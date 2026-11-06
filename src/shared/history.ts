@@ -1,0 +1,5 @@
+import type {WorldEvent} from './types.js';
+export const eventKinds=['production','education','duty','arrival','action','conversation','relationship','birth','death','burial','departure','construction','trade','system','care','hazard'] as const satisfies readonly WorldEvent['kind'][];
+export interface HistoryQuery {cursor?:string;limit?:number;personId?:string;kind?:WorldEvent['kind'];conversationId?:string;q?:string;from?:number;to?:number;populationOnly?:boolean;}
+export interface HistoryPage {worldId:string;events:WorldEvent[];nextCursor:string|null;hasMore:boolean;observedRevision?:number;}
+export interface Biography {worldId:string;person:{id:string;name:string;bornAt:number;status:'alive'|'dead';residency:'resident'|'visitor'|'outside';deathAt:number|null;deathCause?:string;deathDetail?:string;homeId:string|null;parents:string[];adoptiveParents:string[];guardianIds:string[]};recordCount:number;firstRecordAt:number|null;lastRecordAt:number|null;partners:Array<{personId:string;kind:'dating'|'married'|'unspecified';marriedAt?:number|null;startedAt:number|null;endedAt:number|null;sourceEvents:string[]}>;history:HistoryPage;}

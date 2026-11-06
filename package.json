@@ -1,0 +1,28 @@
+{
+  "name": "ai-valley",
+  "version": "2.2.0",
+  "private": true,
+  "description": "An observation-only AI settlement simulation",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server/main.ts",
+    "dev:web": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && tsc -p tsconfig.server.json && vite build",
+    "start": "node build/server/main.js",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "phaser": "3.90.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.0",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3",
+    "vite": "7.3.7"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}

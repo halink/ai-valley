@@ -1,0 +1,3 @@
+export interface AdoptionAction {type:'adoption';operation:'propose'|'consent'|'withdraw'|'register';childId?:string;adoptionId?:string;buildingId?:string;accept?:boolean;}
+export interface AdoptionAgreement {id:string;definition:string;adopterId:string;childId:string;guardianIds:string[];signatures:Array<{personId:string;at:number;eventId:string}>;childAssentedAt:number|null;createdAt:number;expiresAt:number;status:'pending'|'declined'|'withdrawn'|'expired'|'registered';registeredAt:number|null;buildingId:string|null;registrationEventId:string|null;reason:string|null;}
+export interface AdoptionState {agreements:AdoptionAgreement[];nextSerial:number;}

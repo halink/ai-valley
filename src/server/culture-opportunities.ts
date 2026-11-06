@@ -1,0 +1,21 @@
+import {cultureDefinition} from '../world/process-definitions.js';
+import {cultureSeats} from '../world/culture.js';
+import type {FormalOpportunity,Resident,World} from '../shared/types.js';import type {CultureAction,CultureKind} from '../shared/culture.js';import {cultureReason,cultureNames} from '../world/culture.js';import {coLocated} from '../world/proximity.js';import {deathProof} from '../world/knowledge.js';import {distance} from '../world/navigation.js';import {goods,itemKeys,itemLabels} from '../shared/items.js';
+export function cultureOpportunities(w:World,r:Resident):FormalOpportunity[]{const rules=cultureDefinition(w).rules,result:FormalOpportunity[]=[],add=(id:string,label:string,a:CultureAction)=>{if(!cultureReason(w,r,a))result.push({id:'culture.'+id,label,action:a});};
+ for(const b of w.buildings.filter(b=>r.knownBuildings.includes(b.id)&&distance(r.at,b.door)<=8))for(const kind of ['festival','wedding','memorial'] as CultureKind[]){const subjects=kind==='festival'?[undefined]:kind==='wedding'?r.relations.filter(t=>t.partner==='married').map(t=>t.targetId):w.residents.filter(p=>!!deathProof(w,r,p.id)).slice(0,3).map(p=>p.id);for(const id of subjects)add('propose.'+kind+'.'+b.id+'.'+(id??'own'),`在${b.name}由本人筹办${cultureNames[kind]}${id?'，有关人物'+w.residents.find(p=>p.id===id)?.name:''}，填写name名称1–40字、startsIn提前${rules.minimumLead}–${rules.maximumLead}分钟、windowMinutes窗口${rules.minimumWindow}–${rules.maximumWindow}、capacity容量2–54。实际布置需本人${rules.preparationMinutes}分钟和${Object.entries(rules.cost[kind]).map(([i,n])=>n+itemLabels[i as keyof typeof itemLabels]).join('、')}，他人仍须另行同意和实际出席`,{type:'culture',operation:'propose',kind,buildingId:b.id,targetId:id,name:'本人准备筹办的活动',startsIn:Math.max(rules.minimumLead,Math.min(rules.maximumLead,240)),windowMinutes:Math.max(rules.minimumWindow,Math.min(rules.maximumWindow,120)),capacity:Math.min(8,cultureSeats(w,b).length)});}
+ for(const e of w.culture?.events??[]){
+  for(const accept of [true,false])add('cohost.'+e.id+'.'+accept,`本人${accept?'同意':'拒绝'}与现有伴侣共同主办“${e.name}”；这不等于已经举行婚礼`,{type:'culture',operation:'cohost',eventId:e.id,accept});
+  add('rsvp.'+e.id,`本人独立接受“${e.name}”的时段${e.start}–${e.end}，是否实际到场与临时缺席仍另行记载，可自行撤回`,{type:'culture',operation:'rsvp',eventId:e.id});
+  add('withdraw.'+e.id,`本人撤回参加“${e.name}”，自己安排由此涉及的工作或照护；没有自动代班`,{type:'culture',operation:'withdraw',eventId:e.id});
+  add('cancel.'+e.id,'本人取消尚未举行的“'+e.name+'”，自己未投入完成布置的材料在原处收回',{type:'culture',operation:'cancel',eventId:e.id});
+  add('prepare.'+e.id,`本人亲自准备“${e.name}”，填写minutes 1–120；实际材料预留和工作进度保留，尚余${Math.max(0,e.preparation.minutes-e.preparation.worked)}分钟，不会生成宾客`,{type:'culture',operation:'prepare',eventId:e.id,minutes:60});
+  add('attend.'+e.id,`本人实际前往“${e.name}”，填写minutes 1–120；路程不算出席，其他工作与照护仍照常发生`,{type:'culture',operation:'attend',eventId:e.id,minutes:30});
+  add('open.'+e.id,`本人在现场表达现在愿意举行“${e.name}”，填写text 1–240字；婚礼另一位伴侣必须实际在身边并在十分钟内独立表达意愿`,{type:'culture',operation:'open',eventId:e.id,text:'我想表达现在自己的心情'});
+  add('speak.'+e.id,`在实际举行的“${e.name}”中向听得到的在场者说自己的话，填写text 1–240字`,{type:'culture',operation:'speak',eventId:e.id,text:'我想说说自己的感受'});
+  add('cleanup.'+e.id,`本人实际收拾已经结束的“${e.name}”布置，花${cultureDefinition(w,e.definition).rules.cleanupMinutes}分钟，按原规范回收${cultureDefinition(w,e.definition).rules.salvageWood}木归原产权人`,{type:'culture',operation:'cleanup',eventId:e.id});
+  add('reclaim.'+e.id,`亲自取回“${e.name}”结束后本人原先未被取用的物资余量`,{type:'culture',operation:'reclaim',eventId:e.id});
+  for(const item of itemKeys.filter(i=>goods[i].food>0||i==='water')){add('supply.'+e.id+'.'+item,`本人实际提供自有${itemLabels[item]}放在“${e.name}”现场，填写quantity 1–20；自愿参加者每人各领一份，结束后的未用余量仍属本人`,{type:'culture',operation:'supply',eventId:e.id,item,quantity:1});add('take.'+e.id+'.'+item,`本人亲自接受并领取“${e.name}”现场实际存在的1份${itemLabels[item]}，后续进食或家庭照料仍由本人决定`,{type:'culture',operation:'take',eventId:e.id,item});}
+  for(const to of w.residents.filter(p=>coLocated(w,r,p,2)).slice(0,4))add('invite.'+e.id+'.'+to.id,`亲自把“${e.name}”的具体地点与时段邀请送给眼前的${to.name}，对方仍可不参加`,{type:'culture',operation:'invite',eventId:e.id,targetId:to.id});
+  for(const p of w.residents.filter(p=>!!deathProof(w,r,p.id)))add('estate.'+e.id+'.'+p.id,`亲自保全“${e.name}”现场已核实逝者${p.name}原来尚未用完的个人物资，归其遗产`,{type:'culture',operation:'protectEstate',eventId:e.id,targetId:p.id});
+ }return result;
+}

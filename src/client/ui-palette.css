@@ -1,0 +1,21 @@
+/* Colour references from Inventory_Parts.png. See docs/art.md.
+   Coordinates below are zero-based positions in the reference image. */
+:root {
+ --ink: #221122; /* (357, 307) */
+ --muted: #5b2b2a; /* (627, 0) */
+ --wood-dark: #853605; /* (3, 68) */
+ --wood: #b14e05; /* (90, 20) */
+ --bevel: #dc7b05; /* (93, 20) */
+ --gold: #fa9305; /* (18, 68) */
+ --line: #c47a48; /* (12, 77) */
+ --slat: #d68f54; /* (12, 80) */
+ --pressed: #ecaa67; /* (15, 436) */
+ --paper: #ffcb7b; /* (15, 80) */
+ --light: #ffd284; /* (627, 2) */
+ --glow: #ffe4a1; /* (30, 98) */
+ --leaf: #007027; /* (153, 389) */
+ --pond: #4279ce; /* (87, 302) */
+ --heart: #63003e; /* (294, 32) */
+ --anger: #d43200; /* (630, 5) */
+ --dusk: #0f142f; /* (48, 308) */
+}

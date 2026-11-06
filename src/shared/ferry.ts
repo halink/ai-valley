@@ -1,0 +1,8 @@
+import type {Inventory,Vec} from './types.js';
+export const ferryDefaults={buildMaterials:{wood:4,plank:8,cloth:2,bar:1} as Inventory,buildMinutes:180,seats:3,dryStepMinutes:2,rainStepMinutes:3,wearPerTile:.15,repairMaterials:{plank:1,cloth:1} as Inventory,repairMinutes:30,repairAmount:35};
+export interface FerryAction {type:'ferry';definition?:string;operation:'build'|'repair'|'post'|'reserve'|'board'|'depart'|'cancel'|'disembark'|'hold'|'resume'|'return'|'unloadBody';dockId?:string;boatId?:string;tripId?:string;destinationId?:string;personId?:string;fare?:number;departIn?:number;minutes?:number;}
+export interface Boat {id:string;definition:string;ownerId:string;at:Vec;dockId:string|null;condition:number;tripId:string|null;}
+export interface BoatBuild {id:string;ownerId:string;dockId:string;at:Vec;definition:string;stock:Inventory;worked:number;minutes:number;lastAt:number;status:'building'|'completed'|'cancelled';}
+export interface FerrySeat {personId:string;account:string;status:'reserved'|'aboard'|'landed'|'withdrawn';paid:number;refunded:number;}
+export interface FerryTrip {id:string;boatId:string;operatorId:string;sourceId:string;destinationId:string;headingId:string;fare:number;departAt:number;expiresAt:number;capacity:number;phase:'posted'|'sailing'|'held'|'docked'|'completed'|'cancelled';seats:FerrySeat[];aboard:string[];pilotId:string|null;path:Vec[];progress:number;returned:boolean;arrivedAt:number|null;reason:string|null;}
+export interface FerryState {boats:Boat[];builds:BoatBuild[];trips:FerryTrip[];nextSerial:number;totals:{built:number;voyages:number;fares:number;refunds:number};}
