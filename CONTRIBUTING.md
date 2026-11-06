@@ -1,5 +1,7 @@
 # 参与开发 / Contributing
 
+待实现设计的交付顺序、依赖和验收条件见[《栖谷》实施批次](docs/implementation/roadmap.md)。
+
 使用 Node.js 22 安装锁定依赖。规则测试和静止开局预览无需外部模型密钥。
 
 ```sh
