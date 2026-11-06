@@ -30,6 +30,10 @@ node --env-file=.env build/server/main.js
 
 默认每 20 分钟经过一个游戏日。模型、环境变量、存档和自托管方式见[运行与配置](docs/configuration.md)。
 
+## 游戏设计
+
+开局、生态、世代、经济、建设和观察方式见[栖谷游戏设计](docs/design/README.md)。
+
 ## 开发
 
 ```sh

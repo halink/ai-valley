@@ -24,4 +24,6 @@ node --env-file=.env build/server/main.js
 
 See the [configuration guide](docs/configuration.md) for providers, save files, and hosting. The [contribution guide](CONTRIBUTING.md) covers development and tests.
 
+The [game design guide (Chinese)](docs/design/README.md) documents the opening world, ecology, generations, economy, construction, and observer experience.
+
 Original project source and documentation use the [MIT license](LICENSE). See the [third-party notices](public/THIRD_PARTY_NOTICES.txt) and [art credits](docs/art.md) for separate credits and terms.
