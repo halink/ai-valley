@@ -1,6 +1,7 @@
 import {readFileSync} from 'node:fs';
 import ts from 'typescript';
-import {ResidentFollow,residentRoomPositionKnown,roomPositionKnown} from '../../src/client/resident-follow.js';
+import {residentRoomPositionKnown,roomPositionKnown} from '../../src/client/resident-follow.js';
+import {ObserverNavigation} from '../../src/client/observer-navigation.js';
 import * as personPoses from '../../src/client/person-pose.js';
 import {WorkFeedback} from '../../src/client/work-feedback.js';
 import {roomHeat} from '../../src/client/rooms-art.js';
@@ -53,7 +54,7 @@ class Outdoors {
 }
 const dependencies:Record<string,unknown>={
  phaser:{Scene,Math:{Clamp:(n:number,min:number,max:number)=>Math.max(min,Math.min(max,n))}},
- './resident-follow.js':{ResidentFollow,residentRoomPositionKnown,roomPositionKnown},'./person-pose.js':personPoses,'./work-feedback.js':{WorkFeedback},'./rooms-art.js':{roomHeat},
+ './observer-navigation.js':{ObserverNavigation},'./resident-follow.js':{residentRoomPositionKnown,roomPositionKnown},'./person-pose.js':personPoses,'./work-feedback.js':{WorkFeedback},'./rooms-art.js':{roomHeat},
  './estate-custody.js':{estatePiles},'../shared/rooms.js':{roomLayout},'../world/education.js':{teachingPosition},
  './outdoors.js':{Outdoors},'../shared/formal-regions.js':{FORMAL_CENTER},'../world/time.js':{calendar,daylight,FAST_DAY_MINUTES},
  './art.js':{TILE:16,person:()=>({}),interior:()=>({}),hash:()=>.5},'./palette.js':{materials,palette},'./animal-observation.js':ecology,

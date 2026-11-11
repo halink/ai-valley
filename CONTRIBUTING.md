@@ -44,6 +44,8 @@ node --import tsx --test tests/dev-preview.test.ts tests/dev-preview-review.test
 
 [学校室内2.5D有限观察](docs/implementation/isometric-school.md)复用真实 `school` 布局与人物位置；默认种子没有学校，合成路线仅显式新增按真实定义的测试校舍并解除暂停。原人、物资、技能与钱不预改，实际引擎分开验证单方等待、双方共同学习和最后0.25分钟结算；不补造黑板、书本或教学手势，在场不表示学习完成。[独立审查](docs/reviews/isometric-school.md)与源码合成图不是浏览器验收，原2D仍为默认。
 
+[开发专用绘本诊断预览](docs/implementation/storybook-development-preview.md)复用已有 `dev-observer-web.mjs` 的精确 `?storybook=1` 开关及同一观察快照。仍需手动选择原居民 ID 并开启，只用自制合成箭头/线框；两张参考 PNG 未取得，非正式美术。原2D默认、世界及连接不变，失败/室内/销毁恢复原视图；[独立审查](docs/reviews/storybook-development-preview.md)与 Mock DOM/Phaser 不代表浏览器、美学或性能验收。
+
 [诊所室内2.5D有限观察](docs/implementation/isometric-clinic.md)复用真实 `clinic` 布局与人物位置，`care/bodyBay` 不画成设施；不新增医疗动作或改变原2D。使用原种子诊所与原居民，另立明确的测试药剂/伤病例夹具验证真实引擎进出、单方等待、双方结算及[独立审查](docs/reviews/isometric-clinic.md)。图像为标注合成的源码像素栅格，不是浏览器验收。
 
 - 提交问题时写清版本、预期、复现步骤和观察到的状态。分享前移除密钥、真实服务器地址、存档和私人运行日志。

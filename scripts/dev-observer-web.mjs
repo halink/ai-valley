@@ -6,11 +6,18 @@ export function observerReadOnlyAPI(req,res,next){
 }
 const root=fileURLToPath(new URL('../',import.meta.url));
 export const observerWebConfig={root,configFile:false,envFile:false,publicDir:false,base:'/ai-town/',
- plugins:[{name:'optional-observer-preview',apply:'serve',configureServer(server){server.middlewares.use(observerReadOnlyAPI);},transformIndexHtml(){return [{tag:'script',attrs:{type:'module',src:'/ai-town/src/client/development-preview.ts'},injectTo:'body'}];}}],
+ plugins:[{name:'optional-observer-preview',apply:'serve',configureServer(server){server.middlewares.use(observerReadOnlyAPI);},transformIndexHtml(_html,context){return observerDevelopmentScripts(context?.originalUrl);}}],
  server:{host:'127.0.0.1',port:5173,strictPort:true,proxy:{'/ai-town/api':'http://127.0.0.1:3413'},fs:{strict:true,allow:[root],deny:['**/.env','**/.env.*','**/*.{crt,pem,key,p12}','**/.git/**','**/secrets/**','**/runtime/**','**/output/**','**/*.{sqlite,sqlite3,db}','**/*.{sqlite,sqlite3,db}-*','**/*.log']}}};
 export function observerWebConfigForSource(source='synthetic'){
  if(!['synthetic','live'].includes(source))throw new Error('observer_source');
  return {...observerWebConfig,server:{...observerWebConfig.server,proxy:{'/ai-town/api':source==='live'?'http://127.0.0.1:3412':'http://127.0.0.1:3413'}}};
+}
+/** This is HTML-only opt-in on the existing development server, never a world endpoint. */
+export function observerDevelopmentScripts(url=''){
+ const entries=['development-preview.ts'];
+ const params=new URL(url,'http://127.0.0.1').searchParams;
+ if(params.getAll('storybook').length===1&&params.get('storybook')==='1')entries.push('storybook-development-entry.ts');
+ return entries.map(name=>({tag:'script',attrs:{type:'module',src:'/ai-town/src/client/'+name},injectTo:'body'}));
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
  if(process.argv.slice(2).some(v=>v!=='--live')||process.argv.length>3)throw new Error('Only --live is supported; no external URL or credential options');

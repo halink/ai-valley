@@ -4,7 +4,7 @@ import {PanelPositions} from './panel-positions.js';
 import {culturePanel,wordsTabs} from './culture.js';
 import {meetingsSummary,interpretationsProfile} from './social-life.js';
 import {LazyModule} from './lazy-module.js';
-import {residentFollowText,type ResidentFollowState,type ResidentFollowResolver} from './resident-follow.js';
+import {residentFollowText} from './resident-follow.js';
 import {animalHistoryOverview} from './animal-history.js';
 import {rememberWaterDetails} from './water-history.js';
 import {residentActivity,residentStatusProfile,protectionSummary,worldClockStatus} from './resident-status.js';
@@ -16,11 +16,12 @@ import {itemLabels} from '../shared/items.js';
 import Phaser from 'phaser';
 import type {Building, Resident, Snapshot, WorldEvent, Vec} from '../shared/types.js';
 import {calendar,daylight,daylightLabels,knownAgeYears,YEAR} from '../world/time.js';
-import {ValleyScene, type SceneSelection} from './scene.js';
+import {ValleyScene} from './scene.js';
+import {ObserverNavigation} from './observer-navigation.js';
 import './styles.css';
 import './isometric-observer.css';
 import {mountIsometricObserver} from './isometric-observer.js';
-import type {ObserverMap} from './observer-map.js';
+import {createObserverMap,type ObserverSelection} from './observer-map.js';
 import {FORMAL_REGIONS} from '../shared/formal-regions.js';
 import {applyObserverUpdate} from '../shared/observer.js';
 import {Atlas,currentRegion} from './atlas.js';
@@ -59,27 +60,28 @@ app.innerHTML=`
  <div class="observer-note"><span></span>居民自主决定，你只需观看</div>
  <section class="panel hidden" id="panel" aria-modal="false" aria-labelledby="panel-title"><div class="panel-header"><div><span class="eyebrow" id="panel-kicker"></span><h2 id="panel-title"></h2></div><button class="icon-button" data-action="closepanel" aria-label="关闭面板">${icon('close')}</button></div><div id="panel-tools" class="panel-tools hidden"></div><div class="panel-body" id="panel-body"></div></section>
 `;
-const scene=new ValleyScene();
+const navigation=new ObserverNavigation();
+const scene=new ValleyScene(navigation);
+// Only the separately injected development entry imports this existing renderer.
+export {scene as observerScene};
 const atlas=new Atlas();
 new Phaser.Game({type:Phaser.AUTO,parent:'canvas',backgroundColor:palette.spring.grass,pixelArt:true,roundPixels:true,antialias:false,scale:{mode:Phaser.Scale.RESIZE,width:window.innerWidth,height:window.innerHeight},scene:[scene],render:{powerPreference:'low-power'},audio:{noAudio:true}});
-let snapshot:Snapshot|null=null,activePanel:string|null=null,selection:SceneSelection=null,connected=false;
+let snapshot:Snapshot|null=null,activePanel:string|null=null,selection:ObserverSelection=null,connected=false;
 // Both views consume this one client feed. The optional view starts inactive.
-let observedRoomId:string|null=null;
 const mapListeners=new Set<(snapshot:Snapshot|null,connected:boolean)=>void>();
-const roomListeners=new Set<(id:string|null)=>void>();
-const followListeners=new Set<(state:ResidentFollowState|null)=>void>();
-export const observerMap:ObserverMap={
- currentSnapshot(){return snapshot;},currentRoom(){return observedRoomId;},currentTile(){return scene.cameraTile();},currentFollow(){return scene.followState;},
- subscribe(listener:(snapshot:Snapshot|null,connected:boolean)=>void){mapListeners.add(listener);listener(snapshot,connected);return ()=>mapListeners.delete(listener);},
- subscribeRoom(listener:(id:string|null)=>void){roomListeners.add(listener);listener(observedRoomId);return ()=>roomListeners.delete(listener);},
- subscribeFollow(listener:(state:ResidentFollowState|null)=>void){followListeners.add(listener);listener(scene.followState);return ()=>followListeners.delete(listener);},
+export const observerMap=createObserverMap({
+ currentSnapshot(){return snapshot;},
+ subscribe(listener){mapListeners.add(listener);try{listener(snapshot,connected);}catch(error){mapListeners.delete(listener);throw error;}return ()=>{mapListeners.delete(listener);};},
+},navigation,{
+ currentTile(){return scene.cameraTile();},
  stopFollowing(){scene.stopFollowing();},
- setFollowResolver(resolver:ResidentFollowResolver|null){scene.setObserverFollowResolver(resolver);},
- frame(at:Vec){scene.watchTile(at);},
- select(value:SceneSelection){scene.stopFollowing();selection=value;renderSelection();},
- isFullMapTarget(target:EventTarget|null){return target===atlas.canvas;},
- cover(covered:boolean){scene.resetWorkFeedback();if(scene.game){if(covered)scene.game.loop.sleep();else scene.game.loop.wake();}},
-};
+ setFollowResolver(resolver){scene.setObserverFollowResolver(resolver);},
+ frame(at){scene.watchTile(at);},
+ cover(covered){scene.resetWorkFeedback();if(scene.game){if(covered)scene.game.loop.sleep();else scene.game.loop.wake();}},
+},{
+ select(value){selection=value;renderSelection();},
+ isFullMapTarget(target){return target===atlas.canvas;},
+});
 const conversationOpen=new Map<string,boolean>();
 const dutyOpen=new Map<string,boolean>();
 let archiveRenderQueued=false,threadId='',disasterArchiveId='',animalArchiveId='',biographyScope:'related'|'mentions'='related';
@@ -133,10 +135,10 @@ function receive(next:Snapshot){
  updateStatus();renderSelection();observeArchives();if(activePanel)renderPanel(true);
 }
 scene.onSelection=(s)=>{selection=s;renderSelection();};
-scene.onFollow=state=>{for(const listener of followListeners)listener(state);renderSelection();};
+scene.onFollow=()=>{renderSelection();};
 function followNotice(id:string){const state=scene.followState;return state?.personId===id?`<p class="follow-status" role="status">${esc(residentFollowText(state))}</p>`:'';}
 function followButton(id:string){return scene.followState?.personId===id&&scene.followState.status==='following'?'<button data-action="stopfollow">停止跟随</button>':`<button data-follow="${esc(id)}">跟随镜头 ${icon('focus')}</button>`;}
-scene.onRoom=(b)=>{observedRoomId=b?.id??null;for(const listener of roomListeners)listener(observedRoomId);el('room-banner').classList.toggle('hidden',!b);el('room-banner').innerHTML=b?`<span><b>${esc(b.name)}</b><small>${snapshot?.world.rooms?'室内活动 · 缺失位置仅作示意':'室内样章 · 人物位置仅作示意'}</small></span><button data-action="exitroom">返回山谷 ${icon('arrow')}</button>`:'';};
+scene.onRoom=(b)=>{el('room-banner').classList.toggle('hidden',!b);el('room-banner').innerHTML=b?`<span><b>${esc(b.name)}</b><small>${snapshot?.world.rooms?'室内活动 · 缺失位置仅作示意':'室内样章 · 人物位置仅作示意'}</small></span><button data-action="exitroom">返回山谷 ${icon('arrow')}</button>`:'';};
 function renderSelection(){
  const target=el('selection');if(!snapshot||!selection){target.classList.add('hidden');return;}target.classList.remove('hidden');
  if(selection.kind==='animal'||selection.kind==='beast'||selection.kind==='fish'){

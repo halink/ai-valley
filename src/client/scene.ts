@@ -1,4 +1,6 @@
-import {ResidentFollow,residentRoomPositionKnown,roomPositionKnown,type ResidentFollowState,type ResidentFollowResolver} from './resident-follow.js';
+import {residentRoomPositionKnown,roomPositionKnown,type ResidentFollowState,type ResidentFollowResolver} from './resident-follow.js';
+import {ObserverNavigation} from './observer-navigation.js';
+import type {ObserverSelection} from './observer-map.js';
 import {personVisual,personAnimationFrame,personOriginY,type PersonVisual} from './person-pose.js';
 import {WorkFeedback,type WorkFeedbackReceipt} from './work-feedback.js';
 import {roomHeat} from './rooms-art.js';
@@ -15,7 +17,8 @@ import {materials,palette} from './palette.js';
 import {barnAnimalPoint,ecologyLocation,ecologySummary,resolveEcologySelection,type EcologySelection} from './animal-observation.js';
 const rgb=(s:string)=>Number.parseInt(s.slice(1),16);
 
-export type SceneSelection={kind:'person'|'building'|'project';id:string}|EcologySelection|null;
+// Compatibility alias for existing scene consumers; new observers depend on ObserverSelection.
+export type SceneSelection=ObserverSelection;
 export class ValleyScene extends Phaser.Scene {
  private snapshot:Snapshot|null=null;
  private outdoors!:Outdoors;
@@ -29,12 +32,10 @@ export class ValleyScene extends Phaser.Scene {
  private waterShine!:Phaser.GameObjects.Graphics;
  private season:Season|null=null;
  private worldId='';
+ // Renderer-prepared coordinate space; the public committed room lives in navigation.
  private roomId:string|null=null;
  private roomPictureKey='';
  private roomCamera:{x:number;y:number;zoom:number}|null=null;
- private follow=new ResidentFollow();
- private observerFollowResolver:ResidentFollowResolver|null=null;
- private followNotice='';
  private snapActors=false;
  private selected:SceneSelection=null;
  private drag:{x:number;y:number;camX:number;camY:number;moved:boolean}|null=null;
@@ -49,15 +50,16 @@ export class ValleyScene extends Phaser.Scene {
  onRoom:(building:Building|null)=>void=()=>{};
  onCamera:(zoom:number)=>void=()=>{};
  onFollow:(state:ResidentFollowState|null)=>void=()=>{};
- get followState(){return this.follow.state;}
- stopFollowing(){this.follow.clear();this.notifyFollow();}
+ get followState(){return this.navigation.followState;}
+ stopFollowing(){this.navigation.clearFollowing();this.notifyFollow();}
  /** A covered observer owns its camera; removing it immediately revalidates ordinary 2D following. */
  setObserverFollowResolver(resolver:ResidentFollowResolver|null){
-  this.observerFollowResolver=resolver;
-  if(!resolver&&this.snapshot){const target=this.follow.observe(this.snapshot.world);if(target)this.changeRoom(target.roomId);this.notifyFollow();this.centerFollow(true);}
+  this.navigation.setFollowResolver(resolver);
+  if(!resolver&&this.snapshot){const target=this.navigation.observeFollowing(this.snapshot.world);if(target)this.changeRoom(target.roomId);this.notifyFollow();this.centerFollow(true);}
  }
- private notifyFollow(){const key=JSON.stringify(this.follow.state);if(key!==this.followNotice){this.followNotice=key;this.onFollow(this.follow.state);}}
- constructor(){super('valley');}
+ private notifyFollow(){if(this.navigation.publishFollow())this.onFollow(this.navigation.followState);}
+ private notifyRoom(building:Building|null){if(this.snapshot)this.navigation.recordRoom(this.snapshot.world,building?.id??null);this.onRoom(building);}
+ constructor(readonly navigation=new ObserverNavigation()){super('valley');}
  create(){
   this.cameras.main.setBackgroundColor(palette[this.season??'spring'].grass);this.cameras.main.roundPixels=true;
   this.outdoors=new Outdoors(this);this.roomLayer=this.add.container(0,0).setVisible(false);
@@ -92,7 +94,7 @@ export class ValleyScene extends Phaser.Scene {
     for(const frame of [0,1,2,3])this.textures.remove(`person-${id}-${frame}`);
    }
    this.actors.clear();this.resetWorkFeedback();this.animationClock=0;this.animationLastTime=null;this.worldId=w.id;this.selected=null;this.stopFollowing();this.roomCamera=null;this.snapActors=true;
-   this.roomId=null;this.roomLayer.setVisible(false);this.outdoors.setVisible(true);this.onRoom(null);
+   this.roomId=null;this.roomLayer.setVisible(false);this.outdoors.setVisible(true);this.notifyRoom(null);
    const at=this.centerTile();
    this.cameras.main.setBounds(0,0,w.map.width*16,w.map.height*16).setZoom(this.defaultZoom()).centerOn(at.x*16,at.y*16);
    this.onCamera(this.cameras.main.zoom);
@@ -100,7 +102,7 @@ export class ValleyScene extends Phaser.Scene {
   for(const receipt of this.workFeedback.inspect(w))this.workGlints.push({receipt,started:this.animationClock});
   this.season=s;
   this.outdoors.accept(w,s,snapshot.mapRevision??w.id);
-  const followTarget=this.follow.observe(w,this.observerFollowResolver);
+  const followTarget=this.navigation.observeFollowing(w);
   if(followTarget)this.changeRoom(followTarget.roomId);
   this.notifyFollow();
   if(!this.roomId)this.cameras.main.setBackgroundColor(palette[s].grass);
@@ -190,7 +192,7 @@ export class ValleyScene extends Phaser.Scene {
  private buildingAt(x:number,y:number){return !this.roomId?this.snapshot?.world.buildings.find(b=>x>=b.at.x*16&&x<(b.at.x+b.width)*16&&y>=b.at.y*16&&y<(b.at.y+b.height)*16):undefined;}
  private pick(x:number,y:number){
   const person=[...this.actors.entries()].find(([,s])=>s.visible&&Math.abs(s.x-x)<12&&Math.abs(s.y-y-12)<17);
-  if(person){if(this.follow.state?.personId!==person[0])this.stopFollowing();this.selected={kind:'person',id:person[0]};this.onSelection(this.selected);return;}
+  if(person){if(this.navigation.followState?.personId!==person[0])this.stopFollowing();this.selected={kind:'person',id:person[0]};this.onSelection(this.selected);return;}
   this.stopFollowing();
   const subject=this.ecologyAt(x,y);if(subject){this.selected=subject;this.onSelection(subject);return;}
   const b=this.buildingAt(x,y);if(b){this.selected={kind:'building',id:b.id};this.onSelection(this.selected);return;}
@@ -201,7 +203,7 @@ export class ValleyScene extends Phaser.Scene {
  focusPerson(id:string,follow=true){
   if(!this.snapshot)return;
   this.selected={kind:'person',id};
-  this.follow.start(this.snapshot.world,id,this.observerFollowResolver);
+  this.navigation.startFollowing(this.snapshot.world,id);
   this.accept(this.snapshot);
   if(!follow)this.stopFollowing();
  }
@@ -269,11 +271,11 @@ export class ValleyScene extends Phaser.Scene {
    if(this.roomCamera)camera.setZoom(this.roomCamera.zoom).centerOn(this.roomCamera.x,this.roomCamera.y);
    this.roomCamera=null;
   }
-  this.onRoom(b??null);this.onCamera(camera.zoom);
+  this.notifyRoom(b??null);this.onCamera(camera.zoom);
  }
  private centerFollow(frameUnknown=false){
-  if(this.observerFollowResolver)return;
-  const state=this.follow.state;if(state?.status!=='following')return;
+  if(this.navigation.followResolver)return;
+  const state=this.navigation.followState;if(state?.status!=='following')return;
   if(!state.precise){
    if(!frameUnknown)return;
    const w=this.snapshot?.world,b=w?.buildings.find(b=>b.id===state.roomId);if(!w||!b)return;

@@ -161,7 +161,7 @@ export class IsometricPreview {
   return `${space} · ${season} · ${daylightLabels[daylight(w.minute).phase]} ${String(date.hour).padStart(2,'0')}:${String(date.minute).padStart(2,'0')} · 可见 (${b.x},${b.y})–(${b.x+b.width-1},${b.y+b.height-1}) · ${this.scene.objects.length} 个对象 · 预算标记 ${this.scene.budgetMarkerCount??0} · 预算省略 ${this.scene.omittedObjects}${this.scene.uncheckedObjects?'（含未检查候选 '+this.scene.uncheckedObjects+'）':''} · ${w.clock.paused?'暂停：相位静止':'仅显示记录，不表示产出'}`;
  }
 }
-export function previewSelection(hit:StudySubject|{kind:'tile';at:Vec}|null):import('./scene.js').SceneSelection {
+export function previewSelection(hit:StudySubject|{kind:'tile';at:Vec}|null):import('./observer-map.js').ObserverSelection {
  if(!hit||hit.kind==='tile')return null;
  if(hit.kind==='resident')return {kind:'person',id:hit.id};
  if(hit.kind==='building'||hit.kind==='project'||hit.kind==='animal'||hit.kind==='beast'||hit.kind==='fish')return {kind:hit.kind,id:hit.id};

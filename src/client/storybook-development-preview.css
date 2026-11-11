@@ -1,0 +1,6 @@
+.observer-hud>.storybook-development-controls{pointer-events:auto;flex:none;width:100%;max-width:100%;box-sizing:border-box;padding:8px 10px;background:#f4ecd9f5;border:2px dashed #765531;border-radius:8px;color:#3e382f;font-size:11px;line-height:1.45;overflow-wrap:anywhere}
+.storybook-development-controls strong,.storybook-development-controls label{display:block}
+.storybook-development-controls select{display:block;max-width:100%;width:100%;margin:5px 0}
+.storybook-development-controls button{padding:4px 8px;margin:3px 5px 0 0;font-size:11px}
+.storybook-development-controls p{margin:5px 0 0}
+.storybook-development-controls [hidden]{display:none!important}
