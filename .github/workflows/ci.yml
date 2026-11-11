@@ -8,9 +8,14 @@ permissions:
   contents: read
 
 jobs:
-  verify:
+  tests:
+    name: test (${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v6
         with:
@@ -21,4 +26,19 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
-      - run: npm test
+      - run: npm test -- --test-shard=${{ matrix.shard }}/4
+
+  # Keep the original required-check name. A skipped or cancelled shard is not a pass.
+  verify:
+    name: verify
+    needs: tests
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Require all test shards
+        env:
+          TEST_RESULT: ${{ needs.tests.result }}
+        run: |
+          printf 'Test shards: %s\n' "$TEST_RESULT"
+          test "$TEST_RESULT" = success
