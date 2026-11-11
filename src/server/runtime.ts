@@ -104,7 +104,7 @@ export class ValleyRuntime {
  private stopped=false;
  private started=false;
  private generation=0;
- private requestTokens=new Map<string,{generation:number;controller:AbortController}>();
+ private requestTokens=new Map<string,{generation:number;controller:AbortController;terminalCommitted:boolean}>();
  private readonly acceptance?:AcceptanceStopControl;
  private readonly acceptanceEvidence?:{writer:AcceptanceEvidenceWriter;sourceFingerprintAfter:()=>string};
  private acceptanceCommitFailed=false;
@@ -271,7 +271,7 @@ export class ValleyRuntime {
   if(this.stopped)return;
   if(this.acceptance&&this.acceptance.status().phase!=='stopped'){this.acceptance.stop('manual_stop');return;}
   this.stopped=true;this.generation++;if(this.tickTimer)clearInterval(this.tickTimer);
-  const interrupted=this.inFlight.size;
+  const interrupted=this.unresolvedRequestIds().length;
   const tokens=[...this.requestTokens.values()];this.requestTokens.clear();this.inFlight.clear();this.pendingChoices.clear();
   for(const token of tokens)token.controller.abort();
   // Revocation and cancellation precede any fallible storage/observer callback.
@@ -340,6 +340,10 @@ export class ValleyRuntime {
  }
  private ready(actor:Resident){return actor.status==='alive'&&(actor.canDecide||hasCareWithdrawal(this.world,actor)||expressiveTransportControl(this.world,actor))&&actor.canExpress&&actor.residency!=='outside'&&(!actor.plan&&!actor.activity||careWithdrawalOnly(this.world,actor)||expressiveTransportControl(this.world,actor))&&actor.decisionDue<=this.world.minute;}
  private get fastClock(){return this.world.mode==='formal'&&this.world.clock.realMinutesPerDay<=FAST_DAY_MINUTES;}
+ /** A terminal world transaction can notify subscribers before its async slot
+  * leaves inFlight. Reentrant ticks, starts and stops must not revive that
+  * already-accounted request. This does not acknowledge any provider journal. */
+ private unresolvedRequestIds(){return [...this.inFlight.keys()].filter(id=>!this.requestTokens.get(id)?.terminalCommitted);}
  /** Clock never catches up downtime, and model outages are never simulated as famine. */
  tick(now=Date.now()){
   if(this.stopped||this.acceptance&&!this.acceptanceReady())return;
@@ -389,7 +393,7 @@ export class ValleyRuntime {
   const failure=ready.some(p=>this.failures.has(p.id));
   const paused=!this.providers.length||noReplies||protectionOutage||overdue||noInitialPlan;
   const reason=!this.providers.length?'尚未连接居民模型，世界时间已停表':noReplies||protectionOutage?'模型持续未提供居民决定，世界时间已保护性停表':paused?(failure?'居民正在等待模型重试，世界时间已保护性停表':'正在等待居民获得自主决策机会'):null;
-  if(paused&&this.world.clock.paused&&this.world.clock.reason===reason&&JSON.stringify(this.world.metrics.inFlight)===JSON.stringify([...this.inFlight.keys()])){this.schedule();return;}
+  if(paused&&this.world.clock.paused&&this.world.clock.reason===reason&&JSON.stringify(this.world.metrics.inFlight)===JSON.stringify(this.unresolvedRequestIds())){this.schedule();return;}
   let eating:DirectEatingObservation|null=null;
   this.commit(w=>{
    w.clock.paused=paused;w.clock.reason=reason;w.lastWallAt=now;
@@ -402,7 +406,7 @@ export class ValleyRuntime {
     if(this.foodEvidence?.observing)eating=stepWorldWithFoodEvidence(w,advance,options);
     else stepWorld(w,advance,options);
    }
-   w.metrics.inFlight=[...this.inFlight.keys()];
+   w.metrics.inFlight=this.unresolvedRequestIds();
   },()=>{if(eating)this.foodEvidence?.committed(eating,this.world.revision);});
   if(this.acceptance&&(!this.acceptanceReady()||!this.acceptance.committed(this.world)))return;
   this.schedule();
@@ -477,7 +481,7 @@ export class ValleyRuntime {
   if(provider.budget&&!charge){provider.admitAfter=started+1000;this.decisionEvidence?.deferred(actorId,provider.model,this.world.minute);return;}
   const acceptanceRequest=this.acceptance?.reserve(provider.model,this.world.minute);
   if(this.acceptance&&!acceptanceRequest)return;
-  const requestToken={generation,controller:new AbortController()};
+  const requestToken={generation,controller:new AbortController(),terminalCommitted:false};
   this.requestTokens.set(actorId,requestToken);
   const live=()=>!this.stopped&&this.generation===generation&&this.requestTokens.get(actorId)===requestToken;
   let evidenceRequest:ReturnType<DecisionWaitEvidence['requestStarted']>=null;
@@ -517,7 +521,7 @@ export class ValleyRuntime {
   this.inFlight.set(actorId,provider);
   if(!foreign&&!traveller)this.pendingChoices.set(actorId,prepared.choices.map(choice=>choice.action));
   try{
-  this.commit(w=>{requestNumber=++w.metrics.requests;w.metrics.lastAttemptModel=provider.model;w.metrics.inFlight=[...this.inFlight.keys()];this.saveUsage(w,provider);});
+  this.commit(w=>{requestNumber=++w.metrics.requests;w.metrics.lastAttemptModel=provider.model;w.metrics.inFlight=this.unresolvedRequestIds();this.saveUsage(w,provider);});
   evidenceRequest=this.decisionEvidence?.requestStarted(actorId,provider.model,provider===this.providers[0]?'primary':'backup',evidenceTrigger,this.world.minute)??null;
    if(!live()||!this.acceptanceReady()||!admissionReady()||this.acceptance&&!this.acceptance.dispatch(acceptanceRequest!,this.world.minute))return;
    // dispatch() assesses price through trusted synchronous user code. It can
@@ -541,6 +545,9 @@ export class ValleyRuntime {
    }
    let rejection:'actor_changed'|'plan_invalid'|'regional_changed'|'foreign_changed'|null=null;
    this.commit(w=>{
+    // Clear only this response, together with its result and usage. Other
+    // requests and their conservative reservations remain unresolved.
+    w.metrics.inFlight=w.metrics.inFlight.filter(id=>id!==actorId);
     const current=w.residents.find(p=>p.id===actorId);
     this.saveUsage(w,provider);w.metrics.model=provider.model;w.metrics.lastLatencyMs=result.latencyMs;w.metrics.inputTokens+=result.inputTokens;w.metrics.outputTokens+=result.outputTokens;
     if(foreign){
@@ -564,6 +571,7 @@ export class ValleyRuntime {
     if(!accepted.ok){rejection='plan_invalid';w.metrics.failures++;current.lastFailure=accepted.error??'计划不再适用';w.metrics.lastError='居民计划需要重新安排';this.failures.set(actorId,w.metrics.lastError);this.retryAt.set(actorId,Date.now()+5000);return;}
     current.lastDecisionAt=w.minute;this.lastResidentDecision=Date.now();w.metrics.successes++;w.metrics.localDecisions=(w.metrics.localDecisions??0)+1;this.failures.delete(actorId);w.metrics.lastError=this.failures.values().next().value??null;this.retryAt.delete(actorId);
    },()=>{
+    requestToken.terminalCommitted=true;
     const observed=this.decisionCommitted?.(Object.freeze({result,actorId,accepted:rejection===null,rejection,revision:this.world.revision}));
     if(observed&&typeof (observed as {then?:unknown}).then==='function'){
      void Promise.resolve(observed).catch(()=>{});throw new Error('decision_commit_observer_must_be_synchronous');
@@ -576,6 +584,9 @@ export class ValleyRuntime {
   }catch(error){
    if(!live())return;
    if(this.acceptance){this.acceptance.settle(acceptanceRequest!,this.world.minute,undefined);if(this.acceptanceReady())this.acceptance.stop('runtime_failed');return;}
+   // A post-commit observer error is not a second model outcome. Keep the
+   // original error visible without finishing/recounting the response again.
+   if(requestToken.terminalCommitted)throw error;
    if(charge)provider.budget!.finish(charge,Date.now(),error instanceof DecisionError?error.stats:undefined);
    const code=error instanceof Error?error.message:'model_failed';
    const safe=/^(model_http_\d{3}|model_incomplete|model_stream_error|model_context_limit|invalid_decision|unsupported_action|invalid_action)$/.test(code)?code:'model_timeout_or_invalid_response';
@@ -607,7 +618,14 @@ export class ValleyRuntime {
     retryDelay=0;
    }
    this.retryAt.set(actorId,Date.now()+retryDelay);this.failures.set(actorId,safe);
-   this.commit(w=>{this.saveUsage(w,provider);w.metrics.failures++;w.metrics.lastError=safe;if(error instanceof DecisionError){w.metrics.inputTokens+=error.stats.inputTokens;w.metrics.outputTokens+=error.stats.outputTokens;w.metrics.lastLatencyMs=error.stats.latencyMs;}else{w.metrics.unmeteredFailures=(w.metrics.unmeteredFailures??0)+1;}});
+   this.commit(w=>{
+    this.saveUsage(w,provider);w.metrics.failures++;w.metrics.lastError=safe;
+    if(error instanceof DecisionError){w.metrics.inputTokens+=error.stats.inputTokens;w.metrics.outputTokens+=error.stats.outputTokens;w.metrics.lastLatencyMs=error.stats.latencyMs;}
+    else{w.metrics.unmeteredFailures=(w.metrics.unmeteredFailures??0)+1;}
+    // A missing usage report remains explicitly unknown and keeps its budget;
+    // only the already-accounted local wait ends. Unsent cancellation is separate.
+    if(modelInvoked)w.metrics.inFlight=w.metrics.inFlight.filter(id=>id!==actorId);
+   },()=>{if(modelInvoked)requestToken.terminalCommitted=true;});
    this.decisionEvidence?.retry(actorId,retryDelay,this.fallbackPending.has(actorId)?backup?.model??null:null,this.world.minute);
   }finally{
    if(this.requestTokens.get(actorId)===requestToken){
