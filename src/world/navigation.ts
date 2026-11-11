@@ -44,6 +44,18 @@ function obstacleIndex(world:World,start?:Vec) {
 const dx=[1,-1,0,0];
 const dy=[0,0,1,-1];
 
+/** An occupied flood or ruined bridge/dock may be exited, not reentered.
+ * The obstacle index exempts the starting area so escape remains possible;
+ * each search edge must still match walkable's current-position rule. Keep
+ * overlapping areas separate: leaving one does not grant entry from another. */
+function entryRestrictedAreas(world:World):Set<number>[] {
+ const index=(p:Vec)=>p.y*world.map.width+p.x;
+ return [
+  ...(world.frontierHazards?.disasters??[]).filter(d=>d.kind==='flashFlood'&&d.phase==='active'&&d.footprint).map(d=>new Set(d.footprint!.map(index))),
+  ...(world.infrastructure?.assets??[]).filter(a=>a.retiredAt===null&&a.condition<=0&&['bridge','dock'].includes(a.kind)).map(a=>new Set(a.tiles.map(t=>index(t.at))))
+ ];
+}
+
 /** One flood answers a whole construction proposal's access checks without one search per doorway. */
 export function reachableTiles(world:World):Uint8Array {
  const {width,height,tiles,entrance}=world.map,blocked=obstacleIndex(world),seen=new Uint8Array(width*height);
@@ -67,12 +79,12 @@ export function reachableTilesFrom(world:World,start:Vec):Uint8Array {
  const {width,height,tiles}=world.map,seen=new Uint8Array(width*height);
  if(!inBounds(world.map,start))return seen;
  const blocked=obstacleIndex(world,start),edgeOpen=pastureEdgeChecker(world);
- const floods=(world.frontierHazards?.disasters??[]).filter(d=>d.kind==='flashFlood'&&d.phase==='active'&&d.footprint).map(d=>new Set(d.footprint!.map(p=>p.y*width+p.x)));
+ const restricted=entryRestrictedAreas(world);
  const queue=new Uint32Array(width*height);let head=0,tail=0;
  const first=start.y*width+start.x;queue[tail++]=first;seen[first]=1;
  while(head<tail){const index=queue[head++],x=index%width,y=Math.floor(index/width);
   for(let i=0;i<4;i++){const nx=x+dx[i],ny=y+dy[i];if(nx<0||ny<0||nx>=width||ny>=height)continue;
-   const next=ny*width+nx;if(seen[next]||blocked[next]||tiles[next]==='water'||tiles[next]==='cliff'||!edgeOpen({x,y},{x:nx,y:ny})||floods.some(f=>f.has(next)&&!f.has(index)))continue;
+   const next=ny*width+nx;if(seen[next]||blocked[next]||tiles[next]==='water'||tiles[next]==='cliff'||!edgeOpen({x,y},{x:nx,y:ny})||restricted.some(area=>area.has(next)&&!area.has(index)))continue;
    seen[next]=1;queue[tail++]=next;
   }
  }
@@ -89,7 +101,7 @@ export function findPath(world:World,start:Vec,end:Vec,adjacent=false,maximumSte
   if(initialDistance-reach>maximumSteps)return null;
   if(!adjacent&&!walkable(world,end,start,false))return null;
   const blocked=obstacleIndex(world,start),edgeOpen=pastureEdgeChecker(world);
-  const floods=(world.frontierHazards?.disasters??[]).filter(d=>d.kind==='flashFlood'&&d.phase==='active'&&d.footprint).map(d=>new Set(d.footprint!.map(p=>p.y*map.width+p.x)));
+  const restricted=entryRestrictedAreas(world);
   const {width,height,tiles}=map;
   const startIndex=start.y*width+start.x;
   // Zero is unvisited; other values are path length plus one.
@@ -123,7 +135,7 @@ export function findPath(world:World,start:Vec,end:Vec,adjacent=false,maximumSte
         if(nx<0||ny<0||nx>=width||ny>=height)continue;
         const next=ny*width+nx;
         const cost=costs[current]+(scaled?(tiles[next]==='road'?3:4):1);
-        if((costs[next]&&costs[next]<=cost)||blocked[next]||tiles[next]==='water'||tiles[next]==='cliff'||!edgeOpen({x,y},{x:nx,y:ny})||floods.some(f=>f.has(next)&&!f.has(current))||canStep&&!canStep({x,y},{x:nx,y:ny}))continue;
+        if((costs[next]&&costs[next]<=cost)||blocked[next]||tiles[next]==='water'||tiles[next]==='cliff'||!edgeOpen({x,y},{x:nx,y:ny})||restricted.some(area=>area.has(next)&&!area.has(current))||canStep&&!canStep({x,y},{x:nx,y:ny}))continue;
         const remaining=Math.abs(end.x-nx)+Math.abs(end.y-ny);
         if(cost-1+Math.max(0,remaining-reach)>maximumSteps)continue;
         costs[next]=cost;
