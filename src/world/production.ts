@@ -1,10 +1,17 @@
-import {estateGoods,splitEstateParcels,acceptEstateParcels,ownedEstateParcels,estateParcel,atEstateParcel} from './estate-custody.js';
+import {reconcileBusinessEstateSupplements} from './estate-business-supplements.js';
+import {closeUndistributedGift} from './last-wishes.js';
+import {isCustodyAction,custodyTarget,completeCustody,advanceProtectedCustody} from './protected-custody.js';
+import {estateGoods,splitEstateParcels,estateSplitQuantity,acceptEstateParcels,ownedEstateParcels,estateParcel,estateParcels,atEstateParcel,atEstateLocation,type EstateLocation} from './estate-custody.js';
 import {pendingEstateReturns} from './estate-pending.js';
 import {hasEstateDebt,debtClaims,inheritDebtClaims} from './debt.js';
 import {deathProof} from './knowledge.js';
-import {foodTransaction} from './food.js';
+import {foodTransaction,foodValue} from './food.js';
+import {inheritedFoodOwnership} from './food-ownership-evidence.js';
+import {foodFlowInputs,recordFoodFlow,recordFoodOwnership} from './food-consumption-evidence.js';
 import {industryAssets,inheritIndustry} from './industry.js';
-import {itemKeys} from '../shared/items.js';
+import {itemKeys,goods,itemLabels} from '../shared/items.js';
+import {physiologyDefaults} from '../shared/physiology.js';
+import {hasTimelyPublicFood} from './estate-emergency-public.js';
 import type {Building, ContentDefinition, Inventory, Item, Resident, Vec, World} from '../shared/types.js';
 import type {InheritanceShare, ProductionAction} from '../shared/production.js';
 import {moveCoins} from './economy.js';
@@ -60,12 +67,15 @@ export function initializeProduction(w:World):void {
 export function advanceProduction(w:World):void {
   if(w.mode!=='formal')return;
   initializeProduction(w);
+  reconcileBusinessEstateSupplements(w,id=>estateHeirs(w,id));
   const state=w.production!,elapsed=Math.max(0,w.minute-state.lastMinute);
   for(const [id,inheritance]of Object.entries(state.inheritances)){
     const updated:InheritanceShare[]=[];
     for(const share of inheritance.shares){
       if(share.claimedAt!==null||w.residents.some(p=>p.id===share.heirId&&p.status==='alive')){updated.push(share);continue;}
-      const heirs=successors(w,w.estates.find(e=>e.personId===share.heirId)?.heirs??w.residents.filter(p=>(p.parents.includes(share.heirId)||p.adoptiveParents?.includes(share.heirId))).map(p=>p.id));
+      // Only the unaccepted branch passes on. Use the deceased heir's existing
+      // statutory order, including spouse/parent/sibling fallback, for every share.
+      const heirs=estateHeirs(w,share.heirId);
       if(!heirs.length){updated.push(share);continue;}
       const goods=foodTransaction(w,()=>splitEstateParcels(w,id,heirs,heirs.map((_,i)=>share.id+'.'+i),share.goodsClaims??[]));
       for(const [index,heirId]of heirs.entries())updated.push({goodsClaims:goods[index],id:share.id+'.'+index,heirId,claimedAt:null,
@@ -73,9 +83,10 @@ export function advanceProduction(w:World):void {
         plots:share.plots.filter((_,i)=>i%heirs.length===index),buildings:share.buildings.filter((_,i)=>i%heirs.length===index),parcels:share.parcels.filter((_,i)=>i%heirs.length===index),industryAssets:(share.industryAssets??[]).filter((_,i)=>i%heirs.length===index),creditClaims:(share.creditClaims??[]).filter((_,i)=>i%heirs.length===index)});
     }
     inheritance.shares=updated;
-    // Unclaimed rights pass to a deceased heir's descendants, never to an administrator's purse.
+    // Unclaimed rights remain protected until a statutory successor accepts them.
     if(updated.some(s=>s.claimedAt===null)){const estate=w.estates.find(e=>e.personId===id);if(estate)estate.status='protected';}
   }
+  advanceProtectedCustody(w);
   if(!elapsed)return;
   for(const resource of w.resources){
     if(resource.regrowthDays<=0||resource.max<=0)continue;
@@ -138,11 +149,11 @@ function successors(w:World,ids:string[],seen=new Set<string>()):string[]{
   }
   return [...new Set(result)];
 }
-function estateHeirs(w:World,id:string):string[]{
+export function estateHeirs(w:World,id:string):string[]{
   const estate=w.estates.find(e=>e.personId===id),person=w.residents.find(p=>p.id===id);
   if(!estate||!person)return [];
   let ids=successors(w,estate.heirs);
-  if(!ids.length)ids=successors(w,person.relations.filter(r=>r.partner==='married').map(r=>r.targetId));
+  if(!ids.length)ids=successors(w,estate.spouseIds??person.relations.filter(r=>r.partner==='married').map(r=>r.targetId));
   if(!ids.length)ids=successors(w,[...person.parents,...(person.adoptiveParents??[])]);
   if(!ids.length)ids=successors(w,person.relations.filter(r=>(r.kin==='sibling'||r.adoptive==='sibling')).map(r=>r.targetId));
   return ids.sort();
@@ -182,9 +193,10 @@ export function resolveInheritanceBirth(w:World,pendingId:string,childId:string|
     inheritance.shares=updated;
   }
 }
-function prepareShares(w:World,id:string):InheritanceShare[]{
+export function prepareShares(w:World,id:string):InheritanceShare[]{
   const state=w.production!,saved=state.inheritances[id];if(saved)return saved.shares;
   const estate=w.estates.find(e=>e.personId===id)!,heirs=estateHeirs(w,id);
+  closeUndistributedGift(w,id);
   const goods=estateGoods(w,id),claims=splitEstateParcels(w,id,heirs,heirs.map((_,i)=>String(i)));
   const shares=heirs.map((heirId,index)=>({goodsClaims:claims[index],id:String(index),heirId,coins:split(estate.coins,index,heirs.length),
     inventory:Object.fromEntries(items.map(item=>[item,split(goods[item]??0,index,heirs.length)]).filter(([,n])=>Number(n)>0)) as Inventory,
@@ -197,9 +209,84 @@ function prepareShares(w:World,id:string):InheritanceShare[]{
   state.inheritances[id]={createdAt:w.minute,shares};return shares;
 }
 
+export interface EmergencyEstateOption {
+  action:ProductionAction;
+  containerId:string;
+  location:EstateLocation;
+  inventory:Inventory;
+  /** FIFO portions allocated to earlier heirs in an as-yet unsplit physical stock. */
+  portionOffset:Inventory;
+  nutrition:number;
+  expiresAt:number;
+}
+/** Read-only, including for legacy worlds whose allowance has never been used. */
+export function emergencyEstateAllowance(w:World,r:Resident){
+  const saved=w.production?.emergencyFood?.[r.id];
+  const rate=Number(w.definitions[r.physiologyDefinition??'life/physiology@1']?.data.hungerPerMinute??physiologyDefaults.hungerPerMinute);
+  const limit=saved?.limit??(Number.isFinite(rate)&&rate>0?rate*DAY:0),nutrition=saved?.nutrition??0;
+  return {limit,nutrition,remaining:Math.max(0,limit-nutrition)};
+}
+function usableFood(w:World,id:string,bag:Inventory){
+  return items.some(i=>goods[i].food>0&&(bag[i]??0)>=1&&!w.food?.lots[id]?.[i]?.some(l=>l.quantity>0&&l.expiresAt<=w.minute));
+}
+/** A narrow self-help right, not adult inheritance, public spending or guardianship. */
+function emergencyEstateEligible(w:World,r:Resident){
+  const age=ageYears(r.bornAt,w.minute);
+  return w.mode==='formal'&&!!w.production&&r.status==='alive'&&r.residency!=='outside'&&r.canDecide&&r.canExpress&&age>=6&&age<18
+    &&!usableFood(w,'person:'+r.id,r.inventory)
+    &&!hasTimelyPublicFood(w,r);
+}
+/** Preview legal portions without splitting stock, reserving it, or manufacturing a decision. */
+export function emergencyEstateOptions(w:World,r:Resident):EmergencyEstateOption[]{
+  if(!emergencyEstateEligible(w,r))return [];
+  const allowance=emergencyEstateAllowance(w,r);if(allowance.remaining<=0)return [];
+  const result:EmergencyEstateOption[]=[],rationId=r.id+':'+(w.production?.emergencyFood?.[r.id]?.receipts.length??0);
+  for(const e of w.estates){
+    if(!knownDeath(w,r,e.personId)||!registryPlace(w,r,e.personId))continue;
+    const saved=w.production!.inheritances[e.personId],shares=saved?.shares.filter(s=>s.heirId===r.id&&s.claimedAt===null)??[];
+    const owned=(e.parcels??[]).filter(p=>p.ownerId===r.id&&!p.claimId);
+    const permitted=!inheritanceError(w,r,e.personId);
+    const heirs=permitted&&!saved?estateHeirs(w,e.personId):[],index=heirs.indexOf(r.id);
+    const sources:Array<{id:string;inventory:Inventory;location:EstateLocation;split:boolean;share?:InheritanceShare}>=[
+      ...owned.map(p=>({...p,split:false})),
+      ...(permitted?shares.flatMap(share=>(e.parcels??[]).filter(p=>share.goodsClaims?.includes(p.id)&&p.ownerId===e.personId&&p.claimId===share.id).map(p=>({...p,split:false,share}))):[]),
+      ...(permitted&&!saved&&index>=0?[
+        ...(e.location?[{id:'estate:'+e.personId,inventory:e.inventory,location:e.location,split:true}]:[]),
+        ...estateParcels(w).filter(p=>p.ownerId===e.personId&&!p.claimId).map(p=>({...p,split:true})),
+      ]:[]),
+    ];
+    const distributed:Inventory={};
+    for(const source of sources){
+      const share=source.share;
+      const previous={...distributed};if(source.split)for(const [item,n]of Object.entries(source.inventory))distributed[item as Item]=(distributed[item as Item]??0)+n!;
+      if(source.location.regional)continue;
+      if(source.location.inside&&!w.buildings.some(b=>b.id===source.location.inside&&b.condition>0))continue;
+      let remaining=allowance.remaining,nutrition=0,expiresAt=Number.MAX_SAFE_INTEGER;const inventory:Inventory={},portionOffset:Inventory={};
+      const edible=items.filter(i=>goods[i].food>0).sort((a,b)=>Math.min(...(w.food?.lots[source.id]?.[a]??[]).map(l=>l.expiresAt),Number.MAX_SAFE_INTEGER)-Math.min(...(w.food?.lots[source.id]?.[b]??[]).map(l=>l.expiresAt),Number.MAX_SAFE_INTEGER));
+      for(const item of edible){
+        const total=source.inventory[item]??0,quantity=source.split?estateSplitQuantity(total,index,heirs.length,previous[item]??0):share?.goodsClaims?.includes(source.id)?Math.min(total,share.inventory[item]??0):total;
+        const offset=source.split?heirs.slice(0,index).reduce((n,_,i)=>n+estateSplitQuantity(total,i,heirs.length,previous[item]??0),0):0;
+        const lots=w.food?.lots[source.id]?.[item]??[];
+        if(lots.some(l=>l.quantity>0&&l.expiresAt<=w.minute))continue;
+        for(let count=0;count<Math.floor(quantity);count++){
+          const value=foodValue(w,source.id,item,offset+count+1)-foodValue(w,source.id,item,offset+count);
+          if(!Number.isFinite(value)||value<=0||value>remaining+1e-9)break;
+          inventory[item]=(inventory[item]??0)+1;portionOffset[item]=offset;nutrition+=value;remaining-=value;
+          expiresAt=Math.min(expiresAt,...lots.map(l=>l.expiresAt));
+        }
+      }
+      if(nutrition>0)result.push({action:{type:'production',operation:'emergencyEstateRation',personId:e.personId,parcelId:source.id,rationId:rationId+':'+JSON.stringify([inventory,nutrition,source.location.at,source.location.inside,source.location.roomAt])},containerId:source.id,location:structuredClone(source.location),inventory,portionOffset,nutrition,expiresAt});
+    }
+  }
+  return result;
+}
+function emergencyEstateOption(w:World,r:Resident,a:ProductionAction){return emergencyEstateOptions(w,r).find(o=>o.action.personId===a.personId&&o.action.parcelId===a.parcelId&&o.action.rationId===a.rationId);}
+
 export function productionTarget(w:World,r:Resident,a:ProductionAction):{target:Vec;duration:number;error?:string} {
   const fail=(error:string)=>({target:r.at,duration:0,error});
-  if(a.operation==='collectEstate'){const p=estateParcel(w,a.parcelId);if(w.mode!=='formal'||!adult(w,r)||!p||p.ownerId!==r.id||p.claimId||!Object.values(p.inventory).some(n=>n!>0))return fail('没有已登记归本人、尚待实际领取的原址遗产物资');if(p.location.inside&&!w.buildings.some(b=>b.id===p.location.inside))return fail('原储物建筑已不存在，物资位置须先实际核验');return {target:{...p.location.at},duration:5};}
+  if(isCustodyAction(a))return custodyTarget(w,r,a);
+  if(a.operation==='emergencyEstateRation'){const option=emergencyEstateOption(w,r,a);return option?{target:{...option.location.at},duration:5}:fail('须有可核实的本人继承资格、空缺的自有与共屋口粮，以及未支取的一日救急额度；原决定或现物可能已失效');}
+  if(a.operation==='collectEstate'){const p=estateParcel(w,a.parcelId);if(w.mode!=='formal'||!adult(w,r)||!p||p.ownerId!==r.id||p.claimId||!Object.values(p.inventory).some(n=>n!>0))return fail('没有已登记归本人、尚待实际领取的原址遗产物资');if(p.location.regional)return fail('物资仍在镇外实际原址，尚无本人到场或运回谷内的安排');if(p.location.inside&&!w.buildings.some(b=>b.id===p.location.inside))return fail('原储物建筑已不存在，物资位置须先实际核验');return {target:{...p.location.at},duration:5};}
   if(w.mode!=='formal'||!adult(w,r))return fail('此项生产或财产安排须由有决定能力的成年人本人办理');
   if(a.operation==='collectManure'){
     const heap=w.production?.nutrients?.heaps.find(pile=>pile.id===a.heapId&&pile.ownerId===r.id&&pile.units>0);
@@ -241,9 +328,27 @@ export function productionTarget(w:World,r:Resident,a:ProductionAction):{target:
 
 function completeProductionAtomic(w:World,r:Resident,a:ProductionAction):string|null {
   initializeProduction(w);
+  if(isCustodyAction(a))return completeCustody(w,r,a);
   const route=productionTarget(w,r,a);if(route.error)return route.error;
   if(!same(r.at,route.target))return '须本人实际抵达工作地点';
   const fact=(text:string)=>emitEvent(w,{kind:'action',actors:[r.id],place:{...r.at},text});
+  if(a.operation==='emergencyEstateRation'){
+    const option=emergencyEstateOption(w,r,a)!;
+    if(!atEstateLocation(r,option.location))return '须亲自走到本人受保护口粮的实际原址，不能从门口或远处领取';
+    const allowance=emergencyEstateAllowance(w,r),e=w.estates.find(e=>e.personId===a.personId)!;
+    let parcel=estateParcel(w,a.parcelId),share=w.production!.inheritances[e.personId]?.shares.find(s=>s.heirId===r.id&&s.claimedAt===null&&s.goodsClaims?.includes(a.parcelId!));
+    if(!parcel||parcel.ownerId!==r.id&&!share?.goodsClaims?.includes(parcel.id)){
+      share=prepareShares(w,e.personId).find(s=>s.heirId===r.id&&s.claimedAt===null)!;
+      parcel=estateParcel(w,a.parcelId+':share:'+share.id);
+    }
+    if(!parcel||!has(parcel.inventory,option.inventory))return '原址本人份额已经变化，须重新核验';
+    debit(parcel.inventory,option.inventory);credit(r.inventory,option.inventory);
+    if(share?.goodsClaims?.includes(parcel.id))for(const [key,n]of Object.entries(option.inventory)){const item=key as Item;share.inventory[item]=Math.max(0,(share.inventory[item]??0)-n!);}
+    const account=(w.production!.emergencyFood??={})[r.id]??={limit:allowance.limit,nutrition:0,receipts:[]};
+    account.nutrition+=option.nutrition;account.receipts.push({id:a.rationId!,at:w.minute,estateId:e.personId,parcelId:parcel.id,inventory:{...option.inventory},nutrition:option.nutrition});
+    emitEvent(w,{kind:'action',actors:[r.id],place:{...r.at},text:`${r.name}亲自到${option.location.label??'原封存处'}，从本人受保护继承份额支取${Object.entries(option.inventory).map(([i,n])=>n+'份'+itemLabels[i as Item]).join('、')}救急；累计支取${Math.round(account.nutrition*100)/100}/${Math.round(account.limit*100)/100}点一日口粮。没有转移钱款、房地或他人的份额。`,audit:{rule:'estate/emergency-food@1',authority:'本人有能力的未成年继承人有限自救',evidence:deathProof(w,r,e.personId)!.id,scope:['own-protected-food'],resources:{...option.inventory},providerId:r.id,termination:'本次现物领取完成；累计一日上限不因跨日、重试或重启恢复'}});
+    return null;
+  }
   if(a.operation==='collectManure'){
     const state=w.production!.nutrients!,heap=state.heaps.find(pile=>pile.id===a.heapId)!;
     const amount=Math.min(2,heap.units);
@@ -263,8 +368,12 @@ function completeProductionAtomic(w:World,r:Resident,a:ProductionAction):string|
   }
   if(a.operation==='collectEstate'){const p=estateParcel(w,a.parcelId)!;if(!atEstateParcel(r,p))return '须亲自走到封存物资的实际位置，登记不等于已经取货';credit(r.inventory,p.inventory);p.inventory={};fact(`${r.name}亲自到${p.location.label??'原存放处'}领取自己已经登记的物资，没有移动其他人的份额。`);return null;}
   if(a.operation==='saveSeed'){
+    const inputs=foodFlowInputs(w,'person:'+r.id,{turnip:1},1,true);
     debit(r.inventory,{turnip:1});credit(r.inventory,{seed:2});w.production!.seedSaved+=2;r.energy=Math.max(0,r.energy-1);
-    fact(`${r.name}把一份自有根菜留作种用，整理出了两份种子。`);return null;
+    const event=fact(`${r.name}把一份自有根菜留作种用，整理出了两份种子。`);
+    if(inputs&&r.activity?.action===a&&r.activity.remaining<=0)recordFoodFlow(w,{type:'processed',action:'saveSeed',at:w.minute,
+      residentId:r.id,eventId:event.id,planId:r.activity.planId,container:'person:'+r.id,definition:r.activity.definition,inputs,output:{seed:2}});
+    return null;
   }
   if(a.operation==='plantCrop'){
     const p=w.plots.find(p=>p.id===a.plotId)!,def=w.definitions[a.cropId!];
@@ -287,7 +396,8 @@ function completeProductionAtomic(w:World,r:Resident,a:ProductionAction):string|
   const share=prepareShares(w,id).find(s=>s.heirId===r.id&&s.claimedAt===null)!;
   if(estate.coins<share.coins)return '保全财产与登记份额不符，暂不交付';
   if(share.coins&&!moveCoins(w,`estate:${id}`,`resident:${r.id}`,share.coins,'继承本人登记份额',`inherit:${id}:${share.id}`))return '遗产钱款尚未完成交付';
-  acceptEstateParcels(w,share.goodsClaims??[],r.id);
+  const ownership=inheritedFoodOwnership(w,r.id);
+  acceptEstateParcels(w,share.goodsClaims??[],r.id,ownership?.parcel);
   for(const p of w.plots)if(share.plots.includes(p.id)&&p.ownerId===id)p.ownerId=r.id;
   for(const b of w.buildings)if(share.buildings.includes(b.id)&&b.ownerId===id){b.ownerId=r.id;if(!r.knownBuildings.includes(b.id))r.knownBuildings.push(b.id);}
   for(const index of share.parcels){const p=productionParcels(w)[index];if(p?.ownerId===id)w.production!.parcelOwners[index]=r.id;}
@@ -299,12 +409,13 @@ function completeProductionAtomic(w:World,r:Resident,a:ProductionAction):string|
     p.ownerId=r.id;p.managerId=r.id;if(p.base)p.base.ownerId=r.id;
     const known=w.construction!.knownProjects[r.id]??=[];if(!known.includes(p.id))known.push(p.id);
   }
-  inheritIndustry(w,id,r.id,share.industryAssets??[]);inheritDebtClaims(w,id,r.id,share.creditClaims??[]);
+  inheritIndustry(w,id,r.id,share.industryAssets??[],ownership?.industry);inheritDebtClaims(w,id,r.id,share.creditClaims??[]);
   share.claimedAt=w.minute;
   if(!r.knownPeople.includes(id))r.knownPeople.push(id);
   const deaths=w.production!.knownDeaths[r.id]??=[];if(!deaths.includes(id))deaths.push(id);
   if(w.production!.inheritances[id].shares.every(s=>s.claimedAt!==null))estate.status='settled';
-  fact(`${r.name}亲自登记了${w.residents.find(p=>p.id===id)?.name??'亲属'}的本人继承份额，包含 ${share.coins} 枚钱款、${share.plots.length} 块耕地和 ${share.buildings.length} 处建筑；实物留在各自原址，须亲自到场领取；其他人的份额仍各自保全。`);
+  const event=fact(`${r.name}亲自登记了${w.residents.find(p=>p.id===id)?.name??'亲属'}的本人继承份额，包含 ${share.coins} 枚钱款、${share.plots.length} 块耕地和 ${share.buildings.length} 处建筑；实物留在各自原址，须亲自到场领取；其他人的份额仍各自保全。`);
+  if(ownership)recordFoodOwnership(w,{type:'ownership_change',action:'production',operation:'inherit',at:w.minute,eventId:event.id,planId:r.plan?.id??null,estatePersonId:id,shareId:share.id,heirId:r.id,stocks:ownership.stocks});
   return null;
 }
 

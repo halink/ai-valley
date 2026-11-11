@@ -75,7 +75,7 @@ test('classroom windows and jobs cannot reserve the same teacher, learner or sha
  assert.ok(educationReason(w,teacher,{type:'education',operation:'post',buildingId:hall.id,subject:'farming',startsIn:60,windowMinutes:180,fee:0,capacity:4}));
 });
 test('public tuition needs independent votes, real treasury cash and each students own enrollment',()=>{
- const f=fixture(),{w,teacher,student,child,hall}=f,l=course(f),money=totalCoins(w);assert.equal(completeCivic(w,teacher,{type:'civic',operation:'donate',buildingId:hall.id,amount:30}),null);
+ const f=fixture(),{w,teacher,student,child,hall}=f;w.residents.push({...structuredClone(student),id:'tuition-third-elector',coins:0,inventory:{}});const l=course(f),money=totalCoins(w);assert.equal(completeCivic(w,teacher,{type:'civic',operation:'donate',buildingId:hall.id,amount:30}),null);
  assert.equal(completeCivic(w,teacher,{type:'civic',operation:'propose',buildingId:hall.id,measure:{kind:'education',buildingId:hall.id,lessonId:l.id,amount:24,durationDays:1}}),null);const p=w.civic!.proposals.at(-1)!;assert.equal(l.funding,null);
  for(const r of [teacher,student])assert.equal(completeCivic(w,r,{type:'civic',operation:'vote',proposalId:p.id,accept:true}),null);
  assert.equal(l.funding!.allocated,24);assert.equal(l.enrollments.length,0);act(w,child,{operation:'enroll',lessonId:l.id,fundingId:'public'});together(f,l,30,[child]);act(w,teacher,{operation:'cancel',lessonId:l.id});advanceEducation(w);assert.equal(w.economy!.treasury,27);assert.equal(teacher.coins,73);assert.equal(child.coins,100);assert.equal(totalCoins(w),money);

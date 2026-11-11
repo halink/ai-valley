@@ -4,9 +4,10 @@ import {createFormalGeography,createFrontierGeography} from './formal-geography.
 import {foundingHouseholds, type Founder, type HouseholdKind} from './founders.js';
 import {initializeFrontierHazards} from './frontier-hazards.js';
 import {seedFrontierLivelihood} from './frontier-livelihood.js';
+import {initializeFood} from './food.js';
 import {distance, walkable} from './navigation.js';
 import {startingDefinitions} from './starting-content.js';
-import {DAY, YEAR, FORMAL_DAY_MINUTES} from './time.js';
+import {DAY, YEAR, FORMAL_DAY_MINUTES,ageYears} from './time.js';
 
 const dawn = 8 * 60;
 const hair = [0x462b1e, 0x3f2925, 0x594531, 0x944e21, 0x443442, 0x3f3434];
@@ -48,7 +49,9 @@ function createFounder(world:World, person:Founder, house:number, member:number,
   const skills:Resident['skills'] = {farming:0,building:0,care:0};
   if (skilled) skills[experience] = 1 + (index % 3);
   const inventory = world.scenario==='frontier'?{
-    berry:2+index%2,meal:1,turnip:2,water:4,
+    // 166–178 nutrition per person covers three days at 54.72/day. All of it is
+    // directly edible, including children's portions; no future harvest is counted.
+    berry:2+index%2,meal:1,turnip:5,water:4,
     ...(age>=18?{wood:experience==='building'?8:2,stone:experience==='building'?4:1,seed:experience==='farming'?6:3}:{}),
     ...(index===3?{medicine:1}:{}),
   }:{
@@ -81,7 +84,7 @@ function recordHousehold(world:World, home:Building, members:Resident[], kind:Ho
   }
   function parentOf(adult:Resident,child:Resident) {
     child.parents.push(adult.id);
-    if (world.minute - child.bornAt < 18*YEAR) child.guardianIds.push(adult.id);
+    if (ageYears(child.bornAt,world.minute)<18) child.guardianIds.push(adult.id);
     connect(adult,child,{kin:'child'}); connect(child,adult,{kin:'parent'});
     relationships.push(`${adult.name}是${child.name}的家长`);
   }
@@ -121,6 +124,9 @@ export function createFrontierWorld(seed=5401):World {
   }
   seedFrontierLivelihood(world,{barnId:'frontier-barn',pasture:geography.pasture,shore:geography.fishingShore,fisherId:'founder-3-2'});
   initializeFrontierHazards(world);
+  // Date the finite provisions at arrival, not at the first action or a later load.
+  // Loaded worlds never pass through this constructor and receive no extra food.
+  initializeFood(world);
   return world;
 }
 

@@ -1,3 +1,4 @@
+import {animalHistoryButton,animalHistoryId} from './animal-history.js';
 import {animalActivities,type AnimalActivity} from '../shared/animal-behavior.js';
 import {beastNames} from '../shared/frontier-hazards.js';
 import type {Livestock} from '../shared/industry.js';
@@ -5,6 +6,8 @@ import {roomLayout} from '../shared/rooms.js';
 import type {Building,Vec,World} from '../shared/types.js';
 import {fishSchoolView,type FishSchoolView} from '../world/fishing.js';
 import {animalNames} from '../world/livestock-life.js';
+import {isLocalWildSpecies,localWildlifeHabitat} from '../world/wildlife-population.js';
+import {predatorHabitatCondition} from '../world/predator-ecology.js';
 import {DAY} from '../world/time.js';
 import {dateLabel} from './community.js';
 
@@ -21,7 +24,7 @@ export function resolveEcologySelection(w:World,selection:EcologySelection):Ecol
 
 export const habitatLabels={lake:'湖泊',river:'河流',coast:'海岸'} as const;
 export const shoalActivities={feeding:'在水中觅食',resting:'在水中休息',evadingFlood:'躲避洪流'} as const;
-const wildDeath={hunted:'被狩猎',starvation:'饥饿',oldAge:'衰老',thirst:'脱水',predation:'遭捕食'} as const;
+const wildDeath={hunted:'被狩猎',starvation:'饥饿',oldAge:'衰老',thirst:'脱水',predation:'遭捕食',disease:'野生动物疾病'} as const;
 const esc=(v:unknown)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
 export function ecologyButton(selection:EcologySelection,label='查看状态'){
  return `<button data-animal-detail="${esc(ecologyKey(selection))}">${esc(label)}</button>`;
@@ -83,7 +86,9 @@ function facts(entries:Array<[string,string]>){
 
 function fishDetails(s:FishSchoolView){
  return facts([['水域',habitatLabels[s.habitat]],['鱼群储量',`${s.amount} / ${s.capacity} 份`],['可见鱼种',s.species??'当前无活跃鱼种'],
-  ['活动时间',s.hours],['恢复进度',s.amount>=s.capacity?'已达容量':`下一份 ${Math.round(Math.max(0,s.recovery)*100)}%`]]);
+  ['活动时间',s.hours],['繁殖条件','存活鱼种、适宜季节与有限共同容量'],
+  ...s.stocks.map(stock=>[stock.name,`${stock.amount} 份 · 繁殖 ${stock.born} · 钓获 ${stock.caught} · 捕食 ${stock.eaten} · 迁入 ${stock.arrived} / 迁出 ${stock.departed}`] as [string,string]),
+  ['登记边界','仅保留分种登记后的数量变化；旧记录没有的品种不追溯推断']]);
 }
 
 export function animalInspector(w:World,selection:EcologySelection):string {
@@ -106,15 +111,41 @@ export function animalInspector(w:World,selection:EcologySelection):string {
   const n=wild??domestic!;
   const entries:Array<[string,string]>=[['年龄',`${Math.max(0,Math.floor(((n.deathAt??w.minute)-n.bornAt)/DAY))} 天`]];
   if(domestic){
+   if(domestic.motherId||domestic.sireId)entries.push(['亲代',`母 ${domestic.motherId??'未记录'} · 父 ${domestic.sireId??'未记录'}`]);
    entries.push(['照料人',w.residents.find(r=>r.id===domestic.ownerId)?.name??'暂无登记']);
    if(n.status==='alive')entries.push(['待收产物',`${domestic.product} 份`],['繁育',domestic.pregnancy?`孕育中 · 预计${dateLabel(domestic.pregnancy.dueAt)}`:'暂无孕育记录']);
   }else if(wild?.sex)entries.push(['性别',wild.sex==='female'?'雌':'雄']);
+  if(wild&&isLocalWildSpecies(wild.species)){
+   const population=w.frontierHazards?.wildlifePopulation,stock=population?.species[wild.species];
+   entries.push(['亲代',wild.motherId&&wild.sireId?`母 ${wild.motherId} · 父 ${wild.sireId}`:'未记录，不推断旧档亲代']);
+   if(wild.status==='alive')entries.push(['繁育',wild.pregnancy?`孕育中 · 预计${dateLabel(wild.pregnancy.dueAt)} · 父 ${wild.pregnancy.sireId}`:'暂无孕育记录']);
+   if(stock&&population){
+    const habitat=localWildlifeHabitat(w,wild),count=w.frontierHazards!.beasts.filter(b=>b.status==='alive'&&b.species===wild.species).length;
+    entries.push(['有限种群',`${count}/${stock.capacity} 只 · ${habitat.watered?'水源可达':'水源不足或阻断'} · 可达食源 ${habitat.food} 份`],
+     ['种群账目',`登记 ${stock.registered} + 出生 ${stock.born} − 死亡 ${stock.deaths} − 驯化转出 ${stock.tamed} = ${count}`],
+     ['登记边界',`${dateLabel(population.registeredAt)}起记账；灭绝不自动补种，旧档经历不追溯推断`]);
+   }
+  }
+  if(wild&&(wild.species==='wolf'||wild.species==='fox')){
+   const ecology=w.frontierHazards?.predatorEcology,h=ecology?.habitats.find(h=>h.id===wild.habitatId);
+   entries.push(['亲代',wild.motherId&&wild.sireId?`母 ${wild.motherId} · 父 ${wild.sireId}`:'未记录，不推断旧档亲代']);
+   if(wild.status==='alive')entries.push(['繁育',wild.pregnancy?`孕育中 · 预计${dateLabel(wild.pregnancy.dueAt)} · 父 ${wild.pregnancy.sireId}`:'暂无孕育记录'],
+    ['疾病',wild.disease?`野生动物疾病 ${Math.round(wild.disease.severity)}/100 · ${wild.disease.cause==='contact'?'近处患病个体接触':'持续饥渴或拥挤'}`:'暂无疾病记录'],
+    ['迁移',wild.migration?`${wild.migration.fromId} → ${wild.migration.toId} · ${wild.migration.reason}`:'目前未迁移']);
+   if(h&&ecology){
+    const c=predatorHabitatCondition(w,h),count=w.frontierHazards!.beasts.filter(b=>b.status==='alive'&&b.habitatId===h.id).length;
+    entries.push(['登记栖地',`${h.id} · ${count}/${h.capacity} 只 · ${c.sheltered?'有遮蔽':'遮蔽不足'} · ${c.watered?'水源可达':'水源不足或阻断'}`],
+     ['附近食源',`${c.food} 份小兽存量或存活猎物，共享且捕食后扣减，不是预留饲料`],
+     ['栖地账目',`登记 ${h.registered} + 出生 ${h.born} + 迁入 ${h.arrived} − 迁出 ${h.departed} − 死亡 ${h.deaths} = ${count}`],
+     ['登记边界',`${dateLabel(ecology.registeredAt)}起记账，旧档经历不追溯推断`]);
+   }
+  }
   if(n.deathAt!==undefined&&n.deathAt!==null)entries.push(['死亡记录',dateLabel(n.deathAt)]);
   const target=n.activity?.target;
   if(n.status==='alive'&&target)entries.push(['目标位置',`${target.x}, ${target.y}`]);
   body=status(n.status==='alive'?n.activity?.reason:undefined)+`<h3 class="section-label">身体状态</h3><div class="animal-needs">${need('健康',n.health,'var(--leaf)')}${need('饥饿',n.hunger,'var(--bevel)')}${need('口渴',n.thirst,'var(--pond)')}${need('体力',n.energy,'var(--gold)')}</div>`+facts(entries);
  }
- const id=selection.kind==='fish'?'shoal:'+selection.id:selection.id;
+ const id=animalHistoryId(selection);
  const records=w.events.filter(e=>e.animalIds?.includes(id)).slice(-8).reverse();
- return header+map+body+`<h3 class="section-label">近期记录</h3><div class="memory-list">${records.map(e=>`<article><small>${dateLabel(e.at)}</small><p>${esc(e.text)}</p></article>`).join('')||'<p class="empty">此处还没有近期事件记录。</p>'}</div>`;
+ return header+map+animalHistoryButton(id,'查阅完整留存年表')+body+`<h3 class="section-label">近期记录</h3><div class="memory-list">${records.map(e=>`<article><small>${dateLabel(e.at)}${e.interpretation?' · 人物自己的理解':e.observerOnly?' · 已发生事实的年表记载':''}</small><p>${esc(e.text)}</p></article>`).join('')||'<p class="empty">此处还没有近期事件记录。</p>'}</div>`;
 }

@@ -1,3 +1,4 @@
+import {hasBusinessEstateAssets} from './economy.js';
 import {hasCultureAssets} from './culture.js';
 import {hasHouseholdAssets} from './household.js';
 import type {World} from '../shared/types.js';import {hasEmploymentAssets} from './employment.js';import {hasForeignAssets} from './foreign-trade.js';import {hasIndustryAssets} from './industry.js';import {hasLongCareAssets} from './long-care.js';import {hasHealthAssets} from './health.js';import {hasEducationAssets} from './education.js';import {hasConstructionAssets} from './construction.js';
@@ -5,7 +6,8 @@ import type {World} from '../shared/types.js';import {hasEmploymentAssets} from 
 export function pendingEstateReturns(w:World,id:string):string|null {
  if(hasCultureAssets(w,id))return '逝者留在文化活动现场的未用物资尚待实际保全';
  if(hasHouseholdAssets(w,id))return '逝者的共用资金与储物份额须先在原处实际保全，不能提前分配遗产或结清现金债务';
- if(w.economy?.businesses.some(b=>b.ownerId===id&&b.closedAt===null))return '逝者的经营财产尚待完成封存清点';
+ if(hasBusinessEstateAssets(w,id))return '逝者的经营财产尚待完成封存清点';
+ if(w.economy?.leases?.some(l=>[l.ownerId,l.tenantId].includes(id)&&(l.status==='active'||(w.economy!.escrows[l.account.slice(7)]??0)>0)))return '逝者租约的有限租金、押金与相关使用权须先按原约结清';
  if(hasEmploymentAssets(w,id)||hasForeignAssets(w,id))return '逝者的工资约定或在途外贸财产尚待结算，须先保全相关人的权利';
  if(hasIndustryAssets(w,id))return '逝者未完成加工的实际原料尚待保全';
  if(hasLongCareAssets(w,id))return '逝者长期照护预付款尚待保全与结清';

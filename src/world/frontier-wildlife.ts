@@ -1,3 +1,6 @@
+import {initializeWildlifePopulation,recordWildlifeExit,reviewWildlifePopulation} from './wildlife-population.js';
+import {disasterContains} from '../shared/frontier-hazards.js';
+import {fishNames} from '../shared/fishing-rules.js';
 import {beastNames,type FrontierHazardState,type WildBeast,type WildFoodPatch} from '../shared/frontier-hazards.js';
 import type {Livestock} from '../shared/industry.js';
 import type {Resident,Vec,World} from '../shared/types.js';
@@ -8,23 +11,24 @@ import {animalNames,recordLivestockDeath} from './livestock-life.js';
 import {distance,findPath,same,walkable} from './navigation.js';
 import {calendar,DAY,YEAR} from './time.js';
 import type {AnimalActivity} from '../shared/animal-behavior.js';
-import {fishingKey,fishingStockAt,waterAtShore,wildFishAt} from './fishing.js';
+import {availableWildFishAt,fishingKey,waterAtShore,wildFishAt} from './fishing.js';
+import {advancePredatorDisease,initializePredatorEcology,isPredator,predatorFoodPatch,recordPredatorDeath,reviewPredatorEcology,stepPredatorMigration} from './predator-ecology.js';
 
 const directions:Vec[]=[{x:1,y:0},{x:0,y:1},{x:-1,y:0},{x:0,y:-1}];
 const neighbors=(at:Vec)=>directions.map(d=>({x:at.x+d.x,y:at.y+d.y}));
 type Species=WildBeast['species'];
 interface SpeciesRules {
  startHunger:number;hungerMinutes:number;forageRelief:number;patch:WildFoodPatch['kind'];capacity:number;
- starvingRaid:number;raidRange:number;replacementDays:number;years:number;nocturnal:boolean;population:number;
- prey:Species[];danger:number;speed:number;gestation:number;
+ starvingRaid:number;raidRange:number;years:number;nocturnal:boolean;population:number;
+ prey:Species[];danger:number;speed:number;
 }
 const animalRules:Record<Species,SpeciesRules>={
- boar:{startHunger:30,hungerMinutes:45,forageRelief:24,patch:'roots',capacity:6,starvingRaid:86,raidRange:32,replacementDays:6,years:8,nocturnal:false,population:2,prey:[],danger:26,speed:8,gestation:5},
- wolf:{startHunger:44,hungerMinutes:42,forageRelief:37,patch:'smallGame',capacity:5,starvingRaid:68,raidRange:50,replacementDays:8,years:6,nocturnal:true,population:1,prey:['deer','hare','duck'],danger:30,speed:8,gestation:6},
- deer:{startHunger:28,hungerMinutes:55,forageRelief:25,patch:'browse',capacity:22,starvingRaid:Infinity,raidRange:0,replacementDays:6,years:12,nocturnal:false,population:3,prey:[],danger:0,speed:8,gestation:6},
- hare:{startHunger:32,hungerMinutes:56,forageRelief:21,patch:'seeds',capacity:22,starvingRaid:Infinity,raidRange:0,replacementDays:3,years:5,nocturnal:true,population:4,prey:[],danger:0,speed:6,gestation:3},
- fox:{startHunger:39,hungerMinutes:61,forageRelief:34,patch:'smallGame',capacity:6,starvingRaid:75,raidRange:24,replacementDays:7,years:7,nocturnal:true,population:1,prey:['hare','duck'],danger:0,speed:7,gestation:4},
- duck:{startHunger:26,hungerMinutes:64,forageRelief:25,patch:'seeds',capacity:12,starvingRaid:Infinity,raidRange:0,replacementDays:4,years:7,nocturnal:false,population:2,prey:[],danger:0,speed:8,gestation:4},
+ boar:{startHunger:30,hungerMinutes:45,forageRelief:24,patch:'roots',capacity:6,starvingRaid:86,raidRange:32,years:8,nocturnal:false,population:2,prey:[],danger:26,speed:8},
+ wolf:{startHunger:44,hungerMinutes:42,forageRelief:37,patch:'smallGame',capacity:5,starvingRaid:68,raidRange:50,years:6,nocturnal:true,population:1,prey:['deer','hare','duck'],danger:30,speed:8},
+ deer:{startHunger:28,hungerMinutes:55,forageRelief:25,patch:'browse',capacity:22,starvingRaid:Infinity,raidRange:0,years:12,nocturnal:false,population:3,prey:[],danger:0,speed:8},
+ hare:{startHunger:32,hungerMinutes:56,forageRelief:21,patch:'seeds',capacity:22,starvingRaid:Infinity,raidRange:0,years:5,nocturnal:true,population:4,prey:[],danger:0,speed:6},
+ fox:{startHunger:39,hungerMinutes:61,forageRelief:34,patch:'smallGame',capacity:6,starvingRaid:75,raidRange:24,years:7,nocturnal:true,population:1,prey:['hare','duck'],danger:0,speed:7},
+ duck:{startHunger:26,hungerMinutes:64,forageRelief:25,patch:'seeds',capacity:12,starvingRaid:Infinity,raidRange:0,years:7,nocturnal:false,population:2,prey:[],danger:0,speed:8},
 };
 const species=Object.keys(animalRules) as Species[];
 const bound=(value:number)=>Math.max(0,Math.min(100,value));
@@ -54,18 +58,18 @@ function landNear(w:World,anchor:Vec,accept:(at:Vec)=>boolean){
  return null;
 }
 
-function registerHabitat(w:World,state:FrontierHazardState,kind:Species):void {
+function registerHabitat(w:World,state:FrontierHazardState,kind:Species,fresh=false):void {
  const id='habitat:'+kind;
  if(state.foodPatches.some(p=>p.id===id))return;
  const anchor=kind==='boar'||kind==='wolf'?state.beasts.find(b=>b.species===kind)?.den??habitat(w,state,kind):habitat(w,state,kind);
  const at=landNear(w,{x:anchor.x+1,y:anchor.y},cell=>!state.foodPatches.some(p=>same(p.at,cell)));
  if(!at)return;
  const rules=animalRules[kind];
- state.foodPatches.push({id,kind:rules.patch,at,amount:rules.capacity,capacity:rules.capacity,progress:0});
+ state.foodPatches.push({id,kind:rules.patch,at,amount:rules.patch==='smallGame'&&!fresh?0:rules.capacity,capacity:rules.capacity,progress:0});
 }
 
 /** Add habitat and wildlife once. Old individuals, alerts, depleted food and casualties survive upgrades. */
-export function initializeWildlife(w:World,state:FrontierHazardState):void {
+export function initializeWildlife(w:World,state:FrontierHazardState,fresh=false):void {
  state.nextBeastSerial??=1;
  state.totals.livestockAttacks??=0;state.totals.livestockKilled??=0;state.totals.wildlifeDeaths??=0;state.totals.hunted??=0;
  for(const beast of state.beasts){
@@ -75,21 +79,24 @@ export function initializeWildlife(w:World,state:FrontierHazardState):void {
  }
  state.foodPatches??=[];
  if(state.ecologyVersion===1){
-  if(!state.foodPatches.length)for(const kind of species)registerHabitat(w,state,kind);
+  if(!state.foodPatches.length)for(const kind of species)registerHabitat(w,state,kind,fresh);
+  initializePredatorEcology(w,state,createWildBeast,fresh);initializeWildlifePopulation(w,state);
   return;
  }
  for(const kind of species){
   const existing=state.beasts.filter(b=>b.species===kind);
   for(let i=existing.length;i<animalRules[kind].population;i++){
+   if(!fresh)break;
    const den=landNear(w,habitat(w,state,kind),at=>!state.beasts.some(b=>same(b.den,at)));
    if(!den)break;
    const beast=createWildBeast(w,kind,`beast:${kind}:founding-${i+1}`,den);
    beast.sex=i%2?'male':'female';beast.hunger=bound(beast.hunger+i*4);beast.nextMoveAt+=i%4;
    state.beasts.push(beast);
   }
-  registerHabitat(w,state,kind);
+  registerHabitat(w,state,kind,fresh);
  }
  state.ecologyVersion=1;
+ initializePredatorEcology(w,state,createWildBeast,fresh);initializeWildlifePopulation(w,state);
 }
 
 const alive=(beast:WildBeast)=>beast.status!=='dead';
@@ -106,12 +113,15 @@ export function wildlifeVisible(w:World,r:Resident,beast:WildBeast):boolean {
 }
 
 function markWildDeath(w:World,beast:WildBeast,cause:NonNullable<WildBeast['deathCause']>){
+ if(!alive(beast))return;
+ recordWildlifeExit(w,beast,'deaths');
  beast.status='dead';beast.health=0;beast.deathCause=cause;beast.deathAt=w.minute;
+ recordPredatorDeath(w,beast);
  delete beast.alert;delete beast.path;delete beast.activity;delete beast.pregnancy;
  w.frontierHazards!.totals.wildlifeDeaths++;
  if(cause==='hunted'){w.frontierHazards!.totals.hunted++;return;}
  if(cause==='predation')return;
- const reason={oldAge:'衰老',thirst:'长期缺水',starvation:'长期觅食不足'}[cause];
+ const reason={oldAge:'衰老',thirst:'长期缺水',starvation:'长期觅食不足',disease:'野生动物疾病'}[cause];
  emitEvent(w,{kind:'hazard',actors:[],animalIds:[beast.id],place:{...beast.at},text:`一只${beastNames[beast.species]}因${reason}死亡。`});
 }
 
@@ -215,23 +225,46 @@ function patrol(w:World,beast:WildBeast){
  }
 }
 
+const berryDanger=(w:World,at:Vec)=>w.frontierHazards!.disasters.some(d=>d.phase==='active'&&disasterContains(d,at));
+
+/** Deer only: actual nearby berries may supplement an unavailable browse patch. */
+function seekDeerBerries(w:World,beast:WildBeast,targetId?:string):boolean {
+ const sources=w.resources.filter(r=>r.kind==='bush'&&r.amount>=1&&!berryDanger(w,r.at)&&
+  (targetId?r.id===targetId:distance(beast.at,r.at)<=9))
+  .sort((a,b)=>distance(beast.at,a.at)-distance(beast.at,b.at)||a.id.localeCompare(b.id));
+ for(const source of sources){
+  // Recheck the whole bounded route, including obstacles or disasters ahead of a cached step.
+  const path=findPath(w,beast.at,source.at,false,12,(_from,to)=>!berryDanger(w,to));
+  if(!path?.length)continue;
+  beast.path={to:{...source.at},steps:path};
+  beast.at=beast.path.steps.shift()!;
+  activity(beast,'forage','原食源不足，前往附近实际浆果',source.at,source.id);
+  return true;
+ }
+ return false;
+}
+
 function forage(w:World,state:FrontierHazardState,beast:WildBeast):boolean {
  if(beast.hunger<38)return false;
- if(beast.species==='duck'){
-  if(wildFishAt(w,beast.at)){
-   feed(beast,42);activity(beast,'forage','捕食了可触及的实际鱼群',beast.at);
+ const patch=isPredator(beast)?predatorFoodPatch(w,beast):foodPatch(state,beast);
+ // Keep a still-valid land-food journey until contact instead of switching back at every tile.
+ const continuingSeeds=beast.species==='duck'&&patch&&patch.amount>=1&&beast.activity?.kind==='forage'&&beast.activity.targetId===patch.id;
+ if(beast.species==='duck'&&!continuingSeeds){
+  const caught=wildFishAt(w,beast.at);
+  if(caught){
+   feed(beast,42);activity(beast,'forage',`捕食了可触及的实际鱼群：${fishNames[caught]}`,beast.at);
    const water=waterAtShore(w,beast.at)!;
    emitEvent(w,{kind:'hazard',actors:[],animalIds:[beast.id,'shoal:'+fishingKey(water)],place:{...beast.at},
-    text:'一只野鸭吃到一份可触及的鱼，水域鱼群实际减少。'});
+    text:`一只野鸭吃到一份可触及的${fishNames[caught]}，水域同种鱼群实际减少。`});
    return true;
   }
   const shore=state.shore;
-  if(shore&&(fishingStockAt(w,shore)?.amount??0)>0&&moveToward(w,beast,shore,20)){
+  if(shore&&availableWildFishAt(w,shore)&&moveToward(w,beast,shore,20)){
    activity(beast,'forage','寻找河岸可以触及的鱼群',shore);return true;
   }
  }
  if(beast.species==='boar'||beast.species==='deer'){
-  const berries=w.resources.find(resource=>resource.kind==='bush'&&resource.amount>=1&&distance(beast.at,resource.at)<=1&&reach(w,beast.at,resource.at,1));
+  const berries=w.resources.find(resource=>resource.kind==='bush'&&resource.amount>=1&&(beast.species!=='deer'||!berryDanger(w,resource.at))&&distance(beast.at,resource.at)<=1&&reach(w,beast.at,resource.at,1));
   if(berries){berries.amount--;berries.lastHarvest=w.minute;feed(beast,19);activity(beast,'forage','吃到可触及的浆果',berries.at,berries.id);return true;}
   if(beast.hunger>=68){
    const crop=w.plots.find(plot=>plot.crop&&plot.crop.growth>=.5&&reach(w,beast.at,plot.at,1));
@@ -242,19 +275,24 @@ function forage(w:World,state:FrontierHazardState,beast:WildBeast):boolean {
    }
   }
  }
- const patch=foodPatch(state,beast);
- if(!patch||patch.amount<1)return false;
- activity(beast,'forage','饥饿，寻找已知食源',patch.at,patch.id);
- if(reach(w,beast.at,patch.at,1)){
-  patch.amount--;feed(beast,animalRules[beast.species].forageRelief);return true;
+ if(beast.species==='deer'&&beast.activity?.kind==='forage'&&beast.activity.targetId&&beast.activity.targetId!==patch?.id){
+  if(seekDeerBerries(w,beast,beast.activity.targetId))return true;
+  delete beast.path;
  }
- return moveToward(w,beast,patch.at,72);
+ if(patch&&patch.amount>=1){
+  activity(beast,'forage','饥饿，寻找已知食源',patch.at,patch.id);
+  if(reach(w,beast.at,patch.at,1)){
+   patch.amount--;feed(beast,animalRules[beast.species].forageRelief);return true;
+  }
+  if(moveToward(w,beast,patch.at,72))return true;
+ }
+ return beast.species==='deer'&&seekDeerBerries(w,beast);
 }
 
 function seekWater(w:World,state:FrontierHazardState,beast:WildBeast):boolean {
  if((beast.thirst??0)<56)return false;
- const springs=w.resources.filter(r=>r.kind==='spring'&&r.amount>=1&&distance(beast.at,r.at)<=70);
- const nearBank=state.shore&&distance(beast.at,state.shore)<=65&&!state.disasters.some(d=>d.kind==='flashFlood'&&d.phase==='active'&&distance(state.shore!,d.at)<=d.radius)?state.shore:null;
+ const springs=w.resources.filter(r=>r.kind==='spring'&&r.floodDamage?.clearedAt!==null&&r.amount>=1&&distance(beast.at,r.at)<=70);
+ const nearBank=state.shore&&distance(beast.at,state.shore)<=65&&!state.disasters.some(d=>d.kind==='flashFlood'&&d.phase==='active'&&disasterContains(d,state.shore!))?state.shore:null;
  const sources=[...springs.map(spring=>({at:spring.at,spring})),...(nearBank?[{at:nearBank,spring:undefined}]:[])]
   .sort((a,b)=>distance(beast.at,a.at)-distance(beast.at,b.at));
  for(const source of sources){
@@ -296,17 +334,21 @@ function stepWildBeast(w:World,state:FrontierHazardState,beast:WildBeast,minutes
  beast.hunger=bound(beast.hunger+minutes/rules.hungerMinutes*(resting ? .66 : 1));
  beast.thirst=bound((beast.thirst??20)+minutes/(w.weather==='rain'?117:82));
  beast.energy=bound((beast.energy??85)+minutes*(resting ? .12 : beast.activity?.kind==='hunt'||beast.activity?.kind==='flee' ? -.071 : -.03));
+ const beforeDisease=beast.health;
+ advancePredatorDisease(w,beast,minutes);
+ const diseaseKilled=beforeDisease>0&&beast.health<=0;
  if(beast.hunger>=86||beast.thirst>=95)beast.health=bound(beast.health-minutes*.039);
- else if(beast.hunger<38&&beast.thirst<65)beast.health=bound(beast.health+minutes*.014);
- if(beast.health<=0||now-beast.bornAt>=rules.years*YEAR){markWildDeath(w,beast,beast.health<=0?(beast.thirst>=95?'thirst':'starvation'):'oldAge');return;}
+ else if(!beast.disease&&beast.hunger<38&&beast.thirst<65)beast.health=bound(beast.health+minutes*.014);
+ if(beast.health<=0||now-beast.bornAt>=rules.years*YEAR){markWildDeath(w,beast,beast.health<=0?(diseaseKilled?'disease':beast.thirst>=95?'thirst':'starvation'):'oldAge');return;}
 
- const disaster=state.disasters.find(d=>d.phase==='active'&&distance(d.at,beast.at)<=d.radius);
+ const disaster=state.disasters.find(d=>d.phase==='active'&&disasterContains(d,beast.at));
  if(disaster&&now>=beast.nextMoveAt){
   delete beast.alert;
   beast.nextMoveAt=now+4;
   evade(w,beast,disaster.at,'避开已发生的灾害',disaster.id);
   return;
  }
+ if(stepPredatorMigration(w,beast))return;
  const target=targetForAlert(w,beast);
  if(beast.alert){
   if(!target){delete beast.alert;beast.cooldownUntil=now+24;}
@@ -339,6 +381,17 @@ function stepWildBeast(w:World,state:FrontierHazardState,beast:WildBeast,minutes
   if(threat){evade(w,beast,threat.at,predator?'察觉到近处的捕食者':'远离靠近的居民',threat.id);beast.nextMoveAt=now+3;return;}
  }
  if(seekWater(w,state,beast))return;
+ if((isPredator(beast)||beast.motherId)&&now-beast.bornAt<7*DAY){
+  const mother=state.beasts.find(b=>b.id===beast.motherId&&b.species===beast.species&&b.sex==='female'&&alive(b));
+  if(beast.species!=='duck'&&mother&&reach(w,beast.at,mother.at,1)&&beast.hunger>=38&&mother.hunger<60&&!mother.disease){
+   // Nursing transfers the mother's existing nutrition, which she must replace by eating actual food.
+   mother.hunger=bound(mother.hunger+16);mother.energy=bound((mother.energy??0)-2);feed(beast,20);
+   activity(beast,'forage','从近处亲代获得营养，亲代饥饿实际增加',mother.at,mother.id);
+  }else if(beast.species==='duck'&&forage(w,state,beast))return;
+  else if(mother&&moveToward(w,beast,mother.at,24))activity(beast,'roam','跟随存活的亲代',mother.at,mother.id);
+  else if(!forage(w,state,beast))activity(beast,'rest','幼崽在附近等待食物',beast.at);
+  return;
+ }
  if(beast.hunger<80&&(!active||beast.energy<25||resting&&beast.energy<61)){
   if(distance(beast.at,beast.den)>2&&moveToward(w,beast,beast.den,72))activity(beast,'rest','回到藏身处休息',beast.den);
   else activity(beast,'rest',beast.energy<61?'补充体力':'按昼夜作息休息',beast.at);
@@ -370,56 +423,25 @@ function stepWildBeast(w:World,state:FrontierHazardState,beast:WildBeast,minutes
  if(!forage(w,state,beast))patrol(w,beast);
 }
 
-function recolonize(w:World,state:FrontierHazardState){
- const latestDeath=new Set<WildBeast>();
- const dead=state.beasts.filter(b=>b.status==='dead');
- for(const kind of species){
-  const lost=dead.slice().reverse().find(b=>b.species===kind);
-  if(lost)latestDeath.add(lost);
-  if(state.beasts.some(b=>b.species===kind&&alive(b)))continue;
-  const patch=lost&&foodPatch(state,lost);
-  if(!lost||lost.deathAt===undefined||w.minute<lost.deathAt+animalRules[kind].replacementDays*DAY||!patch||patch.amount<2)continue;
-  const den=[lost.den,...neighbors(lost.den)].find(at=>walkable(w,at)&&!state.beasts.some(b=>alive(b)&&same(b.at,at)));
-  if(!den)continue;
-  const beast=createWildBeast(w,kind,`beast:${kind}:${state.nextBeastSerial++}`,den);
-  beast.sex=lost.sex??'female';
-  state.beasts.push(beast);
-  emitEvent(w,{kind:'hazard',actors:[],animalIds:[beast.id],place:{...beast.at},text:`一只新的${beastNames[kind]}从野外进入恢复食源的领地。`});
- }
- const old=dead.slice(0,-12).filter(b=>!latestDeath.has(b));
+/** Current lists stay bounded; registered population totals and persisted events retain the earlier facts. */
+function pruneWildlifeHistory(state:FrontierHazardState){
+ const dead=state.beasts.filter(b=>b.status==='dead'),latestDeath=new Set<WildBeast>();
+ for(const kind of species){const lost=dead.slice().reverse().find(b=>b.species===kind);if(lost)latestDeath.add(lost);}
+ const old=dead.slice(0,-12).filter(b=>!latestDeath.has(b)&&!isPredator(b));
  if(old.length)state.beasts=state.beasts.filter(b=>!old.includes(b));
-}
-
-function reproduce(w:World,state:FrontierHazardState):void {
- for(const kind of species){
-  const herd=state.beasts.filter(b=>alive(b)&&b.species===kind),rules=animalRules[kind];
-  if(herd.length>=rules.population)continue;
-  const capable=(b:WildBeast)=>b.health>=75&&b.hunger<53&&(b.thirst??0)<65&&w.minute-b.bornAt>=28*DAY;
-  for(const mother of herd){
-   if(mother.sex!=='female')continue;
-   if(mother.pregnancy){
-    if(mother.pregnancy.dueAt>w.minute)continue;
-    const at=landNear(w,mother.at,p=>distance(p,mother.at)<=2&&!state.beasts.some(b=>alive(b)&&same(b.at,p)));
-    if(!at||mother.hunger>78)continue;
-    const serial=state.nextBeastSerial++,baby=createWildBeast(w,kind,`beast:${kind}:${serial}`,mother.den);
-    Object.assign(baby,{at,bornAt:w.minute,sex:serial%2?'female':'male',health:90,hunger:35});
-    state.beasts.push(baby);
-    mother.pregnancy=undefined;mother.hunger=bound(mother.hunger+15);
-    emitEvent(w,{kind:'hazard',actors:[],animalIds:[baby.id,mother.id],place:at,text:`一只${beastNames[kind]}幼崽在亲代附近出生。`});
-    break;
-   }
-   if(!capable(mother)||(foodPatch(state,mother)?.amount??0)<3)continue;
-   const sire=herd.find(b=>b.sex==='male'&&capable(b)&&reach(w,mother.at,b.at,5));
-   if(sire){mother.pregnancy={dueAt:w.minute+rules.gestation*DAY,sireId:sire.id};break;}
-  }
- }
 }
 
 export function advanceWildlife(w:World,minutes:number,threats:Threats){
  const state=w.frontierHazards!;
  initializeWildlife(w,state);
+ if(state.lastWildlifeAt!==undefined){
+  if(w.minute<=state.lastWildlifeAt)return;
+  minutes=Math.min(minutes,w.minute-state.lastWildlifeAt);
+ }
+ state.lastWildlifeAt=w.minute;
  const season=calendar(w.minute).season;
  for(const patch of state.foodPatches){
+  if(patch.kind==='smallGame'&&patch.amount<=0){patch.amount=0;patch.progress=0;continue;}
   if(patch.amount>=patch.capacity){patch.progress=0;continue;}
   const plantGrowth=patch.kind==='browse'||patch.kind==='seeds'?5:1;
   patch.progress+=minutes/DAY*plantGrowth*({spring:.68,summer:.85,autumn:.58,winter:.26}[season]);
@@ -427,6 +449,7 @@ export function advanceWildlife(w:World,minutes:number,threats:Threats){
   patch.amount+=recovered;patch.progress-=recovered;
  }
  for(const beast of state.beasts)if(alive(beast))stepWildBeast(w,state,beast,minutes,threats);
- if(Math.floor(w.minute/60)>Math.floor((w.minute-minutes)/60))reproduce(w,state);
- recolonize(w,state);
+ reviewWildlifePopulation(w,state,createWildBeast);
+ reviewPredatorEcology(w,state,createWildBeast);
+ pruneWildlifeHistory(state);
 }

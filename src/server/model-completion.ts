@@ -5,7 +5,8 @@ export type ModelName=typeof QWEN_MODEL|typeof DEEPSEEK_MODEL|typeof GLM_MODEL;
 export type ModelConnection={model:ModelName;key:string};
 export type ModelMessage={role:'system'|'user';content:string};
 type Usage={prompt_tokens?:number;completion_tokens?:number};
-type Reply={content:string;finish:string|null;usage?:Usage};
+export type ModelReply={content:string;finish:string|null;usage?:Usage};
+type Reply=ModelReply;
 type Chunk={choices?:Array<{delta?:{content?:string};finish_reason?:string|null}>;usage?:Usage;error?:unknown};
 
 // Reserve headroom for the provider template and keep some of the account quota free.
@@ -21,6 +22,21 @@ export function checkedInputBytes(model:ModelName,messages:ModelMessage[]):numbe
  if(bytes>modelLimits[model].inputBytes)throw new Error('model_context_limit');
  return bytes;
 }
+
+/** Pure request encoding shared by production and offline HTTP rehearsals.
+ * This function neither reads credentials nor performs transport. */
+export function modelRequestPayload(model:ModelName,messages:ModelMessage[],temperature:number){
+ // Snapshot once so a toJSON/accessor cannot change the body after byte checking.
+ const encoded=JSON.stringify(messages);
+ if(Buffer.byteLength(encoded,'utf8')>modelLimits[model].inputBytes)throw new Error('model_context_limit');
+ messages=JSON.parse(encoded) as ModelMessage[];
+ const {answerTokens,thinkingTokens}=modelLimits[model];
+ const qwen=model===QWEN_MODEL,deepseek=model===DEEPSEEK_MODEL;
+ const options=qwen?{stream:true,stream_options:{include_usage:true},enable_thinking:true,thinking_budget:thinkingTokens}
+  :{stream:false,enable_thinking:deepseek,thinking_budget:deepseek||temperature===0.6?thinkingTokens:1536};
+ return JSON.stringify({model,messages,temperature,max_tokens:answerTokens,...options});
+}
+export const SILICONFLOW_COMPLETIONS_ENDPOINT='https://api.siliconflow.cn/v1/chat/completions';
 
 async function readCompletionStream(response:Response):Promise<Reply>{
  const reply:Reply={content:'',finish:null};
@@ -54,16 +70,12 @@ async function readCompletionStream(response:Response):Promise<Reply>{
  }
 }
 
-export async function completeModel(key:string,model:ModelName,messages:ModelMessage[],temperature:number):Promise<Reply>{
- checkedInputBytes(model,messages);
- const {answerTokens,thinkingTokens}=modelLimits[model];
- const qwen=model===QWEN_MODEL,deepseek=model===DEEPSEEK_MODEL;
- const base=qwen?'https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1':'https://api.siliconflow.cn/v1';
- const options=qwen?{stream:true,stream_options:{include_usage:true},enable_thinking:true,thinking_budget:thinkingTokens}
-  :{stream:false,enable_thinking:deepseek,thinking_budget:deepseek||temperature===0.6?thinkingTokens:1536};
- const response=await fetch(base+'/chat/completions',{
+export async function completeModel(key:string,model:ModelName,messages:ModelMessage[],temperature:number,signal?:AbortSignal):Promise<Reply>{
+ const body=modelRequestPayload(model,messages,temperature),qwen=model===QWEN_MODEL;
+ const endpoint=qwen?'https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1/chat/completions':SILICONFLOW_COMPLETIONS_ENDPOINT;
+ const response=await fetch(endpoint,{
   method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${key}`},
-  body:JSON.stringify({model,messages,temperature,max_tokens:answerTokens,...options}),signal:AbortSignal.timeout(qwen?25_000:150_000)
+  body,signal:signal?AbortSignal.any([signal,AbortSignal.timeout(qwen?25_000:150_000)]):AbortSignal.timeout(qwen?25_000:150_000)
  });
  if(!response.ok)throw new Error(`model_http_${response.status}`);
  if(qwen)return readCompletionStream(response);

@@ -91,16 +91,22 @@ test('an actual model option can tame a wild duck with real feed and keep the sa
  assert.ok(world.events.some(e=>e.animalIds?.includes(duck.id)&&e.text.includes('驯养')));
 });
 
-test('legacy ecology upgrades once, preserves a dead wolf and introduces finite outside breeding stock',()=>{
+test('legacy ecology upgrades once without seeding absent wildlife and retains finite outside breeding stock',()=>{
  const {world,state}=isolated();
  state.beasts=state.beasts.filter(n=>n.id==='beast:boar'||n.id==='beast:wolf');
  const [boar,wolf]=state.beasts,original={...boar.at};
  wolf.status='dead';wolf.deathAt=world.minute;wolf.deathCause='hunted';wolf.health=0;
  state.foodPatches=state.foodPatches.filter(p=>p.id==='habitat:boar'||p.id==='habitat:wolf');
- state.foodPatches[0].amount=1;delete state.ecologyVersion;
+ state.foodPatches[0].amount=1;delete state.ecologyVersion;delete state.wildlifePopulation;
  initializeFrontierHazards(world);
- assert.equal(state.beasts.length,13);
- assert.equal(state.beasts.filter(n=>n.status==='alive').length,12);
+ assert.equal(state.beasts.length,2);
+ assert.equal(state.beasts.filter(n=>n.status==='alive').length,1);
+ assert.deepEqual(state.beasts.map(n=>n.id),['beast:boar','beast:wolf']);
+ assert.equal(state.wildlifePopulation!.species.boar.registered,1);
+ assert.equal(state.wildlifePopulation!.species.duck.registered,0);
+ assert.equal(state.wildlifePopulation!.species.deer.registered,0);
+ assert.equal(state.wildlifePopulation!.species.hare.registered,0);
+ assert.equal(state.beasts.some(n=>n.species==='fox'),false,'an upgrade does not invent a missing predator population');
  assert.deepEqual(boar.at,original);
  assert.equal(wolf.status,'dead');
  assert.equal(state.foodPatches[0].amount,1);
@@ -116,7 +122,9 @@ test('legacy ecology upgrades once, preserves a dead wolf and introduces finite 
   assert.equal(w.industry!.animals.length,3);
   initializeFood(w);initializeFrontierHazards(w);
   assert.deepEqual(w.industry!.livestockCargo!.filter(n=>n.kind==='duck'||n.kind==='cow').map(n=>n.id),added.map(n=>n.id));
-  assert.equal(w.frontierHazards!.beasts.length,13);
+  assert.equal(w.frontierHazards!.beasts.length,2);
+  assert.equal(w.frontierHazards!.wildlifePopulation!.species.boar.registered,1);
+  assert.equal(w.frontierHazards!.wildlifePopulation!.species.duck.registered,0);
   runtime.stop();
  }finally{store.close();}
 });

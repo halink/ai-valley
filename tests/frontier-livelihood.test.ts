@@ -37,14 +37,14 @@ test('a founder can choose a real shore from the model menu, catch fish and impr
  assert.ok(!same(r.at,shore));
  const pool=fishingStockAt(w,shore)!,stock=pool.amount;
  const rod=state.tools.find(t=>t.kind==='rod'&&t.ownerId===r.id)!,durability=rod.durability;
- const duration=fishingMinutes(w,r,shore,rod.level),fish=r.inventory.fish??0;
+ const duration=fishingMinutes(w,r,shore,rod.level),fish=r.inventory[action.fishSpecies!]??0;
  begin(w,r,'first-frontier-catch',action);
  stepWorld(w,duration-1);
- assert.equal(r.inventory.fish??0,fish);
+ assert.equal(r.inventory[action.fishSpecies!]??0,fish);
  assert.equal(rod.durability,durability);
  finish(w,r);
  assert.deepEqual(r.at,shore);
- assert.equal(r.inventory.fish,fish+1);
+ assert.equal(r.inventory[action.fishSpecies!],fish+1);
  assert.equal(pool.amount,stock-1);
  assert.equal(rod.durability,durability-1);
  assert.equal(state.fishingExperience![r.id],.5);

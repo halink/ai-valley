@@ -1,3 +1,4 @@
+import {travellingFamily,familyPassenger} from '../shared/family-relocation.js';
 import type {Plan,Resident,World} from '../shared/types.js';import type {AgencyAction,PersonalRoutine} from '../shared/agency.js';import {focusNames,repeatsActiveGoal} from '../shared/agency.js';import {goods} from '../shared/items.js';import {ageYears,DAY} from './time.js';import {findPath} from './navigation.js';import {residentBed} from '../shared/rooms.js';import {passenger} from './medical-transport.js';import {emitEvent} from './events.js';import {educationConflict} from './education.js';
 const integer=(v:unknown,min:number,max:number):v is number=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=min&&v<=max;
 const capable=(w:World,r:Resident)=>r.status==='alive'&&r.residency!=='outside'&&r.canDecide&&r.canExpress&&ageYears(r.bornAt,w.minute)>=6;
@@ -41,7 +42,7 @@ function freeWindow(w:World,r:Resident,p:PersonalRoutine){
  for(const c of w.employment?.contracts??[])if(c.workerId===r.id&&c.status==='active')for(let day=Math.floor(start/DAY);day<=Math.floor(end/DAY);day++)if(day>=c.startDay&&day<c.endDay&&start<day*DAY+c.terms.startMinute+c.terms.durationMinutes&&day*DAY+c.terms.startMinute<end)return false;
  return true;
 }
-function due(w:World,r:Resident,p:PersonalRoutine){return capable(w,r)&&!passenger(w,r.id)&&idle(r)&&p.status==='active'&&p.remaining>0&&w.minute<p.expiresAt&&w.minute-p.lastAt>=p.cooldown&&(p.action.type==='eat'?r.hunger>=p.threshold:r.energy<=p.threshold)&&freeWindow(w,r,p);}
+function due(w:World,r:Resident,p:PersonalRoutine){return capable(w,r)&&!passenger(w,r.id)&&!travellingFamily(w,r.id)&&!familyPassenger(w,r.id)&&idle(r)&&p.status==='active'&&p.remaining>0&&w.minute<p.expiresAt&&w.minute-p.lastAt>=p.cooldown&&(p.action.type==='eat'?r.hunger>=p.threshold:r.energy<=p.threshold)&&freeWindow(w,r,p);}
 export function agencyReady(w:World){return w.residents.some(r=>r.agency?.routines.some(p=>p.pendingPlanId&&idle(r)||p.status==='active'&&(w.minute>=p.expiresAt||due(w,r,p))));}
 export function settleAgencyAction(r:Resident,planId:string,error?:string){const p=r.agency?.routines.find(p=>p.pendingPlanId===planId);if(!p)return;p.pendingPlanId=null;if(error){p.status='failed';p.reason=error;}else {p.succeeded++;if(p.remaining<=0)p.status='exhausted';}}
 /** These plans are the person's finite prior decision, never a system survival policy or a failed-model fallback. */

@@ -1,3 +1,4 @@
+import {finishChosenVisit} from './helpers/visitor-journeys.js';
 import {initializeForeignTrade} from '../src/world/foreign-trade.js';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
@@ -40,7 +41,7 @@ test('visitor entry, voluntary settlement and departure change the saved census 
  advanceMigration(world);
  const outside=outsideCandidate(world)[0];
  assert.ok(applyOutsideDecision(world,outside.id,outside.revision,{intention:'我想亲自来看看',actions:[{type:'travelToValley'}]}).ok);
- world.minute=world.migration!.contacts[0].journey!.arriveAt;advanceMigration(world);
+ finishChosenVisit(world,outside);
  const visitor=world.residents.find(p=>p.id===outside.id)!;
  assert.deepEqual(headcount(world),{residents:54,visitors:1});
  advanceMigration(world);assert.equal(world.residents.length,55);

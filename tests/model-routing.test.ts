@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {callModel,decisionContext,decisionChoices,prepareModelDecision} from '../src/server/decisions.js';
-import {QWEN_MODEL,DEEPSEEK_MODEL,type ModelName} from '../src/server/model-completion.js';
+import {QWEN_MODEL,DEEPSEEK_MODEL,modelLimits,type ModelName} from '../src/server/model-completion.js';
 import {ModelBudget} from '../src/server/model-budget.js';
 import {ValleyRuntime} from '../src/server/runtime.js';
 import {WorldStore} from '../src/server/store.js';
@@ -110,17 +110,62 @@ test('a single timeout falls back for that resident while other requests still u
  }finally{runtime.stop();store.close();}
 });
 
-test('the formal world starts each provider at its own concurrency without routing extra healthy primary calls',()=>{
+test('each provider fills its own starting concurrency when independent small contexts fit the budget',()=>{
  for(const [connections,expected] of [[providers,8],[[providers[1]],4]] as const){
-  const store=new WorldStore(':memory:');
+  const store=new WorldStore(':memory:'),world=createWorld(),template=world.residents[0];
+  // Nine pending decisions exceed both providers' initial slot limits. Keep the
+  // prompts deliberately small so this test measures concurrency, not TPM.
+  world.buildings=[];world.resources=[];world.plots=[];
+  world.residents=Array.from({length:9},(_,index)=>({...structuredClone(template),id:'slot-test:'+index,name:'测试居民'+index,
+   homeId:null,knownPeople:[],knownResources:[],knownBuildings:[],inventory:{},traits:[],memories:[],relations:[],parents:[],guardianIds:[]}));
+  store.commit(world,null);
   const calls:ModelName[]=[];
+  const runtime=new ValleyRuntime(store,connections,(_key,_context,_feedback,model)=>{
+   calls.push(model!);return new Promise(()=>{});
+  });
+  try{
+   runtime.start();
+   assert.equal(calls.length,expected);
+   assert.equal(runtime.world.metrics.inFlight.length,expected);
+   assert.ok(calls.every(model=>model===connections[0].model));
+   const charges=runtime.world.metrics.usageWindow![connections[0].model];
+   assert.equal(charges.length,expected);
+   assert.ok(charges.reduce((sum,c)=>sum+c.input+c.output,0)<=modelLimits[connections[0].model].tpm);
+   assert.equal(runtime.world.metrics.failures,0);
+  }finally{runtime.stop();store.close();}
+ }
+});
+
+test('formal contexts obey both concurrency and real TPM reservations without treating budget waiting as a failed call',t=>{
+ const attempts:Array<{total:number;admitted:boolean}>=[];
+ const reserve=ModelBudget.prototype.reserve;
+ t.mock.method(ModelBudget.prototype,'reserve',function(this:ModelBudget,now:number,input:number,output:number){
+  const charge=reserve.call(this,now,input,output);
+  attempts.push({total:input+output,admitted:charge!==null});return charge;
+ });
+ assert.equal(modelLimits[DEEPSEEK_MODEL].tpm,45_000);
+ for(const [connections,slots] of [[providers,8],[[providers[1]],4]] as const){
+  const store=new WorldStore(':memory:'),calls:ModelName[]=[];attempts.length=0;
   const runtime=new ValleyRuntime(store,connections,(_key,_context,_feedback,model)=>{
    calls.push(model!);return new Promise(()=>{});
   },{mode:'formal'});
   try{
    runtime.start();
-   assert.equal(calls.length,expected);
-   assert.ok(calls.every(model=>model===connections[0].model));
+   const model=connections[0].model,charges=runtime.world.metrics.usageWindow![model];
+   const reserved=charges.reduce((sum,c)=>sum+c.input+c.output,0);
+   assert.ok(calls.length>0&&calls.length<=slots);
+   assert.ok(calls.every(c=>c===model),'a healthy primary must not spill unrelated work onto backup');
+   assert.equal(calls.length,attempts.filter(a=>a.admitted).length);
+   assert.equal(charges.length,calls.length);
+   assert.equal(runtime.world.metrics.inFlight.length,calls.length);
+   assert.equal(runtime.world.metrics.requests,calls.length);
+   assert.equal(runtime.world.metrics.failures,0);
+   assert.ok(reserved<=modelLimits[model].tpm);
+   if(calls.length<slots){
+    const rejected=attempts.at(-1)!;assert.equal(rejected.admitted,false);
+    assert.ok(reserved+rejected.total>modelLimits[model].tpm,'an unfilled slot must be explained by the actual next request reservation');
+    t.diagnostic(`${model}: ${calls.length}/${slots} slots, ${reserved} reserved; next ${rejected.total} exceeds ${modelLimits[model].tpm} TPM`);
+   }else assert.ok(attempts.every(a=>a.admitted));
   }finally{runtime.stop();store.close();}
  }
 });

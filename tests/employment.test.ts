@@ -1,11 +1,14 @@
+import {decisionContext,decisionChoices} from '../src/server/decisions.js';
+import {parseChoice} from '../src/server/affordances.js';
 import {estateGoods,estateParcels,ownedEstateParcels} from '../src/world/estate-custody.js';
 import {atWorkstation} from './helpers/workspaces.js';
+import {roomLayout} from '../src/shared/rooms.js';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import type {Resident,World} from '../src/shared/types.js';
 import type {EmploymentAction,EmploymentContract,EmploymentTerms} from '../src/shared/employment.js';
 import {createWorld} from '../src/world/seed.js';
-import {initializeEmployment,advanceEmployment,employmentReason,employmentTarget,completeEmployment,employmentWorkError,employmentConflict,employmentDeadline,hasEmploymentAssets} from '../src/world/employment.js';
+import {initializeEmployment,advanceEmployment,employmentReason,employmentTarget,completeEmployment,employmentWorkError,employmentConflict,employmentDeadline,hasEmploymentAssets,employmentKitchenReason} from '../src/world/employment.js';
 import {employmentOpportunities,employmentNotes,parseEmploymentChoice} from '../src/server/employment-opportunities.js';
 import {advanceEconomy,completeEconomy,accountBalance,moveCoins,totalCoins} from '../src/world/economy.js';
 import {recordDeath} from '../src/world/life.js';
@@ -69,6 +72,26 @@ test('an applicant can refuse selection and an insolvent employer cannot promise
  assert.ok(employmentReason(w,owner,{type:'employment',operation:'select',postId:p.id,applicantId:worker.id}));assert.equal(p.offer,null);
  b.coins=start;act(w,owner,{operation:'select',postId:p.id,applicantId:worker.id});act(w,worker,{operation:'decline',postId:p.id});
  assert.equal(b.coins,start);assert.equal(w.employment!.contracts.length,0);assert.equal(p.applications[0].status,'declined');
+});
+
+test('an employed cook and an ordinary cook can work in different kitchens sharing one outdoor doorway',()=>{
+ const f=fixture(),{w,worker,other,b,home}=f,{c}=recruit(f);
+ const kitchen={...structuredClone(home),id:'separate-public-kitchen',name:'另一间厨房',kind:'lodge' as const,ownerId:'commons',residents:[]};w.buildings.push(kitchen);
+ w.minute=c.startDay*DAY+terms.startMinute;other.homeId=null;other.knownBuildings.push(kitchen.id);other.inventory={turnip:2,water:1};
+ other.at={...kitchen.door};other.inside=kitchen.id;other.roomAt={...roomLayout(w,kitchen).slots.find(s=>s.key==='kitchen')!.at};
+ other.activity={planId:'other-kitchen-cook',action:{type:'cook',quantity:1,buildingId:kitchen.id},startedAt:w.minute,remaining:20,path:[],target:{...kitchen.door},definition:'recipe/meal@1'};
+ const meals=b.inventory.meal??0;work(w,worker,c,20);
+ assert.equal(worker.lastFailure,null);assert.equal(other.lastFailure,null);assert.equal(b.inventory.meal,meals+1);assert.equal(other.inventory.meal,1);
+ assert.equal(worker.inside,home.id);assert.equal(other.inside,kitchen.id);
+});
+
+test('a hired cook still exiting another room does not occupy the destination kitchen yet',()=>{
+ const f=fixture(),{w,worker,owner,home}=f,{c}=recruit(f),other={...structuredClone(home),id:'other-room'};w.buildings.push(other);
+ worker.at={...home.door};worker.inside=other.id;
+ worker.activity={planId:'work',action:{type:'employment',operation:'work',contractId:c.id,minutes:20},startedAt:w.minute,remaining:20,path:[],target:{...home.door},definition:w.activeDefinitions['action/routine'],room:{buildingId:other.id,mode:'exit',path:[{...roomLayout(w,other).entry}],target:{...roomLayout(w,other).entry},progress:0}};
+ assert.equal(employmentKitchenReason(w,owner,home.id),null);
+ worker.inside=home.id;delete worker.activity.room;
+ assert.match(employmentKitchenReason(w,owner,home.id)!,/受雇者/);
 });
 
 test('arrival and real materials produce goods and proportional salary; empty attendance cannot mint pay',()=>{
@@ -200,4 +223,24 @@ test('each industrial employment role requires its actual station and turns only
 });
 test('an industrial employer may hire a qualified worker but cannot count an unqualified person or missing machinery as production',async()=>{
  const f=fixture(),{w,owner,worker,b,home}=f;home.kind='workshop';owner.skills.building=0;worker.skills.building=0;w.industry!.stations.push({id:'actual-forge',buildingId:home.id,kind:'forge',installedAt:w.minute});act(w,owner,{operation:'post',businessId:b.id,terms:{...terms,role:'smith'}});const p=w.employment!.posts.at(-1)!;assert.ok(employmentReason(w,worker,{type:'employment',operation:'apply',postId:p.id}));worker.skills.building=1;act(w,worker,{operation:'apply',postId:p.id});act(w,owner,{operation:'select',postId:p.id,applicantId:worker.id});act(w,worker,{operation:'accept',postId:p.id});const c=w.employment!.contracts.at(-1)!;w.minute=c.startDay*DAY+terms.startMinute;w.industry!.stations=[];assert.ok(employmentReason(w,worker,{type:'employment',operation:'work',contractId:c.id,minutes:30}));assert.equal(c.attendance.length,0);assert.equal(c.paid,0);
+});
+
+
+test('an older worker may choose a short work session without forced retirement, altered terms or unearned salary',()=>{
+ const f=fixture(),{w,worker,b}=f;worker.bornAt=w.minute-80*YEAR;const {c}=recruit(f),original=structuredClone(c.terms),money=totalCoins(w);
+ w.minute=c.startDay*DAY+c.terms.startMinute;
+ const choices=employmentOpportunities(w,worker),short=choices.find(x=>x.id==='employment.shortWork.'+c.id)!;
+ assert.ok(short);assert.equal(short.action.type,'employment');assert.ok(choices.some(x=>x.id==='employment.work.'+c.id));
+ assert.match(employmentNotes(w,worker),/年龄不取消/);assert.equal(worker.canDecide,true);assert.equal(c.status,'active');assert.equal(c.paid,0);
+ const menu=decisionChoices(decisionContext(w,worker)),listed=menu.find(x=>x.action.type==='employment'&&x.action.operation==='work'&&x.action.minutes===15)!;assert.ok(listed);
+ const action=parseChoice(JSON.stringify({choice:listed.id}),menu).actions[0] as EmploymentAction;atWorkstation(w,worker,action);assert.ok(submitPlan(w,{id:'elder-short-work',actorId:worker.id,actorRevision:worker.revision,createdAt:w.minute,definition:w.activeDefinitions['action/routine'],intention:'本人只工作十五分钟',actions:[action]}).ok);
+ stepWorld(w,15);assert.equal(c.attendance[0].worked,15);assert.equal(c.paid,1);assert.deepEqual(c.terms,original);assert.equal(totalCoins(w),money);assert.equal(c.status,'active');assert.equal(worker.plan,null);
+ stepWorld(w,5);assert.equal(c.attendance[0].worked,15);assert.equal(c.paid,1);assert.equal(totalCoins(w),money);assert.ok(b.inventory.turnip!<24);
+});
+
+test('an older owner retains the option to hire and propose a shorter independently accepted renewal',()=>{
+ const f=fixture(),{w,owner}=f;owner.bornAt=w.minute-85*YEAR;const {c}=recruit(f);w.minute=c.startDay*DAY+10;
+ const choice=employmentOpportunities(w,owner).find(x=>x.action.type==='employment'&&x.action.operation==='renew'&&x.action.contractId===c.id)!;assert.ok(choice);
+ const terms=structuredClone(c.terms),action=parseEmploymentChoice(choice.action as EmploymentAction,{durationMinutes:30,wage:3});assert.equal(action.terms!.durationMinutes,30);assert.deepEqual(c.terms,terms);
+ act(w,owner,action);assert.equal(w.employment!.posts.at(-1)!.status,'open');assert.equal(c.status,'active');assert.deepEqual(c.terms,terms);assert.equal(owner.canDecide,true);
 });

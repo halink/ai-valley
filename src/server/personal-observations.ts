@@ -1,7 +1,7 @@
-import {coLocated} from '../world/proximity.js';
 import type {Resident,World} from '../shared/types.js';
-import {distance} from '../world/navigation.js';
-import {ageYears,calendar,DAY} from '../world/time.js';
+import {knownAgeYears,calendar,DAY} from '../world/time.js';
+import {observeBody} from '../world/body-observation.js';
+import {bodySignLabels} from '../shared/body-observation.js';
 
 function timeLabel(minute:number):string{
   const date=calendar(minute);
@@ -23,15 +23,16 @@ export function personalObservations(w:World,actor:Resident):string{
     const days=Math.max(0,Math.ceil((actor.pregnancy.dueAt-w.minute)/DAY));
     notes.push(`你本人正在孕育，已与${parent?.name??'另一位家长'}共同确认安排，距预计出生约 ${days} 个游戏日。`);
   }
-  for(const child of w.residents.filter(person=>person.guardianIds.includes(actor.id)&&ageYears(person.bornAt,w.minute)<18)){
-    const age=Math.max(0,Math.floor(ageYears(child.bornAt,w.minute)));
+  for(const child of w.residents.filter(person=>person.guardianIds.includes(actor.id))){
+    const age=knownAgeYears(child.bornAt,w.minute);
+    if(age!==null&&age>=18)continue;
     const home=child.homeId&&actor.knownBuildings.includes(child.homeId)?w.buildings.find(b=>b.id===child.homeId):undefined;
-    const registration=`你登记监护${child.name}（${age}岁）${home?'，登记住处是'+home.name:''}。`;
-    const visible=child.residency!=='outside'&&coLocated(w,actor,child,10);
-    if(visible&&child.status==='alive'){
-      notes.push(registration+`眼前所见饥饿 ${Math.round(child.hunger)}/100、健康 ${Math.round(child.health)}/100。`+
-       (age<6?'幼儿喂养需要使用照护者自己的餐食或芜菁以及清水。':''));
-    }else notes.push(registration+'当前身体状况不在你的观察范围内。');
+    const registration=`你登记监护${child.name}（${age===null?'年龄未知':Math.floor(age)+'岁'}）${home?'，登记住处是'+home.name:''}。`;
+    const observation=observeBody(w,actor,child);
+    if(observation){
+      notes.push(registration+'近身所见：'+observation.signs.map(s=>bodySignLabels[s]).join('；')+'。'+
+       (age!==null&&age<6?'幼儿喂养需要使用照护者自己的餐食或芜菁以及清水。':''));
+    }else notes.push(registration+'没有可据此确认的当前身体需要；不能从登记或亲属关系推断远处情况。');
   }
   for(const shift of w.duties?.shifts??[]){
     if(shift.workerId!==actor.id||shift.end<=w.minute||shift.status==='finished'||shift.status==='unfilled')continue;

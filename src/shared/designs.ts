@@ -1,3 +1,5 @@
+import {parsePrototypeDrawing} from './prototypes.js';
+import type {PrototypeDrawing,PrototypeSpec,PrototypeAsset,PrototypeTrial,PrototypeAction} from './prototypes.js';
 import {roofColors} from './building-art.js';
 import type {ToolKind} from './industry.js';
 import type {BuildingKind, Inventory} from './types.js';
@@ -9,16 +11,18 @@ type Roof=typeof roofColors[number];
 type Description={name:string;purpose:string};
 export type ToolDrawing=Description & {kind:'tool';tool:ToolKind;frame:'wood'|'plank';fitting:'stone'|'bar'|'fiber'|'cloth';reinforcement:number};
 export type BuildingDrawing=Description & {kind:'building';template:BuildingKind;width:number;height:number;roof:Roof;structure:keyof typeof structuralNames};
-export type Drawing=ToolDrawing|BuildingDrawing;
+export type Drawing=ToolDrawing|BuildingDrawing|PrototypeDrawing;
 export type DesignSpec=
+ | PrototypeSpec
  | Omit<ToolDrawing,keyof Description> & {materials:Inventory;minutes:number;durability:number;level:number}
  | Omit<BuildingDrawing,keyof Description> & {materials:Inventory;minutes:number;capacity:number;definition:string};
 export interface ResidentDesign {
  id:string;authorId:string;name:string;purpose:string;createdAt:number;createdIn:string;
  publication:{buildingId:string;at:number}|null;learnedBy:string[];spec:DesignSpec;
 }
-export interface DesignState {nextSerial:number;records:ResidentDesign[];}
+export interface DesignState {nextSerial:number;records:ResidentDesign[];prototypes?:PrototypeAsset[];trials?:PrototypeTrial[];}
 export type DesignAction=
+ | PrototypeAction
  | {type:'design';operation:'draw';buildingId:string;kind:Drawing['kind'];drawing?:Drawing}
  | {type:'design';operation:'fabricate'|'publish'|'study';buildingId:string;designId:string}
  | {type:'design';operation:'equip';toolId:string};
@@ -33,6 +37,7 @@ const key=<T extends object>(table:T,value:unknown):value is keyof T=>typeof val
 export function parseDrawing(kind:Drawing['kind'],value:unknown):Drawing|null {
  if(!value||typeof value!=='object'||Array.isArray(value))return null;
  const d=value as Record<string,unknown>;
+ if(kind==='prototype')return parsePrototypeDrawing(d);
  const fields=kind==='tool'?toolFields:buildingFields;
  if(Object.keys(d).some(k=>k!=='kind'&&!fields.includes(k))||(d.kind!==undefined&&d.kind!==kind)||!label(d.name,24)||!label(d.purpose,80))return null;
  const name=d.name.trim(),purpose=d.purpose.trim();

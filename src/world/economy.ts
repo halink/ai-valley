@@ -1,6 +1,9 @@
+import {activeBusinessRelocation} from '../shared/business-relocation.js';
+import {premisesBusinessRight} from '../shared/premises.js';
 import {firstReceipt,hasReceipt} from './receipts.js';
 import {estateStock,estateBuildingLocation} from './estate-custody.js';
-import {foodTransaction} from './food.js';
+import {advanceFood,foodTransaction} from './food.js';
+import {routeFood} from './food-routes.js';
 import {itemLabels} from '../shared/items.js';
 import type {Building, Inventory, Item, Resident, Vec, World} from '../shared/types.js';
 import type {Business, EconomyAction, MarketListing} from '../shared/economy.js';
@@ -102,11 +105,11 @@ function reserveLevy(w:World,price:number):number {
 }
 function place(w:World,b:Business):Building|undefined{return w.buildings.find(p=>p.id===b.buildingId&&p.condition>0);}
 function usablePlace(w:World,r:Resident,b:Building):boolean {
-  return b.condition>0&&b.ownerId===r.id&&['home','store','workshop'].includes(b.kind);
+  return b.condition>0&&premisesBusinessRight(w,r.id,b)&&['home','store','workshop'].includes(b.kind);
 }
 function ownerPresent(w:World,b:Business):boolean {
   const owner=w.residents.find(r=>r.id===b.ownerId),building=place(w,b);
-  return !!owner&&!!building&&owner.status==='alive'&&owner.residency!=='outside'&&building.ownerId===owner.id&&b.closedAt===null;
+  return !!owner&&!!building&&owner.status==='alive'&&owner.residency!=='outside'&&premisesBusinessRight(w,owner.id,building)&&b.closedAt===null;
 }
 function businessFor(w:World,a:EconomyAction):Business|undefined {
   if(a.listingId){const listing=w.economy?.listings.find(l=>l.id===a.listingId);return w.economy?.businesses.find(b=>b.id===listing?.businessId);}
@@ -116,11 +119,14 @@ export function economyReason(w:World,r:Resident,a:EconomyAction):string|null {
   if(w.mode!=='formal'||!w.economy||!active(r)||ageYears(r.bornAt,w.minute)<18)return '本人当前不能经营或签订交易';
   if(a.operation==='open'){
     const building=w.buildings.find(b=>b.id===a.buildingId);
-    if(!building||!usablePlace(w,r,building)||!r.knownBuildings.includes(building.id))return '须在本人已有产权的住宅、店面或工坊设摊';
+    if(!building||!usablePlace(w,r,building)||!r.knownBuildings.includes(building.id))return '须在本人自有或有效租约允许的住宅、店面或工坊设摊';
     if(w.economy.businesses.some(b=>b.ownerId===r.id&&b.closedAt===null))return '请先经营或关闭已有商铺';
     return null;
   }
-  const b=businessFor(w,a);if(b&&b.closedAt!==null&&a.operation==='retrieve'&&b.ownerId===r.id&&w.buildings.some(p=>p.id===b.buildingId)&&r.knownBuildings.includes(b.buildingId))return a.item&&integer(a.quantity,1,100)&&(b.inventory[a.item]??0)>=a.quantity?null:'原店尚存实物不足';
+  const b=businessFor(w,a);
+  if(b&&a.buildingId!==undefined&&a.buildingId!==b.buildingId)return '商铺地点已改变，须重新决定';
+  if(b&&activeBusinessRelocation(w,b.id)&&['stock','list','order'].includes(a.operation))return '迁址期间停止新增旧址库存与交易承诺，既有订单仍按原址处理';
+  if(b&&b.closedAt!==null&&a.operation==='retrieve'&&b.ownerId===r.id&&w.buildings.some(p=>p.id===b.buildingId)&&r.knownBuildings.includes(b.buildingId))return a.item&&integer(a.quantity,1,100)&&(b.inventory[a.item]??0)>=a.quantity?null:'原店尚存实物不足';
   if(!b||!ownerPresent(w,b))return '商铺已停业或当前产权不适用';
   if(a.operation!=='buy'&&a.operation!=='fulfill'&&b.ownerId!==r.id)return '只能管理自己的商铺';
   if(!r.knownBuildings.includes(b.buildingId))return '本人尚未知道该商铺地点';
@@ -145,22 +151,61 @@ export function economyReason(w:World,r:Resident,a:EconomyAction):string|null {
     if(!l||l.status!=='open'||l.expiresAt<=w.minute)return '这项报价已经结束';
     if(a.operation==='cancel')return null;
     if(b.ownerId===r.id)return '不能与自己的商铺虚构交易';
-    if(!integer(a.quantity,1,100)||l.quantity<a.quantity)return '实物余量不足';
-    if(a.operation==='fulfill'){
-      if(l.side!=='purchase'||!l.escrowId)return '不是已预付资金的收购单';
-      if(amount(r.inventory,l.item)<a.quantity)return '本人未携带足够的实际货物';
-      const rate=w.civic?.salesTax&&w.civic.salesTax.expiresAt>w.minute?w.civic.salesTax.basisPoints:0;
-      if(rate>(l.taxBasisPoints??0))return '公共附加款高于店主这份收购单原先同意的比例，须待本人重新报价';
-      const cost=l.price*a.quantity;
-      return accountBalance(w,l.escrowId)>=cost+salesLevy(w,cost,`business:${b.id}`)?null:'现行附加款变化后预存款不足，请经营者重新报价';
-    }
-    if(l.side!=='sale')return '这项是收购报价';
-    const cost=l.price*a.quantity;
-    const total=cost+salesLevy(w,cost,`resident:${r.id}`);
-    if(!integer(a.maxTotal,1)||total>a.maxTotal)return '货款与公共附加款已高于本人看见并同意的总价，须重新决定';
-    return r.coins>=total?null:'本人钱款不足以支付货款和现行交易附加款';
+    if(a.buildingId!==undefined&&a.buildingId!==b.buildingId)return '商铺地点已改变，须亲自重新查看报价';
+    if(a.item!==undefined&&a.item!==l.item)return '报价货物已经改变，须重新决定';
+    const quote=marketTradeQuote(w,r,a,b,l);
+    return typeof quote==='string'?quote:null;
   }
   return a.operation==='close'?null:'未知经营行动';
+}
+/** Expired lots never count as stock, even when a caller has not stepped the clock yet. */
+function freshQuantity(w:World,container:string,item:Item,quantity:number):number {
+  const expired=(w.food?.lots[container]?.[item]??[]).filter(l=>l.expiresAt<=w.minute).reduce((n,l)=>n+l.quantity,0);
+  return Math.max(0,Math.floor(quantity-expired));
+}
+interface TradeQuote {quantity:number;gross:number;tax:number;minimumQuantity:number;}
+function marketTradeQuote(w:World,r:Resident,a:EconomyAction,b:Business,l:MarketListing):TradeQuote|string {
+  if(!integer(a.quantity,1,100)||!integer(l.quantity,0,100)||!integer(l.price,1,1000))return '报价或成交数量无效';
+  const minimum=a.minimumQuantity??a.quantity;
+  if(!integer(minimum,1,a.quantity))return '最低接受数量须为不超过原数量的正整数';
+  const purchase=a.operation==='fulfill';
+  if(purchase&&(l.side!=='purchase'||!l.escrowId))return '不是已预付资金的收购单';
+  if(!purchase&&l.side!=='sale')return '这项是收购报价';
+  const held=purchase?amount(r.inventory,l.item):l.quantity;
+  if(!Number.isFinite(held)||held<0)return '实际库存无效';
+  const available=freshQuantity(w,purchase?'person:'+r.id:'listing:'+l.id,l.item,held);
+  const quantity=Math.min(a.quantity,l.quantity,available);
+  if(quantity<minimum)return '实际可交付余量低于本人同意的最低数量；须重新决定或退出';
+  const gross=l.price*quantity,payer=purchase?'business:'+b.id:'resident:'+r.id,tax=salesLevy(w,gross,payer);
+  if(!integer(tax,0))return '现行公共附加款无效';
+  if(purchase){
+    if(!integer(a.minTotal,1)||gross<a.minTotal)return '实际到手货款低于本人同意的最低总额，须重新决定';
+    const rate=w.civic?.salesTax&&w.civic.salesTax.expiresAt>w.minute?w.civic.salesTax.basisPoints:0;
+    if(rate>(l.taxBasisPoints??0))return '公共附加款高于店主这份收购单原先同意的比例，须待本人重新报价';
+    if(accountBalance(w,l.escrowId!)<gross+tax)return '预存款不足以支付实际货款与附加款，须重新报价';
+  }else{
+    if(!integer(a.maxTotal,1)||gross+tax>a.maxTotal)return '货款与公共附加款已高于本人看见并同意的总价，须重新决定';
+    if(r.coins<gross+tax)return '本人钱款不足以支付货款和现行交易附加款';
+    if(!Number.isSafeInteger(b.sales+quantity)||!Number.isSafeInteger(b.revenue+gross))return '商铺累计账目超出有效范围';
+  }
+  const destination=purchase?b.inventory:r.inventory;
+  if(!Number.isFinite(amount(destination,l.item))||amount(destination,l.item)<0||amount(destination,l.item)+quantity>Number.MAX_SAFE_INTEGER)return '收货库存超出有效范围';
+  return {quantity,gross,tax,minimumQuantity:minimum};
+}
+interface CoinMove {from:string;to:string;amount:number;reason:string;reference:string;}
+/** Validate all legs against projected balances before the synchronous settlement mutates anything. */
+function marketPaymentsReady(w:World,moves:CoinMove[]):boolean {
+  const balances=new Map<string,number>();
+  for(const move of moves){
+    if(!integer(move.amount,0)||!move.reference||move.reference.length>300||firstReceipt(w,`coin:${JSON.stringify(move.reference)}`))return false;
+    for(const id of [move.from,move.to])if(!balances.has(id)){
+      const a=account(w,id);if(!a||!Number.isSafeInteger(a.get())||a.get()<0)return false;
+      balances.set(id,a.get());
+    }
+    if(balances.get(move.from)!<move.amount||!Number.isSafeInteger(balances.get(move.to)!+move.amount))return false;
+    balances.set(move.from,balances.get(move.from)!-move.amount);balances.set(move.to,balances.get(move.to)!+move.amount);
+  }
+  return true;
 }
 /** Price information is local. An existing proprietor may return to their own registered stall. */
 export function economyTarget(w:World,r:Resident,a:EconomyAction):{target:Vec;duration:number;error?:string} {
@@ -184,11 +229,37 @@ function closeBusinessAtomic(w:World,b:Business,reason:string,actor?:Resident){
   const owner=w.residents.find(r=>r.id===b.ownerId);
   const estate=w.estates.find(e=>e.personId===b.ownerId);
   const recipient=owner?.status==='dead'?estate:owner;
+  if(owner?.status==='dead'&&!w.buildings.some(p=>p.id===b.buildingId))return;
   if(!recipient)return; // Keep unclaimed property protected in its separate account.
   if(b.coins&&!moveCoins(w,`business:${b.id}`,owner?.status==='dead'?`estate:${b.ownerId}`:`resident:${b.ownerId}`,b.coins,'经营清算',`close:${b.id}`))return;
-  if(owner?.status==='dead'){const stock=estateStock(w,b.ownerId,'business:'+b.id,estateBuildingLocation(w,b.buildingId,'原商铺封存余货'))!;deposit(stock,b.inventory);b.inventory={};}else if(owner&&!owner.inside&&place(w,b)&&same(owner.at,place(w,b)!.door)){deposit(owner.inventory,b.inventory);b.inventory={};}b.closedAt=w.minute;
+  if(owner?.status==='dead'){const stock=estateStock(w,b.ownerId,'business:'+b.id,estateBuildingLocation(w,b.buildingId,'原商铺封存余货'))!;deposit(stock,b.inventory);b.inventory={};}else if(actor&&owner&&!owner.inside&&place(w,b)&&same(owner.at,place(w,b)!.door)){deposit(owner.inventory,b.inventory);b.inventory={};}b.closedAt=w.minute;
   if(owner)(actor?emitEvent:emitLedgerEvent)(w,{kind:'trade',actors:[owner.id],place:place(w,b)?.door??owner.at,
-    witnesses:owner.residency==='outside'?[]:undefined,text:`${b.name}${reason}，余货和资金${owner.status==='dead'?'转入受保护的遗产':'归还经营者本人'}。`});
+    witnesses:owner.residency==='outside'?[]:undefined,text:`${b.name}${reason}，${owner.status==='dead'?'余货与资金进入受保护遗产，实物仍在原址':`资金归还经营者，${Object.values(b.inventory).some(n=>n!>0)?'余货仍在原址，须本人另行领取':'余货已由本人实际领取'}`}。`});
+}
+/** Closed shops still own their original goods; closure is not abandonment or succession. */
+export function hasBusinessEstateAssets(w:World,id:string):boolean {
+  return !!w.economy?.businesses.some(b=>b.ownerId===id&&(b.closedAt===null||b.coins>0||Object.values(b.inventory).some(n=>n!>0)
+    ||w.economy!.listings.some(l=>l.businessId===b.id&&(l.status==='open'||!!l.escrowId&&accountBalance(w,l.escrowId)>0))));
+}
+function protectClosedBusiness(w:World,b:Business):void {
+  const owner=w.residents.find(r=>r.id===b.ownerId),estate=w.estates.find(e=>e.personId===b.ownerId);
+  if(b.closedAt===null||owner?.status!=='dead'||!estate)return;
+  // Return each old quotation first, in its own food transaction. Then seal its stock.
+  for(const l of w.economy!.listings.filter(l=>l.businessId===b.id&&l.status==='open'))returnListing(w,l,'cancelled');
+  const goods=Object.values(b.inventory).some(n=>n!>0),coins=b.coins;
+  if(!goods&&!coins)return;
+  // A missing site cannot justify inventing a different physical location.
+  if(!w.buildings.some(p=>p.id===b.buildingId))return;
+  foodTransaction(w,()=>{
+    if(coins&&!moveCoins(w,`business:${b.id}`,`estate:${b.ownerId}`,coins,'停业经营财产保全',`closed-estate:${b.id}:${w.economy!.nextSerial}`))return;
+    const source=(w.production?.inheritances[b.ownerId]?'business-supplement:':'business:')+b.id,stock=estateStock(w,b.ownerId,source,estateBuildingLocation(w,b.buildingId,'原停业商铺封存余货'))!;
+    if(goods){
+      routeFood(w,'business:'+b.id,'estate-stock:'+b.ownerId+':'+source,b.inventory);deposit(stock,b.inventory);b.inventory={};
+    }
+    estate.status='protected';
+    emitLedgerEvent(w,{kind:'trade',actors:[owner.id],place:w.buildings.find(p=>p.id===b.buildingId)?.door??owner.at,
+      text:`${b.name}停业后仍属原经营者的余货与资金纳入其受保护遗产，实物保留原址，尚未交给继承人或场所产权人。`});
+  });
 }
 /** Changes only contracts' physical validity; no new merchant or purchaser is invented. */
 export function advanceEconomy(w:World):void {
@@ -198,6 +269,7 @@ export function advanceEconomy(w:World):void {
   }
   for(const l of e.listings)if(l.status==='open'&&l.expiresAt<=w.minute)returnListing(w,l,'expired');
   for(const b of e.businesses)if(b.closedAt===null&&!ownerPresent(w,b))closeBusiness(w,b,'因经营者离开、失能或场所不可用而停业');
+  for(const b of e.businesses)protectClosedBusiness(w,b);
   // Closed quotations remain in the town event ledger; the active observer state stays bounded.
   if(e.listings.length>240)e.listings=e.listings.filter((l,i)=>l.status==='open'||i>=e.listings.length-120);
   for(const [id,balance]of Object.entries(e.escrows))if(balance===0)delete e.escrows[id];
@@ -219,11 +291,15 @@ export function advanceEconomy(w:World):void {
   }
 }
 function completeEconomyAtomic(w:World,r:Resident,a:EconomyAction):string|null {
+  const reference=`economy-action:${r.activity?.planId??r.plan?.id??`${r.id}:${r.revision}:${w.revision}`}:${r.activity?.startedAt??w.minute}:${a.operation}`;
+  const receipt=`done:${reference}`,trade=a.operation==='buy'||a.operation==='fulfill';
+  const contractNamespace=`market-contract:${r.id}:${reference}`;
+  const contractReceipt=contractNamespace+':'+JSON.stringify([a.operation,a.listingId,a.item,a.buildingId,a.quantity,a.minimumQuantity??a.quantity,a.maxTotal,a.minTotal]);
+  if(trade){const prior=firstReceipt(w,contractNamespace);if(prior)return prior===contractReceipt?null:'同一成交决定不能更换约定后重复结算';}
+  if(hasReceipt(w,receipt))return null;
   const error=economyReason(w,r,a);if(error)return error;
   const e=w.economy!,b=businessFor(w,a),building=w.buildings.find(p=>p.id===(a.operation==='open'?a.buildingId:b?.buildingId))!;
-  if(!same(r.at,building.door))return '须实际到达店前交货、付款或经营';
-  const reference=`economy-action:${r.activity?.planId??r.plan?.id??`${r.id}:${r.revision}:${w.revision}`}:${r.activity?.startedAt??w.minute}:${a.operation}`;
-  const receipt=`done:${reference}`;if(hasReceipt(w,receipt))return null;
+  if(!same(r.at,building.door)||trade&&r.inside!==null)return '须实际到达店前交货、付款或经营';
   const record=(text:string,actors=[r.id])=>emitEvent(w,{kind:'trade',actors,place:{...building.door},text});
   switch(a.operation){
     case 'open':{
@@ -251,35 +327,37 @@ function completeEconomyAtomic(w:World,r:Resident,a:EconomyAction):string|null {
       record(`${r.name}在${b!.name}${purchase?'发布收购':'上架'} ${a.quantity} 份${itemNames[a.item!]}，自行定价每份 ${a.price} 钱，${purchase?'货款已预存，等其他人自主接单交货':'实物已留在店中'}。`);break;
     }
     case 'cancel':returnListing(w,e.listings.find(l=>l.id===a.listingId)!,'cancelled');record(`${r.name}撤下自己的报价，余货回到商铺库存。`);break;
-    case 'buy':{
-      const l=e.listings.find(l=>l.id===a.listingId)!;const gross=l.price*a.quantity!,tax=salesLevy(w,gross,`resident:${r.id}`);
-      // Synchronous preflight makes payment, levy and physical delivery one authoritative action.
-      if(r.coins<gross+tax)return '付款时钱款不足';
-      if(!moveCoins(w,`resident:${r.id}`,`business:${b!.id}`,gross,'商品销售',reference+':sale'))return '货款划转未完成';
-      if(tax&&!moveCoins(w,`resident:${r.id}`,'treasury',tax,'交易公共附加款',reference+':levy'))throw new Error('sales_levy_transaction_failed');
-      commitLevy(w,gross,`resident:${r.id}`);
-      l.quantity-=a.quantity!;if(!l.quantity)l.status='sold';add(r.inventory,l.item,a.quantity!);b!.sales+=a.quantity!;b!.revenue+=gross;
-      record(`${r.name}按${b!.name}的公开报价买下 ${a.quantity} 份${itemNames[l.item]}，支付 ${gross} 钱${tax?`，另按居民议决缴 ${tax} 钱公共附加款`:''}。`,[r.id,b!.ownerId]);break;
-    }
-    case 'fulfill':{
-      const l=e.listings.find(l=>l.id===a.listingId)!,gross=l.price*a.quantity!,tax=salesLevy(w,gross,`business:${b!.id}`);
-      if(!moveCoins(w,l.escrowId!,`resident:${r.id}`,gross,'居民接单交货',reference+':delivery'))return '预付货款不足';
-      if(tax&&!moveCoins(w,l.escrowId!,'treasury',tax,'交易公共附加款',reference+':levy'))throw new Error('order_levy_transaction_failed');
-      commitLevy(w,gross,`business:${b!.id}`);
-      add(r.inventory,l.item,-a.quantity!);add(b!.inventory,l.item,a.quantity!);l.quantity-=a.quantity!;
-      if(!l.quantity){
-        const balance=accountBalance(w,l.escrowId!);
-        if(balance&&!moveCoins(w,l.escrowId!,`business:${b!.id}`,balance,'收购余款退回',`order-return:${l.id}`))throw new Error('order_change_return_failed');
-        l.status='sold';
-      }
-      record(`${r.name}自主接下${b!.name}的收购单，实际交付 ${a.quantity} 份${itemNames[l.item]}，领取预存货款 ${gross} 钱${tax?`，商铺另缴 ${tax} 钱公共附加款`:''}。`,[r.id,b!.ownerId]);break;
+    case 'buy':case 'fulfill':{
+      const l=e.listings.find(l=>l.id===a.listingId)!,quote=marketTradeQuote(w,r,a,b!,l);
+      if(typeof quote==='string')return quote;
+      const {quantity,gross,tax,minimumQuantity}=quote,purchase=a.operation==='fulfill';
+      const from=purchase?l.escrowId!:`resident:${r.id}`,to=purchase?`resident:${r.id}`:`business:${b!.id}`;
+      const moves:CoinMove[]=[{from,to,amount:gross,reason:purchase?'居民接单交货':'商品销售',reference:reference+(purchase?':delivery':':sale')}];
+      if(tax)moves.push({from,to:'treasury',amount:tax,reason:'交易公共附加款',reference:reference+':levy'});
+      const refund=purchase&&l.quantity===quantity?accountBalance(w,from)-gross-tax:0;
+      if(refund)moves.push({from,to:`business:${b!.id}`,amount:refund,reason:'收购余款退回',reference:`order-return:${l.id}`});
+      if(!marketPaymentsReady(w,moves))return '成交账户或收据已改变，钱货未转移，须重新核对';
+      // No awaits, callbacks, or unvalidated payment legs occur after this point.
+      for(const move of moves)if(!moveCoins(w,move.from,move.to,move.amount,move.reason,move.reference))throw new Error('market_preflight_invariant_failed');
+      commitLevy(w,gross,purchase?`business:${b!.id}`:`resident:${r.id}`);
+      if(purchase){routeFood(w,'person:'+r.id,'business:'+b!.id,{[l.item]:quantity});add(r.inventory,l.item,-quantity);add(b!.inventory,l.item,quantity);}
+      else{routeFood(w,'listing:'+l.id,'person:'+r.id,{[l.item]:quantity});add(r.inventory,l.item,quantity);b!.sales+=quantity;b!.revenue+=gross;}
+      l.quantity-=quantity;if(!l.quantity)l.status='sold';
+      const trades=e.trades??=[];
+      trades.push({id:reference,at:w.minute,actorId:r.id,businessId:b!.id,listingId:l.id,buildingId:building.id,operation:a.operation,item:l.item,requestedQuantity:a.quantity!,minimumQuantity,quantity,unitPrice:l.price,gross,levy:tax,...(purchase?{minTotal:a.minTotal}:{maxTotal:a.maxTotal})});
+      if(trades.length>120)trades.splice(0,trades.length-120);
+      w.processed.push(contractReceipt);
+      record(`${r.name}在${b!.name}${purchase?'实际交付':'买下'} ${quantity} 份${itemNames[l.item]}，${quantity<a.quantity! ? `按事前同意至少 ${minimumQuantity} 份，从原拟 ${a.quantity} 份部分成交，` : ''}${purchase?'领取':'支付'}货款 ${gross} 钱${tax?`，${purchase?'商铺':'买方'}另缴 ${tax} 钱公共附加款`:''}（${purchase?'最低到手':'最高总支出'} ${purchase?a.minTotal:a.maxTotal} 钱）。`,[r.id,b!.ownerId]);break;
     }
     case 'close':closeBusiness(w,b!,'由经营者自行结束营业',r);break;
   }
-  w.processed.push(receipt);r.revision++;return null;
+  if(!trade)w.processed.push(receipt);r.revision++;return null;
 }
 
-export function completeEconomy(w:World,r:Resident,a:EconomyAction):string|null{return foodTransaction(w,()=>completeEconomyAtomic(w,r,a));}
+export function completeEconomy(w:World,r:Resident,a:EconomyAction):string|null{
+  if(a.operation==='buy'||a.operation==='fulfill')advanceFood(w);
+  return foodTransaction(w,()=>completeEconomyAtomic(w,r,a));
+}
 
 function returnListing(w:World,l:MarketListing,status:'cancelled'|'expired'):void{return foodTransaction(w,()=>returnListingAtomic(w,l,status));}
 

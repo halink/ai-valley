@@ -1,0 +1,26 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {mkdtempSync,readFileSync,rmSync,writeFileSync} from 'node:fs';
+import {testTmpdir} from '../scripts/repository-temporary.mjs';
+import {join} from 'node:path';
+import {AcceptanceEvidenceWriter,readAcceptanceEvidence} from '../src/server/acceptance-evidence-writer.js';
+import {DecisionWaitEvidence} from '../src/server/decision-wait-evidence.js';
+import {RuntimeFoodEvidence} from '../src/server/runtime-food-evidence.js';
+import {FOOD_FLOW_COVERAGE} from '../src/world/food-consumption-evidence.js';
+import {houseHarvestFixture,custodyHarvestFixture,queueHarvest,finishHarvest,harvestReceipts} from './helpers/food-flow-harvest.js';
+for(const kind of ['house','custody'] as const)test(`actual ${kind} harvest survives sealed writer reload and tampered source metadata invalidates evidence`,t=>{
+ const f=kind==='house'?houseHarvestFixture():custodyHarvestFixture(),from=f.w.minute;
+ queueHarvest(f);const observations=finishHarvest(f.w,f.r),actual=harvestReceipts(observations);
+ assert.equal(actual.length,1);for(const o of observations)assert.equal(o.foodFlowCoverage,FOOD_FLOW_COVERAGE);
+ const root=mkdtempSync(join(testTmpdir(),'harvest-writer-'));t.after(()=>rmSync(root,{recursive:true,force:true}));
+ const directory=join(root,'run'),fingerprint='a'.repeat(64),writer=new AcceptanceEvidenceWriter({directory,sourceFingerprint:fingerprint,worldId:f.w.id,fromMinute:from});t.after(()=>writer.abort());
+ const food=new RuntimeFoodEvidence({observe:writer.observeDirectEating}),wait=new DecisionWaitEvidence({observe:writer.observeDecisionWait,monotonicNow:()=>1});
+ wait.start(from);food.start(f.w.id,from);let revision=1;for(const observation of observations)food.committed(observation,revision++);
+ wait.stop(f.w.minute);food.stop(f.w.id,f.w.minute);
+ const result=writer.close({reason:'scope_finished',statuses:{decisionWaiting:wait.status(),directEating:food.status()},sourceFingerprintAfter:fingerprint});
+ assert.equal(result.foodFlows.complete,true,result.foodFlows.issues.join(','));assert.deepEqual(result.foodFlows.observedReceipts,actual);
+ assert.deepEqual(result.foodFlows.totals!.sourceAdded.units,{turnip:12});assert.deepEqual(readAcceptanceEvidence(directory),result);
+ assert.equal(result.foodProduction,null);assert.equal(result.foodConsumption,null);
+ const path=join(directory,'evidence.jsonl'),original=readFileSync(path,'utf8'),edited=original.replace(actual[0].sourceId,actual[0].sourceId+'-tampered');
+ assert.notEqual(edited,original);writeFileSync(path,edited);assert.equal(readAcceptanceEvidence(directory).foodFlows.totals,null);
+});

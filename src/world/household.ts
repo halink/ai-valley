@@ -1,6 +1,6 @@
 import {routeFood} from './food-routes.js';
 import {estateStock,estateLocation} from './estate-custody.js';
-import type {FormalOpportunity,Inventory,Item,Resident,World} from '../shared/types.js';import type {HouseholdAction,HouseholdCredit,HouseholdGift,HouseholdPool} from '../shared/household.js';import {itemKeys,itemLabels} from '../shared/items.js';import {ageYears,DAY} from './time.js';import {coLocated} from './proximity.js';import {distance,same} from './navigation.js';import {accountBalance,initializeEconomy,moveCoins} from './economy.js';import {foodTransaction} from './food.js';import {deathProof} from './knowledge.js';import {emitEvent} from './events.js';
+import type {FormalOpportunity,Inventory,Item,Resident,World} from '../shared/types.js';import type {HouseholdAction,HouseholdCredit,HouseholdGift,HouseholdPool} from '../shared/household.js';import {goods,itemKeys,itemLabels} from '../shared/items.js';import {ageYears,DAY} from './time.js';import {coLocated} from './proximity.js';import {distance,same} from './navigation.js';import {accountBalance,initializeEconomy,moveCoins} from './economy.js';import {foodTransaction} from './food.js';import {deathProof} from './knowledge.js';import {emitEvent} from './events.js';
 const person=(w:World,id?:string)=>w.residents.find(p=>p.id===id),integer=(n:unknown,a:number,b:number):n is number=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=a&&n<=b;
 const adult=(w:World,r:Resident|undefined):r is Resident=>!!r&&r.status==='alive'&&r.residency!=='outside'&&r.canDecide&&r.canExpress&&ageYears(r.bornAt,w.minute)>=18;
 const pool=(w:World,id?:string)=>w.household?.pools.find(p=>p.id===id),gift=(w:World,id?:string)=>w.household?.gifts.find(p=>p.id===id);
@@ -17,6 +17,18 @@ function nearby(r:Resident,p:HouseholdPool){return !r.inside&&distance(r.at,p.at
 export function initializeHousehold(w:World){if(w.mode!=='formal')return;initializeEconomy(w);w.household??={pools:[],gifts:[],nextSerial:1,totals:{deposited:0,withdrawn:0,gifted:0,estateCoins:0}};w.definitions['family/shared@1']??={id:'family/shared',version:1,kind:'action',dependencies:[],data:{initial:'双方分别接受相同数额的初始出资；以后各自出资分别记份额',physical:'原住处门外实际共用储物处，每人实际库存独立标记',withdraw:'只能取自己的份额；共同赠与须两人及接收者分别接受',separate:'任一人可以结束共用安排，不自动结束婚姻、搬家或清除亲缘',death:'个人份额保全，其他人无权私取；须有真实死亡证据并到原处办理遗产保全'}};}
 function giftFits(p:HouseholdPool,g:Pick<HouseholdGift,'costs'>){return g.costs.every(cost=>{const own=credit(p,cost.ownerId);return own&&own.coins>=cost.coins&&has(own.inventory,cost.inventory);});}
 function giftCosts(p:HouseholdPool,id:string,amount:number,item:Item|undefined,quantity:number,percent:number){const own=Math.ceil(amount*percent/100),ownQuantity=Math.ceil(quantity*percent/100),other=participants(p).find(person=>person!==id)!;return [id,other].map((ownerId,i)=>({ownerId,coins:i?amount-own:own,inventory:item?{[item]:i?quantity-ownQuantity:ownQuantity}:{}}));}
+/** The existing pending-gift expiry rule also gates selection and delivery.
+ * Approval does not require continued co-presence, but neither proposed nor
+ * funded gifts outlive the current contributors' authority under family/shared@1. */
+function giftValidityReason(w:World,p:HouseholdPool,g:HouseholdGift):string|null {
+ if(g.poolId!==p.id||g.expiresAt<=w.minute||p.status!=='open')return '原共同赠与已到期或原共用安排已经结束';
+ // Zero health is already terminal at the start of this engine step, even if
+ // recordDeath has not visited that contributor's array entry yet.
+ const proposer=person(w,g.proposerId),approver=person(w,g.approverId);
+ if(!adult(w,proposer)||!adult(w,approver)||proposer.health<=0||approver.health<=0||person(w,g.recipientId)?.status!=='alive')return '原共同赠与的出资人资格或接收者状态已经改变，不能继续交付';
+ if(g.status==='ready'&&g.segments.some((segment,i)=>!has(segment.inventory,g.costs[i].inventory)))return '预留的完整赠与实物已不足，不能声称完整交付';
+ return null;
+}
 export function householdReason(w:World,r:Resident,a:HouseholdAction):string|null {
  if(!w.household||r.status!=='alive'||r.residency==='outside'||!r.canDecide||!r.canExpress)return '本人目前不能处理共同生活资料';
  if(a.operation==='create'){
@@ -27,7 +39,10 @@ export function householdReason(w:World,r:Resident,a:HouseholdAction):string|nul
  const g=gift(w,a.giftId),p=pool(w,a.poolId??g?.poolId);if(!p)return '没有这份实际共同账户与储物安排';
  if(a.operation==='respond')return adult(w,r)&&p.partnerId===r.id&&p.status==='offered'&&p.expiresAt>w.minute&&typeof a.accept==='boolean'&&(!a.accept||adult(w,person(w,p.creatorId))&&coLocated(w,r,person(w,p.creatorId)!,2)&&r.coins>=p.initial.coins&&has(r.inventory,p.initial.item?{[p.initial.item]:p.initial.quantity}:{})&&has(credit(p,p.creatorId)!.inventory,p.initial.item?{[p.initial.item]:p.initial.quantity}:{}))?null:'没有本人可接受的同住出资条件，或原实物与本人匹配出资已不足';
  if(a.operation==='protectEstate')return adult(w,r)&&!!a.ownerId&&person(w,a.ownerId)?.status==='dead'&&!!deathProof(w,r,a.ownerId)&&!!credit(p,a.ownerId)&&nonempty(credit(p,a.ownerId)!)&&!w.household.gifts.some(g=>g.poolId===p.id&&g.status==='ready'&&g.segments.some(c=>c.ownerId===a.ownerId))?null:'须有本人已核实的死亡证据、确有保全份额，且先退回尚未交付的赠与预留';
- if(a.operation==='acceptGift'||a.operation==='declineGift')return g?.status==='ready'&&g.expiresAt>w.minute&&g.recipientId===r.id&&(nearby(r,p)||g.knownBy.includes(r.id))?null:'没有等待本人独立接受的共同赠与';
+ if(a.operation==='acceptGift'||a.operation==='declineGift'){
+  if(!g||g.poolId!==p.id||g.status!=='ready'||g.expiresAt<=w.minute||g.recipientId!==r.id||!nearby(r,p)&&!g.knownBy.includes(r.id))return '没有等待本人独立接受的共同赠与';
+  return a.operation==='acceptGift'?giftValidityReason(w,p,g):null;
+ }
  if(!adult(w,r)||!participants(p).includes(r.id))return '本人不是这份共同生活安排的出资当事人';
  const own=credit(p,r.id);
  if(a.operation==='close')return p.status==='open'?null:'这份共用安排当前无需结束';
@@ -38,10 +53,26 @@ export function householdReason(w:World,r:Resident,a:HouseholdAction):string|nul
   if(w.household.gifts.filter(g=>g.poolId===p.id&&['proposed','ready'].includes(g.status)).length>=3)return '本处已有三项未完成的共同赠与';return giftFits(p,{costs:giftCosts(p,r.id,a.amount!,a.item,a.quantity!,a.ownPercent!)})?null:'双方分别持有的份额不能支持所提数额与比例';
  }
  if(!g||g.poolId!==p.id||g.expiresAt<=w.minute||!g.knownBy.includes(r.id)&&!nearby(r,p))return '没有仍然有效的共同赠与提议';
- if(a.operation==='notifyGift')return g.status==='ready'&&!!person(w,g.recipientId)&&coLocated(w,r,person(w,g.recipientId)!,2)&&!g.knownBy.includes(g.recipientId)?null:'需要本人掌握的有效赠与，并亲自向身边的接收者送达消息';
+ if(a.operation==='notifyGift')return g.status==='ready'&&!giftValidityReason(w,p,g)&&!!person(w,g.recipientId)&&coLocated(w,r,person(w,g.recipientId)!,2)&&!g.knownBy.includes(g.recipientId)?null:'需要本人掌握的有效赠与，并亲自向身边的接收者送达消息';
  if(a.operation==='cancelGift')return ['proposed','ready'].includes(g.status)?null:'这份赠与已经交付或结束';
- if(a.operation==='approveGift')return p.status==='open'&&g.status==='proposed'&&g.approverId===r.id&&adult(w,person(w,g.proposerId))&&coLocated(w,r,person(w,g.proposerId)!,2)&&giftFits(p,g)?null:'需要另一位出资人独立到场同意，且两人的原份额仍然足额';
+ if(a.operation==='approveGift')return g.status==='proposed'&&!giftValidityReason(w,p,g)&&g.approverId===r.id&&coLocated(w,r,person(w,g.proposerId)!,2)&&giftFits(p,g)?null:'需要另一位出资人独立到场同意，且两人的原份额仍然足额';
  return '没有这项共同生活事务';
+}
+/** A committed route retains its discovered destination. Do not re-run menu
+ * discovery distance or approval co-presence while people are still walking;
+ * householdReason checks those again at actual completion. */
+export function householdGiftActivityReason(w:World,r:Resident,a:HouseholdAction):string|null {
+ if(!['acceptGift','approveGift','notifyGift'].includes(a.operation))return null;
+ if(!w.household||r.status!=='alive'||r.residency==='outside'||!r.canDecide||!r.canExpress)return '本人目前不能处理共同生活资料';
+ const g=gift(w,a.giftId),p=pool(w,a.poolId??g?.poolId);
+ if(!g||!p||g.poolId!==p.id)return '没有这份原共同赠与与储物安排';
+ if(a.operation==='acceptGift'){
+  if(g.status!=='ready'||g.recipientId!==r.id)return '没有等待本人独立接受的共同赠与';
+ }else {
+  if(!adult(w,r)||!participants(p).includes(r.id))return '本人不是这份共同生活安排的出资当事人';
+  if(a.operation==='approveGift'?(g.status!=='proposed'||g.approverId!==r.id||!giftFits(p,g)):g.status!=='ready')return '原共同赠与状态、本人批准权限或原份额已经改变';
+ }
+ return giftValidityReason(w,p,g);
 }
 export function householdTarget(w:World,r:Resident,a:HouseholdAction){const error=householdReason(w,r,a);if(error)return {target:r.at,duration:0,error};const p=pool(w,a.poolId??gift(w,a.giftId)?.poolId),b=a.operation==='create'?eligibleHome(w,r,a.buildingId):null;return {target:{...(a.operation==='notifyGift'?r.at:p?.at??b!.door)},duration:a.operation==='protectEstate'?20:5};}
 function fact(w:World,r:Resident,text:string){emitEvent(w,{kind:'trade',actors:[r.id],place:{...r.at},text});}
@@ -71,27 +102,44 @@ function completeAtomic(w:World,r:Resident,a:HouseholdAction):string|null {
   for(const cost of g!.costs){const own=credit(p!,cost.ownerId)!;pay(w,p!.account,g!.account,cost.coins,'两位出资人分别接受的共同赠与预存',g!.id+':reserve:'+cost.ownerId);own.coins-=cost.coins;routeFood(w,'family-stock:'+p!.id+':'+cost.ownerId,'family-gift:'+g!.id+':'+cost.ownerId,cost.inventory);change(own.inventory,cost.inventory,-1);g!.segments.push(structuredClone(cost));}g!.status='ready';g!.approvedAt=w.minute;if(!g!.knownBy.includes(r.id))g!.knownBy.push(r.id);fact(w,r,`${r.name}亲自同意了这份具体共同赠与，双方实际份额已分别预留；接收者仍可拒绝，尚未收货。`);
  }else if(a.operation==='notifyGift'){g!.knownBy.push(g!.recipientId);const to=person(w,g!.recipientId)!;const e=emitEvent(w,{kind:'trade',actors:[r.id,to.id],place:{...r.at},witnesses:[r.id,to.id],text:`${r.name}亲自向${to.name}送达已被双方同意的共同赠与消息与原储物处地址；接收者仍可拒绝或自行前往领取。`});const memory=to.memories.find(m=>m.eventId===e.id);if(memory)memory.source='heard';
  }else if(a.operation==='acceptGift'){
-  if(g!.segments.some((segment,i)=>!has(segment.inventory,g!.costs[i].inventory)))return '预留的完整赠与实物已不足，不能声称完整交付';const amount=accountBalance(w,g!.account);pay(w,g!.account,`resident:${r.id}`,amount,'本人接受共同赠与实际收款',g!.id+':accept');for(const segment of g!.segments){change(r.inventory,segment.inventory,1);segment.inventory={};segment.coins=0;}g!.status='delivered';g!.deliveredAt=w.minute;s.totals.gifted+=amount;fact(w,r,`${r.name}亲自来到原储物处，独立接受并实际领取双方同意的共同赠与${amount}钱和具体物资；后续用途仍须本人决定。`);
+  const amount=accountBalance(w,g!.account);pay(w,g!.account,`resident:${r.id}`,amount,'本人接受共同赠与实际收款',g!.id+':accept');for(const segment of g!.segments){change(r.inventory,segment.inventory,1);segment.inventory={};segment.coins=0;}g!.status='delivered';g!.deliveredAt=w.minute;s.totals.gifted+=amount;fact(w,r,`${r.name}亲自来到原储物处，独立接受并实际领取双方同意的共同赠与${amount}钱和具体物资；后续用途仍须本人决定。`);
  }else if(a.operation==='declineGift'||a.operation==='cancelGift'){cancelGift(w,g!,a.operation==='declineGift'?'declined':'cancelled');fact(w,r,`${r.name}拒绝或撤回了尚未交付的共同赠与，剩余实物与钱款原地退回各原出资人的份额。`);}
  else {const own=credit(p!,a.ownerId!)!,estate=w.estates.find(e=>e.personId===a.ownerId)!;pay(w,p!.account,`estate:${a.ownerId}`,own.coins,'已核实逝者的共用资金份额保全',p!.id+':estate:'+a.ownerId);s.totals.estateCoins+=own.coins;own.coins=0;change(estateStock(w,a.ownerId!,'household:'+p!.id,estateLocation(p!.at,null,null,'原共同储物处'))!,own.inventory,1);own.inventory={};fact(w,r,`${r.name}亲自到原共用储物处，将已核实逝者${person(w,a.ownerId)!.name}的个人份额纳入保全遗产，没有领取到自己名下或动用另一人的份额。`);}
  r.revision++;return null;
 }
 export function completeHousehold(w:World,r:Resident,a:HouseholdAction){return foodTransaction(w,()=>completeAtomic(w,r,a));}
 export function advanceHousehold(w:World){initializeHousehold(w);const s=w.household;if(!s)return;for(const p of s.pools)if(p.status==='offered'&&(p.expiresAt<=w.minute||!adult(w,person(w,p.creatorId))||!adult(w,person(w,p.partnerId))||p.initial.item&&!has(credit(p,p.creatorId)!.inventory,{[p.initial.item]:p.initial.quantity}))){p.status='expired';p.closedAt=w.minute;p.reason='邀请到期、原实物不足或尚未形成双方有效接受，原份额仍在原处';}
- for(const g of s.gifts)if(['proposed','ready'].includes(g.status)){const p=pool(w,g.poolId)!;if(g.expiresAt<=w.minute||p.status!=='open'||!adult(w,person(w,g.proposerId))||!adult(w,person(w,g.approverId))||person(w,g.recipientId)?.status!=='alive'||g.status==='ready'&&g.segments.some((segment,i)=>!has(segment.inventory,g.costs[i].inventory)))foodTransaction(w,()=>cancelGift(w,g,'expired'));}
+ for(const g of s.gifts)if(['proposed','ready'].includes(g.status)){const p=pool(w,g.poolId)!;if(giftValidityReason(w,p,g))foodTransaction(w,()=>cancelGift(w,g,'expired'));}
  if(s.gifts.length>200)s.gifts=s.gifts.filter((g,i)=>['proposed','ready'].includes(g.status)||i>=s.gifts.length-80);
  if(s.pools.length>200){const referenced=new Set(s.gifts.filter(g=>['proposed','ready'].includes(g.status)).map(g=>g.poolId));s.pools=s.pools.filter((p,i)=>['offered','open'].includes(p.status)||p.credits.some(nonempty)||referenced.has(p.id)||i>=s.pools.length-80);}}
 export function hasHouseholdAssets(w:World,id:string){return !!w.household&&(w.household.pools.some(p=>p.credits.some(c=>c.ownerId===id&&nonempty(c)))||w.household.gifts.some(g=>g.status==='ready'&&g.segments.some(c=>c.ownerId===id&&nonempty(c))));}
 export function householdOpportunities(w:World,r:Resident):FormalOpportunity[]{const result:FormalOpportunity[]=[],add=(id:string,label:string,a:HouseholdAction)=>{if(!householdReason(w,r,a))result.push({id:'household.'+id,label,action:a});};
- for(const b of w.buildings.filter(b=>eligibleHome(w,r,b.id)&&distance(r.at,b.door)<=8))for(const other of w.residents.filter(p=>p.id!==r.id&&coLocated(w,r,p,2)))for(const item of [undefined,...itemKeys.filter(i=>(r.inventory[i]??0)>0).slice(0,2)])add('create.'+other.id+'.'+b.id+'.'+(item??'cash'),`与${other.name}在${b.name}门外建立共同生活储物处：填写name（1–30字）、amount初始钱款0–200、quantity${item?itemLabels[item]+'0–20':'0'}，至少一项出资；对方另行接受相同初始数额，以后各人的份额分别记账`,{type:'household',operation:'create',targetId:other.id,buildingId:b.id,name:'共同生活储物处',amount:item?0:1,item,quantity:item?1:0});
+ for(const b of w.buildings.filter(b=>eligibleHome(w,r,b.id)&&distance(r.at,b.door)<=8))for(const other of w.residents.filter(p=>p.id!==r.id&&coLocated(w,r,p,2)))for(const item of [undefined,...itemKeys.filter(i=>(r.inventory[i]??0)>=1)])add('create.'+other.id+'.'+b.id+'.'+(item??'cash'),`与${other.name}在${b.name}门外建立共同生活储物处：填写name（1–30字）、amount初始钱款0–200、quantity${item?itemLabels[item]+'0–20':'0'}，至少一项出资；对方另行接受相同初始数额，以后各人的份额分别记账`,{type:'household',operation:'create',targetId:other.id,buildingId:b.id,name:'共同生活储物处',amount:item?0:1,item,quantity:item?1:0});
  for(const p of w.household?.pools??[]){
   if(participants(p).includes(r.id)){for(const accept of [true,false])add('respond.'+p.id+'.'+accept,`${accept?'接受并匹配自己的初始出资':'拒绝'}${p.name}：本人出${p.initial.coins}钱和${p.initial.quantity}份${p.initial.item?itemLabels[p.initial.item]:'物资'}；个人产权、婚姻、住处分别记录`,{type:'household',operation:'respond',poolId:p.id,accept});add('close.'+p.id,'本人结束这份共用安排，剩余物资原地保留各自份额；不自动离婚或驱逐住户',{type:'household',operation:'close',poolId:p.id});
-   for(const item of [undefined,...itemKeys.filter(i=>(r.inventory[i]??0)>0||(credit(p,r.id)?.inventory[i]??0)>0).slice(0,3)])for(const operation of ['deposit','withdraw'] as const)add(operation+'.'+p.id+'.'+(item??'cash'),`去${p.name}实际${operation==='deposit'?'存入':'领取'}自己的份额，填写amount钱款0–200、quantity${item?itemLabels[item]+'0–20':'0'}，至少一项；不能取另一人的钱物`,{type:'household',operation,poolId:p.id,amount:item?0:1,item,quantity:item?1:0});
-   if(nearby(r,p))for(const to of w.residents.filter(to=>r.knownPeople.includes(to.id)&&coLocated(w,r,to,6)).slice(0,3))for(const item of [undefined,...itemKeys.filter(i=>p.credits.some(c=>(c.inventory[i]??0)>0)).slice(0,2)])add('gift.'+p.id+'.'+to.id+'.'+(item??'cash'),`向${to.name}提出共同赠与，填写amount钱款0–200、quantity${item?itemLabels[item]+'0–20':'0'}（至少一项）、ownPercent本人出资比例0–100；零头向本人取整，另一人出余数。须另一位出资人及接收者另行同意`,{type:'household',operation:'proposeGift',poolId:p.id,targetId:to.id,amount:item?0:1,item,quantity:item?1:0,ownPercent:50});}
+   for(const item of [undefined,...itemKeys.filter(i=>(r.inventory[i]??0)>=1||(credit(p,r.id)?.inventory[i]??0)>=1)])for(const operation of ['deposit','withdraw'] as const)add(operation+'.'+p.id+'.'+(item??'cash'),`去${p.name}实际${operation==='deposit'?'存入':'领取'}自己的份额，填写amount钱款0–200、quantity${item?itemLabels[item]+'0–20':'0'}，至少一项；不能取另一人的钱物`,{type:'household',operation,poolId:p.id,amount:item?0:1,item,quantity:item?1:0});
+   if(nearby(r,p))for(const to of w.residents.filter(to=>r.knownPeople.includes(to.id)&&coLocated(w,r,to,6)))for(const item of [undefined,...itemKeys.filter(i=>p.credits.some(c=>(c.inventory[i]??0)>=1))])add('gift.'+p.id+'.'+to.id+'.'+(item??'cash'),`向${to.name}提出共同赠与，填写amount钱款0–200、quantity${item?itemLabels[item]+'0–20':'0'}（至少一项）、ownPercent本人出资比例0–100；零头向本人取整，另一人出余数。须另一位出资人及接收者另行同意`,{type:'household',operation:'proposeGift',poolId:p.id,targetId:to.id,amount:item?0:1,item,quantity:item?1:0,ownPercent:(item?(credit(p,r.id)?.inventory[item]??0):credit(p,r.id)?.coins??0)>=1?50:0});}
   if(nearby(r,p))for(const own of p.credits)add('estate.'+p.id+'.'+own.ownerId,'亲自保全原储物处中已核实逝者的个人份额，纳入遗产而非领取到自己名下',{type:'household',operation:'protectEstate',poolId:p.id,ownerId:own.ownerId});
  }
  for(const g of w.household?.gifts??[])for(const operation of ['approveGift','acceptGift','declineGift','cancelGift','notifyGift'] as const)add(operation+'.'+g.id,`${{approveGift:'本人同意具体共同赠与并预存双方已同意的份额',acceptGift:'本人去原处独立接受共同赠与',declineGift:'本人拒绝接收共同赠与',cancelGift:'本人撤回尚未交付的共同赠与',notifyGift:'本人亲自向身边接收者送达有效赠与的消息及具体领取地点'}[operation]}：${g.amount}钱、${g.quantity}份${g.item?itemLabels[g.item]:'物资'}，接收者${person(w,g.recipientId)?.name}`,{type:'household',operation,giftId:g.id});
- return result;
+ return boundedHouseholdAssets(w,result);
+}
+
+// Validate before budgeting: invalid/fractional stock cannot occupy an item slot.
+// Each operation has one rotating edible slot plus a separate cash/material budget.
+// Rotate complete (pool, recipient, item) candidates, not independent nested lists,
+// so two rotations cannot alias and permanently hide a particular combination.
+const assetBudgets={create:3,deposit:4,withdraw:4,proposeGift:9} as const;
+export function isHouseholdFoodOption(c:FormalOpportunity){const a=c.action;return a.type==='household'&&Object.hasOwn(assetBudgets,a.operation)&&!!a.item&&goods[a.item].food>0;}
+function boundedHouseholdAssets(w:World,rows:FormalOpportunity[]){
+ const out=rows.filter(c=>c.action.type!=='household'||!Object.hasOwn(assetBudgets,c.action.operation));
+ const rotate=(choices:FormalOpportunity[],limit:number)=>{const offset=Math.floor(w.minute/30)%Math.max(1,choices.length);return Array.from({length:Math.min(limit,choices.length)},(_,i)=>choices[(offset+i)%choices.length]);};
+ for(const [operation,budget] of Object.entries(assetBudgets)){
+  const candidates=rows.filter(c=>c.action.type==='household'&&c.action.operation===operation).sort((a,b)=>a.id.localeCompare(b.id));
+  const food=candidates.filter(isHouseholdFoodOption),other=candidates.filter(c=>!isHouseholdFoodOption(c));
+  out.push(...rotate(food,1),...rotate(other,budget-(food.length?1:0)));
+ }
+ return out;
 }
 
 export function householdNotes(w:World,r:Resident){return (w.household?.pools??[]).filter(p=>participants(p).includes(r.id)&&nearby(r,p)).map(p=>`${p.name}在原住处门外，共同账簿现状${p.status}。各人可领取份额：${p.credits.map(c=>(person(w,c.ownerId)?.name??'原出资人')+'钱款'+c.coins+'，实际物资'+JSON.stringify(c.inventory)).join('；')}。这不合并房屋产权或孩子财产，未经双方另行同意不能替对方赠与。`).join(' \n');}

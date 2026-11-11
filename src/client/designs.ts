@@ -1,3 +1,4 @@
+import {prototypePanelDetails} from './prototypes.js';
 import type {World} from '../shared/types.js';
 import {itemLabels} from '../shared/items.js';
 import {dateLabel} from './community.js';
@@ -18,11 +19,12 @@ export function designsPanel(w:World):string {
   const buildings=spec.kind==='building'?w.buildings.filter(building=>building.definition===spec.definition):[];
   const projects=spec.kind==='building'?w.construction?.projects.filter(project=>project.definition===spec.definition&&['proposed','planned','active','paused'].includes(project.status))??[]:[];
   const place=design.publication&&w.buildings.find(building=>building.id===design.publication!.buildingId);
-  return `<article class="duty-card design-card"><small>${dateLabel(design.createdAt)} · ${spec.kind==='tool'?'器物图纸':'建筑图纸'}</small>
+  return `<article class="duty-card design-card"><small>${dateLabel(design.createdAt)} · ${spec.kind==='prototype'?'组合原型图纸':spec.kind==='tool'?'器物图纸':'建筑图纸'}</small>
    <h3>${esc(design.name)}</h3><p>${esc(design.purpose)}</p>
-   <p>${spec.kind==='tool'?`${toolNames[spec.tool]} · 预计耐用 ${spec.durability} · 等级 ${spec.level}`:`${buildingNames[spec.template]} · ${spec.width} × ${spec.height} 格 · 容量 ${spec.capacity}`}</p>
+   <p>${spec.kind==='prototype'?`便携晾鱼原型 · 承重 ${spec.capacity} 份 · 计划投入 ${spec.batchSize} 份鲜鱼`:spec.kind==='tool'?`${toolNames[spec.tool]} · 预计耐用 ${spec.durability} · 等级 ${spec.level}`:`${buildingNames[spec.template]} · ${spec.width} × ${spec.height} 格 · 容量 ${spec.capacity}`}</p>
    <p>材料 ${stock(spec.materials)} · 劳动约 ${spec.minutes} 游戏分钟</p>
-   <p>${design.publication?`已公开 · ${design.learnedBy.length} 位居民已登记学习`:'私人图纸'} · ${spec.kind==='tool'?`已制成 ${tools.length} 件`:`已有 ${projects.length} 项待议或在建，${buildings.length} 座已建成`}</p>
+   <p>${design.publication?`已公开 · ${design.learnedBy.length} 位居民已登记学习`:'私人图纸'} · ${spec.kind==='prototype'?`已试作 ${w.designs?.prototypes?.filter(p=>p.designId===design.id).length??0} 件`:spec.kind==='tool'?`已制成 ${tools.length} 件`:`已有 ${projects.length} 项待议或在建，${buildings.length} 座已建成`}</p>
+   ${spec.kind==='prototype'?prototypePanelDetails(w,design):''}
    <div class="place-actions">${author?`<button data-person="${esc(author.id)}">${esc(author.name)}的档案</button>`:''}
    ${place?`<button data-locate="${esc(place.id)}">图纸公开地点</button>`:''}
    ${projects.slice(0,4).map(project=>`<button data-project="${esc(project.id)}">定位工地</button>`).join('')}

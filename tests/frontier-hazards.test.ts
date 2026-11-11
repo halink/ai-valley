@@ -57,11 +57,10 @@ test('continued close exposure can cause a recorded accidental death and preserv
  assert.ok(w.events.some(e=>e.kind==='death'&&e.text.includes('野猪袭击')));
 });
 
-test('a flood progresses from warning to local crop damage and expires using world time',()=>{
+test('an already recorded legacy flood still progresses and expires when new weather hazards are disabled',()=>{
  const {w,first,state}=fixture();
- w.minute=state.nextDisasterAt;
+ const flood:FrontierDisaster={id:'legacy-flood',kind:'flashFlood',at:{...state.shore!},radius:7,phase:'warning',warningAt:w.minute,startsAt:w.minute+90,endsAt:w.minute+222,intensity:24,warned:[],exposure:{}};state.disasters=[flood];
  advanceFrontierHazards(w,1);
- const flood=state.disasters[0];
  assert.equal(flood.kind,'flashFlood');assert.equal(flood.phase,'warning');
  assert.equal(frontierHazardNotes(w,first),'');
  const plot={...w.plots[0],at:{...flood.at},crop:{definition:'crop/turnip@1',planted:w.minute,growth:2,wateredDay:0,lastGrowthDay:0}};

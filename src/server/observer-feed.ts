@@ -6,6 +6,7 @@ export function observerFrame(current: Snapshot, previous?: Snapshot): ObserverU
   const {world, mapRevision, version, serverTime, capabilities} = current;
   const {map, definitions, activeDefinitions, ...dynamic} = world;
   const frame: ObserverUpdate = {worldId:world.id, mapRevision:mapRevision!, version, serverTime, capabilities, world:{...dynamic}};
+  if (!previous || previous.mapRevision !== mapRevision || JSON.stringify(current.foodCoverage) !== JSON.stringify(previous.foodCoverage)) frame.foodCoverage=current.foodCoverage??null;
   if (!previous || previous.mapRevision !== mapRevision) {
     frame.world.definitions = definitions;
     frame.world.activeDefinitions = activeDefinitions;
@@ -25,8 +26,11 @@ export function observerFrame(current: Snapshot, previous?: Snapshot): ObserverU
         const before=(old as Record<string,unknown>)[key];
         if(value!==before && (typeof value!=='object' || JSON.stringify(value)!==JSON.stringify(before))) changed[key]=value;
       }
-      // Full replacement is needed if an optional field disappeared.
-      const missing=Object.keys(old).some(key=>!Object.hasOwn(item,key));
+      // JSON drops undefined values, including legacy absent birth dates.
+      // Replace the entity when a field disappears instead of emitting a
+      // patch that silently retains its previous known value on the client.
+      const missing=Object.keys(old).some(key=>!Object.hasOwn(item,key)||
+        (item as unknown as Record<string,unknown>)[key]===undefined&&(old as Record<string,unknown>)[key]!==undefined);
       if(missing)upsert.push(item);
       else if(Object.keys(changed).length>1)patch.push(changed);
     }
@@ -36,7 +40,7 @@ export function observerFrame(current: Snapshot, previous?: Snapshot): ObserverU
       Object.assign(frame.changes, {[field]:{upsert, remove:[...oldItems.keys()], patch}});
     }
   }
-  for (const field of ['events','graves','processed','estates','offers','proposals','clock','population','migration','duties','economy','civic','production','employment','foreignTrade','construction','education','industry','rooms','food','health','longCare','funerary','infrastructure','adoption','debt','household','social','culture','regions','buildingMigrations','ferries','frontierHazards','designs'] as const) {
+  for (const field of ['socialAppointments','personalFoodGifts','adultPresence','pregnancyPreparation','regionSurveys','waterSupply','events','graves','processed','estates','offers','proposals','clock','population','migration','duties','economy','civic','production','employment','foreignTrade','landRights','construction','education','industry','rooms','food','health','longCare','funerary','infrastructure','adoption','familyRelocation','outsideAid','debt','household','social','culture','regions','buildingMigrations','ferries','frontierHazards','designs'] as const) {
     if (JSON.stringify(world[field]) === JSON.stringify(previous.world[field])) delete frame.world[field];
   }
   if (JSON.stringify(definitions) !== JSON.stringify(previous.world.definitions)) frame.world.definitions = definitions;

@@ -1,4 +1,5 @@
 import {crateLocation} from '../world/livestock-cargo.js';
+import {pastureFenceBlocks} from '../shared/pasture-fence.js';
 import type {Boat} from '../shared/ferry.js';
 import {estatePiles} from './estate-custody.js';
 import type {CultureEvent} from '../shared/culture.js';
@@ -23,7 +24,7 @@ type Picture = Phaser.GameObjects.Image;
 type Prop =
   | {kind:'beast';record:{id:string;at:{x:number;y:number};species:WildBeast['species'];alert:boolean}}
   | {kind:'fish';record:{id:string;at:{x:number;y:number};amount:number;feeding:boolean}}
-  | {kind:'pasture';record:{id:string;at:{x:number;y:number};edge:number;grazed:boolean}}
+  | {kind:'pasture';record:{id:string;at:{x:number;y:number};edge:number;grazed:boolean;water:number|null}}
   | {kind:'shore';record:{id:string;at:{x:number;y:number}}}
   | {kind:'ferry';record:Boat}
   | {kind:'crate';record:{id:string;at:{x:number;y:number}}}
@@ -105,11 +106,21 @@ export class Outdoors {
       for(const record of world.household?.pools??[])if(record.status==='open'||record.credits.some(c=>c.coins>0||Object.values(c.inventory).some(n=>n!>0)))add({kind:'household',record});
       for(const shipment of world.foreignTrade?.shipments??[])if(shipment.goods>0&&shipment.route?.at&&!['completed','cancelled'].includes(shipment.status))add({kind:'cargo',record:{...shipment,at:shipment.route.at}});
       for(const pasture of world.industry?.pastures??[]){
+        if(pasture.status==='retired')continue;
         const tiles=new Set(pasture.tiles.map(t=>`${t.x},${t.y}`));
         for(const at of pasture.tiles){
           const {x,y}=at;
-          const edge=Number(!tiles.has(`${x},${y-1}`))+2*Number(!tiles.has(`${x+1},${y}`))+4*Number(!tiles.has(`${x},${y+1}`))+8*Number(!tiles.has(`${x-1},${y}`));
-          add({kind:'pasture',record:{id:`${pasture.id}:${x},${y}`,at,edge,grazed:pasture.forage<pasture.capacity/3}});
+          let edge=Number(!tiles.has(`${x},${y-1}`))+2*Number(!tiles.has(`${x+1},${y}`))+4*Number(!tiles.has(`${x},${y+1}`))+8*Number(!tiles.has(`${x-1},${y}`));
+          if(!pastureFenceBlocks(pasture))edge=0;
+          if(pasture.gate&&at.x===pasture.gate.inside.x&&at.y===pasture.gate.inside.y)edge&=~4;
+          add({kind:'pasture',record:{id:`${pasture.id}:${x},${y}`,at,edge,grazed:pasture.forage<pasture.capacity/3,water:pasture.trough&&at.x===pasture.trough.at.x&&at.y===pasture.trough.at.y?Math.floor(pasture.trough.water):null}});
+        }
+      }
+      for(const project of world.industry?.pastureProjects??[])if(project.fenceBuilt&&!['completed','removed'].includes(project.status)){
+        for(let y=project.at.y;y<project.at.y+project.height;y++)for(let x=project.at.x;x<project.at.x+project.width;x++){
+          let edge=Number(y===project.at.y)+2*Number(x===project.at.x+project.width-1)+4*Number(y===project.at.y+project.height-1)+8*Number(x===project.at.x);
+          if(x===project.door.x&&y===project.door.y-1)edge&=~4;
+          add({kind:'pasture',record:{id:`${project.id}:${x},${y}`,at:{x,y},edge,grazed:true,water:null}});
         }
       }
       for(const b of world.frontierHazards?.beasts??[])if(b.status==='alive')add({kind:'beast',record:{id:b.id,at:b.at,species:b.species,alert:!!b.alert}});
@@ -223,7 +234,7 @@ export class Outdoors {
     const {x,y}=prop.record.at, season=this.season!;
     let px=x*Art.TILE+8, py=y*Art.TILE+16, depth=py-1, ax=.5, ay=1, key:string,fishArt:string[]|undefined;
     switch (prop.kind) {
-      case 'pasture':{const {edge,grazed}=prop.record;key=this.texture(`pasture-${edge}-${grazed}`,()=>Art.pastureTile(edge,grazed));px=x*Art.TILE;py=y*Art.TILE;ax=ay=0;depth=0;break;}
+      case 'pasture':{const {edge,grazed,water}=prop.record;key=this.texture(`pasture-${edge}-${grazed}-${water}`,()=>Art.pastureTile(edge,grazed,water));px=x*Art.TILE;py=y*Art.TILE;ax=ay=0;depth=0;break;}
       case 'beast':{const {species,alert}=prop.record;key=this.texture(`beast-${species}-${alert}`,()=>Art.wildAnimal(species,alert));break;}
       case 'fish':{
         const count=Math.min(3,Math.ceil(prop.record.amount/4)),{feeding}=prop.record;

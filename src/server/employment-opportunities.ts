@@ -1,3 +1,4 @@
+import {leasedEmploymentTerms} from './premises-opportunities.js';
 import type {FormalOpportunity,Resident,World} from '../shared/types.js';
 import type {EmploymentAction,EmploymentTerms} from '../shared/employment.js';
 import {employmentReason,employmentRoles,employmentTermsLabel} from '../world/employment.js';
@@ -12,10 +13,10 @@ function adjustedTermsHint(){return '可填写wage（每日1–100钱）、start
 export function employmentOpportunities(w:World,r:Resident):FormalOpportunity[]{
  if(!w.employment||!r.canDecide||!r.canExpress||r.status!=='alive'||r.residency==='outside'||ageYears(r.bornAt,w.minute)<18)return [];
  const result:FormalOpportunity[]=[];
- const add=(id:string,label:string,action:EmploymentAction)=>{if(!employmentReason(w,r,action))result.push({id:'employment.'+id,label,action});};
+ const add=(id:string,label:string,action:EmploymentAction)=>{action.buildingId=w.employment!.contracts.find(c=>c.id===action.contractId)?.buildingId??w.employment!.posts.find(p=>p.id===action.postId)?.buildingId??w.economy?.businesses.find(b=>b.id===action.businessId)?.buildingId;if(!employmentReason(w,r,action))result.push({id:'employment.'+id,label,action});};
  const mine=w.economy?.businesses.find(b=>b.ownerId===r.id&&b.closedAt===null);
  if(mine&&atShop(w,r,mine.buildingId)){
-  for(const role of Object.keys(employmentRoles) as EmploymentTerms['role'][]){const terms=baseTerms(role);add('post.'+role,`在${mine.name}招聘：${employmentTermsLabel(terms)}。${adjustedTermsHint()}`,{type:'employment',operation:'post',businessId:mine.id,terms});}
+  for(const role of Object.keys(employmentRoles) as EmploymentTerms['role'][]){const terms=leasedEmploymentTerms(w,r.id,mine.buildingId,baseTerms(role));add('post.'+role,`在${mine.name}招聘：${employmentTermsLabel(terms)}。${adjustedTermsHint()}`,{type:'employment',operation:'post',businessId:mine.id,terms});}
  }
  const relevant=w.employment.posts.filter(p=>p.status==='open'||p.status==='offered');
  const responses:FormalOpportunity[]=[];
@@ -34,7 +35,7 @@ export function employmentOpportunities(w:World,r:Resident):FormalOpportunity[]{
    const application=p.applications.find(app=>app.residentId===r.id);
    if(p.offer?.workerId===r.id&&(p.offer.notifiedAt!==undefined||atShop(w,r,p.buildingId))){
     for(const operation of ['accept','decline'] as const){
-     const action:EmploymentAction={type:'employment',operation,postId:p.id};
+     const action:EmploymentAction={type:'employment',operation,postId:p.id,buildingId:p.buildingId};
      if(!employmentReason(w,r,action))responses.push({id:`employment.${operation}.${p.id}`,label:`${operation==='accept'?'亲自到店接受':'婉拒'}${shop.name}已预存工资的录用邀请：${employmentTermsLabel(p.terms)}，可在${dateTime(p.offer.expiresAt)}前答复`,action});
     }
    }else if(application?.status==='pending'||application?.status==='selected'){
@@ -49,6 +50,7 @@ export function employmentOpportunities(w:World,r:Resident):FormalOpportunity[]{
  for(const c of w.employment.contracts.filter(c=>c.status==='active'&&(c.workerId===r.id||c.employerId===r.id))){
   const shop=w.economy?.businesses.find(b=>b.id===c.businessId),place=w.buildings.find(b=>b.id===c.buildingId);if(!shop||!place)continue;
   if(c.workerId===r.id){
+   if(ageYears(r.bornAt,w.minute)>=65||r.energy<40)add('shortWork.'+c.id,`按本人当前体力只工作15分钟，再自己决定休息或继续；原聘约${c.terms.durationMinutes}分钟足班日薪${c.terms.wage}钱不变，未做工不计薪`,{type:'employment',operation:'work',contractId:c.id,minutes:15});
    add('work.'+c.id,`到${shop.name}履行自己的${employmentRoles[c.terms.role]}聘约，本次工作30分钟，原料与成品归商铺（足班${c.terms.durationMinutes}分钟日薪${c.terms.wage}钱，按真实时间结算）`,{type:'employment',operation:'work',contractId:c.id,minutes:30});
    add('quit.'+c.id,`自行辞去${shop.name}的聘约，已挣工资保留，未履约资金退回雇主`,{type:'employment',operation:'quit',contractId:c.id});
    if(!atShop(w,r,c.buildingId))responses.push({id:'employment.return.'+c.id,label:`去自己已签约的${shop.name}，查看岗位、材料和本人班次`,action:{type:'move',to:{...place.door}}});
@@ -68,6 +70,7 @@ export function employmentOpportunities(w:World,r:Resident):FormalOpportunity[]{
 export function employmentNotes(w:World,r:Resident):string {
  if(!w.employment)return '';
  const notes:string[]=[];
+ if(ageYears(r.bornAt,w.minute)>=65)notes.push('年龄不取消你的经营、工作或照护权限。你可以自己选择短段工作或休息；缩短整段聘约须与雇主另行订约，不会自动补足工资。');
  for(const c of w.employment.contracts.filter(c=>c.status==='active'&&(c.workerId===r.id||c.employerId===r.id))){
   if(!atShop(w,r,c.buildingId))continue;
   const other=w.residents.find(p=>p.id===(c.workerId===r.id?c.employerId:c.workerId));

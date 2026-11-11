@@ -128,6 +128,9 @@ test('a service finishing at the exact closing time completes once, and commutin
   const {w,shift,worker,client}=fixture();
   choose(w,worker,shift,'claim');choose(w,worker,shift,'attend');
   w.minute=shift.end-20;
+  // This test isolates exact-closing work, so be physically seated before the
+  // menu is built; the room approach no longer disappears from time estimates.
+  atWorkstation(w,client,{type:'publicDuty',operation:'receive',shiftId:shift.id});
   choose(w,client,shift,'receive',20);
   assert.equal(shift.served,1);assert.equal(shift.status,'finished');
   assert.ok(dutyReason(w,client,{type:'publicDuty',operation:'receive',shiftId:shift.id}));

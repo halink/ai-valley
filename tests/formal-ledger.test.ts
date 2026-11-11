@@ -3,7 +3,7 @@ import {test} from 'node:test';
 import {DatabaseSync} from 'node:sqlite';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {join} from 'node:path';
-import {tmpdir} from 'node:os';
+import {testTmpdir} from '../scripts/repository-temporary.mjs';
 import {gzipSync,gunzipSync} from 'node:zlib';
 import type {Plan,World,WorldEvent} from '../src/shared/types.js';
 import {WorldStore} from '../src/server/store.js';
@@ -12,7 +12,7 @@ import {createFormalWorld} from '../src/world/formal-seed.js';
 import {submitPlan} from '../src/world/engine.js';
 
 function withDatabase(action:(path:string)=>void) {
- const dir=mkdtempSync(join(tmpdir(),'valley-ledger-'));
+ const dir=mkdtempSync(join(testTmpdir(),'valley-ledger-'));
  try{action(join(dir,'world.sqlite'));}finally{rmSync(dir,{recursive:true,force:true});}
 }
 function checkpoint(db:DatabaseSync) {

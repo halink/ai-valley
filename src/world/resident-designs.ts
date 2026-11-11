@@ -1,3 +1,5 @@
+import {prototypeSpec} from '../shared/prototypes.js';
+import {prototypeActionReason,prototypeDuration,prototypeValidated,workPrototype,completePrototype} from './prototypes.js';
 import {designedToolNames,parseDrawing} from '../shared/designs.js';
 import type {BuildingDrawing,DesignAction,DesignSpec,ResidentDesign,ToolDrawing} from '../shared/designs.js';
 import {itemLabels} from '../shared/items.js';
@@ -65,6 +67,7 @@ export function designTarget(w:World,r:Resident,a:DesignAction):{target:Vec;dura
  if(!b||!designWorkspace(r,b))return fail('须前往已知且本人有使用权的桌台');
  if(a.operation==='draw'){
   const drawing=parseDrawing(a.kind,a.drawing);
+  if(drawing?.kind==='prototype'&&r.skills.building<1)return fail('原型图纸须先掌握一级建造技能');
   if(!drawing||drawing.kind==='tool'&&drawing.tool==='spear'&&w.scenario!=='frontier')return fail('图纸参数缺失或图纸用途在当前世界不可实现');
   if(!mayDraw(w,r))return fail('今天已经绘制新图纸，可以先完成制作或施工');
   if(w.designs?.records.some(d=>d.authorId===r.id&&d.name===drawing.name))return fail('这个名称已经用于本人的图纸');
@@ -72,11 +75,16 @@ export function designTarget(w:World,r:Resident,a:DesignAction):{target:Vec;dura
  }
  const d=record(w,a.designId);
  if(!d)return fail('图纸已不存在');
+ if(a.operation==='assemble'||a.operation==='trial'||a.operation==='abandonPrototype'){
+  const error=prototypeActionReason(w,r,a,d);
+  return error||d.spec.kind!=='prototype'?fail(error??'不是原型图纸'):{target:{...b.door},duration:prototypeDuration(w,a,d.spec)};
+ }
  if(a.operation==='fabricate'){
   if(d.spec.kind!=='tool'||!w.industry||!knowsDesign(r,d)||!has(r.inventory,d.spec.materials))return fail('缺少可读图纸、实际材料或工艺场所');
   return {target:{...b.door},duration:d.spec.minutes};
  }
  if(!knowsHall(r,b))return fail('须在已知公共旅舍的桌台公开或查阅');
+ if(a.operation==='publish'&&d.spec.kind==='prototype'&&!prototypeValidated(w,d))return fail('须由作者以实物试用取得一次可核对产出，再公开该工艺');
  if(a.operation==='publish')return d.authorId===r.id&&!d.publication?{target:{...b.door},duration:12}:fail('只有作者可公开自己的未公开图纸');
  if(a.operation==='study')return d.publication?.buildingId===b.id&&!knowsDesign(r,d)?{target:{...b.door},duration:25}:fail('没有在此公开的未读图纸');
  return fail('未知的设计行动');
@@ -87,8 +95,12 @@ export function designWorkError(w:World,r:Resident,a:DesignAction,minutes:number
  const start=w.minute-minutes;
  const conflict=employmentConflict(w,r,start,w.minute,a.buildingId);
  if(conflict)return conflict;
- return w.duties?.shifts.some(s=>s.workerId===r.id&&['booked','on-duty'].includes(s.status)&&start<s.end&&s.start<w.minute)
-  ?'本人的已认领班次开始，不能继续占用这个时段':null;
+ if(w.duties?.shifts.some(s=>s.workerId===r.id&&['booked','on-duty'].includes(s.status)&&start<s.end&&s.start<w.minute))return '本人的已认领班次开始，不能继续占用这个时段';
+ if(a.operation==='assemble'||a.operation==='trial'||a.operation==='abandonPrototype'){
+  const target=designTarget(w,r,a);if(target.error)return target.error;
+  return workPrototype(w,r,a,record(w,a.designId)!,minutes);
+ }
+ return null;
 }
 
 /** Commits the resident's own drawing or completed physical work, keeping ordinary use, wear and ownership rules. */
@@ -100,11 +112,15 @@ export function completeDesign(w:World,r:Resident,a:DesignAction):string|null{
  const target=designTarget(w,r,a);
  if(target.error)return target.error;
  if(!same(r.at,target.target))return '本人尚未实际抵达指定位置';
- if(a.operation!=='equip'&&w.rooms){
+ if(a.operation!=='equip'&&a.operation!=='trial'&&w.rooms){
   const workspace=actionRoom(w,r,current);
   if(!workspace||r.inside!==workspace.building.id||!r.roomAt||!same(r.roomAt,workspace.target))return '本人尚未实际抵达指定桌台';
  }
  let designId:string|undefined,text:string;
+ if(a.operation==='assemble'||a.operation==='trial'||a.operation==='abandonPrototype'){
+  const error=completePrototype(w,r,a,record(w,a.designId)!);if(error)return error;
+  w.processed.push(receipt);return null;
+ }
  if(a.operation==='equip'){
   const tools=w.industry!.tools,tool=tools.find(t=>t.id===a.toolId)!;
   tools.splice(tools.indexOf(tool),1);
@@ -118,7 +134,8 @@ export function completeDesign(w:World,r:Resident,a:DesignAction):string|null{
    serial=state.nextSerial++;definition=`building/resident-${serial}@1`;
   }
   const id=`design:${w.id}:${serial}`;
-  const spec=drawing.kind==='tool'?toolSpec(w,drawing):buildingSpec(drawing,definition);
+  const spec=drawing.kind==='prototype'?prototypeSpec(drawing):drawing.kind==='tool'?toolSpec(w,drawing):buildingSpec(drawing,definition);
+  if(spec.kind==='prototype')w.definitions[spec.definition]??={id:'invention/air-drying',version:1,kind:'action',dependencies:['action/routine@1'],data:{minimumSunMinutes:120,additionalFishMinutes:20,maximumWetMinutes:30,coveredRainFactor:.25,inputPerOutput:2}};
   if(spec.kind==='building'){
    const alias=definition.slice(0,-2);
    const d:ContentDefinition={id:alias,version:1,kind:'building',dependencies:['action/routine@1'],

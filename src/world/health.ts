@@ -1,3 +1,4 @@
+import {medicalDestinationReason} from './building-safety.js';
 import {markPromiseEnd} from './known-promises.js';
 import {healthDefinition} from './process-definitions.js';
 import {estateStock,estateLocation} from './estate-custody.js';
@@ -26,15 +27,16 @@ export function healthConflict(w:World,id:string,start:number,end:number,buildin
  }return null;
 }
 const appointment=(w:World,id?:string)=>w.health?.appointments.find(a=>a.id===id);
-function scheduling(w:World,r:Resident,start:number,end:number,id:string,except?:string){return healthConflict(w,r.id,start,end,id,except)??educationConflict(w,r.id,start,end,id)??employmentConflict(w,r,start,end,id)??(w.duties?.shifts.some(s=>(s.workerId===r.id||s.buildingId===id&&s.role==='care')&&['booked','on-duty'].includes(s.status)&&start<s.end&&s.start<end)?'与本人公共班次重叠':null);}
-export function healthReason(w:World,r:Resident,a:HealthAction):string|null{
- if(isTransportAction(a))return transportReason(w,r,a);
+function scheduling(w:World,r:Resident,start:number,end:number,id:string,except?:string){if(w.commons?.stays.some(s=>s.buildingId===id&&s.bed===0&&s.endedAt===null&&s.startedAt<end&&s.expiresAt>start))return '这张诊疗床位已有尚未结束的临时借住';return healthConflict(w,r.id,start,end,id,except)??educationConflict(w,r.id,start,end,id)??employmentConflict(w,r,start,end,id)??(w.duties?.shifts.some(s=>(s.workerId===r.id||s.buildingId===id&&s.role==='care')&&['booked','on-duty'].includes(s.status)&&start<s.end&&s.start<end)?'与本人公共班次重叠':null);}
+export function healthReason(w:World,r:Resident,a:HealthAction,mode:'execution'|'menu'='execution'):string|null{
+ if(a.evacuationAuthority!==undefined&&!isTransportAction(a))return '成人紧急撤险标识不能授权诊疗或其他行动';
+ if(isTransportAction(a))return transportReason(w,r,a,mode);
  if(!w.health||!capable(r))return '本人当前无法安排诊疗';
  const binding=healthDefinition(w,a.definition);if(['offer','selfTreat'].includes(a.operation))a.definition=binding.definition;const rules=binding.rules;
  if(a.operation==='selfTreat')return ageYears(r.bornAt,w.minute)>=6&&activeCases(w,r.id).length&&(r.inventory.medicine??0)>=rules.medicine&&(r.inventory.water??0)>=rules.water?null:'自我用药需要已有伤病及本人1药剂、1清水';
  if(a.operation==='offer'){
   const p=person(w,a.targetId),b=site(w,a.buildingId);if(!adult(w,r)||r.skills.care<rules.minimumCare||!p||p.id===r.id||!capable(p)||!coLocated(w,r,p,12))return '需要本人照护能力以及当前可接触、有能力自行同意的患者';
-  if(!b||!r.knownBuildings.includes(b.id)||!['clinic','lodge'].includes(b.kind)||b.condition<=0||b.ownerId!=='commons'&&b.ownerId!==r.id)return '没有实际可用且有使用权的诊疗场所';
+  const unsafe=medicalDestinationReason(w,r,b,{menu:mode==='menu'});if(unsafe)return unsafe;if(!b)return '没有实际可用且有使用权的诊疗场所';
   if(!valid(a.fee,0,30)||!valid(a.startsIn,30,2*DAY)||(r.inventory.medicine??0)<rules.medicine||(r.inventory.water??0)<rules.water)return '预约需要有效价格、起始时间和医生本人实际药剂与水';
   if(w.health.appointments.filter(c=>c.doctorId===r.id&&['offered','accepted'].includes(c.status)).length>=4)return '请先处理本人已有的四项诊疗安排';
   return scheduling(w,r,w.minute+a.startsIn,w.minute+a.startsIn+rules.bookingWindow,b.id);
@@ -44,11 +46,11 @@ export function healthReason(w:World,r:Resident,a:HealthAction):string|null{
  if(a.operation==='decline')return c.patientId===r.id&&c.status==='offered'?null:'没有待本人回应的就诊邀请';
  if(a.operation==='accept'){
   if(c.patientId!==r.id||c.status!=='offered'||c.start<=w.minute||!capable(person(w,c.doctorId))||r.coins<c.fee||!activeCases(w,r.id).length)return '待本人同意的预约、伤病或实际诊疗费用已不适用';
-  return scheduling(w,r,c.start,c.end,c.buildingId,c.id)??scheduling(w,person(w,c.doctorId)!,c.start,c.end,c.buildingId,c.id);
+  return medicalDestinationReason(w,r,site(w,c.buildingId),{provider:person(w,c.doctorId)!,menu:mode==='menu'})??scheduling(w,r,c.start,c.end,c.buildingId,c.id)??scheduling(w,person(w,c.doctorId)!,c.start,c.end,c.buildingId,c.id);
  }
  if(c.status!=='accepted'||w.minute>=c.end||!site(w,c.buildingId)||!capable(person(w,c.doctorId))||!capable(person(w,c.patientId))||person(w,c.patientId)!.refusesCare||person(w,c.doctorId)!.skills.care<(c.rules?.minimumCare??1))return '预约、患者或医生当前不能继续这次诊疗';
  if(a.operation==='treat'&&c.doctorId!==r.id||a.operation==='receive'&&c.patientId!==r.id)return '只能履行本人一方的诊疗承诺';
- if(!valid(a.minutes,1,120))return '实际诊疗时长无效';return null;
+ if(!valid(a.minutes,1,120))return '实际诊疗时长无效';return medicalDestinationReason(w,r,site(w,c.buildingId),{provider:person(w,c.doctorId)!,menu:mode==='menu'});
 }
 export function healthTarget(w:World,r:Resident,a:HealthAction):{target:Vec;duration:number;error?:string}{if(isTransportAction(a))return transportTarget(w,r,a);const error=healthReason(w,r,a);if(error)return {target:r.at,duration:0,error};const c=appointment(w,a.appointmentId);return {target:c&&['treat','receive'].includes(a.operation)?site(w,c.buildingId)!.door:r.at,duration:c&&['treat','receive'].includes(a.operation)?a.minutes!:a.operation==='selfTreat'?healthDefinition(w,a.definition).rules.selfMinutes:5};}
 function finish(w:World,c:Appointment,status:Appointment['status'],reason:string){if(!['offered','accepted'].includes(c.status))return;const balance=accountBalance(w,c.account);payment(w,c.account,account(w,c.patientId),balance,'未进行诊疗的费用退回',`${c.id}:refund:${balance}`);c.refunded+=balance;w.health!.totals.refunded+=balance;const stock=bag(w,c.doctorId,c.id);if(stock)for(const [i,n]of Object.entries(c.stock))stock[i as keyof typeof stock]=(stock[i as keyof typeof stock]??0)+n!;c.stock={};c.status=status;c.reason=reason;for(const id of [c.doctorId,c.patientId]){const p=person(w,id);if(p?.activity?.action.type==='health'&&p.activity.action.appointmentId===c.id&&!p.activity.path.length&&!p.activity.room?.path.length&&p.inside===c.buildingId){p.activity=null;p.plan=null;p.decisionDue=w.minute;p.revision++;}}}
@@ -62,9 +64,9 @@ export function completeHealth(w:World,r:Resident,a:HealthAction):string|null{if
  else if(a.operation==='decline'||a.operation==='cancel')finish(w,c,'cancelled',a.operation==='decline'?'患者婉拒':'当事人终止预约');
  return null;
 }
-export function healthWorkError(w:World,r:Resident,a:HealthAction,dt:number):string|null{if(isTransportAction(a))return transportReason(w,r,a);if(!['treat','receive'].includes(a.operation))return null;const problem=healthReason(w,r,a);if(problem)return problem;const c=appointment(w,a.appointmentId)!;if(w.minute<=c.start)return null;const b=site(w,c.buildingId)!;if(!same(r.at,b.door)||r.inside!==b.id)return '须亲自抵达预约的诊疗位置';w.health!.pulses.push({appointmentId:c.id,personId:r.id,from:Math.max(c.start,w.minute-dt),to:Math.min(c.end,w.minute)});return null;}
+export function healthWorkError(w:World,r:Resident,a:HealthAction,dt:number):string|null{if(isTransportAction(a))return transportReason(w,r,a);if(!['treat','receive'].includes(a.operation))return null;const problem=healthReason(w,r,a);if(problem)return problem;const c=appointment(w,a.appointmentId)!;if(w.minute<=c.start)return null;const b=site(w,c.buildingId)!;if(!same(r.at,b.door)||r.inside!==b.id)return '须亲自抵达预约的诊疗位置';const unsafe=medicalDestinationReason(w,r,b,{provider:person(w,c.doctorId)!,physical:true});if(unsafe)return unsafe;w.health!.pulses.push({appointmentId:c.id,personId:r.id,from:Math.max(c.start,w.minute-dt),to:Math.min(c.end,w.minute)});return null;}
 export function advanceHealth(w:World,dt:number){initializeHealth(w);const s=w.health;if(!s)return;
- for(const c of s.cases){if(c.stage==='resolved')continue;const r=person(w,c.personId);if(!r||r.status!=='alive')continue;const elapsed=Math.max(0,w.minute-c.lastAt),rules=c.rules!;c.lastAt=w.minute;
+ for(const c of s.cases){if(c.stage==='resolved')continue;const r=person(w,c.personId)??w.migration?.contacts.find(p=>p.id===c.personId)?.person;if(!r||r.status!=='alive')continue;const elapsed=Math.max(0,w.minute-c.lastAt),rules=c.rules!;c.lastAt=w.minute;
   const resting=r.activity?.action.type==='sleep'&&!r.activity.path.length&&!r.activity.room?.path.length,wellFed=r.hunger<80&&r.energy>15;
   const recovery=(c.treatment>0?rules.treatedDaily:0)+(wellFed?(c.kind==='injury'?rules.fedInjuryDaily:rules.fedIllnessDaily):0)+(resting?rules.sleepDaily:0);c.severity=Math.max(0,Math.min(100,c.severity+(wellFed?0:rules.badDaySeverity)*elapsed/DAY-recovery*elapsed/DAY));
   if(c.severity>=rules.criticalSeverity||r.health<=rules.criticalHealth){c.stage='critical';if(!c.capacity&&r.canDecide&&r.canExpress){c.capacity={decide:true,express:true};r.canDecide=false;r.canExpress=false;r.plan=null;r.activity=null;r.revision++;}r.health=Math.max(0,r.health-elapsed*rules.criticalDrain);}
@@ -74,7 +76,7 @@ export function advanceHealth(w:World,dt:number){initializeHealth(w);const s=w.h
  // Shared attendance is settled after all actors, avoiding iteration-order treatment.
  const pulses=s.pulses;s.pulses=[];
  for(const c of s.appointments){if(c.status!=='accepted'){if(c.status==='offered'&&c.start<=w.minute)finish(w,c,'expired','未获患者同意便到期');continue;}const doctor=person(w,c.doctorId),patient=person(w,c.patientId),b=site(w,c.buildingId);
-  if(!capable(doctor)||!capable(patient)||patient.refusesCare||doctor.skills.care<(c.rules?.minimumCare??1)||!b||b.condition<=0){finish(w,c,'cancelled','医生、患者或场所无法继续');continue;}
+  if(!capable(doctor)||!capable(patient)||patient.refusesCare||doctor.skills.care<(c.rules?.minimumCare??1)||!b||medicalDestinationReason(w,doctor,b)||medicalDestinationReason(w,patient,b,{provider:doctor})){finish(w,c,'cancelled','医生、患者或场所无法继续');continue;}
   const d=pulses.find(p=>p.appointmentId===c.id&&p.personId===c.doctorId),p=pulses.find(p=>p.appointmentId===c.id&&p.personId===c.patientId);let shared=d&&p?Math.min(c.minutes-c.worked,Math.max(0,Math.min(d.to,p.to,c.end)-Math.max(d.from,p.from,c.start))):0;
   if(c.lastAt>=w.minute-1e-9)shared=0;if(shared>0){if(!c.materialsUsed){if((c.stock.medicine??0)<c.rules!.medicine||(c.stock.water??0)<c.rules!.water){finish(w,c,'cancelled','预留治疗材料不足');continue;}c.stock={};c.materialsUsed=true;}c.lastAt=w.minute;c.worked+=shared;applyMedicine(w,patient,c.rules!.medicineEffect*shared/c.minutes);const earned=Math.floor(c.fee*c.worked/c.minutes+1e-8),due=earned-c.paid;payment(w,c.account,account(w,c.doctorId),due,'实际共同到场的诊疗报酬',`${c.id}:earned:${earned}`);c.paid=earned;s.totals.paid+=due;doctor.skills.care+=shared/6000;}
   if(c.worked>=c.minutes-1e-8){fact(w,patient,`${doctor.name}与${patient.name}实际共同完成${c.minutes}分钟诊疗，实付${c.paid}钱；治疗不代替后续康复。`,[doctor.id,patient.id]);finish(w,c,'completed','实际完成本次诊疗');}else if(c.end<=w.minute)finish(w,c,'expired','预约窗口已结束，只按实际治疗时间结算');

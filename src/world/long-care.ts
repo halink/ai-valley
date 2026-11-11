@@ -1,28 +1,56 @@
+import {longCareHasPersonalAssent,longCareAwaitingPersonalAssent,normalizeLongCareConsent} from './long-care-consent.js';
 import {hasReceipt} from './receipts.js';
+import {longCareSelfWithdrawal} from './long-care-withdrawal.js';
 import {markPromiseEnd,knownPromises} from './known-promises.js';
 import {careDefinition} from './process-definitions.js';
 import {foodValue} from './food.js';
+import {foodFlowInputs,recordLongCareMeal} from './food-consumption-evidence.js';
 import {supportReason,completeSupport,advanceSupport} from './support.js';
-import type {World,Resident,Vec,Plan} from '../shared/types.js';import type {LongCareAction,LongCareAgreement,CareObservation} from '../shared/long-care.js';import {ageYears,DAY} from './time.js';import {coLocated} from './proximity.js';import {findPath,same} from './navigation.js';import {emitEvent} from './events.js';import {accountBalance,initializeEconomy,moveCoins} from './economy.js';import {educationConflict} from './education.js';import {employmentConflict} from './employment.js';
+import type {World,Resident,Vec,Plan} from '../shared/types.js';import type {LongCareAction,LongCareAgreement,CareObservation,CareHandoff} from '../shared/long-care.js';import {ageYears,knownAgeYears,DAY} from './time.js';import {coLocated} from './proximity.js';import {findPath,same} from './navigation.js';import {emitEvent} from './events.js';import {accountBalance,initializeEconomy,moveCoins} from './economy.js';import {educationConflict} from './education.js';import {employmentConflict} from './employment.js';
 const person=(w:World,id?:string)=>w.residents.find(r=>r.id===id),agreement=(w:World,id?:string)=>w.longCare?.agreements.find(c=>c.id===id);
 const alive=(r:Resident|undefined):r is Resident=>!!r&&r.status==='alive'&&r.residency!=='outside';
 const capable=(r:Resident|undefined):r is Resident=>alive(r)&&r.canDecide&&r.canExpress;
-const adult=(w:World,r:Resident)=>capable(r)&&ageYears(r.bornAt,w.minute)>=18;
+const adult=(w:World,r:Resident|undefined):r is Resident=>capable(r)&&ageYears(r.bornAt,w.minute)>=18;
 const integer=(n:unknown,a:number,b:number):n is number=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=a&&n<=b;
 const ownerAccount=(w:World,id:string)=>id==='treasury'?'treasury':person(w,id)?.status==='dead'?`estate:${id}`:`resident:${id}`;
 function pay(w:World,from:string,to:string,n:number,reason:string,ref:string){if(n>0&&!moveCoins(w,from,to,n,reason,ref))throw new Error('long_care_unfunded');}
-function signer(w:World,p:Resident){if(ageYears(p.bornAt,w.minute)>=18)return capable(p)?p:undefined;return p.guardianIds.map(id=>person(w,id)).find(g=>adult(w,g!)&&coLocated(w,g!,p,12));}
+function signer(w:World,p:Resident){const age=knownAgeYears(p.bornAt,w.minute);if(age===null)return undefined;if(age>=18)return capable(p)?p:undefined;return p.guardianIds.map(id=>person(w,id)).find(g=>adult(w,g!)&&coLocated(w,g!,p,12));}
 function fact(w:World,r:Resident,p:Resident,text:string){return emitEvent(w,{kind:'care',actors:[r.id,p.id],place:{...r.at},text});}
-export function initializeLongCare(w:World){if(w.mode!=='formal')return;initializeEconomy(w);w.longCare??={supports:[],agreements:[],observations:[],notices:[],handoffs:[],nextSerial:1,totals:{visits:0,paid:0,refunded:0,handoffs:0}};w.longCare.supports??=[];careDefinition(w);for(const c of w.longCare.agreements){c.knownBy??=[c.providerId,c.signerId,c.beneficiaryId];c.definition??='care/long@1';c.rules??=careDefinition(w,c.definition).rules;}}
+export function initializeLongCare(w:World){if(w.mode!=='formal')return;initializeEconomy(w);w.longCare??={supports:[],agreements:[],observations:[],notices:[],handoffs:[],nextSerial:1,totals:{visits:0,paid:0,refunded:0,handoffs:0}};w.longCare.supports??=[];careDefinition(w);for(const c of w.longCare.agreements){c.knownBy??=[c.providerId,c.signerId,c.beneficiaryId];c.definition??='care/long@1';c.rules??=careDefinition(w,c.definition).rules;normalizeLongCareConsent(w,c);}for(const h of w.longCare.handoffs)if(h.status==='offered'&&!h.approvals){const old=agreement(w,h.oldAgreementId),next=agreement(w,h.newAgreementId);h.approvals=old&&next?handoffParties(w,old,next)??[]:[];}}
 export function careWindows(c:LongCareAgreement,day:number){return Array.from({length:c.visitsPerDay},(_,slot)=>{const start=day*DAY+c.startMinute+(c.visitsPerDay===1?0:Math.floor(slot*720/(c.visitsPerDay-1)));return {day,slot,start,end:start+c.windowMinutes,key:`${day}:${slot}`};});}
 export function currentCareWindow(w:World,c:LongCareAgreement){const day=Math.floor(w.minute/DAY);return day<c.startDay||day>=c.endDay?undefined:careWindows(c,day).find(s=>s.start<=w.minute&&w.minute<s.end&&!c.visits.some(v=>v.key===s.key));}
 export function longCareConflict(w:World,id:string,start:number,end:number,except?:string):string|null{for(const c of w.longCare?.agreements??[]){if(c.id===except||c.status!=='active'||c.providerId!==id&&c.beneficiaryId!==id)continue;const first=Math.max(c.startDay,Math.floor(start/DAY));for(let day=first;day<Math.min(c.endDay,Math.floor(end/DAY)+1);day++)for(const s of careWindows(c,day))if(start<s.end&&s.start<end)return '与本人已接受的托育或长期照护窗口重叠';}return null;}
-function scheduleError(w:World,r:Resident,c:LongCareAgreement){const b=w.buildings.find(b=>b.id===c.addressId);for(let day=c.startDay;day<c.endDay;day++)for(const s of careWindows(c,day)){const error=longCareConflict(w,r.id,s.start,s.end,c.id)??educationConflict(w,r.id,s.start,s.end,b?.id)??(b?employmentConflict(w,r,s.start,s.end,b.id):null);if(error)return error;if(w.duties?.shifts.some(o=>o.workerId===r.id&&['booked','on-duty'].includes(o.status)&&s.start<o.end&&o.start<s.end))return '与本人已接受的公共班次冲突';}return null;}
+function scheduleError(w:World,r:Resident,c:LongCareAgreement){
+ // Education also checks care conflicts. Exclude this same signed promise on resume.
+ w={...w,longCare:w.longCare?{...w.longCare,agreements:w.longCare.agreements.filter(o=>o.id!==c.id)}:undefined};
+ const b=w.buildings.find(b=>b.id===c.addressId);for(let day=c.startDay;day<c.endDay;day++)for(const s of careWindows(c,day)){const error=longCareConflict(w,r.id,s.start,s.end,c.id)??educationConflict(w,r.id,s.start,s.end,b?.id)??(b?employmentConflict(w,r,s.start,s.end,b.id):null);if(error)return error;if(w.duties?.shifts.some(o=>o.workerId===r.id&&['booked','on-duty'].includes(o.status)&&s.start<o.end&&o.start<s.end))return '与本人已接受的公共班次冲突';}return null;}
 function relevantObservation(w:World,c:LongCareAgreement){return w.longCare!.observations.find(o=>o.beneficiaryId===c.beneficiaryId&&o.at>=(c.acceptedAt??c.createdAt)&&o.expiresAt>w.minute&&(c.condition!=='missedHandoff'||o.agreementId===c.primaryId&&o.slotKey===currentCareWindow(w,c)?.key)&&(c.condition==='observedNeed'||c.condition==='missedHandoff'?o.observerId===c.providerId&&o.kind===c.condition:c.condition==='deliveredNotice'&&w.longCare!.notices.some(n=>n.recipientId===c.providerId&&n.observationId===o.id&&n.deliveredAt>=(c.acceptedAt??c.createdAt))));}
 function eligibleVisit(w:World,c:LongCareAgreement){return c.condition==='daily'||!!relevantObservation(w,c);}
-function currentConsent(w:World,c:LongCareAgreement){const p=person(w,c.beneficiaryId);if(!alive(p)||p.refusesCare)return false;if(ageYears(p.bornAt,w.minute)<6)return p.guardianIds.includes(c.signerId);return c.childAssent;}
+function currentConsent(w:World,c:LongCareAgreement){const p=person(w,c.beneficiaryId);if(!alive(p)||p.refusesCare)return false;const age=knownAgeYears(p.bornAt,w.minute);if(age===null)return false;if(age<6)return p.guardianIds.includes(c.signerId);return longCareHasPersonalAssent(w,c);}
+/** Ending one accepted promise needs its own assent, not just assent to the replacement. */
+function handoffParties(w:World,old:LongCareAgreement,next:LongCareAgreement):CareHandoff['approvals']|null {
+ const p=person(w,old.beneficiaryId);if(!alive(p)||p.refusesCare)return null;
+ const age=knownAgeYears(p.bornAt,w.minute);if(age===null)return null;
+ if(age>=18)return capable(p)?[{residentId:p.id,role:'beneficiary',acceptedAt:null}]:null;
+ const guardians=[...new Set([old.signerId,next.signerId])];
+ if(guardians.some(id=>!p.guardianIds.includes(id)||!adult(w,person(w,id)!)))return null;
+ if(age>=6&&!capable(p))return null;
+ return [...guardians.map(residentId=>({residentId,role:'guardian' as const,acceptedAt:null})),...(age>=6?[{residentId:p.id,role:'beneficiary' as const,acceptedAt:null}]:[])];
+}
+function handoffCurrentReason(w:World,h:CareHandoff):string|null {
+ const old=agreement(w,h.oldAgreementId),next=agreement(w,h.newAgreementId),p=person(w,h.beneficiaryId),from=person(w,h.fromId),to=person(w,h.toId);
+ if(h.status!=='offered'||h.expiresAt<=w.minute)return '这次有限交接已经结束或到期';
+ if(!old||!next||old.status!=='active'||next.status!=='active'||old.endDay*DAY<=w.minute||next.endDay*DAY<=w.minute||old.providerId!==h.fromId||next.providerId!==h.toId||old.beneficiaryId!==h.beneficiaryId||next.beneficiaryId!==h.beneficiaryId||!currentConsent(w,old)||!currentConsent(w,next))return '原照护或替代约定已经失效，不能沿用旧交接';
+ const parties=handoffParties(w,old,next);
+ if(!parties?.length||!h.approvals||parties.length!==h.approvals.length||parties.some(p=>!h.approvals!.some(a=>a.residentId===p.residentId&&a.role===p.role)))return '本人或当前监护权限已改变，须重新提出交接';
+ if(!alive(p)||!adult(w,from)||!adult(w,to)||!coLocated(w,from,p,2)||!coLocated(w,to,p,2)||!coLocated(w,from,to,2)||parties.some(a=>!coLocated(w,person(w,a.residentId)!,p,2)))return '原照护者、新照护者、受照护者及当前签署人须共同到场';
+ return null;
+}
 export function longCareReason(w:World,r:Resident,a:LongCareAction):string|null{
  if(a.operation==='acceptSupport'||a.operation==='declineSupport')return supportReason(w,r,a);
+ // Refusing one's own concrete care is an expression, not a new contract decision.
+ // Keep all provider, guardian and third-party powers behind the original capacity rules.
+ if(a.operation==='cancel'&&agreement(w,a.agreementId)?.beneficiaryId===r.id)return longCareSelfWithdrawal(w,r,a)?null:'本人当前不能表达停止这份具体照护，或停止内容已改变';
  if(!w.longCare||!capable(r))return '本人当前不能安排托育与长期照护';
  if(a.operation==='offer'){
   const binding=careDefinition(w,a.definition);a.definition=binding.definition;const rules=binding.rules;
@@ -34,33 +62,67 @@ export function longCareReason(w:World,r:Resident,a:LongCareAction):string|null{
  }
  if(a.operation==='observe'){const p=person(w,a.targetId);return alive(p)&&coLocated(w,r,p,8)&&(p.hunger>=70||p.health<=35)?null:'本人眼前尚无可确认的实际照护需求';}
  if(a.operation==='notify'){const o=w.longCare.observations.find(o=>o.id===a.observationId),target=person(w,a.providerId);return o&&o.observerId===r.id&&o.expiresAt>w.minute&&capable(target)&&coLocated(w,r,target,2)&&!w.longCare.notices.some(n=>n.recipientId===target.id&&n.observationId===o.id)?null:'需要本人的近期实际观察，并亲自向眼前的人送达消息';}
- if(a.operation==='receiveHandoff'){const h=w.longCare.handoffs.find(h=>h.id===a.replacementId),old=h&&agreement(w,h.oldAgreementId),next=h&&agreement(w,h.newAgreementId),p=h&&person(w,h.beneficiaryId),other=h&&person(w,h.fromId);return h&&h.status==='offered'&&h.expiresAt>w.minute&&h.toId===r.id&&old?.status==='active'&&next?.status==='active'&&currentConsent(w,next)&&alive(p)&&capable(other)&&coLocated(w,r,p,2)&&coLocated(w,r,other,2)?null:'实际交接需要原照护者、受照护者与已经另行接受的新照护者共同到场';}
+ if(['approveHandoff','declineHandoff','receiveHandoff'].includes(a.operation)){
+  const h=w.longCare.handoffs.find(h=>h.id===a.replacementId);if(!h)return '没有这次具体交接';
+  const signer=h.approvals?.find(p=>p.residentId===r.id);
+  if(a.operation==='declineHandoff')return h.status==='offered'&&h.expiresAt>w.minute&&(!!signer||[h.fromId,h.toId,h.beneficiaryId].includes(r.id))?null:'没有本人可拒绝或撤回的交接';
+  const error=handoffCurrentReason(w,h);if(error)return error;
+  if(a.operation==='approveHandoff')return signer&&signer.acceptedAt===null?null:'没有尚待本人独立同意的交接';
+  return h.toId===r.id&&h.approvals!.every(p=>p.acceptedAt!==null)?null:'受照护者或当前监护人须先独立同意，再由新照护者亲自确认';
+ }
  const c=agreement(w,a.agreementId);if(!c)return '没有这项具体照护承诺';const p=person(w,c.beneficiaryId);
- if(a.operation==='cancel'||a.operation==='decline')return ([c.providerId,c.signerId,c.beneficiaryId].includes(r.id)||alive(p)&&ageYears(p.bornAt,w.minute)<18&&p.guardianIds.includes(r.id)&&coLocated(w,r,p,2))&&['offered','awaitingChild','active'].includes(c.status)?null:'没有本人可终止的有效承诺';
- if(a.operation==='accept'){if(c.signerId!==r.id||c.status!=='offered'||!alive(p)||signer(w,p)?.id!==r.id||!capable(person(w,c.providerId))||!coLocated(w,r,person(w,c.providerId)!,6)||!coLocated(w,r,p,6)||c.startDay*DAY+c.startMinute+c.windowMinutes<=w.minute)return '需要当前有效的签署人、照护者与未结束的首个窗口';const cost=c.fee*(c.endDay-c.startDay)*c.visitsPerDay;if(!c.funding&&r.coins<cost)return '本人的实际钱款不足以预存有限照护费用';return scheduleError(w,person(w,c.providerId)!,c);}
- if(a.operation==='assent')return c.beneficiaryId===r.id&&c.status==='awaitingChild'&&ageYears(r.bornAt,w.minute)>=6&&capable(person(w,c.providerId))&&coLocated(w,r,person(w,c.providerId)!,6)?null:'没有等待本人另行同意的照护承诺';
+ if(a.operation==='cancel'||a.operation==='decline')return ([c.providerId,c.signerId,c.beneficiaryId].includes(r.id)||alive(p)&&knownAgeYears(p.bornAt,w.minute)!==null&&ageYears(p.bornAt,w.minute)<18&&p.guardianIds.includes(r.id)&&coLocated(w,r,p,2))&&['offered','awaitingChild','active'].includes(c.status)?null:'没有本人可终止的有效承诺';
+ if(a.operation==='accept'){if(c.signerId!==r.id||c.status!=='offered'||!alive(p)||p.refusesCare||signer(w,p)?.id!==r.id||!adult(w,person(w,c.providerId))||!coLocated(w,r,person(w,c.providerId)!,6)||!coLocated(w,r,p,6)||c.startDay*DAY+c.startMinute+c.windowMinutes<=w.minute)return '需要当前有效的签署人、照护者与未结束的首个窗口';const cost=c.fee*(c.endDay-c.startDay)*c.visitsPerDay;if(!c.funding&&r.coins<cost)return '本人的实际钱款不足以预存有限照护费用';return scheduleError(w,person(w,c.providerId)!,c);}
+ if(a.operation==='assent')return c.beneficiaryId===r.id&&longCareAwaitingPersonalAssent(w,c)&&!r.refusesCare&&ageYears(r.bornAt,w.minute)>=6&&(c.assentPausedAt!==undefined||c.status==='active'||w.minute<c.startDay*DAY+c.startMinute+c.windowMinutes)&&adult(w,person(w,c.providerId))&&coLocated(w,r,person(w,c.providerId)!,6)?scheduleError(w,person(w,c.providerId)!,c):'没有等待本人另行同意的照护承诺';
+ if(a.operation==='disarm'&&c.providerId===r.id&&c.status==='awaitingChild'&&c.assentPausedAt!==undefined)return c.armed?null:'本人已经停止这一照护执行安排';
  if(c.status!=='active'||!alive(p)||!currentConsent(w,c))return '照护约定或受照护者当前的同意已不适用';
  if(c.providerId!==r.id)return '只有本人能履行或开启自己的照护分支';
+ if(a.operation!=='disarm'&&!adult(w,r))return '照护者须仍有已知成年身份与当前能力，不能沿用失效的履约权限';
  if(a.operation==='arm'||a.operation==='disarm')return c.armed===(a.operation==='arm')?'本人已经处于这一照护执行状态':null;
- if(a.operation==='handoff'){const next=agreement(w,a.replacementId),other=next&&person(w,next.providerId);return next?.status==='active'&&next.beneficiaryId===p.id&&next.providerId!==r.id&&capable(other)&&coLocated(w,r,p,2)&&coLocated(w,r,other,2)&&currentConsent(w,next)?null:'需要已经另行签署的替代照护、双方照护者与受照护者实际共同在场';}
+ if(a.operation==='handoff'){
+  const next=agreement(w,a.replacementId);if(!next||next.providerId===r.id||next.beneficiaryId!==p.id)return '需要同一受照护者另行签署的替代照护';
+  if(w.longCare.handoffs.some(h=>h.oldAgreementId===c.id&&h.status==='offered'&&h.expiresAt>w.minute))return '原约定已有尚待各方答复的交接';
+  const h:CareHandoff={id:'',fromId:r.id,toId:next.providerId,beneficiaryId:p.id,oldAgreementId:c.id,newAgreementId:next.id,createdAt:w.minute,expiresAt:w.minute+60,status:'offered',approvals:handoffParties(w,c,next)??[]};
+  return handoffCurrentReason(w,h);
+ }
  if(a.operation==='visit'){if(!currentCareWindow(w,c)||!eligibleVisit(w,c))return '当前不在未完成的约定窗口，或本人尚未观察或获悉已接受的触发条件';if(Object.entries(c.rules!.materials).some(([i,n])=>(r.inventory[i as keyof typeof r.inventory]??0)<n!))return '照护者须亲自带上自己的1餐食和1清水';if(!coLocated(w,r,p,12)&&(!c.addressId||!r.knownBuildings.includes(c.addressId)))return '尚无可接触的对象或本人已知的照护地址';return null;}
  return '没有这项照护行动';
 }
-export function longCareTarget(w:World,r:Resident,a:LongCareAction):{target:Vec;duration:number;error?:string}{const c0=agreement(w,a.agreementId);if(a.operation==='visit'&&c0&&c0.providerId===r.id&&capable(r)&&c0.status!=='active'){const b=w.buildings.find(b=>b.id===c0.addressId);if(b&&r.at.x===b.door.x&&r.at.y===b.door.y){c0.endKnownBy??=[];if(!c0.endKnownBy.includes(r.id))c0.endKnownBy.push(r.id);c0.armed=false;return {target:r.at,duration:0,error:'本人在原地址未能履行本次照护，未到场者的情况仍须另行查问'};}}const error=longCareReason(w,r,a);if(error)return {target:r.at,duration:0,error};const c=agreement(w,a.agreementId),p=person(w,a.targetId??c?.beneficiaryId);if(a.operation==='visit'&&p){const address=w.buildings.find(b=>b.id===c?.addressId);return {target:coLocated(w,r,p,12)?{...p.at}:address?{...address.door}:r.at,duration:c!.rules?.visitMinutes??20};}return {target:{...r.at},duration:1};}
+export function longCareTarget(w:World,r:Resident,a:LongCareAction):{target:Vec;duration:number;error?:string}{const c0=agreement(w,a.agreementId);if(a.operation==='visit'&&c0&&c0.providerId===r.id&&capable(r)&&!['offered','awaitingChild','active'].includes(c0.status)){const b=w.buildings.find(b=>b.id===c0.addressId);if(b&&r.at.x===b.door.x&&r.at.y===b.door.y){c0.endKnownBy??=[];if(!c0.endKnownBy.includes(r.id))c0.endKnownBy.push(r.id);c0.armed=false;return {target:r.at,duration:0,error:'本人在原地址未能履行本次照护，未到场者的情况仍须另行查问'};}}const error=longCareReason(w,r,a);if(error)return {target:r.at,duration:0,error};const c=agreement(w,a.agreementId),p=person(w,a.targetId??c?.beneficiaryId);if(a.operation==='visit'&&p){const address=w.buildings.find(b=>b.id===c?.addressId);return {target:coLocated(w,r,p,12)?{...p.at}:address?{...address.door}:r.at,duration:c!.rules?.visitMinutes??20};}return {target:{...r.at},duration:1};}
 function refund(w:World,c:LongCareAgreement,status:LongCareAgreement['status'],reason:string){if(!['offered','awaitingChild','active'].includes(c.status))return;const n=accountBalance(w,c.account);pay(w,c.account,ownerAccount(w,c.payer),n,'未发生的长期照护费用退回',`${c.id}:refund:${n}`);c.refunded+=n;w.longCare!.totals.refunded+=n;c.status=status;c.reason=reason;}
 function observe(w:World,r:Resident,p:Resident,kind:CareObservation['kind'],agreementId:string|null,slotKey:string|null=null){const state=w.longCare!,prior=state.observations.find(o=>o.observerId===r.id&&o.beneficiaryId===p.id&&o.kind===kind&&o.agreementId===agreementId&&o.slotKey===slotKey&&Math.floor(o.at/DAY)===Math.floor(w.minute/DAY));if(prior)return prior;const e=fact(w,r,p,kind==='observedNeed'?`${r.name}实际看到了${p.name}的照护需要。`:`${r.name}在约定地点实际等候，原定照护交接未按时出现；缺席原因尚待核实。`);const o:CareObservation={id:'care-observation:'+state.nextSerial++,observerId:r.id,beneficiaryId:p.id,kind,slotKey,agreementId,at:w.minute,expiresAt:w.minute+DAY,eventId:e.id};state.observations.push(o);return o;}
 export function completeLongCare(w:World,r:Resident,a:LongCareAction):string|null{if(a.operation==='acceptSupport'||a.operation==='declineSupport')return completeSupport(w,r,a);const error=longCareReason(w,r,a);if(error)return error;const state=w.longCare!;
- if(a.operation==='offer'){const p=person(w,a.targetId)!,s=signer(w,p)!;let day=Math.floor((w.minute+a.startsIn!)/DAY);if(day*DAY+a.startMinute!<w.minute+a.startsIn!)day++;const id=`care-agreement:${w.id}:${state.nextSerial++}`;const binding=careDefinition(w,a.definition);state.agreements.push({definition:binding.definition,rules:structuredClone(binding.rules),id,knownBy:[],providerId:r.id,beneficiaryId:p.id,signerId:s.id,payer:s.id,addressId:p.homeId,createdAt:w.minute,acceptedAt:null,childAssent:ageYears(p.bornAt,w.minute)<6,status:'offered',startDay:day,endDay:day+a.days!,startMinute:a.startMinute!,windowMinutes:a.windowMinutes!,visitsPerDay:a.visitsPerDay!,fee:a.fee!,account:'escrow:'+id,reserved:0,paid:0,refunded:0,condition:a.condition!,primaryId:a.primaryId??null,armed:false,armedAt:null,visits:[],funding:null,reason:null});const e=fact(w,r,p,`${r.name}提出为${p.name}持续${a.days}日、每日${a.visitsPerDay}次的具体照护，每次完成服务${a.fee}钱；等待本人或监护人另行同意。`);state.agreements.at(-1)!.knownBy=e.witnesses;return null;}
+ if(a.operation==='offer'){const p=person(w,a.targetId)!,s=signer(w,p)!;let day=Math.floor((w.minute+a.startsIn!)/DAY);if(day*DAY+a.startMinute!<w.minute+a.startsIn!)day++;const id=`care-agreement:${w.id}:${state.nextSerial++}`;const binding=careDefinition(w,a.definition);state.agreements.push({definition:binding.definition,rules:structuredClone(binding.rules),id,knownBy:[],providerId:r.id,beneficiaryId:p.id,signerId:s.id,payer:s.id,addressId:p.homeId,createdAt:w.minute,acceptedAt:null,childAssent:false,childAssentedAt:null,status:'offered',startDay:day,endDay:day+a.days!,startMinute:a.startMinute!,windowMinutes:a.windowMinutes!,visitsPerDay:a.visitsPerDay!,fee:a.fee!,account:'escrow:'+id,reserved:0,paid:0,refunded:0,condition:a.condition!,primaryId:a.primaryId??null,armed:false,armedAt:null,visits:[],funding:null,reason:null});const e=fact(w,r,p,`${r.name}提出为${p.name}持续${a.days}日、每日${a.visitsPerDay}次的具体照护，每次完成服务${a.fee}钱；等待本人或监护人另行同意。`);state.agreements.at(-1)!.knownBy=e.witnesses;return null;}
  if(a.operation==='observe'){observe(w,r,person(w,a.targetId)!,'observedNeed',null);return null;}
  if(a.operation==='notify'){const o=state.observations.find(o=>o.id===a.observationId)!,target=person(w,a.providerId)!,p=person(w,o.beneficiaryId)!;const e=fact(w,r,target,`${r.name}亲自告诉${target.name}：自己在此前实际${o.kind==='observedNeed'?'看到'+p.name+'需要照护':'等候'+p.name+'的交接而原定照护者未出现'}；这条消息不说明现在的全部情况。`);state.notices.push({id:'care-notice:'+state.nextSerial++,observationId:o.id,recipientId:target.id,deliveredAt:w.minute,eventId:e.id});const memory=target.memories.find(m=>m.eventId===e.id);if(memory)memory.source='heard';return null;}
+ if(a.operation==='approveHandoff'||a.operation==='declineHandoff'){const h=state.handoffs.find(h=>h.id===a.replacementId)!,p=person(w,h.beneficiaryId)!;if(a.operation==='approveHandoff'){h.approvals!.find(p=>p.residentId===r.id)!.acceptedAt=w.minute;fact(w,r,p,`${r.name}独立同意这次具体照护交接；原约定仍须各方到场并由新照护者确认后才结束，可在完成前撤回。`);}else{h.status='declined';h.reason='一位当事人拒绝或撤回本次交接';fact(w,r,p,`${r.name}拒绝或撤回这次交接，两份照护约定及各自预付款保持原状。`);}return null;}
  if(a.operation==='receiveHandoff'){const h=state.handoffs.find(h=>h.id===a.replacementId)!,old=agreement(w,h.oldAgreementId)!,p=person(w,h.beneficiaryId)!;markPromiseEnd(w,old,r);old.armed=false;refund(w,old,'cancelled','双方实际完成照护交接，原约定剩余给付退回');h.status='completed';state.totals.handoffs++;fact(w,r,p,`${r.name}与${person(w,h.fromId)!.name}在${p.name}身边实际完成照护交接，原约定未发生的费用已退还原付款人。`);return null;}
  const c=agreement(w,a.agreementId)!,p=person(w,c.beneficiaryId)!;
- if(a.operation==='accept'){const total=c.fee*(c.endDay-c.startDay)*c.visitsPerDay;if(!c.funding){pay(w,`resident:${r.id}`,c.account,total,'本人预存有限长期照护费用',c.id+':reserve');c.reserved=total;}c.acceptedAt=w.minute;const provider=person(w,c.providerId)!;if(c.addressId&&!provider.knownBuildings.includes(c.addressId))provider.knownBuildings.push(c.addressId);c.status=c.childAssent||p.id===r.id?'active':'awaitingChild';if(p.id===r.id)c.childAssent=true;fact(w,r,p,`${r.name}接受并为${p.name}预存具体照护费用，${c.status==='active'?'约定成立':'仍等待孩子另行同意'}。`);}
- else if(a.operation==='assent'){c.childAssent=true;c.status='active';fact(w,r,p,`${r.name}自己同意了已经由监护人签署的照护安排。`);}
+ if(a.operation==='accept'){const total=c.fee*(c.endDay-c.startDay)*c.visitsPerDay;if(!c.funding){pay(w,`resident:${r.id}`,c.account,total,'本人预存有限长期照护费用',c.id+':reserve');c.reserved=total;}c.acceptedAt=w.minute;const provider=person(w,c.providerId)!;if(c.addressId&&!provider.knownBuildings.includes(c.addressId))provider.knownBuildings.push(c.addressId);if(p.id===r.id){c.childAssent=true;c.childAssentedAt=w.minute;delete c.legacyPersonalAssent;}c.status=ageYears(p.bornAt,w.minute)<6||longCareHasPersonalAssent(w,c)?'active':'awaitingChild';fact(w,r,p,`${r.name}接受并为${p.name}预存具体照护费用，${c.status==='active'?'约定成立':'仍等待孩子另行同意'}。`);}
+ else if(a.operation==='assent'){c.childAssent=true;c.childAssentedAt=w.minute;delete c.legacyPersonalAssent;c.status='active';delete c.assentPausedAt;fact(w,r,p,`${r.name}自己同意了已经由监护人签署的照护安排。`);}
  else if(a.operation==='cancel'||a.operation==='decline'){markPromiseEnd(w,c,r);c.armed=false;refund(w,c,'cancelled','当事人终止或婉拒');fact(w,r,p,`${r.name}终止了本人的具体照护约定，尚未发生服务的费用已退回原来源。`);}
  else if(a.operation==='arm'||a.operation==='disarm'){c.armed=a.operation==='arm';c.armedAt=c.armed?w.minute:null;fact(w,r,p,`${r.name}${c.armed?'自行开启已接受约定中的有限照护安排；只在约定时段和本人可观察的条件成立时执行':'停止自己事先开启的照护安排'}。`);}
- else if(a.operation==='handoff'){const next=agreement(w,a.replacementId)!;state.handoffs.push({id:'care-handoff:'+state.nextSerial++,fromId:r.id,toId:next.providerId,beneficiaryId:p.id,oldAgreementId:c.id,newAgreementId:next.id,createdAt:w.minute,expiresAt:w.minute+60,status:'offered'});fact(w,r,p,`${r.name}在${p.name}身边提出与${person(w,next.providerId)!.name}进行实际照护交接，等待对方亲自确认。`);}
- else if(a.operation==='visit'){if(!coLocated(w,r,p,2))return '照护对象不在实际身边，本次不能计作服务';const slot=currentCareWindow(w,c)!;let nourishment=0;for(const [i,n]of Object.entries(c.rules!.materials)){const item=i as keyof typeof r.inventory;nourishment+=foodValue(w,'person:'+r.id,item,n);r.inventory[item]!-=n!;}p.hunger=Math.max(0,p.hunger-nourishment);p.health=Math.min(100,p.health+c.rules!.healthGain);p.revision++;pay(w,c.account,ownerAccount(w,c.providerId),c.fee,'实际完成一次长期照护',`${c.id}:visit:${slot.key}`);c.paid+=c.fee;c.visits.push({key:slot.key,day:slot.day,slot:slot.slot,at:w.minute,providerId:r.id,paid:c.fee});state.totals.visits++;state.totals.paid+=c.fee;fact(w,r,p,`${r.name}亲自用自己实际携带的约定物资完成对${p.name}的一次${c.rules!.visitMinutes}分钟照护，实际取得${c.fee}钱。`);}
+ else if(a.operation==='handoff'){const next=agreement(w,a.replacementId)!;state.handoffs.push({id:'care-handoff:'+state.nextSerial++,fromId:r.id,toId:next.providerId,beneficiaryId:p.id,oldAgreementId:c.id,newAgreementId:next.id,createdAt:w.minute,expiresAt:w.minute+60,status:'offered',approvals:handoffParties(w,c,next)!});fact(w,r,p,`${r.name}在${p.name}身边提出与${person(w,next.providerId)!.name}进行实际照护交接，等待受照护者或当前监护人独立同意，再由新照护者亲自确认。`);}
+ else if(a.operation==='visit'){
+  if(!coLocated(w,r,p,2))return '照护对象不在实际身边，本次不能计作服务';
+  const slot=currentCareWindow(w,c)!,container='person:'+r.id;
+  const inputs=foodFlowInputs(w,container,c.rules!.materials,1),before=inputs?{...r.inventory}:undefined;
+  const hungerBefore=p.hunger,healthBefore=p.health;
+  let nourishment=0;
+  for(const [i,n]of Object.entries(c.rules!.materials)){const item=i as keyof typeof r.inventory;nourishment+=foodValue(w,container,item,n);r.inventory[item]!-=n!;}
+  p.hunger=Math.max(0,p.hunger-nourishment);p.health=Math.min(100,p.health+c.rules!.healthGain);p.revision++;
+  pay(w,c.account,ownerAccount(w,c.providerId),c.fee,'实际完成一次长期照护',`${c.id}:visit:${slot.key}`);
+  c.paid+=c.fee;c.visits.push({key:slot.key,day:slot.day,slot:slot.slot,at:w.minute,providerId:r.id,paid:c.fee});state.totals.visits++;state.totals.paid+=c.fee;
+  const event=fact(w,r,p,`${r.name}亲自用自己实际携带的约定物资完成对${p.name}的一次${c.rules!.visitMinutes}分钟照护，实际取得${c.fee}钱。`);
+  if(inputs&&r.activity?.action.type==='longCare'&&r.activity.action.operation==='visit'){
+   // The signed recipe governs the actual operation, never the current definition.
+   // Record actual debits and immediate effects without inferring missing nutrition.
+   for(const input of inputs)input.quantity=(before![input.item]??0)-(r.inventory[input.item]??0);
+   recordLongCareMeal(w,{action:'longCare',operation:'visit',at:w.minute,providerId:r.id,beneficiaryId:p.id,eventId:event.id,
+    planId:r.activity.planId,container,definition:c.definition!,agreementId:c.id,slotKey:slot.key,inputs,
+    hungerBefore,hungerAfter:p.hunger,hungerRelief:hungerBefore-p.hunger,healthBefore,healthAfter:p.health,healthGain:p.health-healthBefore});
+  }
+ }
  return null;
 }
 export function longCareWorkError(w:World,r:Resident,a:LongCareAction){if(a.operation!=='visit')return null;const problem=longCareReason(w,r,a);if(problem)return problem;const c=agreement(w,a.agreementId)!,p=person(w,c.beneficiaryId)!;return coLocated(w,r,p,2)?null:'受照护者尚未实际到场，不能计作照护工时';}
@@ -68,17 +130,18 @@ export function advanceLongCare(w:World):Plan[]{initializeLongCare(w);const stat
  for(const c of state.agreements){const provider=person(w,c.providerId);if(!['offered','awaitingChild','active'].includes(c.status)&&c.armed&&provider&&capable(provider)&&!provider.plan&&!provider.activity&&eligibleVisit(w,c)&&knownPromises(w,provider).some(p=>p.id==='longCare:'+c.id)){const slot=currentCareWindow(w,c);if(slot){const id=`care-branch:${c.id}:${slot.key}`;if(!hasReceipt(w,'plan:'+id))plans.push({id,actorId:provider.id,actorRevision:provider.revision,createdAt:w.minute,definition:w.activeDefinitions['action/routine'],intention:'履行本人此前开启的有限安排，先到原地址核实',actions:[{type:'promise',operation:'inspect',promiseId:'longCare:'+c.id},{type:'longCare',operation:'visit',agreementId:c.id}]});}}if(!['offered','awaitingChild','active'].includes(c.status))continue;const r=person(w,c.providerId),p=person(w,c.beneficiaryId);
   if(!alive(r)||!alive(p)||c.status==='offered'&&c.payer!=='treasury'&&person(w,c.payer)?.status==='dead'){refund(w,c,'cancelled','原给付或当事人已无法继续，待知情人核实照护缺口');continue;}
   if(w.minute>=c.endDay*DAY){refund(w,c,'completed','有限期限结束，未发生部分退回原来源');continue;}
-  if(c.status!=='active'){if(w.minute>=c.startDay*DAY+c.startMinute+c.windowMinutes)refund(w,c,'expired','首个照护窗口结束前未完成各方同意');continue;}
+  if(c.status!=='active'){if(c.assentPausedAt===undefined&&w.minute>=c.startDay*DAY+c.startMinute+c.windowMinutes)refund(w,c,'expired','首个照护窗口结束前未完成各方同意');continue;}
   const slot=currentCareWindow(w,c);if(!slot){delete c.handoffWatch;continue;}
   if(coLocated(w,r,p,8)&&(p.hunger>=70||p.health<=35))observe(w,r,p,'observedNeed',c.id);
   if(c.condition==='missedHandoff'&&c.primaryId){const primary=agreement(w,c.primaryId),window=primary&&careWindows(primary,slot.day).find(s=>s.slot===slot.slot),primaryPerson=primary&&person(w,primary.providerId),waiting=capable(r)&&(!r.activity&&!r.plan||r.activity?.action.type==='wait'&&!r.activity.path.length&&!r.activity.room?.path.length);
    if(c.armed&&waiting&&coLocated(w,r,p,2)&&window&&w.minute>=window.start&&w.minute<window.end&&!primary!.visits.some(v=>v.key===window.key)&&(!capable(primaryPerson)||!coLocated(w,primaryPerson,p,2))){const watch=c.handoffWatch,elapsed=w.minute-(watch?.lastAt??w.minute);c.handoffWatch={slotKey:slot.key,lastAt:w.minute,minutes:watch?.slotKey===slot.key&&elapsed>=0&&elapsed<=1.00001?watch.minutes+elapsed:0};if(c.handoffWatch.minutes>=30-1e-8)observe(w,r,p,'missedHandoff',c.primaryId,slot.key);}
    else delete c.handoffWatch;
   }
-  if(!c.armed||!eligibleVisit(w,c)||!capable(r)||r.plan||r.activity||!currentConsent(w,c))continue;const id=`care-branch:${c.id}:${slot.key}`;if(hasReceipt(w,'plan:'+id))continue;
+  if(!c.armed||!eligibleVisit(w,c)||!adult(w,r)||r.plan||r.activity||!currentConsent(w,c))continue;const id=`care-branch:${c.id}:${slot.key}`;if(hasReceipt(w,'plan:'+id))continue;
   plans.push({id,actorId:r.id,actorRevision:r.revision,createdAt:w.minute,definition:w.activeDefinitions['action/routine'],intention:'履行本人此前明确开启的有限照护安排',actions:[{type:'promise',operation:'inspect',promiseId:'longCare:'+c.id},{type:'longCare',operation:'visit',agreementId:c.id}]});
  }
- for(const h of state.handoffs)if(h.status==='offered'&&h.expiresAt<=w.minute)h.status='expired';
+ for(const h of state.handoffs)if(h.status==='offered'&&h.expiresAt<=w.minute){h.status='expired';h.reason='60分钟内未完成各方同意与在场确认';}
+ if(state.handoffs.length>240)state.handoffs=state.handoffs.filter((h,i)=>h.status==='offered'||i>=state.handoffs.length-80);
  if(state.observations.length>240){const retained=new Set(state.notices.filter(n=>n.deliveredAt>w.minute-DAY).map(n=>n.observationId));state.observations=state.observations.filter((o,i)=>o.expiresAt>w.minute||retained.has(o.id)||i>=state.observations.length-80);}
  if(state.notices.length>240)state.notices=state.notices.filter((n,i)=>n.deliveredAt>w.minute-DAY||i>=state.notices.length-80);
  return plans;

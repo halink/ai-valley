@@ -1,3 +1,5 @@
+import {regionSurveyPanel} from './region-survey.js';
+import {landRightsPanel} from './land-rights.js';
 import {ferryPanel} from './ferry.js';
 import type {World} from '../shared/types.js';
 import type {ConstructionProject} from '../shared/construction.js';
@@ -35,7 +37,7 @@ export function constructionPanel(w:World){
    <small>${dateLabel(p.createdAt)} 提议${p.ownerId==='commons'?p.authorizedUntil!==null?' · 公共授权至'+dateLabel(p.authorizedUntil):' · 尚未取得公共用地授权':''}</small>
    <div class="place-actions"><button data-project="${esc(p.id)}">查看工地</button>${p.buildingId?`<button data-locate="${esc(p.buildingId)}">查看原址建筑</button>`:''}</div></article>`;
  };
- return `${chapterLinks('construction')}<p class="panel-intro">用途、选址、出资和施工由居民分别决定。材料与劳动逐阶段投入，完工才启用新增空间。这里仅供观察。</p>
+ return `${chapterLinks('construction')}${regionSurveyPanel(w)}${landRightsPanel(w)}<p class="panel-intro">用途、选址、出资和施工由居民分别决定。材料与劳动逐阶段投入，完工才启用新增空间。这里仅供观察。</p>
  <div class="population-flows"><span>进行与遗留 <b>${active.length}</b></span><span>新建交付 <b>${state?.totals.completed??0}</b></span><span>扩建交付 <b>${state?.totals.expanded??0}</b></span></div>
- <div class="duty-list">${active.map(card).join('')||'<p class="empty">居民还没有提出建设工程。房屋不会按预设时间自动出现。</p>'}</div>${upgrades.length?`<h3 class="section-label">建筑兼容改版</h3><div class="duty-list">${upgrades.map(m=>{const b=w.buildings.find(b=>b.id===m.buildingId);return `<article class="duty-card"><h3>${esc(b?.name??'原建筑')}</h3><p>${({offered:'等待本人决定',accepted:'已接受，施工中',declined:'本人已婉拒',cancelled:'已停止',expired:'已到期',completed:'实际完成'} as const)[m.status]} · 实际 ${m.worked.toFixed(1)}/${m.minutes} 分钟<br>原址保留：木材 ${m.stock.wood??0}、石料 ${m.stock.stone??0}</p>${b?`<button data-locate="${esc(b.id)}">查看原建筑</button>`:''}</article>`;}).join('')}</div>`:''}${ferryPanel(w)}${history.length?`<h3 class="section-label">近期工程记录</h3><div class="duty-list">${history.map(card).join('')}</div>`:''}`;
+ <div class="duty-list">${active.map(card).join('')||'<p class="empty">居民还没有提出建设工程。房屋不会按预设时间自动出现。</p>'}</div>${upgrades.length?`<h3 class="section-label">建筑兼容改版</h3><div class="duty-list">${upgrades.map(m=>{const b=w.buildings.find(b=>b.id===m.buildingId),p=m.residentProposal;return `<article class="duty-card"><h3>${esc(b?.name??'原建筑')}${p?' · 居民屋面提议':''}</h3>${p?`<p>提议人：${person(w,p.proposerId)} · ${p.roof==='wood'?'木面':'石板'}屋面<br>报价：木材 ${m.charge.wood??0}、石料 ${m.charge.stone??0}；已实际投入：木材 ${p.consumed.wood??0}、石料 ${p.consumed.stone??0}<br>期限：${dateLabel(m.expiresAt)}。占地、容量、屋况、储物、工位与原约不变。</p><p>${p.parties.map(s=>`${person(w,s.residentId)}（${esc(s.roles.join('、'))}）：${s.acceptedAt!==null?'已独立同意':s.reviewedAt!==null?'已读，尚未同意':'尚未阅读'}`).join('<br>')}</p>${p.reason?`<p>${esc(p.reason)}</p>`:''}`:''}<p>${({offered:'等待本人决定',accepted:'已接受，施工中',declined:'本人已婉拒',cancelled:'已停止',expired:'已到期',completed:'实际完成'} as const)[m.status]} · 实际 ${m.worked.toFixed(1)}/${m.minutes} 分钟<br>原址保留：木材 ${m.stock.wood??0}、石料 ${m.stock.stone??0}</p>${b?`<button data-locate="${esc(b.id)}">查看原建筑</button>`:''}</article>`;}).join('')}</div>`:''}${ferryPanel(w)}${history.length?`<h3 class="section-label">近期工程记录</h3><div class="duty-list">${history.map(card).join('')}</div>`:''}`;
 }

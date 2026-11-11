@@ -1,3 +1,6 @@
+import {shipmentFerry} from '../world/ferry-cargo.js';
+import {premisesPanel} from './premises.js';
+import {outsideAidPanel} from './outside-aid.js';
 import {employmentRoles} from '../world/employment.js';
 import {itemLabels} from '../shared/items.js';
 import type {World} from '../shared/types.js';
@@ -18,7 +21,7 @@ export function employmentPanel(w:World):string {
  const current=state.contracts.filter(c=>c.status==='active');
  const posts=state.posts.filter(p=>p.status==='open'||p.status==='offered');
  const today=Math.floor(w.minute/DAY);
- return `${chapterLinks('employment')}<p class="panel-intro">店主选择具体雇员，应聘者最后确认。工作、辞职和续约分别由本人决定。</p>
+ return `${chapterLinks('employment')}${premisesPanel(w)}<p class="panel-intro">店主选择具体雇员，应聘者最后确认。工作、辞职和续约分别由本人决定。</p>
  <div class="population-numbers"><span><b>${current.length}</b>有效聘约</span><span><b>${state.totals.paid}</b>累计实付工资</span></div>
  <h3 class="section-label">正在招聘</h3><div class="duty-list">${posts.map(p=>{
   const business=w.economy?.businesses.find(b=>b.id===p.businessId);
@@ -63,11 +66,14 @@ export function foreignPanel(w:World):string {
  <h3 class="section-label">公开报价与协商</h3><div class="duty-list">${offers.slice(-20).reverse().map(o=>`<article class="duty-card commerce-card"><div class="duty-heading"><b>${o.side==='import'?'向小镇出售':'向小镇收购'}${names[o.item]}</b><span>${o.price} 钱 / 份</span></div>
  <p>${esc(merchant(o.merchantId)?.name??'原商号')} · ${o.remaining} 份${o.residentId?' · 与 '+person(w,o.residentId)+' 协商':''}</p>
  <small>${o.initiatedBy==='merchant'?'外地商人提出，等居民自己选择':'居民提出，等外地商人独立回复'}。截至${dateTime(o.expiresAt)}。</small></article>`).join('')||'<p class="empty">目前没有可用的外贸报价。商人可以选择生产、等待或不做这笔买卖。</p>'}</div>
- <h3 class="section-label">运输与交接</h3><div class="duty-list">${[...active,...history].map(s=>`<article class="duty-card commerce-card"><div class="duty-heading"><b>${s.side==='import'?'进口':'出口'} ${names[s.item]} × ${s.quantity}</b><span class="shipment-status">${stateNames[s.status]}</span></div>
+ <h3 class="section-label">运输与交接</h3><div class="duty-list">${[...active,...history].map(s=>`<article class="duty-card commerce-card"><div class="duty-heading"><b>${s.publicReserveId?'公共储备（经办非私有） ':''}${s.side==='import'?'进口':'出口'} ${names[s.item]} × ${s.quantity}</b><span class="shipment-status">${s.publicCarrier&&s.goods>0?(s.publicCarrier.sealed?'公粮原位封存':'公粮携运待入库'):stateNames[s.status]}</span></div>
  <p>${person(w,s.residentId)} ↔ ${esc(merchant(s.merchantId)?.name??'原商号')}<br>约定货款 ${s.gross} · ${s.actualTax===null?'已约定税费上限 '+s.maxTax:'实际税费 '+s.actualTax}</p>
- <p>指定交接处（${s.stationAt?.x??trade.station.x}, ${s.stationAt?.y??trade.station.y}）${s.route?.at?` · 货物实际在（${s.route.at.x}, ${s.route.at.y}）<br><button data-tile="${s.route.at.x},${s.route.at.y}">看看这批货物</button>`:s.route&&s.route.phase!=='done'?' · 正在镇外运输段':''}</p>
+ <p>指定交接处（${s.stationAt?.x??trade.station.x}, ${s.stationAt?.y??trade.station.y}）${s.publicCarrier&&s.goods>0?' · 公粮实际携运/封存位置见下':s.route?.at?` · 货物实际在（${s.route.at.x}, ${s.route.at.y}）<br><button data-tile="${s.route.at.x},${s.route.at.y}">看看这批货物</button>`:s.route&&s.route.phase!=='done'?' · 正在镇外运输段':''}</p>
+ ${s.publicCarrier&&s.goods>0?`<p>公共货物${s.publicCarrier.sealed?'原位封存':'随原经办人实际携运'}：（${s.publicCarrier.at.x},${s.publicCarrier.at.y}）；不得作为私人货物，仍须另选送至原共屋。</p>`:''}
+ ${shipmentFerry(w,s.id)?`<p>水运保管：${{offered:'等待船主同意',accepted:'陆运接往起运码头',aboard:'在实际船上',unloaded:'在卸货处等待交回原陆运',released:'已交接',cancelled:'已结束'}[shipmentFerry(w,s.id)!.cargo.status]}；原买卖货款尚按本单独立结算。</p>`:''}
  ${s.deliveryAt!==undefined?`<small>${s.returned?'实际退回':'实际抵达'} ${dateTime(s.deliveryAt)}</small>`:s.arrivesAt!==null?`<small>预计抵达 ${dateTime(s.arrivesAt)}</small>`:''}
  ${s.blockedSince!==null?'<p>交接路段目前受阻，等待通路恢复或双方决定退运。</p>':''}
  ${s.collectedAt!==null?`<small>交接于${dateTime(s.collectedAt)}</small>`:''}</article>`).join('')||'<p class="panel-intro">双方确认并实际交货后，运输记录会出现在这里。</p>'}</div>
+ ${outsideAidPanel(w)}
  <p class="footnote">商号的钱货和镇外原料分别记账，报价由模型产生。观察者不能下单、派人或修改合同。</p>`;
 }

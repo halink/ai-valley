@@ -33,7 +33,7 @@ test('an arriving person is entered in the asset census before their first possi
  const openingExternal=w.economy!.externalCoins;
  w.clock.paused=false;advanceMigration(w);const traveller=outsideCandidate(w)[0],carried=traveller.coins;
  assert.ok(applyOutsideDecision(w,traveller.id,traveller.revision,{intention:'来看看',actions:[{type:'travelToValley'}]}).ok);
- w.minute=w.migration!.contacts.find(c=>c.id===traveller.id)!.journey!.arriveAt-.1;
+ const trip=w.migration!.contacts.find(c=>c.id===traveller.id)!.journey!;w.minute+=trip.staged!.stageRemaining;advanceMigration(w);assert.ok(applyOutsideDecision(w,traveller.id,traveller.revision,{intention:'本人继续余下路程',actions:[{type:'visitorJourney',operation:'continue',journeyId:trip.staged!.id,minutes:trip.staged!.progress}]}).ok);w.minute+=trip.staged!.stageRemaining-.1;
  stepWorld(w,.2);
  assert.ok(w.residents.some(r=>r.id===traveller.id));assert.equal(w.economy!.externalCoins,openingExternal+carried);
  assert.equal(totalCoins(w),w.economy!.initialCoins+w.economy!.externalCoins);

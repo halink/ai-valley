@@ -329,6 +329,8 @@ to{transform:translateY(0);opacity:1}
 .archive-filters .archive-check{flex-direction:row;align-items:center;grid-column:1/-1}.archive-check input{width:auto}
 .archive-pages{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:14px 0 24px;font-size:12px}.archive-pages span{padding:0 4px}.archive-pages button:disabled{opacity:.45;cursor:default}
 .archive-thread{margin-top:6px}.event-people{display:flex;flex-wrap:wrap;gap:8px}.timeline-event>small,.conversation-lines small{font-size:11px}.timeline-event>p,.conversation-lines p{font-size:14px;color:var(--ink);overflow-wrap:anywhere}
+.disaster-history-title,.disaster-fact{overflow-wrap:anywhere}.disaster-fact{margin:10px 0;font-size:12px;line-height:1.8}.disaster-fact p{margin:8px 0}
+.water-history{margin:10px 0;font-size:12px;line-height:1.8;overflow-wrap:anywhere}.water-history summary{cursor:pointer;color:var(--ink)}.water-history p{margin:8px 0}
 @media(max-width:440px){.archive-filters{grid-template-columns:1fr}.archive-pages button{padding:8px}.conversation-lines{padding-left:16px}}
 .dock button.warning{color:var(--anger);border-color:var(--anger)}
 .danger-card{border-left:3px solid var(--anger)}
@@ -348,3 +350,22 @@ to{transform:translateY(0);opacity:1}
 .animal-facts dt{color:var(--muted);font-size:10px}
 .animal-facts dd{margin:4px 0 0;overflow-wrap:anywhere}
 .duty-card button[data-animal-detail]{min-height:28px;text-decoration:underline;text-underline-offset:3px}
+
+/* Read-only activity and decision-protection evidence. */
+.resident-status p,.protection-record p{font-size:12px;line-height:1.8;overflow-wrap:anywhere}
+.status-facts{margin:12px 0;font-size:11px;line-height:1.7}
+.status-facts>div{display:grid;grid-template-columns:minmax(72px,1fr) minmax(0,2.3fr);gap:10px;padding:7px 0;border-bottom:1px solid var(--line)}
+.status-facts dt{color:var(--muted)}
+.status-facts dd{margin:0;overflow-wrap:anywhere}
+.clock-scope{padding:10px 12px;background:var(--paper);border:1px solid var(--slat);border-radius:7px}
+.protection-summary{font-size:10px;color:var(--muted);line-height:1.6}
+.protection-record{border-left:2px solid var(--slat);padding-left:10px}
+
+/* Food observation shares the existing narrow, read-only panel layout. */
+.food-observation{overflow-wrap:anywhere}
+.food-facts{margin:10px 0;font-size:12px;line-height:1.7}
+.food-facts>div{margin:8px 0}
+.food-facts dt{color:var(--muted)}
+.food-facts dd{margin:0}
+
+.selection .follow-status{padding:8px 10px;background:var(--glow);border-left:3px solid var(--leaf);line-height:1.6;overflow-wrap:anywhere}

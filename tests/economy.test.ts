@@ -25,6 +25,7 @@ function fixture(){
 function act(w:World,r:Resident,a:Omit<EconomyAction,'type'>){
   const action:EconomyAction={type:'economy',...a};
   if(action.operation==='buy'&&action.maxTotal===undefined){const l=w.economy!.listings.find(l=>l.id===action.listingId)!;const gross=l.price*action.quantity!;action.maxTotal=gross+salesLevy(w,gross,`resident:${r.id}`);}
+  if(action.operation==='fulfill'&&action.minTotal===undefined){const l=w.economy!.listings.find(l=>l.id===action.listingId)!;action.minTotal=l.price*action.quantity!;}
   if(action.operation==='order'&&action.maximumLevyBasisPoints===undefined)action.maximumLevyBasisPoints=w.civic?.salesTax&&w.civic.salesTax.expiresAt>w.minute?w.civic.salesTax.basisPoints:0;
   const route=economyTarget(w,r,action);assert.equal(route.error,undefined);
   r.at={...route.target};r.inside=null;

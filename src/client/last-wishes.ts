@@ -1,0 +1,7 @@
+import type {World} from '../shared/types.js';
+import {dateLabel} from './community.js';
+const esc=(v:unknown)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
+export function lastWishesPanel(w:World){
+ const name=(id:string)=>esc(w.residents.find(p=>p.id===id)?.name??id),status={draft:'待独立见证',active:'生前已签署',revoked:'本人已撤回',declined:'见证人拒绝',expired:'草案已失效',superseded:'被本人新文书取代'},gift={pending:'尚未接受或执行',paid:'已实际交付',declined:'已被拒绝',unfulfilled:'未履行'};
+ return `<h3 class="section-label">生前遗嘱与安葬意愿</h3><p class="panel-intro">以下是观察记录，不是居民共同知识。见证不任命执行人，文书不预留钱物、墓位或人手。现金须先保护债务及全部继承人的独立权利；安葬仍须有人自愿搬运。</p><div class="duty-list">${(w.lastWishes?.records??[]).map(c=>`<article class="duty-card"><h3>${name(c.personId)} · ${status[c.status]}</h3><p>${dateLabel(c.createdAt)}本人提出 · 见证人${name(c.witnessId)}${c.signedAt===null?'尚未同意':'于'+dateLabel(c.signedAt)+'独立见证'}<br>登记处：${esc(w.buildings.find(b=>b.id===c.buildingId)?.name??'原场所')}</p><p>${c.beneficiaryId?'希望给'+name(c.beneficiaryId)+'至多'+c.amount+'钱；清算净现金四分之一为额外上限。':'未提出现金遗赠。'}<br>${gift[c.gift.status]}${c.gift.amount?'：'+c.gift.amount+'钱':''}${c.gift.reason?' · '+esc(c.gift.reason):''}</p><p>已实际查阅：${Object.keys(c.readers).map(name).join('、')||'暂无'}<br>已独立同意的继承人：${Object.keys(c.approvals).map(name).join('、')||'暂无'}</p><p>希望${c.graveId?'使用原记录墓位'+esc(c.graveId):'使用实际可用空墓位'}；墓志：“${esc(c.epitaph)}”<br>${c.burial?esc(c.burial.reason):'尚无按本份意愿实际完成的安葬记录'}</p></article>`).join('')||'<p class="empty">尚无居民本人写下身后意愿。旧档不代写、不补造同意。</p>'}</div>`;
+}

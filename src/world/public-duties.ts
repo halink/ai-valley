@@ -1,5 +1,10 @@
-import {roomLayout} from '../shared/rooms.js';
+import {clearRoomPoint} from './commons-observation.js';
+import {canInspectDutyService,dutyServiceApproachCost,dutyServicePoint,dutyInspectionPoint,dutyInspectionApproachCost,knownDutyPlace} from './public-duty-observation.js';
+import {movementRate} from './health.js';
+import {occupiesKitchen,roomLayout} from '../shared/rooms.js';
 import {foodTransaction} from './food.js';
+import {foodFlowInputs,recordPublicDutyMeal} from './food-consumption-evidence.js';
+import {accountBalance} from './economy.js';
 import {educationConflict} from './education.js';
 import type {Building, Resident, Vec, World} from '../shared/types.js';
 import type {DutyAssignment, DutyRole, PublicDutyAction, PublicShift} from '../shared/public-duties.js';
@@ -37,7 +42,7 @@ export function hasDutyMaterials(w:World,person:Resident,shift:PublicShift){retu
 function staffed(w:World, shift:PublicShift, place:Building) {
   const worker=w.residents.find(p=>p.id===shift.workerId);
   if(!worker || !mayWork(w,worker,shift.role) || !same(worker.at,place.door) || worker.inside!==place.id) return undefined;
-  if(w.rooms){const slot=roomLayout(w,place).slots.find(s=>s.key===(shift.role==='care'?'care':'kitchen'));if(!slot||!worker.roomAt||!same(slot.at,worker.roomAt))return undefined;}
+  if(w.rooms){const slot=roomLayout(w,place).slots.find(s=>s.key===(shift.role==='care'?'care':'kitchen'));if(!slot||!worker.roomAt||!same(slot.at,worker.roomAt)||!clearRoomPoint(roomLayout(w,place),worker.roomAt))return undefined;}
   const action=worker.activity?.action;
   if(action && !(action.type==='wait' || action.type==='publicDuty' && ['attend','stay','withdraw'].includes(action.operation))) return undefined;
   return worker;
@@ -114,6 +119,11 @@ export function advancePublicDuties(w:World):void {
 function overlap(a:PublicShift,b:PublicShift) {return a.start<b.end&&b.start<a.end;}
 /** Action eligibility at the board and on the spot is shared by the model and the executor. */
 export function dutyReason(w:World,r:Resident,a:PublicDutyAction):string|null {
+  if(a.operation==='inspect'){
+    const b=w.buildings.find(b=>b.id===a.buildingId);
+    if(w.mode!=='formal'||!competent(r)||!b||!knownDutyPlace(w,r,b)||b.condition<=0)return '须有已知的完好公共服务地点和本人决定';
+    return dutyInspectionApproachCost(w,r,b)===null?'公共服务桌旁或床边的实际路线不可达':null;
+  }
   const shift=w.duties?.shifts.find(s=>s.id===a.shiftId);
   if(w.mode!=='formal'||!shift||!competent(r))return '该公共班次或行动人当前不可用';
   const place=placeFor(w,shift);
@@ -152,6 +162,9 @@ export function dutyReason(w:World,r:Resident,a:PublicDutyAction):string|null {
       return null;
     case 'stay':return shift.status==='on-duty'&&owns&&mayWork(w,r,shift.role)?null:'本人当前没有在场值守';
     case 'receive':{
+      const active=r.activity?.action.type==='publicDuty'&&r.activity.action.operation==='receive'&&r.activity.action.shiftId===shift.id?r.activity:undefined;
+      if((shift.clientId===r.id||active&&active.remaining<serviceMinutes[shift.role])&&(!atServicePoint(w,r,place)||shift.clientId!==r.id))return '已经开始的公共服务失去实际位置或席位，须重新决定';
+      if(dutyServiceApproachCost(w,r,place,shift)===null)return '公共服务桌台或床位的实际路线不可达或正在被占用';
       if(shift.status!=='on-duty'||owns||w.minute<shift.start)return '没有在岗的服务者';
       if(shift.clientId && shift.clientId!==r.id)return '这处工位正在服务另一位居民';
       const provider=staffed(w,shift,place);
@@ -163,7 +176,15 @@ export function dutyReason(w:World,r:Resident,a:PublicDutyAction):string|null {
   }
 }
 
-export function dutyTarget(w:World,r:Resident,a:PublicDutyAction):{target:Vec;duration:number;error?:string} {
+export function dutyTarget(w:World,r:Resident,a:PublicDutyAction,startDelay=0):{target:Vec;duration:number;error?:string} {
+  if(a.operation==='inspect'){
+    const error=dutyReason(w,r,a),b=w.buildings.find(b=>b.id===a.buildingId);
+    return error||!b?{target:r.at,duration:0,error:error??'公共服务地点不存在'}:{target:{...b.door},duration:1};
+  }
+  if(a.operation==='receive'){
+    const shift=w.duties?.shifts.find(s=>s.id===a.shiftId),place=shift&&placeFor(w,shift);
+    if(!place||!canInspectDutyService(w,r,place))return {target:r.at,duration:0,error:'目前看不到实际公共服务桌台或床位，请先按已知地址到场核实'};
+  }
   const error=dutyReason(w,r,a);
   if(error)return {target:r.at,duration:0,error};
   const shift=w.duties!.shifts.find(s=>s.id===a.shiftId)!;
@@ -172,7 +193,8 @@ export function dutyTarget(w:World,r:Resident,a:PublicDutyAction):{target:Vec;du
   let duration=1;
   if(a.operation==='receive')duration=serviceMinutes[shift.role];
   if(a.operation==='stay')duration=Math.min(15,shift.end-w.minute);
-  if(w.minute+distance(r.at,place.door)+duration-1>shift.end)return {target:r.at,duration:0,error:'路程与工作时间超过本班时段'};
+  const travel=a.operation==='receive'?Math.ceil((dutyServiceApproachCost(w,r,place,shift)??Infinity)/movementRate({...w,definitions:{...w.definitions}},r)):distance(r.at,place.door);
+  if(w.minute+startDelay+travel+duration-1>shift.end)return {target:r.at,duration:0,error:'路程与工作时间超过本班时段'};
   return {target:{...place.door},duration};
 }
 
@@ -180,25 +202,38 @@ export function dutyTarget(w:World,r:Resident,a:PublicDutyAction):{target:Vec;du
 export function dutyWorkError(w:World,r:Resident,a:PublicDutyAction):string|null {
   const error=dutyReason(w,r,a);
   if(error)return error;
+  if(a.operation==='inspect'){const b=w.buildings.find(b=>b.id===a.buildingId)!;return atInspectionPoint(w,r,b)?null:'须实际走到公共服务桌台或床位核实';}
   const shift=w.duties!.shifts.find(s=>s.id===a.shiftId)!;
   const place=placeFor(w,shift)!;
   if(!same(r.at,place.door))return '须亲自抵达公告板或工位';
-  if(a.operation==='attend'||a.operation==='stay'||a.operation==='receive'||a.operation==='withdraw'&&shift.status==='on-duty')r.inside=place.id;
+  if(a.operation==='attend'||a.operation==='stay'||a.operation==='withdraw'&&shift.status==='on-duty')r.inside=place.id;
   if(a.operation==='attend'&&w.minute<shift.start&&r.activity){
     r.activity.remaining=Math.max(1,shift.start-w.minute+1);
   }
   if(a.operation==='receive'){
+    if(!atServicePoint(w,r,place))return '须实际走到公共服务桌台或床位，位置和路线不能受阻';
     // Personal consent is the resident's own model plan. Claim the single seat only upon arrival.
     if(w.minute+(r.activity?.remaining??serviceMinutes[shift.role])-1>shift.end)return '剩余时段不足以完成服务';
-    if(shift.role==='kitchen'&&w.residents.some(p=>p.id!==r.id&&p.inside===place.id&&p.activity?.action.type==='cook'))return '厨房的工位正在被使用';
+    if(shift.role==='kitchen'&&w.residents.some(p=>p.id!==r.id&&occupiesKitchen(w,p,place.id)))return '厨房的工位正在被使用';
     shift.clientId=r.id;
   }
   return null;
 }
 
+function atInspectionPoint(w:World,r:Resident,b:Building){
+  const at=dutyInspectionPoint(w,b);return !!at&&same(r.at,b.door)&&r.inside===b.id&&!!r.roomAt&&same(r.roomAt,at)&&dutyInspectionApproachCost(w,r,b)!==null;
+}
+function atServicePoint(w:World,r:Resident,b:Building){
+  const at=dutyServicePoint(w,b);
+  return !!at&&same(r.at,b.door)&&r.inside===b.id&&!!r.roomAt&&same(r.roomAt,at)&&dutyServiceApproachCost(w,r,b)!==null;
+}
 function completeDutyAtomic(w:World,r:Resident,a:PublicDutyAction):string|null {
   const error=dutyReason(w,r,a);
   if(error)return error;
+  if(a.operation==='inspect'){
+    const b=w.buildings.find(b=>b.id===a.buildingId)!;if(!atInspectionPoint(w,r,b))return '须实际走到公共服务桌台或床位核实';
+    emitEvent(w,{kind:'action',actors:[r.id],place:{...r.at},roomId:b.id,roomAt:{...r.roomAt!},text:`${r.name}按已知地址到${b.name}实际查看公共服务；查看没有领取饭水或接受照护，须另行选择。`});return null;
+  }
   const shift=w.duties!.shifts.find(s=>s.id===a.shiftId)!;
   const place=placeFor(w,shift)!;
   if(!same(r.at,place.door))return '须实际抵达岗位地点';
@@ -231,9 +266,18 @@ function completeDutyAtomic(w:World,r:Resident,a:PublicDutyAction):string|null {
     case 'stay':return null;
     case 'receive':{
       const provider=staffed(w,shift,place);
-      if(shift.clientId!==r.id||!provider||r.inside!==place.id)return '没有持续在场的当班人和服务席位';
+      if(shift.clientId!==r.id||!provider||!atServicePoint(w,r,place))return '没有持续在场的当班人和服务席位';
       const isCare=shift.role==='care';
       const ingredient=isCare?'meal':'turnip';
+      const container=shift.funding?'public:'+shift.buildingId:'person:'+provider.id;
+      // Read the actual physical source, never the treasuryStock summary. Repaired
+      // or missing original lots stay unknown; fixed service relief is not nutrition.
+      const source=shift.funding?w.civic!.stores[shift.buildingId]:provider.inventory;
+      const inputs=foodFlowInputs(w,container,{[ingredient]:isCare?1:2,water:1},1,true);
+      const before=inputs?{...source}:undefined,hungerBefore=r.hunger,healthBefore=r.health;
+      const funding=inputs&&shift.funding?{budgetId:shift.funding.budgetId,account:shift.funding.wageAccount,
+        wagePerService:shift.funding.wagePerService,providerCoinsBefore:provider.coins,
+        accountBalanceBefore:accountBalance(w,shift.funding.wageAccount),paidBefore:shift.funding.paid}:null;
       if(shift.funding){
         if(!payPublicService(w,shift,provider))return '本次公共物资或已预留工资不再可用';
       }else{
@@ -247,12 +291,20 @@ function completeDutyAtomic(w:World,r:Resident,a:PublicDutyAction):string|null {
         provider.skills.care+=0.02;
       }
       shift.served++;shift.clientId=null;
-      const source=shift.funding?'已经采购到场的公共':'自己的';
-      const description=(isCare?`提供了一次基础照护，使用${source} 1 份餐食和 1 份水`:`做了一份热餐，使用${source} 2 份芜菁和 1 份水`)+(shift.funding?`，实际领到 ${shift.funding.wagePerService} 钱工资`:'');
-      emitEvent(w,{kind:isCare?'care':'duty',actors:[provider.id,r.id],place:{...place.door},
+      const descriptionSource=shift.funding?'已经采购到场的公共':'自己的';
+      const description=(isCare?`提供了一次基础照护，使用${descriptionSource} 1 份餐食和 1 份水`:`做了一份热餐，使用${descriptionSource} 2 份芜菁和 1 份水`)+(shift.funding?`，实际领到 ${shift.funding.wagePerService} 钱工资`:'');
+      const event=emitEvent(w,{kind:isCare?'care':'duty',actors:[provider.id,r.id],place:{...place.door},
         text:`${r.name}主动来到${place.name}，${provider.name}为其${description}。`,
         ...(isCare?{audit:{rule:'public-care@1',authority:'consent',evidence:r.activity?.planId??shift.id,
           scope:['food','basic-care'],resources:{meal:1,water:1},providerId:provider.id,termination:'已完成此次本人请求的照护'}}:{})});
+      if(inputs&&r.activity?.action.type==='publicDuty'&&r.activity.action.operation==='receive'){
+        for(const input of inputs)input.quantity=(before![input.item]??0)-(source[input.item]??0);
+        recordPublicDutyMeal(w,{action:'publicDuty',operation:'receive',at:w.minute,providerId:provider.id,beneficiaryId:r.id,
+          eventId:event.id,planId:r.activity.planId,definition:r.activity.definition,shiftId:shift.id,buildingId:shift.buildingId,
+          role:shift.role,serviceNumber:shift.served,container,source:shift.funding?'public':'personal',inputs,
+          hungerBefore,hungerAfter:r.hunger,hungerRelief:hungerBefore-r.hunger,healthBefore,healthAfter:r.health,healthGain:r.health-healthBefore,
+          funding:funding?{...funding,providerCoinsAfter:provider.coins,accountBalanceAfter:accountBalance(w,funding.account),paidAfter:shift.funding!.paid}:null});
+      }
       return null;
     }
   }
@@ -267,8 +319,7 @@ export function publicKitchenReason(w:World,r:Resident,buildingId:string):string
   const duty=w.duties?.shifts.find(s=>s.buildingId===buildingId&&s.role==='kitchen'&&s.status==='on-duty'
     &&w.minute>=s.start&&w.minute<s.end&&staffed(w,s,building));
   if(duty)return '公厨工位正由已到岗的值班人使用，须先等班次结束或交还工位';
-  const busy=w.residents.some(other=>other.id!==r.id&&other.status==='alive'&&other.residency!=='outside'
-    &&same(other.at,building.door)&&other.activity?.action.type==='cook'&&other.activity.path.length===0);
+  const busy=w.residents.some(other=>other.id!==r.id&&occupiesKitchen(w,other,buildingId));
   return busy?'这处公共厨房已有居民在实际烹饪，请等工位空出':null;
 }
 

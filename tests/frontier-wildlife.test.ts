@@ -14,6 +14,8 @@ function frontierAtNight(){
  state.nextDisasterAt=Infinity;
  for(const r of w.residents)r.inside=r.homeId;
  const wolf=state.beasts.find(b=>b.species==='wolf')!;
+ // Keep these single-animal attack regressions independent of the new finite founding mate.
+ state.beasts=state.beasts.filter(b=>b.id===wolf.id||b.species!=='wolf');
  return {w,state,wolf};
 }
 
@@ -58,7 +60,7 @@ test('a witnessing owner can choose to physically move threatened livestock into
  assert.equal(state.totals.livestockAttacks,0);
 });
 
-test('local habitat stock is finite, wolves die without food, and a recovered habitat draws a new individual',()=>{
+test('local habitat stock is finite, wolves die without food, and recovered food cannot resurrect an extinct predator',()=>{
  const {w,state,wolf}=frontierAtNight(),prey=state.foodPatches.find(p=>p.kind==='smallGame')!;
  const starting=prey.amount;
  wolf.at={...prey.at};wolf.hunger=56;wolf.nextMoveAt=w.minute;
@@ -74,7 +76,7 @@ test('local habitat stock is finite, wolves die without food, and a recovered ha
  prey.amount=2;w.minute++;
  advanceFrontierHazards(w,1);
  const immigrant=state.beasts.find(b=>b.species==='wolf'&&b.status==='alive');
- assert.ok(immigrant);assert.notEqual(immigrant.id,wolf.id);
+ assert.equal(immigrant,undefined);
  assert.equal(wolf.status,'dead');
 });
 

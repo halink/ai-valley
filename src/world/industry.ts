@@ -1,3 +1,6 @@
+import {recordWildlifeExit} from './wildlife-population.js';
+import {pastureOperations,pastureTarget,workPasture,completePasture,advancePastureProjects,pastureAdmissionError} from './pasture-projects.js';
+import {currentPremisesLease,premisesWorkReason} from '../shared/premises.js';
 import {hasReceipt} from './receipts.js';
 import {hasFerryAssets} from './ferry.js';
 import {animalCrate,cratedAnimal,crateLocation,canReachCrate,careForCrate} from './livestock-cargo.js';
@@ -5,15 +8,16 @@ import {industryDefinition,initializeIndustryRules} from './industry-rules.js';
 import {animalYears} from '../shared/industry-rules.js';
 import {roomLayout} from '../shared/rooms.js';
 import {initializeIndustryDefinitions,actionRecipe,stationDefinition} from './industry-definitions.js';
-import {initializeFishing,advanceFishing,fishWindow,fishingMinutes,fishingShore,fishingStockAt,shoalWithinReach,waterAtShore,fishingKey} from './fishing.js';
+import {initializeFishing,advanceFishing,fishWindow,takeFish,fishingMinutes,fishingShore,fishingStockAt,shoalWithinReach,waterAtShore,fishingKey} from './fishing.js';
 import {advancePastures,pastureTileFree} from './pasture.js';
 import {initializeFixtureRemoval,advanceFixtureRemoval,publicRemovalError,fixtureMandate,workFixtureRemoval,finishFixtureRemoval} from './fixture-removal.js';
 import {estateStock,estateBuildingLocation,atEstateLocation} from './estate-custody.js';
 import {addHealthCase} from './health.js';
 import {prepareRoomExit} from './rooms.js';
 import {foodTransaction,initializeFood} from './food.js';
+import {recordFoodFlow,recordNaturalFoodFlow,finishFoodFlowAction,craftFoodFlowInputs} from './food-consumption-evidence.js';
 import type {Building,Inventory,Item,Resident,Vec,World} from '../shared/types.js';
-import type {IndustryAction,ToolKind} from '../shared/industry.js';
+import type {IndustryAction,ToolKind,OrchardTree,Livestock} from '../shared/industry.js';
 import {toolKits} from '../shared/industry.js';
 import {completeHunt,huntingTarget} from './hunting.js';
 import {recipeById,stationCosts,stationNames} from './industry-content.js';
@@ -27,7 +31,7 @@ import {animalNames,animalProducts,recordLivestockDeath} from './livestock-life.
 import {recordLivestockNourishment} from './frontier-nutrients.js';
 
 const whole=(v:unknown,a=1,b=120):v is number=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=a&&v<=b;
-const eligible=(w:World,r:Resident,a:IndustryAction)=>r.status==='alive'&&r.residency!=='outside'&&r.canDecide&&r.canExpress&&ageYears(r.bornAt,w.minute)>=(w.scenario==='frontier'&&a.operation==='shoreRest'?6:w.scenario==='frontier'&&a.operation==='fish'?13:18);
+const eligible=(w:World,r:Resident,a:IndustryAction)=>r.status==='alive'&&r.residency!=='outside'&&r.canDecide&&r.canExpress&&ageYears(r.bornAt,w.minute)>=(w.scenario==='frontier'&&a.operation==='shoreRest'?6:w.scenario==='frontier'&&(a.operation==='fish'||a.operation==='equip'&&a.tool==='rod')?13:18);
 const has=(bag:Inventory,cost:Inventory)=>Object.entries(cost).every(([i,n])=>(bag[i as Item]??0)>=n!);
 const change=(bag:Inventory,values:Inventory,sign=1)=>{for(const [i,n]of Object.entries(values))bag[i as Item]=(bag[i as Item]??0)+sign*n!;};
 const building=(w:World,id?:string)=>w.buildings.find(b=>b.id===id);
@@ -35,9 +39,10 @@ const use=(r:Resident,b:Building)=>b.condition>0&&(b.ownerId==='commons'||b.owne
 export {animalNames} from './livestock-life.js';
 export const barnCapacity=(b:Building)=>Math.max(4,Math.floor(b.width*b.height/8));
 const toolFor=(w:World,r:Resident,kind?:ToolKind)=>w.industry?.tools.find(t=>t.ownerId===r.id&&t.kind===kind&&!t.location&&t.durability>0);
-const aliveAnimals=(w:World,id:string)=>w.industry!.animals.filter(a=>a.barnId===id&&a.status==='alive');
+/** A living mother reserves both herself and her unborn offspring in her home and destination barns. */
+const barnOccupancy=(w:World,id:string,except?:string)=>w.industry!.animals.filter(a=>a.id!==except&&a.status==='alive'&&(a.barnId===id||a.destinationId===id)).reduce((n,a)=>n+1+(a.pregnancy?1:0),0);
 const name=(w:World,id:string)=>w.residents.find(r=>r.id===id)?.name??'原居民';
-function fact(w:World,r:Resident,text:string,at=r.at,animalIds?:string[]){emitEvent(w,{kind:'production',actors:[r.id],place:{...at},text,...(animalIds?{animalIds}:{})});}
+function fact(w:World,r:Resident,text:string,at=r.at,animalIds?:string[]){return emitEvent(w,{kind:'production',actors:[r.id],place:{...at},text,...(animalIds?{animalIds}:{})});}
 export function initializeIndustry(w:World){
  if(w.mode!=='formal')return;if(w.industry){initializeIndustryRules(w);initializeIndustryDefinitions(w);initializeFixtureRemoval(w);initializeFishing(w);return;}
  const mineral=w.resources.filter(r=>r.kind==='rock'&&r.amount>0);
@@ -54,37 +59,42 @@ function workConflict(w:World,r:Resident,at:Vec,minutes:number,b?:Building){
 function tameableDuck(w:World,id?:string){
  return w.frontierHazards?.beasts.find(b=>b.id===id&&b.species==='duck'&&b.status==='alive');
 }
-export function industryTarget(w:World,r:Resident,a:IndustryAction):{target:Vec;duration:number;adjacent?:boolean;error?:string}{
+export function industryTarget(w:World,r:Resident,a:IndustryAction,completed=false,validationAt=w.minute,readOnly=false):{target:Vec;duration:number;adjacent?:boolean;error?:string}{
  const fail=(error:string)=>({target:r.at,duration:0,error});if(!w.industry||!eligible(w,r,a))return fail('本人年龄或能力不适合这项活动');
+ if(pastureOperations.has(a.operation)){const t=pastureTarget(w,r,a);const error=t.error??workConflict(w,r,t.target,t.duration);return error?fail(error):t;}
  if(w.scenario!=='frontier'&&(a.tool==='spear'||a.recipeId==='spear'||a.recipeId==='gameMeal'))return fail('此处还没有开拓聚落的打猎活动');
  let at:Vec={...r.at},duration=30,adjacent=false;const b=building(w,a.buildingId),instance=a.toolId?w.industry.tools.find(t=>t.id===a.toolId):a.treeId?w.industry.trees.find(t=>t.id===a.treeId):a.animalId?w.industry.animals.find(t=>t.id===a.animalId):a.mineId?w.industry.mines.find(t=>t.id===a.mineId):['upgrade','repairTool'].includes(a.operation)?w.industry.tools.find(t=>t.ownerId===r.id&&!t.location&&t.kind===a.tool):null;const selected=industryDefinition(w,instance?.definition??a.processDefinition);a.processDefinition=selected.definition;const rules=selected.rules;duration=rules.animalWorkMinutes;
- if(['placeAnimal','feedCrate','waterCrate'].includes(a.operation))initializeFood(w);
+ const permissionAt=completed?w.minute-(a.operation==='repairTool'?rules.repairMinutes:a.operation==='upgrade'?rules.upgradeMinutes:0):validationAt;
+ // Menu inspection must not repair missing food batches and invent freshness.
+ if(!readOnly&&['placeAnimal','feedCrate','waterCrate'].includes(a.operation))initializeFood(w);
  if(['craft','install','uninstall','plantHouse','tendHouse','harvestHouse'].includes(a.operation)){
-  if(!b||!r.knownBuildings.includes(b.id)||!use(r,b)&&!(['tendHouse','harvestHouse'].includes(a.operation)&&w.industry.beds.some(p=>p.buildingId===b.id&&p.index===a.bed&&p.crop?.ownerId===r.id)))return fail('没有已知且有使用权的场所');at={...b.door};
+  if(!b||!r.knownBuildings.includes(b.id)||!use(r,b)&&!(currentPremisesLease(w,b.id,permissionAt)?.tenantId===r.id&&['craft','repairTool','upgrade'].includes(a.operation))&&!(['tendHouse','harvestHouse'].includes(a.operation)&&w.industry.beds.some(p=>p.buildingId===b.id&&p.index===a.bed&&p.crop?.ownerId===r.id)))return fail('没有已知且有使用权的场所');at={...b.door};
  }
  if(a.operation==='craft'){
-  const selected=actionRecipe(w,r.id,a),recipe=selected?.recipe;if(!recipe||!whole(a.minutes))return fail('没有这项有效制作方法或实际工时');
+  const selected=actionRecipe(w,r.id,a,readOnly),recipe=selected?.recipe;if(!recipe||!whole(a.minutes))return fail('没有这项有效制作方法或实际工时');
   a.station=recipe.station??undefined;
   if(!['home','lodge','workshop','store'].includes(b!.kind)||r.skills[recipe.skill]<recipe.minimum)return fail('本人技能或制作场所不适用');
   if(recipe.station&&!w.industry.stations.some(s=>s.buildingId===b!.id&&s.kind===recipe.station&&!(s.removalWorked!>0)))return fail('所需加工设备尚未由居民实际安装');
-  const batch=w.industry.batches.find(c=>c.ownerId===r.id&&c.status==='working');if(batch&&(batch.buildingId!==b!.id||batch.recipe.id!==recipe.id))return fail('本人已有未完成批次，须回到原工位继续');
+  const batch=w.industry.batches.find(c=>c.ownerId===r.id&&c.status==='working');if(a.batchId&&batch?.id!==a.batchId)return fail('原先选择的本人加工批次已失效，须重新决定');if(batch&&(!Number.isFinite(batch.worked)||batch.worked<0||batch.worked>=batch.recipe.minutes))return fail('原批次的实际工时记录不足或已经完成');if(batch&&(batch.buildingId!==b!.id||batch.recipe.id!==recipe.id))return fail('本人已有未完成批次，须回到原工位继续');
   if(!batch&&!has(r.inventory,recipe.input))return fail('本人没有真实配方原料');duration=Math.min(a.minutes,batch?batch.recipe.minutes-batch.worked:recipe.minutes);
  }else if(a.operation==='install'){
+  if(currentPremisesLease(w,b!.id,permissionAt))return fail('原址仍有有效租约，不能未经承租人同意改动工位');
   const installation=a.station?stationDefinition(w,a.station,a.stationDefinition):null;if(installation)a.stationDefinition=installation.definition;
   if(!a.station||!installation||!['workshop','store','lodge'].includes(b!.kind)||b!.kind==='lodge'&&a.station!=='bench'||b!.ownerId!==r.id&&b!.ownerId!=='commons')return fail('不能在此安装这类设备');
   if(w.industry.stations.some(s=>s.buildingId===b!.id&&s.kind===a.station)||!has(r.inventory,installation.cost))return fail('该设备已存在或本人安装材料不足');duration=installation.minutes;
  }else if(a.operation==='uninstall'){
   const fixture=w.industry.stations.find(s=>s.buildingId===b!.id&&s.kind===a.station);if(a.stationId&&fixture?.id!==a.stationId)return fail('原先指定的设备身份已经改变，须由本人重新决定');if(fixture)a.stationId=fixture.id;
   if(!a.station||!w.industry.stations.some(s=>s.buildingId===b!.id&&s.kind===a.station)||b!.ownerId!==r.id&&b!.ownerId!=='commons')return fail('没有本人有权处置的现有设备');if(b!.ownerId==='commons'){const problem=publicRemovalError(w,b!.id,a.station);if(problem)return fail(problem);}
+  if(currentPremisesLease(w,b!.id,permissionAt))return fail('须先结清有效租约，不能拆除承诺的工位');
   if(w.industry.batches.some(c=>c.buildingId===b!.id&&c.status==='working')||w.employment?.contracts.some(c=>c.buildingId===b!.id&&c.status==='active'))return fail('实际在制品或有效雇佣尚未结清，不能拆除工位');duration=b!.ownerId==='commons'?Math.max(.001,(fixture!.uninstallMinutes??60)-(fixture!.removalWorked??0)):fixture!.uninstallMinutes??60;
- }else if(a.operation==='collectTool'){const t=w.industry.tools.find(t=>t.id===a.toolId&&t.ownerId===r.id&&t.location);if(!t)return fail('没有归本人且尚待到原处领取的封存工具');at={...t.location!.at};duration=5;
+ }else if(a.operation==='collectTool'){const t=w.industry.tools.find(t=>t.id===a.toolId&&t.ownerId===r.id&&t.location);if(!t)return fail('没有归本人且尚待到原处领取的封存工具');if(t.location!.regional)return fail('工具封存在镇外实际路程，尚无本人到场或运回安排');at={...t.location!.at};duration=5;
  }else if(a.operation==='equip'){
   if(!a.tool||!Object.hasOwn(toolKits,a.tool)||!has(r.inventory,{[toolKits[a.tool]]:1})||toolFor(w,r,a.tool))return fail('没有未拆封工具，或已有可用同类工具');duration=rules.equipMinutes;
  }else if(a.operation==='repairTool'){
   const t=w.industry.tools.find(t=>t.ownerId===r.id&&!t.location&&t.kind===a.tool&&(!a.toolId||t.id===a.toolId)&&t.durability<t.maxDurability);
-  if(!t||!b||!use(r,b)||!w.industry.stations.some(s=>s.buildingId===b.id&&s.kind==='bench'&&!(s.removalWorked!>0))||!has(r.inventory,{wood:rules.repairWood,stone:rules.repairStone}))return fail('维修需要本人磨损工具、木工作台、2木材和1石料');a.toolId=t.id;a.station='bench';at={...b.door};duration=rules.repairMinutes;
+  if(!t||!b||!use(r,b)&&currentPremisesLease(w,b.id,permissionAt)?.tenantId!==r.id||!w.industry.stations.some(s=>s.buildingId===b.id&&s.kind==='bench'&&!(s.removalWorked!>0))||!has(r.inventory,{wood:rules.repairWood,stone:rules.repairStone}))return fail('维修需要本人磨损工具、木工作台、2木材和1石料');a.toolId=t.id;a.station='bench';at={...b.door};duration=rules.repairMinutes;
  }else if(a.operation==='upgrade'){
-  const t=toolFor(w,r,a.tool);if(!t||t.level>=rules.maximumToolLevel||!has(r.inventory,{bar:rules.upgradeBar,wood:rules.upgradeWood})||!b||!use(r,b)||!w.industry.stations.some(s=>s.buildingId===b.id&&s.kind==='forge'&&!(s.removalWorked!>0)))return fail('升级需要本人可用工具、锻冶炉、2铁锭和2木材');a.station='forge';at={...b.door};duration=rules.upgradeMinutes;
+  const t=toolFor(w,r,a.tool);if(!t||t.level>=rules.maximumToolLevel||!has(r.inventory,{bar:rules.upgradeBar,wood:rules.upgradeWood})||!b||!use(r,b)&&currentPremisesLease(w,b.id,permissionAt)?.tenantId!==r.id||!w.industry.stations.some(s=>s.buildingId===b.id&&s.kind==='forge'&&!(s.removalWorked!>0)))return fail('升级需要本人可用工具、锻冶炉、2铁锭和2木材');a.station='forge';at={...b.door};duration=rules.upgradeMinutes;
  }else if(['plantTree','tendTree','harvestFruit','cutTree'].includes(a.operation)){
   const p=w.plots.find(p=>p.id===a.plotId),t=w.industry.trees.find(t=>t.id===a.treeId&&t.status!=='cut');
   if(a.operation==='plantTree'){
@@ -97,8 +107,7 @@ export function industryTarget(w:World,r:Resident,a:IndustryAction):{target:Vec;
   const duck=tameableDuck(w,a.beastId);
   if(!duck||!a.at||r.inside||!walkable(w,a.at,r.at)||distance(r.at,a.at)>10||distance(a.at,duck.at)>5||
    !has(r.inventory,{fodder:1})||!b||b.kind!=='barn'||!r.knownBuildings.includes(b.id)||!use(r,b))return fail('需要户外亲自接近目击的活野鸭、实有饲料及可用畜舍');
-  const animals=aliveAnimals(w,b.id);
-  if(animals.length+animals.filter(n=>n.pregnancy).length+w.industry.animals.filter(n=>n.barnId!==b.id&&n.destinationId===b.id).length>=barnCapacity(b)||
+  if(barnOccupancy(w,b.id)+1+(duck.pregnancy?1:0)>barnCapacity(b)||
    findPath(w,a.at,b.door,false,65)===null)return fail('畜舍没有空位或没有实际护送路线');
   at={...a.at};duration=24;adjacent=true;
  }else if(a.operation==='feedCrate'||a.operation==='waterCrate'){const c=w.industry.livestockCargo?.find(c=>c.id===a.animalId&&c.status==='crated'),l=c&&crateLocation(w,c);if(!c||!l?.at||!canReachCrate(w,r,c)||!has(r.inventory,{[a.operation==='feedCrate'?'fodder':'water']:1}))return fail('须亲自接近实际活畜运输笼，并使用本人饲料或水');at={...l.at};duration=industryDefinition(w,c.definition).rules.animalWorkMinutes;
@@ -106,7 +115,7 @@ export function industryTarget(w:World,r:Resident,a:IndustryAction):{target:Vec;
   const animal=w.industry.animals.find(n=>n.id===a.animalId&&(n.status==='alive'||a.operation==='collectAnimal')),barn=a.operation==='placeAnimal'||a.operation==='moveAnimal'?b:building(w,animal?.barnId);
   if(!barn||barn.kind!=='barn'||barn.condition<=0||!r.knownBuildings.includes(barn.id))return fail('须已知、实际可用的畜舍');at={...barn.door};
   if(a.operation==='placeAnimal'){
-   if(!a.kind||!Object.hasOwn(animalNames,a.kind)||!use(r,barn)||!has(r.inventory,{[animalCrate(a.kind)]:1})||!cratedAnimal(w,'person:'+r.id,a.kind,a.animalId)||aliveAnimals(w,barn.id).length+aliveAnimals(w,barn.id).filter(n=>n.pregnancy).length>=barnCapacity(barn))return fail('须真实种畜、合法畜舍和未预留的空位');
+   if(!a.kind||!Object.hasOwn(animalNames,a.kind)||!use(r,barn)||!has(r.inventory,{[animalCrate(a.kind)]:1})||!cratedAnimal(w,'person:'+r.id,a.kind,a.animalId)||barnOccupancy(w,barn.id)>=barnCapacity(barn))return fail('须真实种畜、合法畜舍和未预留的空位');
   }else{
    if(!animal)return fail('这只动物不再存活');if(animal.at&&a.operation!=='moveAnimal')at={...animal.at};
    if(animal.carrierId&&!(a.operation==='moveAnimal'&&animal.carrierId===r.id))return fail('这只动物正被另一人实际护送');
@@ -115,21 +124,20 @@ export function industryTarget(w:World,r:Resident,a:IndustryAction):{target:Vec;
    if(a.operation==='collectAnimal'&&animal.product<1)return fail('没有实际可收集的动物产物');
    if(a.operation==='breedAnimal'){
     const sire=w.industry.animals.find(n=>n.id===a.partnerId&&n.status==='alive'&&n.ownerId===r.id&&n.barnId===animal.barnId&&n.kind===animal.kind&&n.sex==='male');
-    if(animal.sex!=='female'||animal.pregnancy||!sire||w.minute-animal.bornAt<rules.animalAdultDays*DAY||w.minute-sire.bornAt<industryDefinition(w,sire.definition).rules.animalAdultDays*DAY||animal.health<rules.animalMinimumBreedHealth||sire.health<industryDefinition(w,sire.definition).rules.animalMinimumBreedHealth||animal.hunger>rules.animalBreedThreshold||animal.thirst>rules.animalBreedThreshold||aliveAnimals(w,barn.id).length+aliveAnimals(w,barn.id).filter(n=>n.pregnancy).length>=barnCapacity(barn))return fail('繁育需要本人同舍健康成年雌雄、实际照料和预留幼畜空位');
+    if(animal.sex!=='female'||animal.pregnancy||!sire||w.minute-animal.bornAt<rules.animalAdultDays*DAY||w.minute-sire.bornAt<industryDefinition(w,sire.definition).rules.animalAdultDays*DAY||animal.health<rules.animalMinimumBreedHealth||sire.health<industryDefinition(w,sire.definition).rules.animalMinimumBreedHealth||animal.hunger>rules.animalBreedThreshold||animal.thirst>rules.animalBreedThreshold||barnOccupancy(w,barn.id)>=barnCapacity(barn))return fail('繁育需要本人同舍健康成年雌雄、实际照料和预留幼畜空位');
    }
    if(a.operation==='moveAnimal'){
     const source=animal.at??building(w,animal.barnId)?.door;
-    const reserved=w.industry.animals.filter(n=>n.id!==animal.id&&n.status==='alive'&&n.destinationId===barn.id).length;
     if(!source||!use(r,barn))return fail('没有合法畜舍或可接近的动物位置');
     let destination=barn.door;
     if(a.pastureId){
      const yard=w.industry.pastures?.find(p=>p.id===a.pastureId&&p.barnId===barn.id);
-     if(!yard||!a.at||!yard.tiles.some(tile=>same(tile,a.at!))||animal.pastureId===yard.id)return fail('没有实际可用的放牧位置，或动物已经在这处牧场');
+     if(!yard||pastureAdmissionError(w,yard)||yard.ownerId&&yard.ownerId!==r.id||!a.at||!yard.tiles.some(tile=>same(tile,a.at!))||animal.pastureId===yard.id)return fail('没有实际可用的放牧位置，或动物已经在这处牧场');
      const free=pastureTileFree(w,a.at,animal.id)?a.at:a.phase!=='delivery'?yard.tiles.find(tile=>pastureTileFree(w,tile,animal.id)):undefined;
      if(!free)return fail('牧场没有空闲且可走的放牧位置');
      a.at={...free};destination=a.at;
     }else if(barn.id===animal.barnId&&!animal.at)return fail('动物已经在本人畜舍内');
-    if(barn.id!==animal.barnId&&aliveAnimals(w,barn.id).length+aliveAnimals(w,barn.id).filter(n=>n.pregnancy).length+reserved>=barnCapacity(barn))return fail('新畜舍没有空位');
+    if(barn.id!==animal.barnId&&barnOccupancy(w,barn.id,animal.id)+1+(animal.pregnancy?1:0)>barnCapacity(barn))return fail('新畜舍没有空位');
     if(findPath(w,source,destination)===null)return fail('没有实际通往动物目的地的路线');
     at={...(a.phase==='delivery'?destination:source)};duration=15;
    }
@@ -151,7 +159,10 @@ export function industryTarget(w:World,r:Resident,a:IndustryAction):{target:Vec;
    if(!rod)return fail('垂钓需要本人可用钓具');
    if(!pool)return fail('这片新增水域没有已登记的真实种群来源');
    if(pool.amount<1)return fail('这片水域鱼群尚未恢复');
-   if(!fishWindow(w,at).species)return fail('当前地点、季节、时段和天气没有可活动的已知鱼种');
+   const window=fishWindow(w,at,a.fishSpecies);
+   if(!window.species)return fail('当前地点、季节、时段和天气没有可活动的已知鱼种');
+   a.fishSpecies??=window.species;
+   if((pool.species?.[a.fishSpecies]?.amount??0)<1)return fail('所选鱼种的实际种群已耗尽，须另选鱼种或水岸');
    if(!shoalWithinReach(w,at))return fail('鱼群离岸太远、隔着陆地，或正在躲避洪水');
    duration=fishingMinutes(w,r,at,rod.level);
   }
@@ -160,27 +171,46 @@ export function industryTarget(w:World,r:Resident,a:IndustryAction):{target:Vec;
   if(a.depth!==undefined&&a.depth!==m.depth)return fail('矿层已由其他施工改变，请重新查看再决定');a.depth=m.depth;
   if(a.operation==='mine'&&(m.remaining[m.depth]<1||m.depth===0&&(w.resources.find(r=>r.id===m.resourceId)?.amount??0)<1))return fail('本层有限矿脉已耗尽');if(a.operation==='deepen'&&(m.depth>=2||t.level<m.depth+2||!has(r.inventory,{plank:rules.supportPlank,bar:rules.supportBar})))return fail('向深层开拓须更高等级工具、2木板和1铁锭支护');duration=a.operation==='mine'?rules.mineMinutes:rules.deepenMinutes;
  }else return fail('没有这项生产安排');
+ if(b&&['craft','repairTool','upgrade'].includes(a.operation)){const key=a.station?'station:'+a.station:'table',problem=premisesWorkReason(w,r.id,b.id,key,completed?w.minute-duration:validationAt,completed?w.minute:validationAt+duration);if(problem)return fail(problem);}
  const conflict=workConflict(w,r,adjacent?r.at:at,duration,b);return conflict?fail(conflict):{target:at,duration,adjacent};
 }
 export function industryWorkError(w:World,r:Resident,a:IndustryAction,dt:number):string|null {
- if(a.operation!=='craft'){const removal=workFixtureRemoval(w,r,a,dt);if(removal)return removal;const animal=w.industry?.animals.find(n=>n.id===a.animalId),b=building(w,a.buildingId??animal?.barnId);if(b&&same(r.at,b.door)&&(!animal?.at||animal.inside===b.id)&&['install','uninstall','upgrade','repairTool','plantHouse','tendHouse','harvestHouse','placeAnimal','feedAnimal','waterAnimal','collectAnimal'].includes(a.operation))r.inside=b.id;return null;}
+ if(pastureOperations.has(a.operation))return workPasture(w,r,a,dt);
+ if(a.operation!=='craft'){if(a.buildingId&&['repairTool','upgrade'].includes(a.operation)){const key=a.operation==='repairTool'?'station:bench':'station:forge',error=premisesWorkReason(w,r.id,a.buildingId,key,w.minute-dt,w.minute);if(error)return error;}const removal=workFixtureRemoval(w,r,a,dt);if(removal)return removal;const animal=w.industry?.animals.find(n=>n.id===a.animalId),b=building(w,a.buildingId??animal?.barnId);if(b&&same(r.at,b.door)&&(!animal?.at||animal.inside===b.id)&&['install','uninstall','upgrade','repairTool','plantHouse','tendHouse','harvestHouse','placeAnimal','feedAnimal','waterAnimal','collectAnimal'].includes(a.operation))r.inside=b.id;return null;}
  if(r.activity?.action.type!=='industry'||r.activity.action.operation!=='craft'||r.activity.action.recipeId!==a.recipeId||r.activity.action.buildingId!==a.buildingId)return '没有本人已接受并实际开始的制作安排';
- const b=building(w,a.buildingId);if(!b||!same(r.at,b.door)||!use(r,b))return '本人必须实际到达仍有使用权的工位';
+ const b=building(w,a.buildingId);if(!b||!same(r.at,b.door)||!use(r,b)&&currentPremisesLease(w,b.id,w.minute-dt)?.tenantId!==r.id)return '本人必须实际到达仍有使用权的工位';
  const selected=actionRecipe(w,r.id,a),recipe=selected?.recipe;if(!recipe||r.skills[recipe.skill]<recipe.minimum)return '本人制作能力或配方不适用';
+ const key=recipe.station?'station:'+recipe.station:'table',leaseError=premisesWorkReason(w,r.id,b.id,key,w.minute-dt,w.minute);if(leaseError)return leaseError;
  if(educationConflict(w,r.id,w.minute-dt,w.minute,b.id))return '教学桌正在被已接受的课堂占用';
  const actionKey=r.activity?`${r.activity.planId}:${r.activity.startedAt}`:`manual:${r.id}:${w.minute}`;if(w.industry!.batches.some(c=>c.ownerId===r.id&&c.actionKey===actionKey&&c.status==='completed'))return null;
  if(a.batchId&&w.industry!.batches.find(c=>c.id===a.batchId)?.status==='cancelled')return '本次加工的实际原料已腐败或批次已终止，请重新决定';
  let batch=w.industry!.batches.find(c=>c.ownerId===r.id&&c.status==='working');
+ if(a.batchId&&batch?.id!==a.batchId)return '原先选择的本人加工批次已失效，须重新决定';
  if(!batch){if(!has(r.inventory,recipe.input))return '实际加工原料已不足';foodTransaction(w,()=>{change(r.inventory,recipe.input,-1);batch={definition:selected!.definition,id:`batch:${w.id}:${w.industry!.nextSerial++}`,ownerId:r.id,buildingId:b.id,recipe:structuredClone(recipe),input:{...recipe.input},actionKey,worked:0,lastAt:-1,status:'working',createdAt:w.minute};w.industry!.batches.push(batch!);a.batchId=batch!.id;});fact(w,r,`${r.name}开始${recipe.name}，实际原料已留在${b.name}的加工批次中。`);}
  if(!batch)return '加工批次未建立';a.batchId=batch.id;batch.actionKey=actionKey;
  if(batch.buildingId!==b.id||batch.recipe.id!==recipe.id)return '须先处理本人既有加工批次';if(batch.lastAt>=w.minute-1e-9)return null;
  batch.worked+=Math.min(dt,batch.recipe.minutes-batch.worked,r.activity?.remaining??dt);batch.lastAt=w.minute;r.inside=b.id;
- if(batch.worked>=batch.recipe.minutes-1e-8)foodTransaction(w,()=>{batch!.worked=batch!.recipe.minutes;batch!.status='completed';change(r.inventory,batch!.recipe.output);w.industry!.totals.crafted++;r.skills[recipe.skill]+=recipe.minutes/12000;if(r.activity?.action===a)r.activity.remaining=0;fact(w,r,`${r.name}实际完成${recipe.name}，得到${Object.entries(batch!.recipe.output).map(([i,n])=>`${n}份${itemLabels[i as Item]}`).join('、')}。`);});
+ if(batch.worked>=batch.recipe.minutes-1e-8){
+  const inputs=craftFoodFlowInputs(w,'craft:'+batch.id,batch.input,batch.recipe);
+  try{foodTransaction(w,()=>{
+   batch!.worked=batch!.recipe.minutes;batch!.status='completed';change(r.inventory,batch!.recipe.output);w.industry!.totals.crafted++;r.skills[recipe.skill]+=recipe.minutes/12000;if(r.activity?.action===a)r.activity.remaining=0;
+   const event=fact(w,r,`${r.name}实际完成${recipe.name}，得到${Object.entries(batch!.recipe.output).map(([i,n])=>`${n}份${itemLabels[i as Item]}`).join('、')}。`);
+   if(inputs&&r.activity?.action===a){
+    const original=batch!.recipe,snapshot={id:original.id,input:original.input,output:original.output,minutes:original.minutes,
+     station:original.station,skill:original.skill,minimum:original.minimum};
+    recordFoodFlow(w,{type:'processed',action:'industry_craft',at:w.minute,residentId:r.id,eventId:event.id,
+     planId:r.activity.planId,container:'person:'+r.id,inputContainer:'craft:'+batch!.id,batchId:batch!.id,
+     buildingId:batch!.buildingId,definition:batch!.definition??selected!.definition,recipe:structuredClone(snapshot),
+     inputs,output:batch!.recipe.output});
+   }
+  });}finally{finishFoodFlowAction(w);}
+ }
  return null;
 }
 function completeIndustryAtomic(w:World,r:Resident,a:IndustryAction):string|null {
  if(a.operation==='craft')return null;const mark=r.activity?`industry:${r.activity.planId}:${r.activity.startedAt}:${a.operation}`:`industry:${r.id}:${r.revision}:${w.revision}`;if(hasReceipt(w,mark))return null;
- const route=industryTarget(w,r,a);if(route.error)return route.error;if(route.adjacent?distance(r.at,route.target)>1:!same(r.at,route.target))return '须亲自到达实际工作位置';
+ if(pastureOperations.has(a.operation)){const error=completePasture(w,r,a);if(!error)w.processed.push(mark);return error;}
+ const route=industryTarget(w,r,a,true);if(route.error)return route.error;if(route.adjacent?distance(r.at,route.target)>1:!same(r.at,route.target))return '须亲自到达实际工作位置';
  const rules=industryDefinition(w,a.processDefinition).rules;const state=w.industry!,b=building(w,a.buildingId),t=state.trees.find(t=>t.id===a.treeId),n=state.animals.find(n=>n.id===a.animalId),m=state.mines.find(m=>m.id===a.mineId);
  if(a.operation==='install'){const installation=stationDefinition(w,a.station!,a.stationDefinition)!;change(r.inventory,installation.cost,-1);state.stations.push({id:'station:'+state.nextSerial++,buildingId:b!.id,kind:a.station!,installedAt:w.minute,installedCost:structuredClone(installation.cost),definition:installation.definition,uninstallMinutes:installation.uninstallMinutes,salvageFraction:installation.salvageFraction,removalWorked:0});fact(w,r,`${r.name}用实际材料在${b!.name}安装了${stationNames[a.station!]}。`);}
  else if(a.operation==='uninstall'&&b!.ownerId==='commons'){const problem=finishFixtureRemoval(w,r,a);if(problem)return problem;}
@@ -201,7 +231,9 @@ function completeIndustryAtomic(w:World,r:Resident,a:IndustryAction):string|null
   const animal={definition:a.processDefinition,id:duck.id,ownerId:r.id,kind:'duck' as const,at:{...duck.at},inside:null,
    pen:nextAnimalPen(w,b!.id),sex:duck.sex??'female' as const,bornAt:duck.bornAt,barnId:b!.id,hunger,
    thirst:duck.thirst??20,health:duck.health,status:'alive' as const,deathAt:null,product:0,progress:0,
-   pregnancy:null,lastMinute:w.minute,energy:duck.energy??75};
+   pregnancy:duck.pregnancy?{...duck.pregnancy}:null,lastMinute:w.minute,energy:duck.energy??75,
+   motherId:duck.motherId,sireId:duck.sireId};
+  recordWildlifeExit(w,duck,'tamed');
   w.frontierHazards!.beasts=w.frontierHazards!.beasts.filter(x=>x.id!==duck.id);
   state.animals.push(animal);recordLivestockNourishment(w,animal,duck.hunger-hunger);
   fact(w,r,`${r.name}在河岸以实物驯养了一只野鸭。家鸭保留原身份与位置，尚待亲自接回畜舍。`,animal.at,[animal.id]);
@@ -210,11 +242,11 @@ function completeIndustryAtomic(w:World,r:Resident,a:IndustryAction):string|null
  else if(a.operation==='feedCrate'||a.operation==='waterCrate'){const c=state.livestockCargo!.find(c=>c.id===a.animalId)!;change(r.inventory,{[a.operation==='feedCrate'?'fodder':'water']:1},-1);careForCrate(w,c,a.operation==='waterCrate');fact(w,r,`${r.name}用本人实物照料了运输笼内的${animalNames[c.kind]}。`,r.at,[c.id]);}
  else if(a.operation==='feedAnimal'){
   change(r.inventory,{fodder:1},-1);
-  const hunger=n!.hunger;n!.hunger=Math.max(0,hunger-rules.animalFeedRelief);
+  const hunger=n!.hunger;n!.hunger=Math.max(0,hunger-rules.animalFeedRelief);n!.lastCaredAt=w.minute;
   recordLivestockNourishment(w,n!,hunger-n!.hunger);
   fact(w,r,`${r.name}自愿用本人饲料喂养${name(w,n!.ownerId)}的${animalNames[n!.kind]}。`,r.at,[n!.id]);
  }
- else if(a.operation==='waterAnimal'){change(r.inventory,{water:1},-1);n!.thirst=Math.max(0,n!.thirst-rules.animalWaterRelief);fact(w,r,`${r.name}自愿为${animalNames[n!.kind]}提供本人清水。`,r.at,[n!.id]);}
+ else if(a.operation==='waterAnimal'){change(r.inventory,{water:1},-1);n!.thirst=Math.max(0,n!.thirst-rules.animalWaterRelief);n!.lastCaredAt=w.minute;fact(w,r,`${r.name}自愿为${animalNames[n!.kind]}提供本人清水。`,r.at,[n!.id]);}
  else if(a.operation==='collectAnimal'){const item=animalProducts[n!.kind];change(r.inventory,{[item]:n!.product});state.totals.animalProducts+=n!.product;fact(w,r,`${r.name}实际收集${n!.product}份${itemLabels[item]}。`,r.at,[n!.id]);n!.product=0;}
  else if(a.operation==='breedAnimal'){n!.pregnancy={sireId:a.partnerId!,dueAt:w.minute+rules[`${n!.kind}PregnancyDays`]*DAY};fact(w,r,`${r.name}决定让本人健康成年${animalNames[n!.kind]}繁育，已为幼畜预留畜舍位置。`,r.at,[n!.id,a.partnerId!]);}
  else if(a.operation==='moveAnimal'){
@@ -241,16 +273,26 @@ function completeIndustryAtomic(w:World,r:Resident,a:IndustryAction):string|null
   let bed=state.beds.find(p=>p.buildingId===b!.id&&p.index===a.bed);if(!bed){bed={id:`bed:${b!.id}:${a.bed}`,buildingId:b!.id,index:a.bed!,crop:null};state.beds.push(bed);}
   if(a.operation==='plantHouse'){change(r.inventory,{...w.definitions[a.cropId!].cost,water:(w.definitions[a.cropId!].cost?.water??0)+1},-1);bed.crop={ownerId:r.id,definition:a.cropId!,growth:0,wateredDay:Math.floor(w.minute/DAY),lastMinute:w.minute};fact(w,r,`${r.name}在温室种植床${a.bed!+1}播种，季节保护不替代种水与实际生长。`);}
   else if(a.operation==='tendHouse'){change(r.inventory,{water:1},-1);bed.crop!.wateredDay=Math.floor(w.minute/DAY);}
-  else{const d=w.definitions[bed.crop!.definition],item=(d.data.output??'turnip') as Item;change(r.inventory,{[item]:Number(d.data.yield)});bed.crop=null;fact(w,r,`${r.name}实际收获一床温室作物。`);}
+  else{
+   const definition=bed.crop!.definition,ownerId=bed.crop!.ownerId,d=w.definitions[definition],item=(d.data.output??'turnip') as Item,quantity=Number(d.data.yield);
+   change(r.inventory,{[item]:quantity});bed.crop=null;const event=fact(w,r,`${r.name}实际收获一床温室作物。`);
+   if(goods[item]?.food>0&&quantity>0&&r.activity?.action===a&&r.activity.remaining<=0)recordFoodFlow(w,{type:'source_added',action:'harvest_house',at:w.minute,
+    residentId:r.id,eventId:event.id,planId:r.activity.planId,container:'person:'+r.id,definition,sourceId:bed.id,buildingId:bed.buildingId,bed:bed.index,ownerId,output:{[item]:quantity}});
+  }
  }else if(a.operation==='hunt'){
   const problem=completeHunt(w,r,a);if(problem)return problem;
  }else if(a.operation==='fish'){
-  const pool=fishingStockAt(w,a.at!)!,window=fishWindow(w,a.at!);
-  pool.amount--;toolFor(w,r,'rod')!.durability--;change(r.inventory,{fish:1});state.totals.fish++;
+  const pool=fishingStockAt(w,a.at!)!,window=fishWindow(w,a.at!,a.fishSpecies);
+  if(!a.fishSpecies||!takeFish(w,a.at!,a.fishSpecies,'caught'))return '所选鱼种已经不再可捕捞';
+  toolFor(w,r,'rod')!.durability--;change(r.inventory,{[a.fishSpecies]:1});state.totals.fish++;
   if(state.fishingExperience)state.fishingExperience[r.id]=Math.min(10,(state.fishingExperience[r.id]??0)+.5);
   else r.skills.farming+=.01;
-  emitEvent(w,{kind:'production',actors:[r.id],place:{...r.at},animalIds:['shoal:'+fishingKey(waterAtShore(w,a.at!)!)],
-   text:`${r.name}在${window.habitat==='coast'?'海岸':window.habitat==='lake'?'湖岸':'河岸'}实际钓获一份${window.name}。当地鱼群余${pool.amount}，钓具实际磨损一次。`});
+  const sourceId='shoal:'+fishingKey(waterAtShore(w,a.at!)!);
+  const event=emitEvent(w,{kind:'production',actors:[r.id],place:{...r.at},animalIds:[sourceId],
+   text:`${r.name}在${window.habitat==='coast'?'海岸':window.habitat==='lake'?'湖岸':'河岸'}实际钓获一份${window.name}。本种余${pool.species![a.fishSpecies]!.amount}，当地鱼群合计余${pool.amount}，钓具实际磨损一次。`});
+  if(r.activity?.action===a&&r.activity.remaining<=0)recordFoodFlow(w,{type:'source_added',action:'fish',at:w.minute,
+   residentId:r.id,eventId:event.id,planId:r.activity.planId,container:'person:'+r.id,definition:pool.definition!,
+   sourceId,species:a.fishSpecies,output:{[a.fishSpecies]:1}});
  }else if(a.operation==='shoreRest'){
   r.energy=Math.min(100,r.energy+4);
   fact(w,r,`${r.name}在水边坐了一会儿，恢复了一些体力。`);
@@ -260,9 +302,9 @@ function completeIndustryAtomic(w:World,r:Resident,a:IndustryAction):string|null
 }
 export function advanceIndustry(w:World){
  initializeIndustry(w);advanceFixtureRemoval(w);const s=w.industry;if(!s)return;const day=Math.floor(w.minute/DAY),season=calendar(w.minute).season;
- advancePastures(w);
+ advancePastureProjects(w);advancePastures(w);
  for(const n of s.animals)if(n.status==='alive'&&n.pen===undefined)n.pen=nextAnimalPen(w,n.barnId);
- for(const tree of s.trees){const rules=industryDefinition(w,tree.definition).rules;const dt=Math.max(0,w.minute-tree.lastMinute);tree.lastMinute=w.minute;if(tree.status==='cut')continue;const wet=tree.lastWateredDay===day||w.weather==='rain';if(wet&&tree.status==='growing'){tree.growth+=dt;if(tree.growth>=rules.treeGrowthDays*DAY)tree.status='mature';}if(tree.status==='mature'&&season!=='winter'&&wet&&tree.fruit<rules.treeMaximumFruit){tree.fruitProgress+=dt;const fruit=Math.min(rules.treeMaximumFruit-tree.fruit,Math.floor(tree.fruitProgress/(rules.treeFruitDays*DAY)));if(fruit)foodTransaction(w,()=>{tree.fruit+=fruit;});tree.fruitProgress-=fruit*rules.treeFruitDays*DAY;}}
+ for(const tree of s.trees){const rules=industryDefinition(w,tree.definition).rules;const dt=Math.max(0,w.minute-tree.lastMinute);tree.lastMinute=w.minute;if(tree.status==='cut')continue;const wet=tree.lastWateredDay===day||w.weather==='rain';if(wet&&tree.status==='growing'){tree.growth+=dt;if(tree.growth>=rules.treeGrowthDays*DAY)tree.status='mature';}if(tree.status==='mature'&&season!=='winter'&&wet&&tree.fruit<rules.treeMaximumFruit){tree.fruitProgress+=dt;const fruit=Math.min(rules.treeMaximumFruit-tree.fruit,Math.floor(tree.fruitProgress/(rules.treeFruitDays*DAY)));if(fruit){try{foodTransaction(w,()=>{tree.fruit+=fruit;recordNaturalFoodFlow(w,{type:'source_added',action:'fruit_growth',at:w.minute,ownerId:tree.ownerId,sourceId:tree.id,container:'orchard-stock:'+tree.id,definition:industryDefinition(w,tree.definition).definition,output:{fruit}});});}finally{finishFoodFlowAction(w);}}tree.fruitProgress-=fruit*rules.treeFruitDays*DAY;}}
  for(const n of s.animals){
   const rules=industryDefinition(w,n.definition).rules,dt=Math.max(0,w.minute-n.lastMinute);
   n.lastMinute=w.minute;if(n.status==='dead')continue;
@@ -283,10 +325,10 @@ export function advanceIndustry(w:World){
    else if(n.thirst>72||n.hunger>72)n.activity={kind:n.thirst>72?'drink':'forage',reason:n.thirst>72?'口渴，等待可接触的清水':'饥饿，等待送来的饲料',target:at};
    else n.activity={kind:sheltered?'shelter':'roam',reason:sheltered?'在可用畜舍休息':'停在户外，等待接回牧场或畜舍',target:at};
   }
-  if(n.hunger<rules.animalProductThreshold&&n.thirst<rules.animalProductThreshold&&w.minute-n.bornAt>=rules.animalAdultDays*DAY&&n.product<rules.animalMaximumProduct&&(n.kind==='sheep'||n.sex==='female')&&(n.kind!=='cow'||(n.lactatesUntil??0)>w.minute)){n.progress+=dt;const interval=rules[`${n.kind}ProductDays`]*DAY;const amount=Math.min(rules.animalMaximumProduct-n.product,Math.floor(n.progress/interval));if(amount)foodTransaction(w,()=>{n.product+=amount;});n.progress-=amount*interval;}
+  if(n.hunger<rules.animalProductThreshold&&n.thirst<rules.animalProductThreshold&&w.minute-n.bornAt>=rules.animalAdultDays*DAY&&n.product<rules.animalMaximumProduct&&(n.kind==='sheep'||n.sex==='female')&&(n.kind!=='cow'||(n.lactatesUntil??0)>w.minute)){n.progress+=dt;const interval=rules[`${n.kind}ProductDays`]*DAY;const amount=Math.min(rules.animalMaximumProduct-n.product,Math.floor(n.progress/interval));if(amount){try{foodTransaction(w,()=>{n.product+=amount;if(n.kind!=='sheep')recordNaturalFoodFlow(w,{type:'source_added',action:'animal_product',at:w.minute,ownerId:n.ownerId,sourceId:n.id,species:n.kind,container:'animal-stock:'+n.id,definition:industryDefinition(w,n.definition).definition,output:{[animalProducts[n.kind]]:amount}});});}finally{finishFoodFlowAction(w);}}n.progress-=amount*interval;}
   if(n.pregnancy&&n.pregnancy.dueAt<=w.minute){
-   n.pregnancy=null;
-   const baby={...n,definition:industryDefinition(w).definition,id:'animal:'+s.nextSerial++,sex:s.nextSerial%2?'female' as const:'male' as const,bornAt:w.minute,carrierId:null,destinationId:null,pen:nextAnimalPen(w,n.barnId),hunger:30,thirst:30,health:90,product:0,progress:0,pregnancy:null,lastMinute:w.minute,activity:undefined,energy:90,lactatesUntil:undefined};
+   const sireId=n.pregnancy.sireId;n.pregnancy=null;
+   const baby={...n,definition:industryDefinition(w).definition,id:'animal:'+s.nextSerial++,sex:s.nextSerial%2?'female' as const:'male' as const,bornAt:w.minute,carrierId:null,destinationId:null,pen:nextAnimalPen(w,n.barnId),hunger:30,thirst:30,health:90,product:0,progress:0,pregnancy:null,lastMinute:w.minute,activity:undefined,energy:90,lactatesUntil:undefined,motherId:n.id,sireId};
    if(n.kind==='cow')n.lactatesUntil=w.minute+112*DAY;
    const yard=s.pastures?.find(p=>p.id===n.pastureId);
    if(yard&&n.at){
@@ -296,7 +338,7 @@ export function advanceIndustry(w:World){
    }
    s.animals.push(baby);s.totals.animalBirths++;
    const owner=w.residents.find(r=>r.id===n.ownerId);
-   if(owner)fact(w,owner,`一只${animalNames[n.kind]}幼畜实际出生，进入${barn?.name??'原畜舍'}的照料与容量记录。`,baby.at??barn?.door??owner.at,[n.id,baby.id]);
+   if(owner)fact(w,owner,`一只${animalNames[n.kind]}幼畜实际出生，进入${barn?.name??'原畜舍'}的照料与容量记录。`,baby.at??barn?.door??owner.at,[n.id,sireId,baby.id]);
   }
  }
  for(const bed of s.beds)if(bed.crop){const dt=Math.max(0,w.minute-bed.crop.lastMinute);bed.crop.lastMinute=w.minute;const b=building(w,bed.buildingId);if(b&&b.condition>0&&bed.crop.wateredDay===day)bed.crop.growth+=dt/DAY;}
@@ -306,15 +348,16 @@ export function advanceIndustry(w:World){
 }
 export function industryAssets(w:World,id:string):string[]{
  const s=w.industry;if(!s)return [];
- return [...(w.ferries?.boats.filter(b=>b.ownerId===id).map(b=>b.id)??[]),...s.tools.filter(t=>t.ownerId===id).map(t=>t.id),...s.trees.filter(t=>t.ownerId===id&&t.status!=='cut').map(t=>t.id),...s.animals.filter(a=>a.ownerId===id&&(a.status==='alive'||a.product>0)).map(a=>a.id),...s.beds.filter(b=>b.crop?.ownerId===id).map(b=>b.id)];
+ return [...(s.pastureProjects??[]).filter(p=>p.ownerId===id&&!['completed','removed'].includes(p.status)).map(p=>p.id),...(s.pastures??[]).filter(p=>p.ownerId===id&&p.status!=='retired').map(p=>p.id),...(w.ferries?.boats.filter(b=>b.ownerId===id).map(b=>b.id)??[]),...s.tools.filter(t=>t.ownerId===id).map(t=>t.id),...s.trees.filter(t=>t.ownerId===id&&t.status!=='cut').map(t=>t.id),...s.animals.filter(a=>a.ownerId===id&&(a.status==='alive'||a.product>0)).map(a=>a.id),...s.beds.filter(b=>b.crop?.ownerId===id).map(b=>b.id)];
 }
 export function hasIndustryAssets(w:World,id:string){return hasFerryAssets(w,id)||!!w.industry?.batches.some(b=>b.ownerId===id&&b.status==='working');}
-export function inheritIndustry(w:World,from:string,to:string,ids:string[]){
+export function inheritIndustry(w:World,from:string,to:string,ids:string[],observe?:(stock:OrchardTree|Livestock,kind:'orchard-stock'|'animal-stock')=>void){
  const s=w.industry;if(!s)return;const heir=w.residents.find(r=>r.id===to)!;
+ for(const p of [...(s.pastureProjects??[]),...(s.pastures??[])])if(p.ownerId===from&&ids.includes(p.id)){p.ownerId=to;if(!heir.knownBuildings.includes(p.barnId))heir.knownBuildings.push(p.barnId);}
  for(const b of w.ferries?.boats??[])if(b.ownerId===from&&ids.includes(b.id)){b.ownerId=to;heir.knownDocks??=[];if(b.dockId&&!heir.knownDocks.includes(b.dockId))heir.knownDocks.push(b.dockId);}
  for(const t of s.tools)if(t.ownerId===from&&ids.includes(t.id))t.ownerId=to;
- for(const t of s.trees)if(t.ownerId===from&&ids.includes(t.id))t.ownerId=to;
- for(const a of s.animals)if(a.ownerId===from&&ids.includes(a.id)){a.ownerId=to;if(!heir.knownBuildings.includes(a.barnId))heir.knownBuildings.push(a.barnId);}
+ for(const t of s.trees)if(t.ownerId===from&&ids.includes(t.id)){if(t.ownerId!==to)observe?.(t,'orchard-stock');t.ownerId=to;}
+ for(const a of s.animals)if(a.ownerId===from&&ids.includes(a.id)){if(a.ownerId!==to)observe?.(a,'animal-stock');a.ownerId=to;if(!heir.knownBuildings.includes(a.barnId))heir.knownBuildings.push(a.barnId);}
  for(const b of s.beds)if(b.crop?.ownerId===from&&ids.includes(b.id)){b.crop.ownerId=to;if(!heir.knownBuildings.includes(b.buildingId))heir.knownBuildings.push(b.buildingId);}
 }
 

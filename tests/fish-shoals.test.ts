@@ -19,7 +19,7 @@ test('frontier fish are visible near the fishing shore and a wild catch uses the
  assert.equal(w.map.tiles[opening.at.y*w.map.width+opening.at.x],'water');
  assert.equal(opening.amount,pool.amount);
  assert.equal(opening.activity,'feeding');
- assert.equal(wildFishAt(w,shore),true);
+ assert.equal(wildFishAt(w,shore),'carp');
  assert.equal(fishSchoolView(w,key)?.amount,opening.amount-1);
  assert.match(animalInspector(w,{kind:'fish',id:key}),new RegExp(`${opening.amount-1} / ${opening.capacity}`));
  pool.amount=0;
@@ -46,7 +46,7 @@ test('an actual flood moves the shoal and interrupts a reachable cast without ch
 
 test('an older save gains positions without refilling exhausted pools and keeps position across restart',()=>{
  const w=createFrontierWorld(),{key,pool}=villageSchool(w);
- delete pool.shoal;pool.amount=0;pool.progress=.46;
+ delete pool.shoal;delete pool.species;delete pool.habitats;delete pool.speciesRegisteredAt;delete pool.speciesLastMinute;delete pool.lastMigrationDay;pool.amount=0;pool.progress=.46;
  const old=JSON.parse(JSON.stringify(w)) as World;
  initializeFishing(old);
  assert.equal(old.industry!.fishing[key].amount,0);

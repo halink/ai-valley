@@ -1,3 +1,4 @@
+import {canInspectSpring} from '../src/world/spring-observation.js';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {decisionChoices,decisionContext} from '../src/server/decisions.js';
@@ -28,7 +29,7 @@ test('the frontier starts as a compact nine-person village on the full watershed
  }
  assert.ok(formerBridges>0);
  assert.equal(world.industry?.animals.length,3);
- assert.equal(world.frontierHazards?.beasts.length,13);
+ assert.equal(world.frontierHazards?.beasts.length,15);
  assert.equal(new Set(world.frontierHazards?.beasts.map(animal=>animal.species)).size,6);
 });
 
@@ -45,7 +46,13 @@ test('founders can reach their farmland, freshwater, burial sites and a fishable
  assert.ok(findPath(world,fisher.at,shore)!.length<=12);
  assert.ok(world.residents.every(r=>r.knownResources.includes(well.id)&&r.knownBuildings.includes('frontier-hall')));
  for(const resident of world.residents){
-  assert.ok(decisionChoices(decisionContext(world,resident)).some(({action})=>action.type==='gather'&&action.resourceId===well.id),`${resident.name} can choose to gather fresh water immediately`);
+  const menu=decisionChoices(decisionContext(world,resident));
+  const gather=menu.some(({action})=>action.type==='gather'&&action.resourceId===well.id);
+  if(canInspectSpring(world,resident,well))assert.ok(gather,`${resident.name} can gather currently visible freshwater`);
+  else {
+   assert.equal(gather,false,`${resident.name} cannot inspect stock through a house`);
+   assert.ok(menu.some(({action})=>action.type==='move'&&distance(action.to,well.at)===0),`${resident.name} can choose to inspect the known spring address`);
+  }
  }
  assert.equal(world.plots.length,18);
  assert.ok(world.industry!.tools.some(t=>t.ownerId===fisher.id&&t.kind==='rod'));

@@ -250,3 +250,20 @@ test('an interrupted repair releases its work claim and pays no unfinished wage,
   assert.equal(budget.paidWages,15);assert.equal(totalCoins(w),total);
  }
 });
+
+test('one or two adult electors cannot establish new public spending or taxes, but can use their own money',()=>{
+ for(const n of [1,2]){const {w,people,hall}=fixture();w.residents=people.slice(0,n);const p=w.residents[0];
+  assert.ok(civicReason(w,p,{type:'civic',operation:'propose',buildingId:hall.id,measure:{kind:'salesTax',basisPoints:300,durationDays:2}}));
+  assert.ok(completeCivic(w,p,{type:'civic',operation:'propose',buildingId:hall.id,measure:{kind:'repair',buildingId:hall.id,wage:2,suppliesBudget:10,durationDays:1}}));
+  execute(w,p,{type:'civic',operation:'donate',buildingId:hall.id,amount:1});assert.equal(w.economy!.treasury,1);assert.equal(w.civic!.proposals.length,0);
+ }
+});
+test('incapacity preserves the original civic roll and arbitrary saved ballots cannot manufacture a quorum',()=>{
+ const {w,people,hall}=fixture();people[2].canDecide=false;
+ execute(w,people[0],{type:'civic',operation:'propose',buildingId:hall.id,measure:{kind:'salesTax',basisPoints:300,durationDays:2}});const p=w.civic!.proposals[0];assert.equal(p.electorate.length,3);
+ execute(w,people[0],{type:'civic',operation:'vote',proposalId:p.id,accept:true});p.votes['not-an-elector']=true;(p.votes as Record<string,unknown>)[people[1].id]='yes';p.electorate.push(people[0].id);w.minute=p.closesAt;advanceCivic(w);assert.equal(p.status,'rejected');assert.equal(w.civic!.salesTax,null);
+});
+test('legacy single-person proposals cannot approve while already funded finite budgets survive population loss',()=>{
+ const {w,people,hall}=fixture();execute(w,people[0],{type:'civic',operation:'propose',buildingId:hall.id,measure:{kind:'salesTax',basisPoints:300,durationDays:2}});const p=w.civic!.proposals[0];p.electorate=[people[0].id];p.votes={[people[0].id]:true};w.minute=p.closesAt;advanceCivic(w);assert.equal(p.status,'rejected');
+ const b=budgetFixture();b.w.residents=b.people.slice(0,1);const balance=accountBalance(b.w,b.budget.supplyAccount);advanceCivic(b.w);assert.equal(b.budget.status,'active');assert.equal(accountBalance(b.w,b.budget.supplyAccount),balance);b.w.minute=b.budget.expiresAt;advanceCivic(b.w);assert.equal(b.budget.status,'expired');assert.equal(b.w.economy!.treasury,100);
+});

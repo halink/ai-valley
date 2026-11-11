@@ -12,6 +12,8 @@ export interface ObserverUpdate {
   serverTime: string;
   version: string;
   capabilities: Snapshot['capabilities'];
+  /** Observer metadata only. Omitted in an unchanged delta; null clears it. */
+  foodCoverage?: Snapshot['foodCoverage'] | null;
   world: Partial<World>;
   changes?: Changes;
 }
@@ -39,5 +41,6 @@ export function applyObserverUpdate(current: Snapshot, update: ObserverUpdate): 
     if (changes) world[key] = reconcile<{id: string}>(world[key], changes.upsert, changes.remove, changes.patch) as World[K];
   }
   for (const key of entityFields) apply(key);
-  return {world, mapRevision:update.mapRevision, serverTime:update.serverTime, version:update.version, capabilities:update.capabilities};
+  const foodCoverage=Object.hasOwn(update,'foodCoverage')?update.foodCoverage:current.foodCoverage;
+  return {world, ...(foodCoverage?{foodCoverage}:{}), mapRevision:update.mapRevision, serverTime:update.serverTime, version:update.version, capabilities:update.capabilities};
 }

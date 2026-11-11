@@ -1,3 +1,4 @@
+import {currentPremisesLease} from '../shared/premises.js';
 import {hasReceipt} from './receipts.js';
 import {markPromiseEnd} from './known-promises.js';
 import {cultureConflict} from './culture.js';
@@ -78,6 +79,7 @@ export function educationReason(w:World,r:Resident,a:EducationAction):string|nul
  if(a.operation==='post'){
   const d=w.definitions[w.activeDefinitions['education/rules']];if(!d||d.id!=='education/rules'||!validInt(d.data.minutes,1,360)||typeof d.data.gain!=='number'||d.data.gain<=0||d.data.gain>1)return '当前没有有效教学规则';
   const b=w.buildings.find(b=>b.id===a.buildingId);
+  if(b&&currentPremisesLease(w,b.id))return '原址仍有经营租约，不能另行承诺课堂';
   if(!adult(w,r)||!a.subject||!Object.hasOwn(subjects,a.subject)||r.skills[a.subject]<1||!b||!r.knownBuildings.includes(b.id)||!classroom(w,r,b)||!near(r,b))return '授课需要成年、相应技能至少1级，并在有使用权的教学场所公告板附近';
   if(!validInt(a.startsIn,30,7*DAY)||!validInt(a.windowMinutes,60,360)||!validInt(a.fee,0,30)||!validInt(a.capacity,1,4))return '课程须提前30分钟至7日，窗口60–360分钟，学费0–30钱，席位1–4';
   if(w.education.lessons.filter(l=>l.teacherId===r.id&&l.status==='scheduled').length>=3)return '本人已有三场尚未结束的授课安排';

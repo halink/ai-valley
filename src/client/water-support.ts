@@ -1,0 +1,6 @@
+import type {World} from '../shared/types.js';
+const esc=(v:unknown)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
+export function waterSupportPanel(w:World){
+ const state=w.waterSupply;if(!state)return '';const name=(id:string)=>esc(w.residents.find(p=>p.id===id)?.name??'原当事人');
+ return `<h3 class="section-label">有限协助饮水与赠桶</h3><p class="panel-intro">协助须成年人本人原先明确授权、现场仍具完整决定与表达能力且非重症。无紧急灌水权限，不改变健康、监护或住所。赠桶须6至17岁收受人独立接受并实际交接。</p><div class="duty-list">${(state.assistance??[]).slice(-12).reverse().map(c=>`<article class="duty-card"><b>${name(c.beneficiaryId)}授权${name(c.providerId)}协助饮水</b><p>${c.revokedAt!==null?'已撤回':c.expiresAt<=w.minute?'固定24小时时限已届满':c.used>=c.limit?'两次额度已用尽':'限时授权仍有效，现场资格另验'} · 已用${c.used}/${c.limit}次<br>未饮用的授权不消耗水，不自动履行；当前拒绝立即停供。</p></article>`).join('')}${(state.gifts??[]).slice(-12).reverse().map(g=>`<article class="duty-card"><b>${name(g.donorId)}向${name(g.recipientId)}赠桶</b><p>${g.status==='offered'&&g.expiresAt<=w.minute?'提议24小时已到期':{offered:'等待本人独立接受与现场交接',accepted:'已实际交接',declined:'收受人已拒绝',cancelled:'原桶主已撤回'}[g.status]}<br>原约定：同一6份容量水桶，内有${g.amount}份${g.amount?'安全水':'水'}。提议不转移实物。</p></article>`).join('')||'<p class="empty">尚无明确授权或赠桶提议，旧照护关系不会自动转为新权限。</p>'}</div>`;
+}

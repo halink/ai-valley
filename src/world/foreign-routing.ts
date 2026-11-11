@@ -1,3 +1,4 @@
+import {shipmentFerry,cancelUnloadedFreight} from './ferry-cargo.js';
 import type {Resident,Vec,World} from '../shared/types.js';
 import type {ForeignOffer,ForeignShipment} from '../shared/foreign-trade.js';
 import {distance,findPath,same,walkable} from './navigation.js';
@@ -12,7 +13,7 @@ export function deliveryPoint(w:World,r:Resident,id?:string):{at:Vec;name:string
 }
 export const cargoStation=(w:World,s:Pick<ForeignOffer,'stationAt'>|undefined):Vec=>s?.stationAt??w.foreignTrade!.station;
 export const atCargoStation=(w:World,r:Resident,s:Pick<ForeignOffer,'stationAt'>|undefined,range=8)=>!r.inside&&distance(r.at,cargoStation(w,s))<=range;
-function regionalMinutes(w:World,s:ForeignShipment){return w.foreignTrade!.merchants.find(m=>m.id===s.merchantId)!.routeMinutes;}
+function regionalMinutes(w:World,s:Pick<ForeignShipment,'merchantId'>){return w.foreignTrade!.merchants.find(m=>m.id===s.merchantId)!.routeMinutes;}
 function estimateLocal(w:World,at:Vec,to:Vec){const path=findPath(w,at,to);return path?.reduce((sum,p)=>sum+(w.map.tiles[p.y*w.map.width+p.x]==='road'?1.5:2),0)??Infinity;}
 
 export function dispatchCargo(w:World,s:ForeignShipment){
@@ -22,7 +23,7 @@ export function dispatchCargo(w:World,s:ForeignShipment){
  if(!Number.isFinite(s.arrivesAt))s.arrivesAt=null;
 }
 export function beginCargoReturn(w:World,s:ForeignShipment){
- const old=s.route;s.status='returning';s.returned=true;s.nextCheckAt=w.minute;
+ cancelUnloadedFreight(w,s,'原买卖进入退运');const old=s.route;s.status='returning';s.returned=true;s.nextCheckAt=w.minute;
  if(old?.at){
   s.route={at:{...old.at},phase:s.side==='import'?'localOut':'localIn',updatedAt:w.minute,dueAt:w.minute,progress:0};
   const target=s.side==='import'?w.foreignTrade!.station:cargoStation(w,s);
@@ -35,19 +36,21 @@ export function beginCargoReturn(w:World,s:ForeignShipment){
 }
 
 /** The already hired regional carrier routes the same consignment. Routing never chooses a new trade. */
-export function advanceCargo(w:World,s:ForeignShipment):boolean {
+export function advanceCargo(w:World,s:Pick<ForeignShipment,'merchantId'|'stationAt'|'route'|'arrivesAt'|'blockedSince'|'nextCheckAt'> & {id?:string},onOutward?:(stage:'depart'|'arrive'|'return',at:number)=>void):boolean {
  const gate=w.foreignTrade!.station,station=cargoStation(w,s);
  // Existing accepted contracts retain their old gate and regional deadline on upgrade.
- s.route??={at:null,phase:s.side==='import'&&s.status==='inTransit'||s.side==='export'&&s.status==='returning'?'regionalIn':'regionalOut',updatedAt:w.minute,dueAt:s.arrivesAt??w.minute,progress:0};
+ s.route??={at:null,phase:'side' in s&&'status' in s&&(s.side==='import'&&s.status==='inTransit'||s.side==='export'&&s.status==='returning')?'regionalIn':'regionalOut',updatedAt:w.minute,dueAt:s.arrivesAt??w.minute,progress:0};
+ const freight=s.id?shipmentFerry(w,s.id):undefined;const handoff=freight?.cargo.status==='accepted'?freight.cargo:undefined;
+ if(freight&&['aboard','unloaded'].includes(freight.cargo.status)){s.route.updatedAt=w.minute;s.route.progress=0;s.arrivesAt=null;return false;}
  const route=s.route;let cursor=route.updatedAt,budget=Math.max(0,w.minute-cursor);route.updatedAt=w.minute;
  if(route.phase==='done')return true;
  if(route.phase==='regionalIn'||route.phase==='regionalOut'){
   if(w.minute<route.dueAt)return false;
-  if(route.phase==='regionalOut'){route.phase='done';route.at=null;s.blockedSince=null;return true;}
+  if(route.phase==='regionalOut'){onOutward?.('arrive',route.dueAt);route.phase='done';route.at=null;s.blockedSince=null;return true;}
   if(!walkable(w,gate)){s.blockedSince??=w.minute;s.nextCheckAt=w.minute+1;return false;}
-  cursor=Math.max(cursor,route.dueAt);budget=Math.max(0,w.minute-cursor);route.at={...gate};route.phase='localIn';
+  onOutward?.('return',route.dueAt);cursor=Math.max(cursor,route.dueAt);budget=Math.max(0,w.minute-cursor);route.at={...gate};route.phase='localIn';
  }
- const target=route.phase==='localOut'?gate:station;
+ const target=handoff?.sourceAt??(route.phase==='localOut'?gate:station);
  if(!route.at)return false;
  const blocked=()=>{s.blockedSince??=w.minute;s.nextCheckAt=w.minute+1;route.progress=0;return false;};
  if(same(route.at,target)){
@@ -63,9 +66,11 @@ export function advanceCargo(w:World,s:ForeignShipment):boolean {
   }
  }
  s.blockedSince=null;s.nextCheckAt=w.minute;
+ if(handoff){route.progress=0;s.arrivesAt=null;return false;}
  if(route.phase==='localOut'){
-  route.phase='regionalOut';route.at=null;route.dueAt=cursor+regionalMinutes(w,s);s.arrivesAt=route.dueAt;
+  onOutward?.('depart',cursor);route.phase='regionalOut';route.at=null;route.dueAt=cursor+regionalMinutes(w,s);s.arrivesAt=route.dueAt;
   if(w.minute<route.dueAt)return false;
+  onOutward?.('arrive',route.dueAt);
  }
  route.phase='done';return true;
 }

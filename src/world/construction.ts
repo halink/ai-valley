@@ -1,3 +1,4 @@
+import {landConstructionError} from '../shared/land-rights.js';
 import {mayUseDesignedBuilding} from './resident-designs.js';
 import {hasReceipt} from './receipts.js';
 import {estateStock,estateLocation} from './estate-custody.js';
@@ -117,6 +118,8 @@ export function advanceConstruction(w:World):void {
   settleDeceasedContributors(w,p);
   const owner=w.residents.find(r=>r.id===p.ownerId),manager=w.residents.find(r=>r.id===p.managerId);
   if(live(p)&&p.ownerId!=='commons'&&(!owner||owner.status==='dead'||owner.residency==='outside'))cancelProject(w,p,'因产权人死亡或离镇而结束本次施工',true);
+  if(live(p)&&landConstructionError(w,p)&&!p.stock.length&&!Object.values(p.incorporated).some(n=>n!>0))cancelProject(w,p,'有限用地到期，释放未投入施工预留',true);
+  if(live(p)&&landConstructionError(w,p)){p.status='paused';p.reason=landConstructionError(w,p);for(const c of p.workers)endWorker(w,p,c,'released');if(p.grants.some(g=>g.remaining))refundFunds(w,p,'有限用地到期');}
   if(live(p)&&p.ownerId==='commons'&&((p.authorizedUntil??0)<=w.minute||!manager||!capable(w,manager))){
    p.status='paused';p.reason='公共授权到期或原负责人无法履职，等待居民重新表决';
    for(const c of p.workers)endWorker(w,p,c,'released');
@@ -129,7 +132,7 @@ export function advanceConstruction(w:World):void {
  const retained=new Set(state.projects.map(p=>p.id));for(const known of Object.values(state.knownProjects))for(let i=known.length-1;i>=0;i--)if(!retained.has(known[i]))known.splice(i,1);
 }
 function materialsReady(p:ConstructionProject){const s=p.stages[p.stage];return !!s&&(s.startedAt!==null||Object.entries(s.materials).every(([item,n])=>stockCount(p.stock,item)>=n!));}
-function hasMandate(w:World,p:ConstructionProject){return p.ownerId!=='commons'||(p.authorizedUntil??0)>w.minute;}
+function hasMandate(w:World,p:ConstructionProject){return !landConstructionError(w,p)&&(p.ownerId!=='commons'||(p.authorizedUntil??0)>w.minute);}
 function busy(w:World,r:Resident,door:Vec,start:number,end:number):boolean {
  if(educationConflict(w,r.id,start,end))return true;
  const shifts=(w.duties?.shifts??[]).filter(s=>s.workerId===r.id&&['booked','on-duty'].includes(s.status)).map(s=>({start:s.start,end:s.end,buildingId:s.buildingId}));
@@ -160,7 +163,7 @@ export function constructionReason(w:World,r:Resident,a:ConstructionAction,worki
   return constructionSiteError(w,p,true);
  }
  if(a.operation==='dismantle'){
-  if(!manager||p.status!=='abandoned'||!hasMandate(w,p)||!integer(a.minutes,1,120))return '只能亲自拆除本人获授权的未完工遗留部分';
+  if(!manager||p.status!=='abandoned'||!(p.ownerId!=='commons'||(p.authorizedUntil??0)>w.minute)||!integer(a.minutes,1,120))return '只能亲自拆除本人获授权的未完工遗留部分';
   const path=findPath(w,r.at,p.door);if(path===null)return '工地目前不可达';
   if(!working&&busy(w,r,p.door,w.minute+path.length,w.minute+path.length+a.minutes))return '拆除与本人已接受的班次或通勤时间冲突';
   return r.health>=45&&r.energy>=10?null:'身体条件不适合拆除';
@@ -279,7 +282,7 @@ export function completeConstruction(w:World,r:Resident,a:ConstructionAction):st
   const id=`project:${w.id}:${w.construction!.nextSerial++}`,publicProject=s.ownerId==='commons';
   const board=w.buildings.filter(b=>b.ownerId==='commons'&&r.knownBuildings.includes(b.id)).sort((a,b)=>distance(a.door,s.door)-distance(b.door,s.door))[0];
   if(publicProject&&!board)return '须先知道一处可公开议决的公共公告板';
-  const p:ConstructionProject={id,name:a.name?.trim()||(s.base?s.base.name+(s.mode==='conversion'?'改造为'+constructionNames[s.kind]:'扩建'):r.name+'的'+constructionNames[s.kind]),mode:s.mode,ownerId:s.ownerId,managerId:r.id,kind:s.kind,definition:s.definition,ruleVersion:s.ruleVersion,
+  const p:ConstructionProject={id,...(s.landRightId?{landRightId:s.landRightId}:{}),name:a.name?.trim()||(s.base?s.base.name+(s.mode==='conversion'?'改造为'+constructionNames[s.kind]:'扩建'):r.name+'的'+constructionNames[s.kind]),mode:s.mode,ownerId:s.ownerId,managerId:r.id,kind:s.kind,definition:s.definition,ruleVersion:s.ruleVersion,
    ...(s.terrain?{terrain:structuredClone(s.terrain)}:{}),at:s.at,width:s.width,height:s.height,door:s.door,base:s.base?structuredClone(s.base):null,capacity:s.capacity,buildingId:s.base?.id??null,boardId:board?.id??null,
    createdAt:w.minute,updatedAt:w.minute,finishedAt:null,authorizedUntil:null,status:publicProject?'proposed':'planned',reserved:!publicProject,reason:null,
    stages:constructionStages(s.cost,s.minutes).map((stage,i)=>({...stage,name:String((w.definitions[`construction/rules@${s.ruleVersion}`]?.data.stages as string[]|undefined)?.[i]??stage.name)})),stage:0,incorporated:{},stock:[],claims:[],grants:[],account:`escrow:${id}`,wagePerHour:a.wagePerHour!,prices:{...a.prices},spentWages:0,spentSupplies:0,

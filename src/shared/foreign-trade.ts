@@ -4,6 +4,8 @@ export type ForeignSide='import'|'export';
 export type ForeignRecipe='drawWater'|'gatherWood'|'quarryStone'|'saveSeed'|'cook'|'growRoots'|'fiber'|'fodder'|'feedLivestock'|'waterLivestock';
 export interface ForeignAction {
  type:'foreignTrade';animalId?:string;
+ /** A freshly voted mandate, bound by the offered choice. */
+ reserveId?:string;
  operation:'post'|'propose'|'accept'|'reject'|'cancelOffer'|'dispatch'|'collect'|'cancelShipment'|'produce'|'wait';
  merchantId?:string;offerId?:string;shipmentId?:string;
  side?:ForeignSide;item?:Item;quantity?:number;price?:number;
@@ -20,6 +22,7 @@ export interface ForeignMerchant {
  work:{animalId?:string;recipe:ForeignRecipe;quantity:number;finishesAt:number;output:Inventory}|null;
 }
 export interface ForeignOffer {
+ publicReserveId?:string;
  stationAt?:Vec;deliveryId?:string;
  id:string;merchantId:string;residentId:string|null;initiatedBy:'merchant'|'resident';
  side:ForeignSide;item:Item;quantity:number;remaining:number;price:number;
@@ -31,6 +34,9 @@ export interface ForeignOffer {
  taxPolicyId:string|null;taxRate:number;
 }
 export interface ForeignShipment {
+ publicReserveId?:string;
+ /** Goods stay in the public shipment container, never the handler inventory. */
+ publicCarrier?:{at:Vec;inside:string|null;roomAt:Vec|null;sealed:boolean};
  stationAt?:Vec;deliveryId?:string;
  route?:CargoRoute;
  id:string;offerId:string;merchantId:string;residentId:string;side:ForeignSide;

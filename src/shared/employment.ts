@@ -12,6 +12,7 @@ export interface EmploymentTerms {
 export interface EmploymentAction {
  type:'employment';
  operation:'post'|'apply'|'withdrawApplication'|'select'|'reject'|'accept'|'decline'|'cancelPost'|'work'|'quit'|'dismiss'|'renew';
+ buildingId?:string;
  businessId?:string;
  postId?:string;
  contractId?:string;

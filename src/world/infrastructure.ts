@@ -1,3 +1,6 @@
+import {disasterContains} from '../shared/frontier-hazards.js';
+import {retainedOutdoorSites} from '../shared/land-use.js';
+import {reservedLandRights,inLand} from '../shared/land-rights.js';
 import {hasReceipt} from './receipts.js';
 import {infrastructureNames} from '../shared/infrastructure.js';
 import {pastureContains} from './pasture.js';
@@ -25,9 +28,12 @@ export function infrastructureFootprint(w:World,a:ConstructionAction):Infrastruc
 export function infrastructureSiteError(w:World,p:Pick<ConstructionProject,'id'|'ownerId'|'at'|'width'|'height'|'door'|'definition'|'terrain'>,access=false):string|null{
  const work=p.terrain;if(!work||p.ownerId!=='commons'||!w.definitions[p.definition])return '公共交通与墓园必须有具体的定义、占地及公共授权';const asset=work.repairOf?w.infrastructure?.assets.find(s=>s.id===work.repairOf&&s.retiredAt===null):undefined;if(work.repairOf&&!asset)return '原公共设施已不再有效';
  if(!walkable(w,p.door))return '施工人员实际可到达的岸边或入口不可用';
+ if(w.frontierHazards?.disasters.some(d=>d.kind==='flashFlood'&&d.phase==='active'&&d.footprint&&work.tiles.some(t=>disasterContains(d,t.at))))return '实际施工地块的洪水尚未消退';
  if(!work.tiles.length||new Set(work.tiles.map(t=>t.at.x+','+t.at.y)).size!==work.tiles.length)return '施工方案须有不重复的真实地块';
- const occupied=productionParcels(w);for(const t of [...work.tiles,...work.anchors.map(at=>({at,before:w.map.tiles[at.y*w.map.width+at.x],after:w.map.tiles[at.y*w.map.width+at.x]}))]){const at=t.at;if(at.x<1||at.y<1||at.x>=w.map.width-1||at.y>=w.map.height-1)return '公共工程超出开放地图';const current=w.map.tiles[at.y*w.map.width+at.x];if(current!==t.before&&(!asset||current!==t.after))return '现场地形已改变，原方案须重新核验';
+ const occupied=productionParcels(w),retained=retainedOutdoorSites(w);for(const t of [...work.tiles,...work.anchors.map(at=>({at,before:w.map.tiles[at.y*w.map.width+at.x],after:w.map.tiles[at.y*w.map.width+at.x]}))]){const at=t.at;if(at.x<1||at.y<1||at.x>=w.map.width-1||at.y>=w.map.height-1)return '公共工程超出开放地图';const current=w.map.tiles[at.y*w.map.width+at.x];if(current!==t.before&&(!asset||current!==t.after))return '现场地形已改变，原方案须重新核验';
   if(asset){if(work.anchors.some(a=>same(a,at))&&!walkable(w,at))return '原设施的实际接入点已经改变';continue;}
+  if(retained.some(p=>same(p,at)))return '公共工程不能覆盖未葬遗体或原址封存实物';
+  if(reservedLandRights(w).some(p=>inLand({...p.at,width:p.width,height:p.height},at)))return '公共工程不能占用有效或保全中的有限建设地权';
   if(pastureContains(w,at))return '公共工程不能占用已经使用的牧场';
   if(occupied.some(q=>at.x>=q.x&&at.y>=q.y&&at.x<q.x+q.width&&at.y<q.y+q.height)||Object.values(w.construction?.yards??{}).some(q=>at.x>=q.x&&at.y>=q.y&&at.x<q.x+q.width&&at.y<q.y+q.height)||w.buildings.some(q=>inRect(at,q))||w.plots.some(q=>same(q.at,at))||w.graves.some(q=>distance(q.at,at)<=1)||w.resources.some(q=>same(q.at,at)))return '道路、水岸与墓园不能占用既有私人院落、农田、墓位、自然资源或矿口';
   if(w.infrastructure?.assets.some(s=>s.retiredAt===null&&[...s.tiles.map(t=>t.at),...(s.anchors??[s.access])].some(t=>same(t,at))))return '这里已有持续有效的公共设施，应修护原设施';
@@ -44,7 +50,8 @@ export function completeTerrain(w:World,p:ConstructionProject):string|null{
  const mark='terrain-commit:'+p.id;if(hasReceipt(w,mark))return null;
  if(p.mode!=='terrain'||!p.terrain||p.stage!==p.stages.length||p.stages.some(s=>s.worked<s.minutes||s.finishedAt===null)||(p.authorizedUntil??0)<=w.minute)return '地形与墓位只能在有效公共授权及全部实际施工阶段完成后交付';
  const error=infrastructureSiteError(w,p,true);if(error)return error;const t=p.terrain!,state=w.infrastructure!;const tiles=[...w.map.tiles];for(const edit of t.tiles)tiles[edit.at.y*w.map.width+edit.at.x]=edit.after;w.map={...w.map,entrance:{...w.map.entrance},tiles};
- if(t.repairOf){const a=state.assets.find(a=>a.id===t.repairOf)!;a.condition=100;a.lastDay=Math.floor(w.minute/DAY);state.totals.repairs++;w.processed.push(mark);return null;}
+ if(t.repairOf){const a=state.assets.find(a=>a.id===t.repairOf)!,before=a.condition,disasterId=a.lastHazardDamage?.disasterId??w.events.slice().reverse().find(e=>e.hazardFact?.phase==='damage'&&e.hazardFact.targetId===a.id)?.hazardFact?.disasterId;a.condition=100;
+  if(disasterId)emitEvent(w,{kind:'hazard',actors:[],place:{...a.access},hazardFact:{disasterId,phase:'repair',targetId:a.id,before,after:a.condition},text:`${a.name}由已授权的公共工程实际完成修护；材料和工时记录在工程 ${p.id}。`});a.lastDay=Math.floor(w.minute/DAY);state.totals.repairs++;w.processed.push(mark);return null;}
  const graveIds=t.graves.map((at,i)=>{const id=`grave:${p.id}:${i}`;if(!w.graves.some(g=>g.id===id))w.graves.push({id,at:{...at},personId:null,buriedAt:null,reservedBy:null,condition:100,lastMaintainedAt:w.minute});return id;});
  if(!state.assets.some(a=>a.projectId===p.id))state.assets.push({id:`infrastructure:${p.id}`,name:p.name,projectId:p.id,kind:t.kind,definition:p.definition,at:{...p.at},width:p.width,height:p.height,access:{...p.door},anchors:structuredClone(t.anchors),tiles:structuredClone(t.tiles),graveIds,condition:100,lastDay:Math.floor(w.minute/DAY),createdAt:w.minute,retiredAt:null,cost:p.stages.reduce((bag,s)=>({wood:(bag.wood??0)+(s.materials.wood??0),stone:(bag.stone??0)+(s.materials.stone??0)}),{} as Inventory),minutes:p.stages.reduce((n,s)=>n+s.minutes,0)});
  w.processed.push(mark);state.totals[t.kind==='road'?'roads':t.kind==='bridge'?'bridges':t.kind==='dock'?'docks':'cemeteries']++;return null;

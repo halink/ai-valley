@@ -60,14 +60,14 @@ test('adding a guardian requires the existing guardian and an expressive child t
  for(const p of [child,parent,volunteer])p.inside=null;
  assert.ok(executeSocialAction(w,volunteer,{type:'fosterChild',targetId:child.id}).ok);
  assert.ok(!child.guardianIds.includes(volunteer.id));
- assert.ok(executeSocialAction(w,parent,{type:'familyConsent',targetId:child.id,accept:true}).ok);
+ assert.ok(executeSocialAction(w,parent,{type:'familyConsent',targetId:child.id,accept:true,offerId:child.guardianOffer!.id}).ok);
  assert.ok(!child.guardianIds.includes(volunteer.id));
- assert.ok(executeSocialAction(w,child,{type:'familyConsent',targetId:child.id,accept:true}).ok);
+ assert.ok(executeSocialAction(w,child,{type:'familyConsent',targetId:child.id,accept:true,offerId:child.guardianOffer!.id}).ok);
  assert.ok(child.guardianIds.includes(volunteer.id));
  assert.equal(w.events.at(-1)?.populationChange,'guardian');
 });
 
-test('distant unknown death cannot recruit a guardian but witnessed loss can prompt a voluntary offer',()=>{
+test('neither unknown nor verified parental death grants automatic permanent guardianship',()=>{
  const w=stage(),[parent,other]=w.residents,volunteer=w.residents.find(r=>r.name==='靳微')!;
  const child=birth(w,parent,other);child.guardianIds=[parent.id];
  parent.at={x:60,y:60};parent.inside=null;
@@ -77,8 +77,8 @@ test('distant unknown death cannot recruit a guardian but witnessed loss can pro
  initializeFunerary(w);volunteer.at={...parent.at};
  assert.equal(completeFunerary(w,volunteer,{type:'funerary',operation:'verify',targetId:parent.id}),null);
  volunteer.at={x:child.at.x+1,y:child.at.y};
- assert.ok(executeSocialAction(w,volunteer,{type:'fosterChild',targetId:child.id}).ok);
- assert.ok(child.guardianIds.includes(volunteer.id));
+ assert.equal(executeSocialAction(w,volunteer,{type:'fosterChild',targetId:child.id}).ok,false);
+ assert.ok(!child.guardianIds.includes(volunteer.id));
 });
 
 test('private household invitations need a separate choice and physical arrival',()=>{

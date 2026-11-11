@@ -1,11 +1,17 @@
 export type DutyRole = 'kitchen' | 'care';
 
-export interface PublicDutyAction {
+export type PublicDutyAction = {
   type: 'publicDuty';
   operation: 'claim' | 'decline' | 'reschedule' | 'withdraw' | 'attend' | 'stay' | 'receive';
   shiftId: string;
   fromShiftId?: string;
-}
+} | {
+  type:'publicDuty';
+  operation:'inspect';
+  buildingId:string;
+  shiftId?:never;
+  fromShiftId?:never;
+};
 
 export interface DutyAssignment {
   residentId: string;

@@ -1,3 +1,4 @@
+import {activeLandRights} from '../shared/land-rights.js';
 import {buildingBlueprints} from '../world/building-blueprints.js';
 import {isInfrastructure} from '../world/infrastructure.js';
 import type {BuildingKind,FormalOpportunity,Resident,World} from '../shared/types.js';
@@ -57,10 +58,10 @@ export function constructionOpportunities(w:World,r:Resident):FormalOpportunity[
   for(const asset of w.infrastructure?.assets.filter(s=>s.retiredAt===null&&s.condition<95&&distance(r.at,s.access)<=16)??[])add('repairInfrastructure.'+asset.id,`提出对${constructionNames[asset.kind]}的实际修护工程：现场状况${Math.floor(asset.condition)}/100，预算、供料、承包与各次上工仍须居民自行决定`,{type:'construction',operation:'repairInfrastructure',assetId:asset.id,...terms});
  }
  const blueprints=buildingBlueprints(w,r);
- const owned=productionParcels(w).filter(p=>p.ownerId===r.id);
+ const owned=[...productionParcels(w).filter(p=>p.ownerId===r.id),...activeLandRights(w).filter(p=>p.applicantId===r.id&&p.purpose!=='pasture').map(p=>({...p.at,width:p.width,height:p.height,ownerId:r.id}))];
  const defaults={wagePerHour:6,prices:{wood:2,stone:2}};
  const terms='可另填name、wagePerHour（0–60）、prices（wood/stone每份1–100），未填沿用此明确条件；不能替别人出钱或上工';
- for(const lot of owned.slice(0,2)){
+ for(const lot of owned){
   const visit={x:lot.x+Math.floor(lot.width/2),y:lot.y+lot.height};
   if(r.inside||distance(r.at,visit)>12){choices.push({id:`construction.inspect.${lot.x}.${lot.y}`,label:'到自己登记的建设用地查看选址',action:{type:'move',to:visit}});continue;}
   for(const {kind,definition,name,def} of blueprints){

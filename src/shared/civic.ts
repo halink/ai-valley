@@ -1,7 +1,9 @@
 import type {Inventory,Item} from './types.js';
 
 /** Public decisions and their finite mandates, separate from anybody's personal purse. */
+export interface PublicProcurementMandate {merchantId:string;handlerId:string;}
 export type CivicMeasure =
+ | {kind:'foodReserve';foreignProcurement?:PublicProcurementMandate;buildingId:string;item:Item;quantity:number;unitPrice:number;suppliesBudget:number;dailyNutrition:number;durationDays:number}
  | {kind:'fixtureRemoval';buildingId:string;stationId:string;wage:number;durationDays:number}
  | {kind:'salesTax';basisPoints:number;durationDays:number}
  | {kind:'careSupport';buildingId:string;agreementId:string;amount:number;durationDays:number}
@@ -11,6 +13,9 @@ export type CivicMeasure =
  | {kind:'service';buildingId:string;wagePerService:number;wageBudget:number;suppliesBudget:number;durationDays:number;prices?:Inventory}
  | {kind:'repair';buildingId:string;wage:number;suppliesBudget:number;durationDays:number;prices?:Inventory};
 export type CivicAction =
+ | {type:'civic';operation:'deliverReserve';reserveId:string;shipmentId:string}
+ | {type:'civic';operation:'supplyReserve';reserveId:string;quantity:number;receiptId:string}
+ | {type:'civic';operation:'openReserve';reserveId:string;quantity:number;receiptId:string}
  | {type:'civic';operation:'donate';buildingId:string;amount:number}
  | {type:'civic';operation:'propose';buildingId:string;measure:CivicMeasure}
  | {type:'civic';operation:'vote';proposalId:string;accept:boolean}
@@ -29,9 +34,18 @@ export interface CivicBudget {
  wageAccount:string;supplyAccount:string;prices:Inventory;purchased:Inventory;
  repairWorkerId?:string;
 }
+export interface PublicFoodReserve {
+ foreignProcurement?:PublicProcurementMandate & {acquired:number;delivered:number};
+ id:string;proposalId:string;buildingId:string;item:Item;quantityLimit:number;unitPrice:number;dailyNutrition:number;
+ startsAt:number;expiresAt:number;status:'active'|'expired';
+ supplyAccount:string;suppliesLimit:number;spent:number;refunded:number;
+ /** Independent physical shelf, never available to service/repair or counted twice. */
+ inventory:Inventory;stocked:number;purchased:number;opened:number;withdrawn:number;
+ receipts:Array<{id:string;personId:string;operation:'supplyReserve'|'openReserve'|'deliverReserve';quantity:number;coins:number;at:number}>;
+}
 export interface CivicState {
- proposals:CivicProposal[];budgets:CivicBudget[];
- /** Physical public stores by building; these sum to economy.treasuryStock. */
+ proposals:CivicProposal[];budgets:CivicBudget[];reserves?:PublicFoodReserve[];
+ /** Uncommitted/service public stores by building; these plus reserve shelves sum to economy.treasuryStock. */
  stores:Record<string,Inventory>;
  salesTax:{basisPoints:number;expiresAt:number;proposalId:string}|null;
  nextSerial:number;

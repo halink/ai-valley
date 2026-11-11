@@ -1,9 +1,15 @@
+import {childHelpPending,childHelpOutsideChoices,isChildHelpReply,childHelpReplyNotice,recordChildHelpReply} from './child-help-mail.js';
+import {startAdultFamilyJourney,adultFamilyJourneyContext,applyAdultFamilyJourneyDecision,advanceAdultFamilyJourneys} from './adult-family-journey.js';
+import {ordinaryVisitorJourney,visitorStageMinutes} from '../shared/visitor-journey.js';
+import {startVisitorJourney,advanceVisitorJourney,applyVisitorJourneyDecision,visitorJourneyCandidate,visitorJourneyContext} from './visitor-journey.js';
+import {advanceVisitorAid,applyVisitorAidDecision,visitorAidCandidate,visitorAidContext} from './visitor-aid.js';
 import {physiologyDefinition,physiology} from './physiology.js';
 import type {Building, DecisionContext, FormalOpportunity, ModelDecision, Resident, World} from '../shared/types.js';
 import {emitEvent} from './events.js';
-import {ageMortalityDue} from './life.js';
+import {ageMortalityDue,recordDeath} from './life.js';
 import {distance, findPath, walkable} from './navigation.js';
 import {ageYears, calendar, DAY, YEAR} from './time.js';
+import {gateDirectoryNote,journeySupplyNote,observeGateDirections,visibleGateDirectory} from './visitor-guidance.js';
 
 /** A person first enters the town register at the gate. Afterwards that same resident record is canonical. */
 interface RoadContact {
@@ -12,12 +18,12 @@ interface RoadContact {
   name:string;
   origin:string;
   person?:Resident;
-  phase:'home'|'offered'|'travelling'|'inTown';
+  phase:'home'|'offered'|'travelling'|'inTown'|'carryingMail';
   offeredAt:number|null;
   lastDecisionAt:number|null;
   lastChoice:'stay'|'travel'|null;
   futureAt:number;
-  journey:{leftAt:number;arriveAt:number;nextCheckAt:number;blocked:boolean}|null;
+  journey:{leftAt:number;arriveAt:number;nextCheckAt:number;blocked:boolean;staged?:import('../shared/visitor-journey.js').VisitorJourney}|null;
 }
 export interface MigrationState {
   contacts:RoadContact[];
@@ -67,7 +73,7 @@ function personFor(w:World,contact:RoadContact):Resident|undefined{
 }
 function availableTraveller(w:World,contact:RoadContact):Resident|undefined{
   const p=personFor(w,contact);
-  return p?.status==='alive'&&p.residency==='outside'&&p.canDecide&&p.canExpress&&ageYears(p.bornAt,w.minute)>=18?p:undefined;
+  return p?.status==='alive'&&p.health>0&&p.residency==='outside'&&p.canDecide&&p.canExpress&&ageYears(p.bornAt,w.minute)>=18?p:undefined;
 }
 function newReturnContact(w:World,person:Resident):RoadContact {
   return {id:person.id,name:person.name,origin:stations[0].name,phase:'home',offeredAt:null,
@@ -103,6 +109,7 @@ export function recordDeparture(w:World,person:Resident):void{
 }
 
 export function canDepart(w:World,person:Resident):string|null{
+ if(w.mode==='formal'&&w.foreignTrade?.shipments.some(s=>s.publicReserveId&&s.residentId===person.id&&s.publicCarrier&&!s.publicCarrier.sealed&&s.goods>0))return '本人正携运公共储备粮，须先实际交至原共屋，不能携公粮离谷';
   if(ageYears(person.bornAt,w.minute)<18)return '儿童独立离镇需要有效监护与实际同行安排';
   if(w.mode!=='formal')return null;
   if(person.pregnancy)return '孕育期间需要先落实镇外接产与同行照护，当前不能独自启程';
@@ -120,26 +127,35 @@ export function canDepart(w:World,person:Resident):string|null{
 export function outsideCandidate(w:World):Resident[]{
   const candidates:Resident[]=[];
   for(const c of w.migration?.contacts??[]){
-    if(c.phase!=='offered')continue;
+    if(c.journey?.staged){const p=personFor(w,c);if(p&&visitorJourneyCandidate(w,p))candidates.push(p);continue;}
+    if(c.phase==='carryingMail'){const p=personFor(w,c);if(p&&visitorAidCandidate(w,p))candidates.push(p);continue;}
     const p=availableTraveller(w,c);
+    if(c.phase!=='offered'&&(!p||!childHelpPending(w,p).length))continue;
     if(p&&(!c.familyConsentUntil||p.decisionDue<=w.minute))candidates.push(p);
   }
   return candidates;
 }
-function stationDuration(w:World,origin:string){return (stations.find(station=>station.name===origin)?.minutes??65)+(w.scenario==='frontier'?180:0);}
+export function knownStationDuration(w:World,origin:string):number|null{const station=stations.find(station=>station.name===origin);return station?station.minutes+(w.scenario==='frontier'?180:0):null;}
+export function stationDuration(w:World,origin:string){return knownStationDuration(w,origin)??65+(w.scenario==='frontier'?180:0);}
 
 export function outsideDecisionContext(w:World,person:Resident):DecisionContext{
-  const contact=w.migration!.contacts.find(c=>c.id===person.id&&c.phase==='offered');
+  if(ordinaryVisitorJourney(w,person))return ordinaryVisitorJourney(w,person)!.family?adultFamilyJourneyContext(w,person):visitorJourneyContext(w,person);
+  if(w.migration?.contacts.some(c=>c.id===person.id&&c.phase==='carryingMail'))return visitorAidContext(w,person);
+  const contact=w.migration!.contacts.find(c=>c.id===person.id&&(c.phase==='offered'||childHelpPending(w,person).length));
   if(!contact)throw new Error('outside_opportunity_expired');
   const returning=!contact.person;
-  const choices:FormalOpportunity[]=[
+  const choices:FormalOpportunity[]=contact.phase==='offered'?[
     {id:'stay.outside',label:contact.journey?.blocked?'原路返回居地，结束这一次旅程':'留在原居地，婉拒本次来访',action:{type:'stayOutside'}},
-    {id:'travel.valley',label:contact.journey?.blocked?'留在路口等待下次查路，再试着入谷':`从${contact.origin}沿西南林道${returning?'重访':'访问'}山谷，抵达后自己决定去留`,action:{type:'travelToValley'}},
-  ];
-  const relative=travelCompanion(w,contact);if(relative)choices.push({id:'travel.family.'+relative.id,label:`我愿意与亲属${relative.name}一同沿原路线探访，双方独立同意才会启程；各自抵达后自己选择住宿和去留`,action:{type:'travelWithFamily',partnerId:relative.id}});
-  const notice=`你现在 ${Math.floor(ageYears(person.bornAt,w.minute))} 岁。`+(contact.journey?.blocked
-    ?'你在谷口遇到路阻，眼前暂时不能通行。'
-    :`你在${contact.origin}读到本次驿路公示。西南林道通往${w.map.name}，路程约${stationDuration(w,contact.origin)}分钟。可自行探访，在当地打听住处和工作；公示没有承诺床位、收入或居民同意。`);
+    {id:'travel.valley',label:contact.journey?.blocked?'留在路口等待下次查路，再试着入谷':`从${contact.origin}沿西南林道${returning?'重访':'访问'}山谷，本次先走${visitorStageMinutes(stationDuration(w,contact.origin))}分钟再由本人另选，抵达后自己决定去留`,action:{type:'travelToValley'}},
+  ]:[];
+  choices.push(...childHelpOutsideChoices(w,person));
+  const relative=travelCompanion(w,contact);if(relative)choices.push({id:'travel.family.'+relative.id,label:`我愿意与亲属${relative.name}一同沿原路线探访，双方独立同意才启程，首段最多${visitorStageMinutes(stationDuration(w,contact.origin))}分钟；每段再分别同意，按较慢速度，途中各自进食休息或明确离队，不代替照护；抵达后各自选择住宿`,action:{type:'travelWithFamily',partnerId:relative.id}});
+  const travelMinutes=contact.journey?.blocked?30:stationDuration(w,contact.origin);
+  const helpNotice=childHelpPending(w,person).slice(0,4).map(n=>`你实际收到${n.reporterName}在第${n.createdAt}分钟记录的${n.childName}求助，原址（${n.location.at.x},${n.location.at.y}）${n.location.inside?'室内':'室外'}，第${n.expiresAt}分钟到期。原信不证明当前需要，不传递新的位置、监护死亡证据或进入权。`).join('');
+  const notice=helpNotice+`你现在 ${Math.floor(ageYears(person.bornAt,w.minute))} 岁。`+(contact.journey?.blocked
+    ?`你在谷口遇到路阻，眼前暂时不能通行。若本人选择继续等待，约${travelMinutes}分钟后再检查入口；也可选择返回。`
+    :`${contact.phase==='offered'?`你在${contact.origin}读到本次驿路公示。`:`你在${contact.origin}收到这份历史求助信。`}西南林道通往${w.map.name}，路程约${travelMinutes}分钟。可自行探访，在当地打听住处和工作；公示没有承诺床位、收入或居民同意。单人来访本次只走${visitorStageMinutes(travelMinutes)}分钟，之后可本人另选继续、随身进食、原地休息或原路返回。`)
+    +journeySupplyNote(w,person,travelMinutes);
   return {
     actor:{id:person.id,name:person.name,traits:person.traits,hunger:person.hunger,energy:person.energy,health:person.health,inventory:{...person.inventory},skills:{...person.skills},intention:person.intention,at:{...person.at},homeId:person.homeId,lastFailure:person.lastFailure},
     outside:{origin:contact.origin,notice,choices},minute:w.minute,season:calendar(w.minute).season,weather:w.weather,bounds:{width:w.map.width,height:w.map.height},
@@ -148,23 +164,34 @@ export function outsideDecisionContext(w:World,person:Resident):DecisionContext{
 }
 
 export function applyOutsideDecision(w:World,id:string,revision:number,decision:ModelDecision):{ok:boolean;error?:string}{
-  const c=w.migration?.contacts.find(contact=>contact.id===id&&contact.phase==='offered');
+  const staged=w.migration?.contacts.find(c=>c.id===id&&c.journey?.staged),traveller=staged&&personFor(w,staged);if(traveller)return staged!.journey!.staged!.family?applyAdultFamilyJourneyDecision(w,traveller,revision,decision):applyVisitorJourneyDecision(w,traveller,revision,decision);
+  const carrying=w.migration?.contacts.find(c=>c.id===id&&c.phase==='carryingMail'),carrier=carrying&&personFor(w,carrying);if(carrier)return applyVisitorAidDecision(w,carrier,revision,decision);
+  const requested=decision.actions[0];
+  const c=w.migration?.contacts.find(contact=>contact.id===id&&(contact.phase==='offered'||requested&&isChildHelpReply(requested)));
   const person=c&&availableTraveller(w,c);
-  const action=decision.actions[0];
+  const help=person&&requested&&isChildHelpReply(requested)?childHelpReplyNotice(w,person,requested):undefined;
+  if(requested&&isChildHelpReply(requested)&&!help)return {ok:false,error:'本人没有仍在原期限内且尚未答复的实际已收求助'};
+  const action=help?{type:requested.type==='emergencyCare'&&requested.operation==='travelHelp'?'travelToValley' as const:'stayOutside' as const}:requested;
   if(!c||!person||person.revision!==revision)
     return {ok:false,error:'外部人物或驿路机会已经变化'};
   if(decision.actions.length!==1||!(action?.type==='travelToValley'||action?.type==='stayOutside'||action?.type==='travelWithFamily'))return {ok:false,error:'请选择本人当前可以决定的驿路事项'};
+  if(action.type==='travelToValley'&&!c.journey){const error=canDepart(w,person);if(error)return {ok:false,error};}
   const relative=travelCompanion(w,c);if(action.type==='travelWithFamily'&&relative?.id!==action.partnerId)return {ok:false,error:'亲属或本次具体同行机会已变化'};
+  if(action.type==='travelWithFamily'){for(const p of [person,personFor(w,relative!)!]){const error=canDepart(w,p);if(error)return {ok:false,error};const child=[...w.residents,...w.migration!.contacts.flatMap(c=>c.person?[c.person]:[])].find(child=>child.status==='alive'&&child.residency==='outside'&&ageYears(child.bornAt,w.minute)<18&&child.guardianIds.includes(p.id));if(child)return {ok:false,error:`${child.name}的镇外照护与接送尚未落实，成人同行不能代替儿童安排`};}}
+  if(help){
+    recordChildHelpReply(w,person,help,action.type==='stayOutside'?'decline':'visit');
+    if(action.type==='stayOutside'){person.intention=decision.intention.slice(0,160);person.lastDecisionAt=w.minute;person.revision++;w.revision++;return {ok:true};}
+  }
   c.lastChoice=action.type==='stayOutside'?'stay':'travel';c.lastDecisionAt=w.minute;
   person.intention=decision.intention.slice(0,160);person.lastDecisionAt=w.minute;person.revision++;
-  if(action.type==='travelWithFamily'){const other=personFor(w,relative!)!;if((relative!.familyConsentUntil??0)>w.minute){const arrival=w.minute+stationDuration(w,c.origin);for(const member of [c,relative!]){member.phase='travelling';delete member.familyConsentUntil;member.journey={leftAt:w.minute,arriveAt:arrival,nextCheckAt:arrival,blocked:false};}other.revision++;}else{c.familyConsentUntil=w.minute+120;person.decisionDue=w.minute+30;}w.revision++;return {ok:true};}
+  if(action.type==='travelWithFamily'){const other=personFor(w,relative!)!;if((relative!.familyConsentUntil??0)>w.minute){startAdultFamilyJourney(w,person,other,c.origin,stationDuration(w,c.origin));other.revision++;}else{c.familyConsentUntil=w.minute+120;person.decisionDue=w.minute+30;}w.revision++;return {ok:true};}
   delete c.familyConsentUntil;if(relative?.familyConsentUntil){delete relative.familyConsentUntil;const other=personFor(w,relative);if(other){other.decisionDue=w.minute;other.revision++;}}
   if(action.type==='stayOutside'){
     c.phase='home';c.futureAt=w.minute+reconsiderAfter;c.journey=null;
   }else{
     c.phase='travelling';
     const arrival=w.minute+stationDuration(w,c.origin);
-    c.journey=c.journey?{...c.journey,nextCheckAt:w.minute+30,blocked:false}:{leftAt:w.minute,arriveAt:arrival,nextCheckAt:arrival,blocked:false};
+    c.journey=c.journey?{...c.journey,nextCheckAt:w.minute+30,blocked:false}:{leftAt:w.minute,arriveAt:arrival,nextCheckAt:w.minute+visitorStageMinutes(stationDuration(w,c.origin)),blocked:false,staged:startVisitorJourney(w,person,c.origin,stationDuration(w,c.origin))};
   }
   w.revision++;
   return {ok:true};
@@ -175,7 +202,7 @@ function publicInn(w:World):Building|undefined{
   for(const b of w.buildings)if(b.kind==='lodge'&&b.ownerId==='commons'&&(!nearest||distance(b.door,w.map.entrance)<distance(nearest.door,w.map.entrance)))nearest=b;
   return nearest;
 }
-function passableEntry(w:World,inn:Building|undefined):boolean{
+export function passableEntry(w:World,inn:Building|undefined=publicInn(w)):boolean{
   const gate=w.map.entrance;
   if(!walkable(w,gate))return false;
   if(inn)return findPath(w,gate,inn.door)!==null;
@@ -191,13 +218,14 @@ function tryEntry(w:World,c:RoadContact){
     return;
   }
   const firstVisit=Boolean(c.person);
-  person.at={...w.map.entrance};person.inside=null;person.homeId=null;person.residency='visitor';
+  person.at={...w.map.entrance};delete person.regionalLocation;person.inside=null;person.homeId=null;person.residency='visitor';
   person.decisionDue=w.minute;person.plan=null;person.activity=null;person.lastFailure=null;person.revision++;
-  if(inn&&!person.knownBuildings.includes(inn.id))person.knownBuildings.push(inn.id);
+  observeGateDirections(w,person);
   if(firstVisit)w.residents.push(person);
   delete c.person;c.phase='inTown';c.journey=null;
+  const sign=visibleGateDirectory(w,person);
   emitEvent(w,{kind:'arrival',populationChange:'visit',actors:[person.id],place:{...person.at},
-    text:`${person.name}从${c.origin}沿西南林道${firstVisit?'来到':'重返'}溪岚谷，目前是访客。${inn?'谷口路牌标有'+inn.name+'的地址。':''}`});
+    text:`${person.name}从${c.origin}沿西南林道${firstVisit?'来到':'重返'}${w.map.name}，目前是访客。${sign?gateDirectoryNote(sign):''}`});
 }
 
 /** Publication creates a chance to learn about the road. Only an accepted individual decision starts travel. */
@@ -205,18 +233,21 @@ export function advanceMigration(w:World):void{
   if(w.mode!=='formal'||w.clock.paused)return;
   initializeMigration(w);
   const state=w.migration!;
+  advanceVisitorAid(w);
   const before=state.lastLifeAt??w.minute;
   if(Math.floor(before/DAY)!==Math.floor(w.minute/DAY)){
     for(const c of state.contacts){
       const p=c.person;
       if(p?.status==='alive'&&ageMortalityDue(w.seed,p,before,w.minute,physiology(w,p))){
-        p.status='dead';p.deathAt=w.minute;p.deathCause='oldAge';p.canDecide=false;p.canExpress=false;p.revision++;
-        c.phase='home';c.journey=null;
+        if(c.journey?.staged){recordDeath(w,p,'oldAge');}else{p.status='dead';p.deathAt=w.minute;p.deathCause='oldAge';p.canDecide=false;p.canExpress=false;p.revision++;c.phase='home';c.journey=null;}
       }
     }
   }
   state.lastLifeAt=w.minute;
+  const familyHandled=advanceAdultFamilyJourneys(w,id=>{const c=state.contacts.find(c=>c.id===id);if(c)tryEntry(w,c);});
   for(const c of state.contacts){
+    if(familyHandled.has(c.id))continue;
+    if(c.journey?.staged){const p=personFor(w,c);if(p)advanceVisitorJourney(w,p,()=>tryEntry(w,c));continue;}
     if(c.phase==='travelling'&&c.journey&&c.journey.nextCheckAt<=w.minute)tryEntry(w,c);
     if(c.phase!=='offered')continue;
     const p=personFor(w,c);
@@ -241,10 +272,11 @@ export function advanceMigration(w:World):void{
 
 export function settlementDirections(w:World,person:Resident):FormalOpportunity[]{
   if(person.residency!=='visitor'||person.status!=='alive'||!person.canDecide||!person.canExpress)return [];
-  const lodging=w.buildings.filter(b=>b.kind==='lodge'&&b.ownerId==='commons'&&person.knownBuildings.includes(b.id))
+  const sign=visibleGateDirectory(w,person);
+  const lodging=w.buildings.filter(b=>b.kind==='lodge'&&b.ownerId==='commons'&&(person.knownBuildings.includes(b.id)||sign?.hall?.id===b.id))
     .sort((a,b)=>distance(a.door,person.at)-distance(b.door,person.at))[0];
   if(!lodging)return [];
-  if(distance(lodging.door,person.at)>8)return [{id:'visit.inn',label:`沿已知路线去${lodging.name}了解住宿，到场再看是否有床`,action:{type:'move',to:{...lodging.door}}}];
+  if(distance(lodging.door,person.at)>8||person.inside!==null&&person.inside!==lodging.id)return [{id:'visit.inn',label:`按已知地址去${lodging.name}门外（${lodging.door.x},${lodging.door.y}）了解住宿与供给，至少${distance(lodging.door,person.at)}格；路况、空床、余粮与值守情况到场再核实`,action:{type:'move',to:{...lodging.door}}}];
   if(!person.homeId && lodging.residents.length<lodging.capacity)return [{id:'visit.lodge',label:`在${lodging.name}借用一张空床短住，保留访客身份`,action:{type:'lodge',buildingId:lodging.id}}];
   return [];
 }

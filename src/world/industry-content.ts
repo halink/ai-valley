@@ -1,3 +1,5 @@
+import {fishSpecies,fishItems} from '../shared/fish-species.js';
+import {fishNames} from '../shared/fishing-rules.js';
 import type {CraftRecipe,StationKind} from '../shared/industry.js';
 import type {Inventory} from '../shared/types.js';
 export const stationNames:Record<StationKind,string>={bench:'木工作台',forge:'锻冶炉',mill:'磨坊工位',dairy:'乳品工位',loom:'织机',preserver:'罐藏工位'};
@@ -22,4 +24,12 @@ export const recipes:CraftRecipe[]=[
  {id:'cloth',name:'纺织布料',input:{fiber:3,wool:1},output:{cloth:2},minutes:60,station:'loom',skill:'building',minimum:0},
  {id:'medicine',name:'配制照护用品',input:{herb:2,water:1,cloth:1},output:{medicine:2},minutes:45,station:null,skill:'care',minimum:1},
 ];
+// Explicit recipes preserve the actual species inputs in work batches and receipts.
+for(const species of fishSpecies){
+ recipes.push({id:'fishMeal.'+species,name:'烹制'+fishNames[species]+'鱼餐',input:{[fishItems[species]]:1,water:1,wood:1},output:{meal:2},minutes:30,station:null,skill:'farming',minimum:0});
+ for(const other of fishSpecies.slice(fishSpecies.indexOf(species))){
+  const input:Inventory={water:1,wood:1};input[species]=1;input[other]=(input[other]??0)+1;
+  recipes.push({id:'preserveFish.'+species+'.'+other,name:'罐藏'+fishNames[species]+(other===species?'':'与'+fishNames[other]),input,output:{preserve:2},minutes:60,station:'preserver',skill:'farming',minimum:0});
+ }
+}
 export const recipeById=(id?:string)=>recipes.find(r=>r.id===id);

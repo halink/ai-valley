@@ -1,0 +1,2 @@
+/* Legacy development stylesheet; the shared observer stylesheet is loaded by main. */
+@import './isometric-observer.css';

@@ -1,3 +1,6 @@
+import {retainedOutdoorSites} from '../shared/land-use.js';
+import {activeLandRights,reservedLandRights,inLand,landConstructionError} from '../shared/land-rights.js';
+import {currentPremisesLease} from '../shared/premises.js';
 import {accountBalance} from './economy.js';
 import {infrastructureFootprint,infrastructureSiteError,isInfrastructure} from './infrastructure.js';
 import {infrastructureNames} from '../shared/infrastructure.js';
@@ -45,22 +48,25 @@ export function constructionStages(cost:Inventory,minutes:number):ConstructionSt
  return ['基础与地基','梁柱与墙体','屋顶与交付'].map((name,i)=>({name,materials:[first,second,third][i],minutes:times[i],worked:0,startedAt:null,finishedAt:null}));
 }
 export function constructionLand(w:World,at:Vec):boolean {
- return productionParcels(w).some(p=>inRect(at,p))||Object.values(w.construction?.yards??{}).some(p=>inRect(at,p))||!!w.construction?.projects.some(p=>p.reserved&&insideProject(p,at));
+ return reservedLandRights(w).some(p=>inLand({...p.at,width:p.width,height:p.height},at))||productionParcels(w).some(p=>inRect(at,p))||Object.values(w.construction?.yards??{}).some(p=>inRect(at,p))||!!w.construction?.projects.some(p=>p.reserved&&insideProject(p,at));
 }
 /** Cheap local validity for a menu. Global reachability runs only when reserving or delivering a project. */
-export function constructionSiteError(w:World,p:Pick<ConstructionProject,'id'|'mode'|'ownerId'|'at'|'width'|'height'|'door'|'base'|'definition'|'ruleVersion'|'terrain'>,access=false):string|null {
+export function constructionSiteError(w:World,p:Pick<ConstructionProject,'id'|'mode'|'ownerId'|'at'|'width'|'height'|'door'|'base'|'definition'|'ruleVersion'|'terrain'|'landRightId'>,access=false):string|null {
  if(p.mode==='terrain')return infrastructureSiteError(w,p,access);
+ const landError=landConstructionError(w,p);if(landError)return landError;
+ const retained=retainedOutdoorSites(w);
  if(!w.definitions[p.definition])return '建筑定义已不存在';
  if(p.at.x<1||p.at.y<1||p.at.x+p.width>=w.map.width||p.at.y+p.height>=w.map.height)return '建设范围超出开放地图';
  const parcels=productionParcels(w),yard=p.base?w.construction?.yards[p.base.id]:undefined;
- if(p.base){if(w.buildingMigrations?.some(m=>m.buildingId===p.base!.id&&(m.status==='accepted'||Object.values(m.stock).some(n=>n!>0))))return '原场所仍有本人已接受的兼容改版或实际保留材料';const current=w.buildings.find(b=>b.id===p.base!.id);
+ if(p.base){if(currentPremisesLease(w,p.base.id))return '原址仍有有效租约，不能未经承租人同意改动';if(w.buildingMigrations?.some(m=>m.buildingId===p.base!.id&&(m.status==='accepted'||Object.values(m.stock).some(n=>n!>0))))return '原场所仍有本人已接受的兼容改版或实际保留材料';const current=w.buildings.find(b=>b.id===p.base!.id);
   if(p.mode==='conversion'){const occupied=conversionUseError(w,p.base.id);if(occupied)return occupied;}
   if(!current||current.ownerId!==p.ownerId||current.definition!==p.base.definition||!same(current.at,p.base.at)||current.width!==p.base.width||current.height!==p.base.height||!same(current.door,p.base.door))return '原建筑产权或占地已改变，须重新设计扩建';
  }
  for(let y=p.at.y;y<p.at.y+p.height;y++)for(let x=p.at.x;x<p.at.x+p.width;x++){
   const at={x,y};if(p.base&&insideBuilding(p.base,at))continue;
+  if(retained.some(p=>same(p,at)))return '新增占地不能覆盖未葬遗体或原址封存实物';
   if(pastureContains(w,at))return '新增占地不能覆盖已经使用的牧场';
-  const privateParcel=parcels.find(q=>inRect(at,q));
+  const privateParcel=parcels.find(q=>inRect(at,q))??activeLandRights(w).filter(q=>q.definition===p.definition).map(q=>({...q.at,width:q.width,height:q.height,ownerId:q.applicantId})).find(q=>inRect(at,q));
   if(p.ownerId!=='commons'){
    if(privateParcel?.ownerId!==p.ownerId&&!(yard&&inRect(at,yard)))return '新增占地超出本人登记的建设用地或院落';
    if(privateParcel&&privateParcel.ownerId!==p.ownerId)return '此处属于另一位居民的建设用地';
@@ -81,7 +87,9 @@ export function constructionSiteError(w:World,p:Pick<ConstructionProject,'id'|'m
  const candidate={...current,construction:{...w.construction!,projects:[...(current.construction?.projects??[]),reserved]}};
  const before=reachableTiles(current),after=reachableTiles(candidate),index=(at:Vec)=>at.y*w.map.width+at.x;
  const reachable=(seen:Uint8Array,at:Vec,adjacent=false)=>!!seen[index(at)]||adjacent&&[{x:at.x-1,y:at.y},{x:at.x+1,y:at.y},{x:at.x,y:at.y-1},{x:at.x,y:at.y+1}].some(q=>q.x>=0&&q.y>=0&&q.x<w.map.width&&q.y<w.map.height&&seen[index(q)]);
- const places=[...w.buildings.map(b=>b.door),...(w.construction?.projects.filter(q=>q.id!==p.id&&q.reserved).map(q=>q.door)??[]),...w.residents.filter(r=>r.status==='alive'&&r.residency!=='outside'&&!r.inside).map(r=>r.at),...(w.industry?.pastures?.flatMap(yard=>yard.tiles)??[])];
+ const places=[...retained,...reservedLandRights(w).map(p=>p.door),...w.buildings.map(b=>b.door),...(w.construction?.projects.filter(q=>q.id!==p.id&&q.reserved).map(q=>q.door)??[]),...w.residents.filter(r=>r.status==='alive'&&r.residency!=='outside'&&!r.inside).map(r=>r.at),...(w.industry?.pastures?.flatMap(yard=>yard.tiles)??[])];
+ const privateAccess=parcels.flatMap(q=>{const cells:Vec[]=[];for(let y=Math.max(0,q.y);y<Math.min(w.map.height,q.y+q.height);y++)for(let x=Math.max(0,q.x);x<Math.min(w.map.width,q.x+q.width);x++)cells.push({x,y});return cells;});
+ if(privateAccess.some(at=>!insideProject(p,at)&&reachable(before,at)&&!reachable(after,at)))return '工程会阻断原有私人地块的可达通路';
  if(!reachable(after,p.door)||places.some(at=>reachable(before,at)&&!reachable(after,at))||w.resources.filter(r=>r.kind==='spring').some(r=>reachable(before,r.at,true)&&!reachable(after,r.at,true))||w.plots.some(q=>reachable(before,q.at)&&!reachable(after,q.at)))return '工程会阻断既有住户、农田、牧场、工地或水源的通路';
  return null;
 }
@@ -90,11 +98,13 @@ export function proposedSite(w:World,r:Resident,a:ConstructionAction){
  const ownerId=f.terrain?'commons':f.base?.ownerId??(a.scope==='public'?'commons':r.id);
  const rules=w.definitions[w.activeDefinitions['construction/rules']??'construction/rules@1'];
  if(!rules||rules.id!=='construction/rules')return null;
- return {...f,id:'candidate',ownerId,mode:f.terrain?'terrain' as const:a.operation==='convert'?'conversion' as const:f.base?'expansion' as const:'new' as const,ruleVersion:rules.version};
+ const right=activeLandRights(w).find(p=>p.applicantId===ownerId&&p.definition===f.definition&&inLand({...p.at,width:p.width,height:p.height},f.at));
+ return {...f,...(right?{landRightId:right.id}:{}),id:'candidate',ownerId,mode:f.terrain?'terrain' as const:a.operation==='convert'?'conversion' as const:f.base?'expansion' as const:'new' as const,ruleVersion:rules.version};
 }
 
 /** Renovation never evicts a person or silently destroys an existing crop, animal or promise. */
 export function conversionUseError(w:World,id:string):string|null{
+ if(currentPremisesLease(w,id))return '原址仍有有效租约';
  const b=w.buildings.find(b=>b.id===id);if(!b)return '原场所已不存在';
  if(w.industry?.pastures?.some(yard=>yard.barnId===id))return '该畜舍仍登记有附属牧场，不能直接改换用途';
  if(w.culture?.events.some(e=>e.buildingId===id&&(['planned','held'].includes(e.status)||e.preparation.completedAt!==null&&e.preparation.clearedAt===null||Object.values(e.preparation.held).some(n=>n!>0)||e.contributions.some(c=>Object.values(c.inventory).some(n=>n!>0)))))return '原场所还有已接受的文化活动、实际布置或他人物资，须先实际处理';

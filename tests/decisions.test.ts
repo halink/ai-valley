@@ -35,12 +35,13 @@ test('a caregiver can observe a hungry dependent before having feeding supplies,
  child.bornAt=w.minute-2*YEAR;child.hunger=92;child.health=68;child.at={...parent.at};child.inside=parent.inside;
  parent.inventory={};parent.pregnancy={otherParentId:w.residents[1].id,conceivedAt:w.minute,dueAt:w.minute+1440,definition:'life/basic@1'};
  const nearby=decisionContext(w,parent);
- assert.match(nearby.formal!.familyNotes!,/饥饿 92\/100/);
+ assert.match(nearby.formal!.familyNotes!,/有明显饥饿迹象/);
+ assert.doesNotMatch(nearby.formal!.familyNotes!,/92\/100|68\/100/);
  assert.match(nearby.formal!.familyNotes!,/正在孕育/);
  child.at={x:parent.at.x+40,y:parent.at.y+20};child.hunger=37;
  const far=decisionContext(w,parent);
  assert.equal(far.formal!.familyNotes!.includes('37/100'),false);
- assert.match(far.formal!.familyNotes!,/当前身体状况不在你的观察范围内/);
+ assert.match(far.formal!.familyNotes!,/不能从登记或亲属关系推断远处情况/);
 });
 
 test('own promised shifts remain in model context even when distant and lacking supplies',async()=>{
@@ -86,7 +87,8 @@ test('formal decision prompts use each person’s own completed rest, and presen
  peer.recentActions=[{type:'sleep',at:w.minute-12,minutes:41,energy:78}];
  const c=decisionContext(w,actor);c.plots=[];
  const choices=decisionChoices(c);
- const another=decisionChoices({...c,actor:{...c.actor,id:peer.id}});
+ // Change only the presentation seed, not into a visible target (self-talk is illegal).
+ const another=decisionChoices({...c,actor:{...c.actor,id:'presentation-order-probe'}});
  assert.notDeepEqual(choices.map(c=>c.label),another.map(c=>c.label));
  assert.deepEqual(choices.map(c=>c.label).sort(),another.map(c=>c.label).sort());
  const message=prompt(c,choices)[0].content;

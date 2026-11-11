@@ -112,8 +112,8 @@ test('accepted routine retains recipe version when active content changes before
 
 test('revoked residence stops sleep without using a bed through stale homeId',()=>{
  const w=fresh(),r=w.residents[0],home=w.buildings.find(b=>b.id===r.homeId)!;r.at={...home.door};r.energy=10;
- plan(w,r,[{type:'sleep',minutes:100}]);stepWorld(w,5);const energy=r.energy;home.residents=[];stepWorld(w,1);
- assert.equal(r.activity,null);assert.equal(r.inside,null);assert.ok(r.energy<energy);assert.match(r.lastFailure!,/室内/);
+ plan(w,r,[{type:'sleep',minutes:100}]);stepWorld(w,5);const energy=r.energy;assert.ok(energy>10,'valid ordinary residence permits actual sleep before revocation');home.residents=[];stepWorld(w,1);
+ assert.equal(r.activity,null);assert.equal(r.inside,null);assert.ok(r.energy<energy);assert.equal(r.homeId,home.id,'stale registration does not restore revoked rights');assert.equal(r.lastFailure,'原住处的床位使用权已经失效');
 });
 
 test('zero health stops an already selected action before any final labor or consumption',()=>{

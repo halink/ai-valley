@@ -1,4 +1,6 @@
+import {retainedInterpretationMemories,MAX_INTERPRETATION_MEMORIES,MAX_INTERPRETATION_TARGETS,INTERPRETATION_ROTATION_MINUTES} from '../shared/interpretation-memory.js';
 import {hasReceipt} from './receipts.js';
+import {dialogueExcerpt,dialogueSource,dialogueTone} from '../shared/dialogue-evidence.js';
 import type {FormalOpportunity,Resident,Vec,World} from '../shared/types.js';import type {Meeting,SocialAction} from '../shared/social-life.js';import {ageYears} from './time.js';import {distance,walkable} from './navigation.js';import {roomLayout,roomPath} from '../shared/rooms.js';import {emitEvent} from './events.js';import {canObserve} from './knowledge.js';import {coLocated} from './proximity.js';
 const person=(w:World,id?:string)=>w.residents.find(r=>r.id===id),meeting=(w:World,id?:string)=>w.social?.meetings.find(m=>m.id===id);
 const capable=(w:World,r:Resident)=>r.status==='alive'&&r.residency!=='outside'&&r.canDecide&&r.canExpress&&ageYears(r.bornAt,w.minute)>=6;
@@ -6,7 +8,7 @@ const member=(m:Meeting,id:string)=>m.members.find(p=>p.personId===id&&p.leftAt=
 export function initializeSocial(w:World){if(w.mode!=='formal')return;w.social??={meetings:[],nextSerial:1,totals:{meetings:0,speeches:0,interpretations:0}};w.definitions['social/meeting@1']??={id:'social/meeting',version:1,kind:'action',dependencies:[],data:{capacity:8,minimumMinutes:30,maximumMinutes:180,roster:false}};w.definitions['social/interpretation@1']??={id:'social/interpretation',version:1,kind:'action',dependencies:[],data:{deltaLimit:5,scope:'仅本人已实际获知经历的个人理解，不是对世界事实或他人感受的重写'}};}
 export function atMeeting(w:World,r:Resident,m:Meeting,range=m.roomId?6:2){if(r.inside!==m.roomId||r.residency==='outside')return false;if(m.roomId){const b=w.buildings.find(b=>b.id===m.roomId);return !!b&&distance(r.roomAt??roomLayout(w,b).entry,m.roomAt??roomLayout(w,b).entry)<=range;}return distance(r.at,m.at)<=range;}
 function visible(w:World,r:Resident,m:Meeting){return m.status==='open'&&m.expiresAt>w.minute&&canObserve(w,r)&&atMeeting(w,r,m,10)&&m.members.some(p=>p.leftAt===null&&person(w,p.personId)?.status==='alive'&&atMeeting(w,person(w,p.personId)!,m));}
-function source(w:World,r:Resident,id?:string){const memory=r.memories.find(m=>m.eventId===id),fact=memory&&w.events.find(e=>e.id===memory.eventId);return memory&&fact?{memory,fact}:null;}
+function source(w:World,r:Resident,id?:string){const memory=retainedInterpretationMemories(r.memories,w.minute).find(m=>m.eventId===id),fact=memory&&w.events.find(e=>e.id===memory.eventId);return memory&&fact&&fact.at<=w.minute?{memory,fact}:null;}
 export function meetingSeat(w:World,m:Meeting,r:Resident):Vec|null {
  if(!m.roomId)return {...m.at};const b=w.buildings.find(b=>b.id===m.roomId);if(!b)return null;const layout=roomLayout(w,b),taken=new Set(m.members.filter(p=>p.leftAt===null&&p.personId!==r.id).map(p=>p.seat)),current=member(m,r.id),index=current?.seat??[0,1,2,3,4,5,6,7].find(i=>!taken.has(i));if(index===undefined)return null;
  const [x,y]=[[0,0],[-2,0],[2,0],[0,2],[-2,2],[2,2],[-3,1],[3,1]][index],origin=m.roomAt??layout.entry,at={x:origin.x+x,y:origin.y+y};return roomPath(layout,r.inside===b.id?r.roomAt??layout.entry:layout.entry,at)!==null?at:null;
@@ -14,7 +16,7 @@ export function meetingSeat(w:World,m:Meeting,r:Resident):Vec|null {
 export function socialReason(w:World,r:Resident,a:SocialAction):string|null {
  if(!w.social||!capable(w,r))return '本人当前不能自主交谈或理解经历';
  if(a.operation==='interpret'){
-  const s=source(w,r,a.eventId);if(!s||!a.targetId||a.targetId===r.id||!r.knownPeople.includes(a.targetId)||!s.fact.actors.includes(a.targetId))return '只能理解本人实际经历或收到、且涉及已认识人物的具体记录';
+  const s=source(w,r,a.eventId);if(!s||!a.targetId||!person(w,a.targetId)||a.targetId===r.id||!r.knownPeople.includes(a.targetId)||!s.fact.actors.includes(a.targetId))return '只能理解本人实际经历或收到、且涉及已认识人物的具体记录';
   if(hasReceipt(w,`interpret:${r.id}:${a.eventId}:${a.targetId}`))return '本人已经就这条经历形成过理解，新的变化需要新的经历';
   return typeof a.text==='string'&&!!a.text.trim()&&a.text.length<=240&&[a.affection,a.trust,a.conflict].every(n=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=-5&&n<=5)?null:'请本人写1–240字理解，好感、信任、矛盾各自变化须为-5至5';
  }
@@ -62,6 +64,23 @@ export function advanceSocial(w:World){initializeSocial(w);const s=w.social;if(!
 export function socialOpportunities(w:World,r:Resident):FormalOpportunity[]{const result:FormalOpportunity[]=[],add=(id:string,label:string,a:SocialAction)=>{if(!socialReason(w,r,a))result.push({id:'social.'+id,label,action:a});};
  add('start','本人发起一场临时讨论，填写text话题（1–80字）和minutes 30–180；其他人各自决定是否加入、何时说话或离开',{type:'social',operation:'start',text:'我想同在场的人谈一谈',minutes:60});
  for(const m of w.social?.meetings??[]){add('join.'+m.id,`本人走到眼前“${m.topic}”的讨论地点并自愿加入；没人替本人发言`,{type:'social',operation:'join',meetingId:m.id});add('speak.'+m.id,`在本人参加的“${m.topic}”讨论中说自己的话，填写text（1–240字）；只向实际在场并听得到的人说，不必等固定顺序`,{type:'social',operation:'speak',meetingId:m.id,text:'我想表达自己的看法'});add('leave.'+m.id,`本人退出“${m.topic}”的讨论，继续自己的生活`,{type:'social',operation:'leave',meetingId:m.id});}
- for(const memory of r.memories.slice(-5).reverse()){const event=w.events.find(e=>e.id===memory.eventId);if(!event)continue;for(const id of event.actors.filter(id=>id!==r.id&&r.knownPeople.includes(id)).slice(0,2))add('interpret.'+event.id+'.'+id,`根据本人${memory.source==='heard'?'收到的消息（不等于已经核实）':'实际经历'}“${memory.text.slice(0,140)}”，对${person(w,id)?.name??'这位人物'}形成自己的理解；填写text（1–240字）、affection好感变化、trust信任变化、conflict矛盾变化各-5至5，只改本人的感受`,{type:'social',operation:'interpret',eventId:event.id,targetId:id,text:'我有自己的理解',affection:0,trust:0,conflict:0});}
+ // Rotate all eligible retained memories, not a permanently newest-five
+ // prefix. Each event gets at most two eligible people, including later actors.
+ // Advance the target offset only after one complete event cycle: applying
+ // the same tick to both levels can permanently alias particular event/targets.
+ const facts=new Map(w.events.map(e=>[e.id,e]));
+ const candidates=retainedInterpretationMemories(r.memories,w.minute).flatMap(memory=>{
+  const event=facts.get(memory.eventId);if(!event||event.at>w.minute)return [];
+  const targets=[...new Set(event.actors)].filter(id=>id!==r.id&&r.knownPeople.includes(id)&&!!person(w,id)&&!hasReceipt(w,`interpret:${r.id}:${event.id}:${id}`));
+  return targets.length?[{memory,event,targets}]:[];
+ });
+ const tick=Math.floor(w.minute/INTERPRETATION_ROTATION_MINUTES),count=candidates.length;
+ for(let i=0;i<Math.min(MAX_INTERPRETATION_MEMORIES,count);i++){
+  const {memory,event,targets}=candidates[(tick+i)%count],offset=Math.floor(tick/count)%targets.length;
+  for(let j=0;j<Math.min(MAX_INTERPRETATION_TARGETS,targets.length);j++){
+   const id=targets[(offset+j)%targets.length];
+   add('interpret.'+event.id+'.'+id,`根据${dialogueSource(memory.source)}${dialogueExcerpt(memory.text,140)}（${dialogueTone(memory)}；完整依据见本次理解依据），对${dialogueExcerpt(person(w,id)?.name??'这位人物',24)}形成自己的理解；填写text（1–240字）、affection好感变化、trust信任变化、conflict矛盾变化各-5至5，只改本人的感受`,{type:'social',operation:'interpret',eventId:event.id,targetId:id,text:'我有自己的理解',affection:0,trust:0,conflict:0});
+  }
+ }
  return result;
 }

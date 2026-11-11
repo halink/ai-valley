@@ -2,7 +2,7 @@ import {VALLEY_VERSION} from '../shared/version.js';
 import {FAST_DAY_MINUTES} from '../world/time.js';
 import {parseHistoryQuery,HistoryQueryError} from './history-query.js';
 import type {Biography} from '../shared/history.js';
-import {createServer,type ServerResponse} from 'node:http';
+import {createServer,type Server,type ServerResponse} from 'node:http';
 import {readFileSync,statSync} from 'node:fs';
 import {resolve,extname} from 'node:path';
 import {gzipSync} from 'node:zlib';
@@ -10,6 +10,7 @@ import type {ValleyRuntime} from './runtime.js';
 import type {Snapshot} from '../shared/types.js';
 import {observerFrame} from './observer-feed.js';
 import type {WorldStore} from './store.js';
+import type {ProductionModelPolicy} from './production-model-policy.js';
 const types:Record<string,string>={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.png':'image/png','.svg':'image/svg+xml','.ico':'image/x-icon','.woff2':'font/woff2'};
 const jsonHeaders={'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','Vary':'Accept-Encoding'};
 const eventHeaders={'Content-Type':'text/event-stream','Cache-Control':'no-cache, no-transform','Connection':'keep-alive','X-Accel-Buffering':'no'};
@@ -17,7 +18,7 @@ const acceptsGzip=(value:string|undefined)=>value?.split(',').some(encoding=>{
  const [name,...parameters]=encoding.trim().toLowerCase().split(';');
  return name.trim()==='gzip'&&!parameters.some(p=>/^q\s*=\s*0(?:\.0+)?\s*$/.test(p.trim()));
 })??false;
-export function createObserverServer(runtime:ValleyRuntime,store:WorldStore,root:string){
+export function createObserverServer(runtime:ValleyRuntime,store:WorldStore,root:string,server:Server=createServer(),productionModelPolicy?:ProductionModelPolicy){
  const clients=new Map<ServerResponse,Snapshot>();
  let cache:{snapshot:Snapshot;body?:string;gzip?:Buffer;baseline?:string}|undefined;
  const currentSnapshot=()=>{
@@ -41,7 +42,7 @@ export function createObserverServer(runtime:ValleyRuntime,store:WorldStore,root
    clients.set(client,current);
   }
  });
- const server=createServer((req,res)=>{
+ server.on('request',(req,res)=>{
   res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','same-origin');
   res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'");
   if(req.method!=='GET'&&req.method!=='HEAD'){res.writeHead(405,{'Allow':'GET, HEAD'});res.end('Observer access is read-only');return;}
@@ -65,7 +66,8 @@ export function createObserverServer(runtime:ValleyRuntime,store:WorldStore,root
    }else{res.writeHead(200,jsonHeaders);res.end(body);}
    return;
   }
-  if(pathname==='/ai-town/api/health'){json({ok:true,version:VALLEY_VERSION,mode:runtime.world.mode,revision:runtime.world.revision,clockPaused:runtime.world.clock.paused,modelConfigured:runtime.world.metrics.configured});return;}
+  if(pathname==='/ai-town/api/health'){json({ok:true,version:VALLEY_VERSION,mode:runtime.world.mode,revision:runtime.world.revision,clockPaused:runtime.world.clock.paused,modelConfigured:runtime.world.metrics.configured,
+   ...(productionModelPolicy?{ready:false,modelExecution:productionModelPolicy}:{} )});return;}
   if(pathname==='/ai-town/api/history/page'){
    try{json({...store.historyPage(runtime.world.id,parseHistoryQuery(url.searchParams)),observedRevision:runtime.world.revision});}catch(error){json({error:error instanceof HistoryQueryError?error.message:'history_unavailable'},error instanceof HistoryQueryError?400:500);}return;
   }

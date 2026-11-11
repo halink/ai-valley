@@ -1,3 +1,6 @@
+import {advancePublicCarrier} from './public-food-procurement.js';
+import {recordPreparedBirth} from './pregnancy-preparation.js';
+import {closePartnershipsOnDeath,spousesAtDeath} from './relationships.js';
 import {physiology,physiologyDefinition} from './physiology.js';
 import {physiologyDefaults,type PhysiologyRules} from '../shared/physiology.js';
 import {healthDefaults} from '../shared/process-definitions.js';
@@ -5,22 +8,25 @@ import {estateLocation} from './estate-custody.js';
 import {foodTransaction} from './food.js';
 import type {Resident, World} from '../shared/types.js';
 import {emitEvent} from './events.js';
-import {ageYears, DAY} from './time.js';
+import {ageYears,knownAgeYears, DAY} from './time.js';
 import {resolveInheritanceBirth} from './production.js';
 
 /** Immediate world fact and estate protection; does not notify distant residents or appoint successors. */
 function recordDeathAtomic(w:World,person:Resident,cause:NonNullable<Resident['deathCause']>,detail?:string):boolean {
  if(person.status==='dead')return false;
- for(const t of w.industry?.tools??[])if(t.ownerId===person.id&&!t.location)t.location=estateLocation(person.at,person.inside,person.roomAt??null,'原址封存工具');
+ const sealedLocation={...estateLocation(person.at,person.inside,person.roomAt??null,person.regionalLocation?'镇外实际路程原址封存，尚无回谷运输':'逝者随身物品原址封存'),...(person.regionalLocation?{regional:{...person.regionalLocation}}:{})};
+ for(const t of w.industry?.tools??[])if(t.ownerId===person.id&&!t.location)t.location=structuredClone(sealedLocation);
  person.body={reservedBy:null,carriedBy:null,storedAt:null};person.deathCause=cause;
  if(cause==='accident'&&detail?.trim())person.deathDetail=detail.trim().slice(0,80);
  person.status='dead';person.deathAt=w.minute;person.plan=null;person.activity=null;person.revision++;
+ // Public cargo is not an estate: seal its real position before any corpse movement.
+ for(const s of w.foreignTrade?.shipments??[])if(s.residentId===person.id&&s.publicReserveId&&s.publicCarrier)advancePublicCarrier(w,s);
  person.canDecide=false;person.canExpress=false;person.intention='已逝';
  const heirs=w.residents.filter(p=>(p.parents.includes(person.id)||p.adoptiveParents?.includes(person.id))).map(p=>p.id);
  // Expected children retain a claim reference before identity creation; birth replaces it with the child's identity.
  for(const p of w.residents)if(p.pregnancy?.otherParentId===person.id)heirs.push(`unborn:${p.id}:${p.pregnancy.conceivedAt}`);
  if(!w.estates.some(e=>e.personId===person.id)){
-  w.estates.push({location:estateLocation(person.at,person.inside,person.roomAt??null,'逝者随身物品原址封存'),parcels:[],personId:person.id,inventory:{...person.inventory},coins:person.coins,status:'protected',heirs});
+  w.estates.push({spouseIds:spousesAtDeath(person),location:structuredClone(sealedLocation),parcels:[],personId:person.id,inventory:{...person.inventory},coins:person.coins,status:'protected',heirs});
   person.inventory={};person.coins=0;
  }
  for(const p of w.proposals)if(p.status==='open'&&(p.actorId===person.id||p.targetId===person.id))p.status='expired';
@@ -36,7 +42,8 @@ function recordDeathAtomic(w:World,person:Resident,cause:NonNullable<Resident['d
   person.pregnancy=null;
  }
  const end=cause==='oldAge'?'因自然衰老离世':cause==='accident'?`因${person.deathDetail??'意外'}离世`:'去世';
- emitEvent(w,{kind:'death',populationChange:person.residency==='outside'?undefined:'death',witnesses:person.residency==='outside'?[]:undefined,actors:[person.id],place:{...person.at},text:`${person.name}${person.residency==='outside'?'在镇外':''}${end}了。遗体留在原处，个人遗产已保全，安葬与后续处置尚待在世人物实际办理。`});
+ emitEvent(w,{kind:'death',populationChange:person.residency==='outside'?undefined:'death',witnesses:person.residency==='outside'?[]:undefined,actors:[person.id],place:{...person.at},text:`${person.name}${person.regionalLocation?`在镇外往${person.regionalLocation.origin}的原路上（离谷口${person.regionalLocation.progress}/${person.regionalLocation.duration}分钟路程）`:person.residency==='outside'?'在镇外':''}${end}了。遗体留在原处，个人遗产已保全，安葬与后续处置尚待在世人物实际办理。`});
+ closePartnershipsOnDeath(w,person);
  return true;
 }
 
@@ -55,6 +62,7 @@ function birth(w:World,parent:Resident){
   parents:[parent.id,pregnancy.otherParentId],guardianIds:[parent.id,...(other?.status==='alive'?[other.id]:[])],pregnancy:null,
   canDecide:false,canExpress:false,refusesCare:false,deathAt:null,
  };
+ recordPreparedBirth(w,parent,identity);
  w.residents.push(child);
  for(const p of [parent,other].filter((p):p is Resident=>!!p)){
   p.relations.push({targetId:identity,affection:0,trust:0,conflict:0,kin:'child',evidence:[]});
@@ -101,7 +109,8 @@ const stageNames={infant:'婴幼儿',child:'儿童',teen:'青少年',adult:'成�
 
 /** Natural sleep is infant physiology. Feeding still consumes the supplies of an actual caregiver. */
 export function infantRest(w:World,person:Resident,minutes:number):void {
- if(person.status!=='alive'||person.residency==='outside'||ageYears(person.bornAt,w.minute)>=6)return;
+ const age=knownAgeYears(person.bornAt,w.minute);
+ if(person.status!=='alive'||person.residency==='outside'||age===null||age>=6)return;
  const hour=(w.minute%DAY)/60;
  if(hour<8||hour>=19||person.energy<25)person.energy=Math.min(100,person.energy+minutes*physiology(w,person).infantRest);
 }
@@ -151,13 +160,16 @@ export function advanceLife(w:World,minutes:number):void {
   if(p.health<=0){recordDeath(w,p);continue;}
   if(naturalDeath(w,p,from,w.minute))continue;
   if(p.pregnancy&&p.pregnancy.dueAt<=w.minute)birth(w,p);
-  const age=ageYears(p.bornAt,w.minute);
+  if(p.guardianOffer&&p.guardianOffer.expiresAt<=w.minute)delete p.guardianOffer;
+  if(p.homeInvitation&&p.homeInvitation.expiresAt<=w.minute)delete p.homeInvitation;
+  const age=knownAgeYears(p.bornAt,w.minute);
+  // A missing/invalid birth record is not a new infant stage or a birthday.
+  // Preserve existing capabilities and history; age-independent expiry stays live.
+  if(age===null)continue;
   const next=lifeStage(age);
   const prior=p.lifeStage??lifeStage(ageYears(p.bornAt,from));
   p.lifeStage=next;
   infantRest(w,p,minutes);
-  if(p.guardianOffer&&p.guardianOffer.expiresAt<=w.minute)delete p.guardianOffer;
-  if(p.homeInvitation&&p.homeInvitation.expiresAt<=w.minute)delete p.homeInvitation;
   activateChild(w,p,age,prior);
   if(next!==prior){
    if(age>=18){p.guardianIds=[];delete p.guardianOffer;}

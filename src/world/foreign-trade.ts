@@ -1,9 +1,15 @@
+import {routeFood} from './food-routes.js';
+import {procurementReserve,procurementRefundAccount,procurementProposalReason,publicOfferValid,publicShipmentValid,advancePublicCarrier,procurementCapable} from './public-food-procurement.js';
+import {foodStockFresh} from './public-food-reserves.js';
+import {carryAidMail} from './outside-aid-mail.js';
+import {completeOutsideAid,merchantAidOpportunities} from './outside-aid.js';
 import {hasReceipt} from './receipts.js';
 import {industryDefinition} from './industry-rules.js';
 import {crateAtOrigin,careForCrate} from './livestock-cargo.js';
 import {estateStock,estateLocation} from './estate-custody.js';
 import {deliveryPoint,cargoStation,atCargoStation,dispatchCargo,beginCargoReturn,advanceCargo} from './foreign-routing.js';
 import {foodTransaction} from './food.js';
+import {foreignPersonalTransferAmount,foreignCargoTransferAmount,recordFoodTransfer,type FoodFlowAmount,type ForeignFoodTransferReceipt} from './food-consumption-evidence.js';
 import {itemLabels} from '../shared/items.js';
 import type {DecisionContext,FormalOpportunity,Inventory,Item,ModelDecision,Resident,Vec,World} from '../shared/types.js';
 import type {ForeignAction,ForeignMerchant,ForeignOffer,ForeignRecipe,ForeignShipment} from '../shared/foreign-trade.js';
@@ -63,30 +69,49 @@ function touchMerchant(w:World,id:string){const m=merchantFor(w,id);if(m)m.perso
 function payment(w:World,from:string,to:string,n:number,reason:string,reference:string){
  if(n>0&&!moveCoins(w,from,to,n,reason,reference))throw new Error('foreign_transaction_failed:'+reason);
 }
+/** Observation-only facts. Existing custody, event and save semantics stay unchanged. */
+type TransferContract=Pick<ForeignOffer,'id'|'merchantId'|'residentId'|'side'>;
+function transfer(w:World,operation:ForeignFoodTransferReceipt['operation'],o:TransferContract,s:ForeignShipment|null,amount:FoodFlowAmount|undefined,eventId:string|null,personId:string|null,returned=false){
+ if(!amount)return;
+ const source=operation==='reserveOffer'||operation==='reserveShipment'?'person:'+personId:s?'shipment:'+s.id:'offer:'+o.id;
+ const destination=operation==='reserveOffer'?'offer:'+o.id:operation==='reserveShipment'?'shipment:'+s!.id:operation==='collect'?'person:'+personId:
+  'estate-stock:'+o.residentId+':'+(s?'foreign-shipment:'+s.id:'foreign-offer:'+o.id);
+ const estateOwnerId=operation==='estateCustody'?w.estates.flatMap(e=>e.parcels??[]).find(p=>p.id===destination)?.ownerId??null:null;
+ // The established estate operation must have produced this physical parcel.
+ if(operation==='estateCustody'&&!estateOwnerId)return;
+ recordFoodTransfer(w,{type:'transfer',action:'foreignTrade',operation,at:w.minute,eventId,offerId:o.id,shipmentId:s?.id??null,
+  merchantId:o.merchantId,residentId:s?.residentId??o.residentId!,personId,estateOwnerId,side:o.side,returned,container:source,destinationContainer:destination,amount});
+}
+/** Shipments outlive pruned offer history. Never recreate or mutate that history. */
+function shipmentOffer(s:ForeignShipment):TransferContract{return {id:s.offerId,merchantId:s.merchantId,residentId:s.residentId,side:s.side};}
+function cargoAmount(w:World,s:ForeignShipment){return foreignCargoTransferAmount(w,'shipment:'+s.id,s.item,s.goods,s.createdAt);}
 function parcel(w:World,o:ForeignOffer,quantity:number,readyAt=w.minute):void {
  const state=w.foreignTrade!,id=`foreign-shipment-${state.nextSerial++}`;
  state.shipments.push({id,offerId:o.id,merchantId:o.merchantId,residentId:o.residentId!,side:o.side,item:o.item,quantity,price:o.price,goods:quantity,status:'arrived',createdAt:w.minute,readyAt,
   departedAt:null,arrivesAt:w.minute,deliveryAt:w.minute,merchantNoticeAt:w.minute,merchantNotified:true,blockedSince:null,nextCheckAt:w.minute,collectedAt:null,stationAt:{...cargoStation(w,o)},deliveryId:o.deliveryId,route:{at:{...cargoStation(w,o)},phase:'done',updatedAt:w.minute,dueAt:w.minute,progress:0},escrowAccount:`escrow:${id}`,gross:0,maxTax:0,actualTax:0,taxPolicyId:null,taxRate:0,returned:true});
 }
-function closeOfferAtomic(w:World,o:ForeignOffer,status:'cancelled'|'rejected'|'expired'){
+function closeOfferAtomic(w:World,o:ForeignOffer,status:'cancelled'|'rejected'|'expired',amount?:FoodFlowAmount){
+ let estateMoved=false;
  if(o.status!=='open')return;
  const m=merchantFor(w,o.merchantId)!;
- if(o.escrowAccount){const to=o.initiatedBy==='merchant'?`foreign:${m.id}`:recipientAccount(w,o.residentId!);payment(w,o.escrowAccount,to,accountBalance(w,o.escrowAccount),'外贸报价余款退回',`foreign-offer-return:${o.id}`);}
+ if(o.escrowAccount){const to=o.publicReserveId?procurementRefundAccount(w,o.publicReserveId,accountBalance(w,o.escrowAccount)):o.initiatedBy==='merchant'?`foreign:${m.id}`:recipientAccount(w,o.residentId!);payment(w,o.escrowAccount,to,accountBalance(w,o.escrowAccount),'外贸报价余款退回',`foreign-offer-return:${o.id}`);}
  if(o.stock>0){
   if(o.initiatedBy==='merchant')add(m.person.inventory,o.item,o.stock);
-  else {const estate=recipientBag(w,o.residentId!,cargoStation(w,o),'foreign-offer:'+o.id);if(estate)add(estate,o.item,o.stock);else parcel(w,o,o.stock,w.minute+(status==='rejected'?m.routeMinutes:0));}
+  else {const estate=recipientBag(w,o.residentId!,cargoStation(w,o),'foreign-offer:'+o.id);if(estate){add(estate,o.item,o.stock);estateMoved=true;}else parcel(w,o,o.stock,w.minute+(status==='rejected'?m.routeMinutes:0));}
  }
  o.stock=0;o.remaining=0;o.merchantKnownRemaining=0;o.status=status;touchMerchant(w,o.merchantId);
  const knownByMerchant=status==='rejected'||o.initiatedBy==='merchant'||o.expiresAt<=w.minute&&o.noticeAt<=w.minute;
- tell(w,`${m.name}的${o.side==='import'?'售货':'收购'}协商已${status==='expired'?'到期':status==='rejected'?'被对方婉拒':'撤回'}，预留钱款已退回，实物归原所有人保管${o.initiatedBy==='resident'&&o.side==='export'?'，回执送达后在驿站领取':''}。`,[...(knownByMerchant?[m.id]:[]),...(o.residentId?[o.residentId]:[])],true);
+ const event=tell(w,`${m.name}的${o.side==='import'?'售货':'收购'}协商已${status==='expired'?'到期':status==='rejected'?'被对方婉拒':'撤回'}，预留钱款已退回，实物归原所有人保管${o.initiatedBy==='resident'&&o.side==='export'?'，回执送达后在驿站领取':''}。`,[...(knownByMerchant?[m.id]:[]),...(o.residentId?[o.residentId]:[])],true);
+ if(estateMoved)transfer(w,'estateCustody',o,null,amount,event.id,null,true);
 }
 function shipmentTax(w:World,s:ForeignShipment):number {
- return s.taxPolicyId?salesLevyForPolicy(w,s.gross,`resident:${s.residentId}`,s.taxPolicyId,s.taxRate):0;
+ return s.taxPolicyId?salesLevyForPolicy(w,s.gross,s.publicReserveId?'public-reserve:'+s.publicReserveId:`resident:${s.residentId}`,s.taxPolicyId,s.taxRate):0;
 }
 function commitTax(w:World,s:ForeignShipment){
- if(s.taxPolicyId)commitLevyForPolicy(w,s.gross,`resident:${s.residentId}`,s.taxPolicyId,s.taxRate);
+ if(s.taxPolicyId)commitLevyForPolicy(w,s.gross,s.publicReserveId?'public-reserve:'+s.publicReserveId:`resident:${s.residentId}`,s.taxPolicyId,s.taxRate);
 }
-function settleDeliveryAtomic(w:World,s:ForeignShipment){
+function settleDeliveryAtomic(w:World,s:ForeignShipment,amount?:FoodFlowAmount){
+ let estateMoved=false;
  if(s.goods<s.quantity)throw new Error('cannot_settle_incomplete_cargo');
  const m=merchantFor(w,s.merchantId)!,state=w.foreignTrade!,tax=shipmentTax(w,s);
  if(tax>s.maxTax)throw new Error('foreign_tax_quote_exceeded');
@@ -94,25 +119,29 @@ function settleDeliveryAtomic(w:World,s:ForeignShipment){
  payment(w,s.escrowAccount,target,s.side==='import'?s.gross:s.gross-tax,s.side==='import'?'外贸进口货款':'外贸出口收入',`${s.id}:goods`);
  payment(w,s.escrowAccount,'treasury',tax,'外贸成交税',`${s.id}:tax`);
  const remainder=accountBalance(w,s.escrowAccount);
- if(remainder)payment(w,s.escrowAccount,s.side==='import'?recipientAccount(w,s.residentId):`foreign:${m.id}`,remainder,'外贸预留余款退回',`${s.id}:excess`);
+ if(remainder)payment(w,s.escrowAccount,s.publicReserveId?procurementRefundAccount(w,s.publicReserveId,remainder):s.side==='import'?recipientAccount(w,s.residentId):`foreign:${m.id}`,remainder,'外贸预留余款退回',`${s.id}:excess`);
+ if(s.publicReserveId){const p=procurementReserve(w,s.publicReserveId)!;p.spent+=s.gross+tax;p.purchased+=s.quantity;p.foreignProcurement!.acquired+=s.quantity;w.civic!.totals.procurement+=s.gross+tax;}
  commitTax(w,s);s.actualTax=tax;s.deliveryAt=w.minute;state.totals.taxes+=tax;
  if(s.side==='export'){
   add(m.person.inventory,s.item,s.goods);s.goods=0;s.status='completed';state.totals.exports+=s.quantity;state.totals.exportValue+=s.gross;
  }else{
-  const estate=recipientBag(w,s.residentId,cargoStation(w,s),'foreign-shipment:'+s.id);if(estate){add(estate,s.item,s.goods);s.goods=0;s.status='completed';}else s.status='arrived';
+  const estate=s.publicReserveId?undefined:recipientBag(w,s.residentId,cargoStation(w,s),'foreign-shipment:'+s.id);if(estate){add(estate,s.item,s.goods);s.goods=0;s.status='completed';estateMoved=true;}else s.status='arrived';
   state.totals.imports+=s.quantity;state.totals.importValue+=s.gross;
  }
  touchMerchant(w,m.id);
- tell(w,`${s.quantity} 份${foreignItemNames[s.item]}已经${s.side==='import'?'从'+m.origin+'运抵合同指定交接处':'送达'+m.origin}，实际结算货款 ${s.gross} 钱、税款 ${tax} 钱${s.status==='arrived'?'，货主尚待亲自取货':''}。`,[s.residentId],s.side==='export');
+ const event=tell(w,`${s.quantity} 份${foreignItemNames[s.item]}已经${s.side==='import'?'从'+m.origin+'运抵合同指定交接处':'送达'+m.origin}，实际结算货款 ${s.gross} 钱、税款 ${tax} 钱${s.status==='arrived'?'，货主尚待亲自取货':''}。`,[s.residentId],s.side==='export');
+ if(estateMoved)transfer(w,'estateCustody',shipmentOffer(s),s,amount,event.id,null,false);
 }
-function finishReturnAtomic(w:World,s:ForeignShipment){
+function finishReturnAtomic(w:World,s:ForeignShipment,amount?:FoodFlowAmount){
+ let estateMoved=false;
  const m=merchantFor(w,s.merchantId)!;
- const refund=s.side==='import'?recipientAccount(w,s.residentId):`foreign:${m.id}`;
+ const refund=s.publicReserveId?procurementRefundAccount(w,s.publicReserveId,accountBalance(w,s.escrowAccount)):s.side==='import'?recipientAccount(w,s.residentId):`foreign:${m.id}`;
  payment(w,s.escrowAccount,refund,accountBalance(w,s.escrowAccount),'外贸退运退款',`${s.id}:returned`);
- if(s.side==='import'){add(m.person.inventory,s.item,s.goods);s.goods=0;s.status='cancelled';}
- else{const estate=recipientBag(w,s.residentId,cargoStation(w,s),'foreign-shipment:'+s.id);if(estate){add(estate,s.item,s.goods);s.goods=0;s.status='cancelled';}else s.status='arrived';}
+ if(s.side==='import'){if(s.publicReserveId&&s.goods>0)routeFood(w,'shipment:'+s.id,'person:'+m.id,{[s.item]:s.goods});add(m.person.inventory,s.item,s.goods);s.goods=0;s.status='cancelled';}
+ else{const estate=s.publicReserveId?undefined:recipientBag(w,s.residentId,cargoStation(w,s),'foreign-shipment:'+s.id);if(estate){add(estate,s.item,s.goods);s.goods=0;s.status='cancelled';estateMoved=true;}else s.status='arrived';}
  s.returned=true;s.deliveryAt=w.minute;w.foreignTrade!.totals.returned+=s.quantity;touchMerchant(w,m.id);
- tell(w,`与${m.name}约定的 ${s.quantity} 份${foreignItemNames[s.item]}已完成退运，预留货款退回付款人，未收成交税。`,[s.residentId],s.side==='import');
+ const event=tell(w,`与${m.name}约定的 ${s.quantity} 份${foreignItemNames[s.item]}已完成退运，预留货款退回付款人，未收成交税。`,[s.residentId],s.side==='import');
+ if(estateMoved)transfer(w,'estateCustody',shipmentOffer(s),s,amount,event.id,null,true);
 }
 
 /** Only accepted shipping arrangements and ecological consequences advance without another choice. */
@@ -137,10 +166,12 @@ export function advanceForeignTrade(w:World):void {
  for(const o of state.offers){
   if(o.status!=='open')continue;
   const resident=o.residentId?w.residents.find(r=>r.id===o.residentId):undefined;
-  if(o.expiresAt<=w.minute||resident?.status==='dead'||(o.initiatedBy==='merchant'&&o.side==='import'||o.initiatedBy==='resident'&&o.side==='export')&&o.stock<o.remaining)closeOffer(w,o,'expired');
+  if(o.expiresAt<=w.minute||o.publicReserveId&&!publicOfferValid(w,o)||resident?.status==='dead'||(o.initiatedBy==='merchant'&&o.side==='import'||o.initiatedBy==='resident'&&o.side==='export')&&o.stock<o.remaining)closeOffer(w,o,'expired');
   else if(o.initiatedBy==='resident'&&o.noticeAt<=w.minute&&!o.delivered){o.delivered=true;const m=merchantFor(w,o.merchantId)!;m.person.decisionDue=Math.min(m.person.decisionDue,w.minute);}
  }
  for(const s of state.shipments){
+  advancePublicCarrier(w,s);
+  if(s.publicReserveId&&s.status==='inTransit'&&(!publicShipmentValid(w,s)||!foodStockFresh(w,'shipment:'+s.id,s.item,s.quantity)))beginCargoReturn(w,s);
   if(!s.merchantNotified&&w.minute>=(s.merchantNoticeAt??s.createdAt)){
    s.merchantNotified=true;const m=merchantFor(w,s.merchantId)!,o=offerFor(w,s.offerId);
    if(o&&o.initiatedBy==='merchant')o.merchantKnownRemaining=Math.max(0,o.quantity-state.shipments.filter(other=>other.offerId===o.id&&(other.merchantNoticeAt??other.createdAt)<=w.minute).reduce((n,other)=>n+other.quantity,0));
@@ -153,11 +184,11 @@ export function advanceForeignTrade(w:World):void {
   if(s.status==='ready'&&(owner?.status==='dead'||w.minute>s.readyAt+7*DAY)){
    s.status='returning';s.returned=true;s.arrivesAt=w.minute;s.nextCheckAt=w.minute;finishReturn(w,s);continue;
   }
-  if(s.status==='arrived'&&owner?.status==='dead'){
-   const estate=recipientBag(w,s.residentId,cargoStation(w,s),'foreign-shipment:'+s.id);if(estate)foodTransaction(w,()=>{add(estate,s.item,s.goods);s.goods=0;s.status=s.returned?'cancelled':'completed';});continue;
+  if(s.status==='arrived'&&owner?.status==='dead'&&!s.publicReserveId){
+   const amount=cargoAmount(w,s),estate=recipientBag(w,s.residentId,cargoStation(w,s),'foreign-shipment:'+s.id);if(estate){foodTransaction(w,()=>{add(estate,s.item,s.goods);s.goods=0;s.status=s.returned?'cancelled':'completed';});transfer(w,'estateCustody',shipmentOffer(s),s,amount,null,null,s.returned);}continue;
   }
   if(!['inTransit','returning'].includes(s.status)||w.minute<s.nextCheckAt)continue;
-  if(!advanceCargo(w,s))continue;
+  if(!advanceCargo(w,s,(stage,at)=>carryAidMail(w,s,stage,at)))continue;
   if(s.status==='returning')finishReturn(w,s);else settleDelivery(w,s);
  }
  // In-progress rights are never pruned. The full event and receipt journals remain durable.
@@ -181,6 +212,8 @@ function production(m:ForeignMerchant,recipe:ForeignRecipe,quantity:number):{dur
 export function foreignReason(w:World,r:Resident,a:ForeignAction):string|null {
  const state=w.foreignTrade,m=merchantFor(w,r.id);
  if(!state||w.mode!=='formal'||(!m&&!localAdult(w,r)))return '本人当前不能安排外贸';
+ if(m&&(!m.person.canDecide||!m.person.canExpress||m.person.status!=='alive'))return '商人当前不能独立决定';
+ if(a.reserveId!==undefined&&(a.operation!=='propose'||m))return '公共采购授权只能用于经办人原定进口协商';
  if(m&&m.work)return '自己的既有生产安排尚未完成';
  if(a.operation==='wait')return m&&validNumber(a.minutes,60,720)?null:'商行等待时间无效';
  if(a.operation==='produce'){
@@ -200,6 +233,7 @@ export function foreignReason(w:World,r:Resident,a:ForeignAction):string|null {
   const delivery=deliveryPoint(w,r,a.deliveryId);if(!delivery||!atCargoStation(w,r,{stationAt:delivery.at}))return '须本人到达有权使用的实际交接处提交协商与实物';
   const policy=levy(w),rate=policy?.basisPoints??0;
   if(!validNumber(a.maximumLevyBasisPoints,0,1500)||rate>a.maximumLevyBasisPoints)return '当前税率高于本人所见上限，请重新决定';
+  if(a.reserveId!==undefined)return procurementProposalReason(w,r,a);
   return a.side==='import'?(r.coins>=gross+maxTax(gross,rate)?null:'本人实际钱款不足以预存货款与最高税额'):(count(r.inventory,a.item)>=a.quantity?null:'出口货物须由本人实际带到驿站');
  }
  if(a.operation==='accept'||a.operation==='reject'||a.operation==='cancelOffer'){
@@ -212,6 +246,7 @@ export function foreignReason(w:World,r:Resident,a:ForeignAction):string|null {
   if(o.noticeAt>w.minute)return '报价信件尚未实际送达';
   if(m){if(o.initiatedBy!=='resident'||o.merchantId!==m.id)return '这份协商不是交给自己的';}
   else if(o.initiatedBy!=='merchant'||!nearStation(w,r))return '须到驿站阅读对方真实张贴的报价';
+  if(a.operation==='accept'&&o.publicReserveId&&!publicOfferValid(w,o))return '原公共采购授权或经办资格已失效';
   if(a.operation==='reject')return m?null:'可自行不接受公开报价，无需替商行撤单';
   const quantity=m?o.remaining:a.quantity;
   if(!validNumber(quantity)||quantity>o.remaining)return '报价数量不足';
@@ -223,6 +258,7 @@ export function foreignReason(w:World,r:Resident,a:ForeignAction):string|null {
    if(!validNumber(a.maximumLevyBasisPoints,0,1500)||rate>a.maximumLevyBasisPoints)return '当前税率高于本人所见上限，请重新决定';
    return o.side==='import'?(r.coins>=o.price*quantity+maxTax(o.price*quantity,rate)?null:'本人货款及税额预留不足'):(count(r.inventory,o.item)>=quantity?null:'本人尚未把这批实际货物带到驿站');
   }
+  if(o.publicReserveId&&(!o.escrowAccount||accountBalance(w,o.escrowAccount)<quantity*o.price+maxTax(quantity*o.price,o.taxRate)||!foodStockFresh(w,'person:'+partner.id,o.item,quantity)))return '公共货款或商人原批次实物不足';
   return o.side==='import'?(count(partner.person.inventory,o.item)>=quantity?null:'商行没有足够的实际货物'):(partner.person.coins>=o.price*quantity?null:'商行预付资金不足');
  }
  const s=shipmentFor(w,a.shipmentId);
@@ -231,24 +267,26 @@ export function foreignReason(w:World,r:Resident,a:ForeignAction):string|null {
  if(!m&&s.readyAt>w.minute)return '这笔协商的回执尚未实际送达';
  if(!m&&!atCargoStation(w,r,s))return '须亲自到合同指定的交接处查看、发货或领取';
  if(a.operation==='dispatch')return !m&&s.status==='ready'&&s.readyAt<=w.minute&&walkable(w,cargoStation(w,s))?null:'这批货物尚未具备实际启程条件';
- if(a.operation==='collect')return !m&&s.status==='arrived'&&s.goods>0?null:'尚无已经到站的本人货物';
+ if(s.publicReserveId&&!m&&(s.residentId!==procurementReserve(w,s.publicReserveId)?.foreignProcurement?.handlerId||!procurementCapable(w,r)))return '本人没有原公粮经办权';
+ if(a.operation==='collect')return !m&&s.status==='arrived'&&s.goods>0&&!s.publicCarrier&&( !s.publicReserveId||s.actualTax!==null&&foodStockFresh(w,'shipment:'+s.id,s.item,s.goods))?null:'尚无已经到站的本人货物';
  if(a.operation==='cancelShipment')return s.status==='ready'||s.status==='inTransit'?null:'这笔运输已交付或正在退运，无法再次撤回';
  return '未知的外贸安排';
 }
 export function foreignTarget(w:World,r:Resident,a:ForeignAction):{target:Vec;duration:number;error?:string}{
  const error=foreignReason(w,r,a);const shipment=shipmentFor(w,a.shipmentId),offer=offerFor(w,a.offerId),delivery=a.operation==='propose'?deliveryPoint(w,r,a.deliveryId):null;return error?{target:r.at,duration:0,error}:{target:{...(delivery?.at??cargoStation(w,shipment??offer))},duration:a.operation==='dispatch'||a.operation==='collect'?10:5};
 }
-function newOffer(w:World,r:Resident,a:ForeignAction){
+function newOffer(w:World,r:Resident,a:ForeignAction,amount?:FoodFlowAmount){
  const state=w.foreignTrade!,m=merchantFor(w,a.merchantId??r.id)!,foreign=!!merchantFor(w,r.id),id=`foreign-offer-${state.nextSerial++}`;
  const policy=foreign?null:levy(w),rate=policy?.basisPoints??0,gross=a.price!*a.quantity!;
  const cash=foreign?a.side==='export':a.side==='import';const escrowAccount=cash?`escrow:${id}`:null;
- if(cash)payment(w,foreign?`foreign:${m.id}`:`resident:${r.id}`,escrowAccount!,gross+(foreign?0:maxTax(gross,rate)),'外贸报价预付款',`${id}:reserve`);
+ if(cash)payment(w,a.reserveId?procurementReserve(w,a.reserveId)!.supplyAccount:foreign?`foreign:${m.id}`:`resident:${r.id}`,escrowAccount!,gross+(foreign?0:maxTax(gross,rate)),'外贸报价预付款',`${id}:reserve`);
  else add(r.inventory,a.item!,-a.quantity!);
- const o:ForeignOffer={id,merchantId:m.id,residentId:foreign?null:r.id,initiatedBy:foreign?'merchant':'resident',side:a.side!,item:a.item!,quantity:a.quantity!,remaining:a.quantity!,merchantKnownRemaining:a.quantity!,price:a.price!,createdAt:w.minute,noticeAt:w.minute+m.routeMinutes,expiresAt:w.minute+4*DAY,status:'open',stationAt:{...(foreign?state.station:deliveryPoint(w,r,a.deliveryId)!.at)},deliveryId:foreign?undefined:a.deliveryId,escrowAccount,stock:cash?0:a.quantity!,taxPolicyId:policy?.proposalId??null,taxRate:rate};
+ const o:ForeignOffer={...(a.reserveId?{publicReserveId:a.reserveId}:{}),id,merchantId:m.id,residentId:foreign?null:r.id,initiatedBy:foreign?'merchant':'resident',side:a.side!,item:a.item!,quantity:a.quantity!,remaining:a.quantity!,merchantKnownRemaining:a.quantity!,price:a.price!,createdAt:w.minute,noticeAt:w.minute+m.routeMinutes,expiresAt:a.reserveId?Math.min(w.minute+4*DAY,procurementReserve(w,a.reserveId)!.expiresAt):w.minute+4*DAY,status:'open',stationAt:{...(foreign?state.station:deliveryPoint(w,r,a.deliveryId)!.at)},deliveryId:foreign?undefined:a.deliveryId,escrowAccount,stock:cash?0:a.quantity!,taxPolicyId:policy?.proposalId??null,taxRate:rate};
  state.offers.push(o);touchMerchant(w,m.id);
- tell(w,`${foreign?m.name:r.name}在交接处（${(foreign?state.station:deliveryPoint(w,r,a.deliveryId)!.at).x},${(foreign?state.station:deliveryPoint(w,r,a.deliveryId)!.at).y}）提出${a.side==='import'?'从'+m.origin+'进口':'向'+m.origin+'出口'} ${a.quantity} 份${foreignItemNames[a.item!]}的报价，每份 ${a.price} 钱，信件尚待送达与对方自行决定。`,foreign?[m.id]:[r.id],foreign);
+ const event=tell(w,`${foreign?m.name:r.name}在交接处（${(foreign?state.station:deliveryPoint(w,r,a.deliveryId)!.at).x},${(foreign?state.station:deliveryPoint(w,r,a.deliveryId)!.at).y}）提出${a.side==='import'?'从'+m.origin+'进口':'向'+m.origin+'出口'} ${a.quantity} 份${foreignItemNames[a.item!]}的报价，每份 ${a.price} 钱，信件尚待送达与对方自行决定。`,foreign?[m.id]:[r.id],foreign);
+ if(!foreign&&o.side==='export')transfer(w,'reserveOffer',o,null,amount,event.id,r.id);
 }
-function acceptOffer(w:World,r:Resident,a:ForeignAction){
+function acceptOffer(w:World,r:Resident,a:ForeignAction,amount?:FoodFlowAmount){
  const state=w.foreignTrade!,o=offerFor(w,a.offerId)!,m=merchantFor(w,o.merchantId)!,isMerchant=!!merchantFor(w,r.id);
  const residentId=isMerchant?o.residentId!:r.id,quantity=isMerchant?o.remaining:a.quantity!,id=`foreign-shipment-${state.nextSerial++}`;
  const policy=isMerchant?{proposalId:o.taxPolicyId,basisPoints:o.taxRate}:levy(w),rate=policy?.basisPoints??0;
@@ -262,22 +300,24 @@ function acceptOffer(w:World,r:Resident,a:ForeignAction){
  }
  o.remaining-=quantity;if(isMerchant)o.merchantKnownRemaining=o.remaining;if(!o.remaining)o.status='accepted';
  const readyAt=isMerchant?w.minute+m.routeMinutes:w.minute;
- state.shipments.push({id,offerId:o.id,merchantId:m.id,residentId,side:o.side,item:o.item,quantity,price:o.price,goods:quantity,
+ state.shipments.push({...(o.publicReserveId?{publicReserveId:o.publicReserveId}:{}),id,offerId:o.id,merchantId:m.id,residentId,side:o.side,item:o.item,quantity,price:o.price,goods:quantity,
   stationAt:{...cargoStation(w,o)},deliveryId:o.deliveryId,route:o.side==='import'?{at:null,phase:'regionalIn',updatedAt:w.minute,dueAt:w.minute+m.routeMinutes*(isMerchant?1:2),progress:0}:{at:{...cargoStation(w,o)},phase:'done',updatedAt:w.minute,dueAt:w.minute,progress:0},status:o.side==='import'?'inTransit':'ready',createdAt:w.minute,readyAt,merchantNoticeAt:w.minute+(isMerchant?0:m.routeMinutes),merchantNotified:isMerchant,
   departedAt:o.side==='import'?w.minute:null,arrivesAt:o.side==='import'?w.minute+m.routeMinutes*(isMerchant?1:2):null,
   blockedSince:null,nextCheckAt:w.minute,collectedAt:null,escrowAccount,gross,maxTax:tax,actualTax:null,taxPolicyId:policy?.proposalId??null,taxRate:rate,returned:false});
+ if(o.publicReserveId)routeFood(w,'person:'+m.id,'shipment:'+id,{[o.item]:quantity});
  touchMerchant(w,m.id);
- tell(w,`${isMerchant?m.name:r.name}自主接受了每份 ${o.price} 钱的协商，${quantity} 份${foreignItemNames[o.item]}及货款已分别预留。${o.side==='import'?'货物按已同意的往返安排在途中，实际到站后结算':'回执送达后由本镇货主亲自办理发货'}；本单税率锁定 ${rate/100}%，最多 ${tax} 钱，累计零头按实际交付结算。`,isMerchant?[m.id]:[r.id],isMerchant);
+ const event=tell(w,`${isMerchant?m.name:r.name}自主接受了每份 ${o.price} 钱的协商，${quantity} 份${foreignItemNames[o.item]}及货款已分别预留。${o.side==='import'?'货物按已同意的往返安排在途中，实际到站后结算':'回执送达后由本镇货主亲自办理发货'}；本单税率锁定 ${rate/100}%，最多 ${tax} 钱，累计零头按实际交付结算。`,isMerchant?[m.id]:[r.id],isMerchant);
+ if(!isMerchant&&o.side==='export')transfer(w,'reserveShipment',o,state.shipments.at(-1)!,amount,event.id,r.id);
 }
-function executeAtomic(w:World,r:Resident,a:ForeignAction):string|null {
+function executeAtomic(w:World,r:Resident,a:ForeignAction,amount?:FoodFlowAmount):string|null {
  const error=foreignReason(w,r,a);if(error)return error;
  const m=merchantFor(w,r.id);
  const endpoint=a.operation==='propose'?deliveryPoint(w,r,a.deliveryId)?.at:cargoStation(w,shipmentFor(w,a.shipmentId)??offerFor(w,a.offerId));
  if(!m&&(!endpoint||!same(r.at,endpoint)||r.inside))return '须本人实际抵达约定交接处办理';
  const ref=`foreign-action:${r.activity?.planId??`${r.id}:${r.revision}:${w.revision}`}:${r.activity?.startedAt??w.minute}:${a.operation}`;
  if(hasReceipt(w,ref))return null;
- if(a.operation==='post'||a.operation==='propose')newOffer(w,r,a);
- else if(a.operation==='accept')acceptOffer(w,r,a);
+ if(a.operation==='post'||a.operation==='propose')newOffer(w,r,a,amount);
+ else if(a.operation==='accept')acceptOffer(w,r,a,amount);
  else if(a.operation==='reject'||a.operation==='cancelOffer')closeOffer(w,offerFor(w,a.offerId)!,a.operation==='reject'?'rejected':'cancelled');
  else if(a.operation==='wait')m!.person.decisionDue=w.minute+a.minutes!;
  else if(a.operation==='produce'){
@@ -291,8 +331,10 @@ function executeAtomic(w:World,r:Resident,a:ForeignAction):string|null {
    s.status='inTransit';s.departedAt=w.minute;s.nextCheckAt=w.minute;dispatchCargo(w,s);
    tell(w,`${r.name}实际在合同指定交接处交付并发出了 ${s.quantity} 份${foreignItemNames[s.item]}，货款在送达${partner.origin}后结算。`,[r.id]);
   }else if(a.operation==='collect'){
-   add(r.inventory,s.item,s.goods);s.goods=0;s.collectedAt=w.minute;s.status=s.returned?'cancelled':'completed';
-   tell(w,`${r.name}亲自来到合同指定交接处，领取了 ${s.quantity} 份${foreignItemNames[s.item]}${s.returned?'退回的原货':''}。`,[r.id]);
+   if(s.publicReserveId){s.publicCarrier={at:{...r.at},inside:r.inside,roomAt:r.roomAt?{...r.roomAt}:null,sealed:false};s.collectedAt=w.minute;}
+   else{add(r.inventory,s.item,s.goods);s.goods=0;s.collectedAt=w.minute;s.status=s.returned?'cancelled':'completed';}
+   const event=tell(w,`${r.name}亲自来到合同指定交接处，领取了 ${s.quantity} 份${foreignItemNames[s.item]}${s.returned?'退回的原货':''}${s.publicReserveId?'公粮；保持独立公共货单，须另行携至原共屋，不能作为本人食品':''}。`,[r.id]);
+   if(!s.publicReserveId)transfer(w,'collect',shipmentOffer(s),s,amount,event.id,r.id,s.returned);
   }else{
    const ready=s.status==='ready';beginCargoReturn(w,s);
    if(ready)finishReturn(w,s);
@@ -304,7 +346,7 @@ function executeAtomic(w:World,r:Resident,a:ForeignAction):string|null {
 export const completeForeignTrade=execute;
 export function foreignCandidates(w:World):Resident[]{return (w.foreignTrade?.merchants??[]).filter(m=>!m.work&&m.person.status==='alive'&&m.person.canDecide&&m.person.decisionDue<=w.minute).map(m=>m.person);}
 export function hasForeignAssets(w:World,id:string):boolean {
- return !!w.foreignTrade&&(w.foreignTrade.offers.some(o=>o.residentId===id&&o.status==='open')||w.foreignTrade.shipments.some(s=>s.residentId===id&&activeShipment(s)));
+ return !!w.foreignTrade&&(w.foreignTrade.offers.some(o=>!o.publicReserveId&&o.residentId===id&&o.status==='open')||w.foreignTrade.shipments.some(s=>!s.publicReserveId&&s.residentId===id&&activeShipment(s)));
 }
 export function activeForeignPolicyIds(w:World):string[]{return [...new Set([...(w.foreignTrade?.offers.filter(o=>o.status==='open').map(o=>o.taxPolicyId)??[]),...(w.foreignTrade?.shipments.filter(activeShipment).map(s=>s.taxPolicyId)??[])].filter((id):id is string=>!!id))];}
 export function foreignDeadline(w:World,id:string):number {
@@ -312,10 +354,10 @@ export function foreignDeadline(w:World,id:string):number {
 }
 
 export function merchantChoices(w:World,m:ForeignMerchant):FormalOpportunity[]{
- const choices:FormalOpportunity[]=[];
+ const choices:FormalOpportunity[]=[...merchantAidOpportunities(w,m.person)];
  const add=(id:string,label:string,action:ForeignAction)=>{if(!foreignReason(w,m.person,action))choices.push({id:'foreign.'+id,label,action});};
  for(const o of w.foreignTrade!.offers.filter(o=>o.merchantId===m.id&&o.initiatedBy==='resident'&&o.status==='open'&&o.noticeAt<=w.minute).slice(0,4)){
-  const description=`交接地址（${cargoStation(w,o).x},${cargoStation(w,o).y}），镇内按实际陆路运输；${o.side==='import'?'向来信居民出售':'向来信居民收购'} ${o.remaining} 份${foreignItemNames[o.item]}，每份 ${o.price} 钱`;
+  const description=`${o.publicReserveId?'这是一份公共储备采购，货物与预算均非经办人私产；':''}交接地址（${cargoStation(w,o).x},${cargoStation(w,o).y}），镇内按实际陆路运输；${o.side==='import'?'向来信居民出售':'向来信居民收购'} ${o.remaining} 份${foreignItemNames[o.item]}，每份 ${o.price} 钱`;
   add('accept.'+o.id,`接受已送达的协商，${description}，使用自己的真实资金或货物`,{type:'foreignTrade',operation:'accept',offerId:o.id});
   add('reject.'+o.id,`婉拒已送达的协商：${description}`,{type:'foreignTrade',operation:'reject',offerId:o.id});
  }
@@ -339,18 +381,27 @@ export function foreignDecisionContext(w:World,person:Resident):DecisionContext 
 }
 export function applyForeignDecision(w:World,id:string,revision:number,decision:ModelDecision):{ok:boolean;error?:string}{
  const m=merchantFor(w,id);if(!m||m.person.revision!==revision||m.work||m.person.status!=='alive')return {ok:false,error:'商行当前状态已改变'};
- if(decision.actions.length!==1||decision.actions[0].type!=='foreignTrade')return {ok:false,error:'商行只能提交自己的经营选择'};
- const action=decision.actions[0],error=execute(w,m.person,action);
+ if(decision.actions.length!==1||!['foreignTrade','outsideAid'].includes(decision.actions[0].type))return {ok:false,error:'商行只能提交自己的经营选择'};
+ const action=decision.actions[0];if(action.type!=='foreignTrade'&&action.type!=='outsideAid')return {ok:false,error:'商行选择无效'};const error=action.type==='outsideAid'?completeOutsideAid(w,m.person,action):execute(w,m.person,action);
  if(error)return {ok:false,error};
  m.person.intention=decision.intention.slice(0,160);m.person.lastDecisionAt=w.minute;m.person.lastFailure=null;
  if(action.operation!=='wait')m.person.decisionDue=w.minute+120;
  return {ok:true};
 }
 
-function execute(w:World,r:Resident,a:ForeignAction):string|null{return foodTransaction(w,()=>executeAtomic(w,r,a));}
+function execute(w:World,r:Resident,a:ForeignAction):string|null{
+ // Snapshot before the existing transaction may initialize or repair food lots.
+ let amount:FoodFlowAmount|undefined;
+ if(!merchantFor(w,r.id)){
+  if(a.operation==='propose'&&a.side==='export'&&a.item&&a.quantity)amount=foreignPersonalTransferAmount(w,r,a.item,a.quantity);
+  else if(a.operation==='accept'){const o=offerFor(w,a.offerId);if(o?.side==='export'&&a.quantity)amount=foreignPersonalTransferAmount(w,r,o.item,a.quantity);}
+  else if(a.operation==='collect'){const s=shipmentFor(w,a.shipmentId);if(s)amount=cargoAmount(w,s);}
+ }
+ return foodTransaction(w,()=>executeAtomic(w,r,a,amount));
+}
 
-function closeOffer(w:World,o:ForeignOffer,status:'cancelled'|'rejected'|'expired'):void{return foodTransaction(w,()=>closeOfferAtomic(w,o,status));}
+function closeOffer(w:World,o:ForeignOffer,status:'cancelled'|'rejected'|'expired'):void{const amount=foreignCargoTransferAmount(w,'offer:'+o.id,o.item,o.stock,o.createdAt);return foodTransaction(w,()=>closeOfferAtomic(w,o,status,amount));}
 
-function settleDelivery(w:World,s:ForeignShipment):void{return foodTransaction(w,()=>settleDeliveryAtomic(w,s));}
+function settleDelivery(w:World,s:ForeignShipment):void{const amount=cargoAmount(w,s);return foodTransaction(w,()=>settleDeliveryAtomic(w,s,amount));}
 
-function finishReturn(w:World,s:ForeignShipment):void{return foodTransaction(w,()=>finishReturnAtomic(w,s));}
+function finishReturn(w:World,s:ForeignShipment):void{const amount=cargoAmount(w,s);return foodTransaction(w,()=>finishReturnAtomic(w,s,amount));}

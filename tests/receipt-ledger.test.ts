@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync} from 'node:fs';
-import {tmpdir} from 'node:os';
+import {testTmpdir} from '../scripts/repository-temporary.mjs';
 import {join} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
 import {test} from 'node:test';
@@ -16,7 +16,7 @@ import {createFrontierWorld} from '../src/world/formal-seed.js';
 import {DAY,YEAR} from '../src/world/time.js';
 
 function withDatabase(action:(path:string)=>void){
- const folder=mkdtempSync(join(tmpdir(),'valley-receipt-check-'));
+ const folder=mkdtempSync(join(testTmpdir(),'valley-receipt-check-'));
  try{action(join(folder,'world.sqlite'));}finally{rmSync(folder,{recursive:true,force:true});}
 }
 

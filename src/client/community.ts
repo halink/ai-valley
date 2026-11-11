@@ -1,7 +1,8 @@
+import {pregnancyPreparationProfile} from './pregnancy-preparation.js';
 import type {Resident,World} from '../shared/types.js';
 import type {PublicShift} from '../shared/public-duties.js';
 import {headcount} from '../shared/demography.js';
-import {ageYears,calendar,DAY} from '../world/time.js';
+import {knownAgeYears,calendar,DAY} from '../world/time.js';
 
 const esc=(text:unknown)=>String(text??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]!));
 const seasons={spring:'春',summer:'夏',autumn:'秋',winter:'冬'};
@@ -13,8 +14,8 @@ function hour(minute:number){
  const time=calendar(minute);
  return `${String(time.hour).padStart(2,'0')}:${String(time.minute).padStart(2,'0')}`;
 }
-export function chapterLinks(active:'people'|'population'|'places'|'duties'|'market'|'finance'|'employment'|'foreign'|'construction'|'education'|'industry'|'health'|'longCare'|'support'|'infrastructure'|'debt'|'household'){
- const chapters=active==='people'||active==='population'||active==='household'?[['people','居民名册'],['population','人口簿'],['household','共同生活钱物']]:[['places','场所'],['construction','建设'],['education','学堂'],['industry','产业'],['health','照护'],['duties','排班'],['market','经营'],['finance','公共账本']];
+export function chapterLinks(active:'people'|'population'|'places'|'food'|'duties'|'market'|'finance'|'employment'|'foreign'|'construction'|'education'|'industry'|'health'|'longCare'|'support'|'infrastructure'|'debt'|'household'){
+ const chapters=active==='people'||active==='population'||active==='household'?[['people','居民名册'],['population','人口簿'],['household','共同生活钱物']]:[['places','场所'],['food','粮食'],['construction','建设'],['education','学堂'],['industry','产业'],['health','照护'],['duties','排班'],['market','经营'],['finance','公共账本']];
  const building=['construction','infrastructure'].includes(active);
  const caring=['health','longCare','support'].includes(active);
  const trading=['market','employment','foreign','debt'].includes(active);
@@ -27,11 +28,14 @@ function personLink(world:World,id:string){
  const person=world.residents.find(p=>p.id===id);
  return person?`<button data-person="${esc(person.id)}">${esc(person.name)}</button>`:'';
 }
+function roadIncapable(world:World,id:string){const r=world.residents.find(r=>r.id===id)??world.migration?.contacts.find(c=>c.id===id)?.person;return !!r&&(!r.canDecide||!r.canExpress||r.health<=0);}
 export function censusPanel(world:World){
  const count=headcount(world);
  const living=world.residents.filter(person=>person.status==='alive'&&person.residency==='resident');
- const young=living.filter(person=>ageYears(person.bornAt,world.minute)<18).length;
- const elders=living.filter(person=>ageYears(person.bornAt,world.minute)>=65).length;
+ const ages=living.map(person=>knownAgeYears(person.bornAt,world.minute));
+ const young=ages.filter(age=>age!==null&&age<18).length;
+ const elders=ages.filter(age=>age!==null&&age>=65).length;
+ const unknownAge=ages.filter(age=>age===null).length;
  const expecting=living.filter(person=>person.pregnancy).length;
  const record=world.population;
  const recent=record?.recent.slice().reverse()??[];
@@ -39,10 +43,10 @@ export function censusPanel(world:World){
  const road=world.migration?.contacts.filter(person=>person.phase==='travelling'||person.phase==='offered')??[];
  return `${chapterLinks('population')}
  <div class="population-numbers"><span><b>${count.residents}</b>常住居民</span><span><b>${count.visitors}</b>在镇访客</span></div>
- <p class="panel-intro">未满 18 岁 ${young} 人 · 65 岁及以上 ${elders} 人${expecting?' · '+expecting+' 人正在孕育':''}</p>
+ <p class="panel-intro">未满 18 岁 ${young} 人 · 65 岁及以上 ${elders} 人 · 年龄未知 ${unknownAge} 人${expecting?' · '+expecting+' 人正在孕育':''}</p>
  <div class="population-flows"><span>本季出生 <b>${totals.birth??0}</b></span><span>定居 <b>${totals.settle??0}</b></span><span>迁出 <b>${totals.depart??0}</b></span><span>离世 <b>${totals.death??0}</b></span></div>
  ${record?`<p class="footnote">本簿自${dateLabel(record.since)}登记，当时常住 ${record.baseline} 人。</p>`:''}
- ${road.length?`<h3 class="section-label">西南驿路</h3><div class="road-notices">${road.map(person=>`<p><b>${esc(person.name)}</b> · ${esc(person.origin)}<br><span>${person.phase==='travelling'?'已自主启程，预计'+hour(person.journey!.arriveAt)+'抵达':person.journey?.blocked?'正在考虑路阻后的去向':'已收到来访消息，正在自行考虑'}</span></p>`).join('')}</div>`:''}
+ ${road.length?`<h3 class="section-label">西南驿路</h3><div class="road-notices">${road.map(person=>`<p><b>${esc(person.name)}</b> · ${esc(person.origin)}<br><span>${person.journey?.staged?`离谷口 ${Number(person.journey.staged.progress.toFixed(1))}/${person.journey.staged.duration} 分钟 · ${person.journey.staged.direction==='valley'?'访谷':'原路返回'}${person.journey.staged.family?' · 成人亲属同行':''} · ${roadIncapable(world,person.id)?'失能停步，尚无实际照护接班':person.journey.staged.pause?(person.journey.staged.pause.kind==='eat'?'停步进食':'原地休息'):person.journey.staged.family?.ready?'本人已同意下一段，等待亲属确认':person.journey.staged.status==='waiting'?'等待本人另选':'执行本人已选的一段'}`:person.phase==='travelling'?'已自主启程，预计'+hour(person.journey!.arriveAt)+'抵达':person.journey?.blocked?'正在考虑路阻后的去向':'已收到来访消息，正在自行考虑'}</span></p>`).join('')}</div>`:''}
  <h3 class="section-label">人口与家庭纪事</h3>
  ${recent.length?`<div class="timeline">${recent.map(event=>`<article class="timeline-event"><span class="timeline-dot"></span><small>${dateLabel(event.at)} · ${hour(event.at)}</small><p>${esc(event.text)}</p><div class="event-people">${event.actors.map(id=>personLink(world,id)).join('')}</div></article>`).join('')}</div>`:'<p class="panel-intro">这里会记录到访、定居、出生、成家、迁出和离世。</p>'}
  ${record&&record.seasons.length>1?`<h3 class="section-label">历季人口</h3><div class="population-seasons">${record.seasons.slice(-12).reverse().map(period=>`<p><span>第 ${period.year} 年 · ${seasons[period.season]}</span><b>${period.residents} 常住 · ${period.visitors} 访客</b></p>`).join('')}</div>`:''}`;
@@ -77,5 +81,5 @@ export function familyPanel(world:World,person:Resident){
  ${row('子女',children.map(p=>p.id))}${row('养子女',adopted.map(p=>p.id))}${row('孙辈',grandchildren.map(p=>p.id))}
  ${pregnancy?`<div><span>孕育</span><b>预计${dateLabel(pregnancy.dueAt)}，另一位家长 ${personLink(world,pregnancy.otherParentId)}</b></div>`:''}
  ${!person.parents.length&&!children.length&&!pregnancy?'<p class="panel-intro">尚无已登记的上下代亲缘。</p>':''}
- </div>`;
+ </div>${pregnancyPreparationProfile(world,person)}`;
 }

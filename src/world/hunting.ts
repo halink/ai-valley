@@ -1,7 +1,8 @@
-import {beastNames} from '../shared/frontier-hazards.js';
+import {beastNames,huntedMeatYield} from '../shared/frontier-hazards.js';
 import type {IndustryAction} from '../shared/industry.js';
 import type {Resident,Vec,World} from '../shared/types.js';
 import {emitEvent} from './events.js';
+import {recordFoodFlow} from './food-consumption-evidence.js';
 import {alarmWildBeast,woundWildBeast} from './frontier-hazards.js';
 import {distance,findPath,walkable} from './navigation.js';
 
@@ -29,9 +30,9 @@ export function completeHunt(w:World,r:Resident,a:IndustryAction):string|null {
  if(!hit)return '到场后未能接近原先看到的猎物';
  spear.durability--;
  const name=beastNames[hit.species];
- let text:string;
+ let text:string,meat=0;
  if(hit.killed){
-  const meat={boar:5,wolf:2,deer:6,hare:1,fox:2,duck:1}[hit.species];
+  meat=huntedMeatYield[hit.species];
   const totals=w.industry!.totals;
   r.inventory.gameMeat=(r.inventory.gameMeat??0)+meat;
   totals.gameMeat=(totals.gameMeat??0)+meat;
@@ -40,6 +41,9 @@ export function completeHunt(w:World,r:Resident,a:IndustryAction):string|null {
   alarmWildBeast(w,beast.id,r);
   text=`${r.name}用猎矛刺伤一只${name}，野兽仍然活着，可能还击或逃走。`;
  }
- emitEvent(w,{kind:'hazard',actors:[r.id],animalIds:[beast.id],place:{...r.at},text});
+ const event=emitEvent(w,{kind:'hazard',actors:[r.id],animalIds:[beast.id],place:{...r.at},text});
+ if(meat>0)recordFoodFlow(w,{type:'source_added',action:'hunt',at:w.minute,residentId:r.id,eventId:event.id,
+  planId:r.activity.planId,container:'person:'+r.id,definition:a.processDefinition!,sourceId:beast.id,
+  species:hit.species,output:{gameMeat:meat}});
  return null;
 }

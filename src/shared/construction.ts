@@ -20,6 +20,7 @@ export interface ConstructionWorker {
  wagePerHour:number;reserved:number;worked:number;paid:number;refunded:number;
 }
 export interface ConstructionProject {
+ landRightId?:string;
  id:string;name:string;mode:'new'|'expansion'|'conversion'|'terrain';ownerId:string;managerId:string;kind:ConstructionKind;
  terrain?:import('./infrastructure.js').TerrainWork;
  definition:string;ruleVersion:number;at:Vec;width:number;height:number;door:Vec;

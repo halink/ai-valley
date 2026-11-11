@@ -1,4 +1,5 @@
-import type {PersonPose} from './person-pose.js';
+import {isWorkPose,type PersonPose,type PersonFacing} from './person-pose.js';
+import {workPicture} from './work-art.js';
 import {roomPicture} from './rooms-art.js';
 import type { Building, Resident, Season, Tile, World } from '../shared/types.js';
 import type { AnimalKind } from '../shared/industry.js';
@@ -224,8 +225,9 @@ export function resource(kind: string, season: Season, available = true) {
   return canvas;
 }
 export {buildingExterior as house} from './buildings.js';
-export function person(r: Resident, frame = 0, pose:PersonPose='idle') {
+export function person(r: Resident, frame = 0, pose:PersonPose='idle',facing:PersonFacing='south',focus:{x:number;y:number}|null=null) {
   if(r.status==='dead')return wrappedBody();
+  if(isWorkPose(pose)){const picture=workPicture(r,pose,frame,facing,focus),{canvas,ctx}=surface(picture.width,picture.height);for(const p of picture.marks)rect(ctx,p.color,p.x,p.y,p.width,p.height);return canvas;}
   const {canvas,ctx:c} = surface(18,28), {hair,shirt,skin} = residentColors(r.appearance);
   if(pose==='sleep'||pose==='carried'){rect(c,materials.woodShade,0,20,18,6);rect(c,materials.rootLight,0,18,7,6);rect(c,hair,2,17,5,6);rect(c,skin,4,18,4,4);rect(c,pose==='carried'?materials.rockLight:shirt,8,17,10,7);rect(c,materials.ink,5,20,2,1);return canvas;}
   if(pose==='shoreRest'){
@@ -245,11 +247,6 @@ export function person(r: Resident, frame = 0, pose:PersonPose='idle') {
   rect(c,hair,4,2,10,9); rect(c,skin,5,5,8,8); rect(c,hair,4,2,10,4); rect(c,hair,4,5,2,4); rect(c,hair,12,4,2,5);
   rect(c,materials.ink,7,8,1,2); rect(c,materials.ink,11,8,1,2); rect(c,shade(skin,.78),9,11,2,1); rect(c,shade(hair,1.3),5,3,5,1);
   if(pose==='work'){rect(c,skin,13,12-frame*2,3,6);rect(c,materials.woodShade,14,8-frame*3,2,10);rect(c,materials.rockLight,12,6-frame*3,6,3);}
-  if(pose==='fish'){
-    rect(c,materials.woodLight,13,13,2,5);rect(c,materials.woodShade,14,8,1,7);
-    rect(c,materials.woodLight,15,4-frame,1,5);rect(c,materials.rockLight,16,6-frame,1,14);
-    rect(c,'#bc6443',16,20-frame,2,2);
-  }
   if(pose==='hunt'){
     const y=16-2*frame;
     rect(c,materials.woodShade,4,y,12,2);rect(c,materials.woodLight,6,y,9,1);
@@ -378,7 +375,7 @@ export function fishShoal(count:number,frame:number,feeding:boolean){
  return canvas;
 }
 
-export function pastureTile(edge:number,grazed:boolean){
+export function pastureTile(edge:number,grazed:boolean,water:number|null=null){
  const {canvas,ctx:c}=surface(16,16);
  rect(c,grazed?'#aa9349':'#75884b',0,0,16,16);
  for(const [x,y] of [[2,3],[5,10],[10,5],[13,12]]){
@@ -389,6 +386,7 @@ export function pastureTile(edge:number,grazed:boolean){
  if(edge&2){rect(c,rail,14,0,2,16);rect(c,highlight,14,3,2,2);}
  if(edge&4){rect(c,rail,0,14,16,2);rect(c,highlight,12,13,2,3);}
  if(edge&8){rect(c,rail,0,0,2,16);rect(c,highlight,0,11,2,2);}
+ if(water!==null){rect(c,'#665c4c',4,5,9,6);rect(c,water>0?'#679daa':'#3e4139',5,6,7,3);rect(c,'#b3a386',4,10,9,1);}
  return canvas;
 }
 

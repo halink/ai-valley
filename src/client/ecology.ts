@@ -1,3 +1,6 @@
+import {localWildSpecies} from '../world/wildlife-population.js';
+import {fishSpecies} from '../shared/fish-species.js';
+import {beastNames} from '../shared/frontier-hazards.js';
 import type {World} from '../shared/types.js';
 import {fishSchoolView,fishingKey,waterAtShore} from '../world/fishing.js';
 import {cropYieldAt,soilFertility} from '../world/frontier-nutrients.js';
@@ -13,11 +16,12 @@ export function ecologyPanel(w:World):string {
  const carried=(item:keyof typeof itemLabels)=>people.reduce((total,resident)=>total+(resident.inventory[item]??0),0);
  const water=shore&&waterAtShore(w,shore),school=water&&fishSchoolView(w,fishingKey(water));
  const herds=industry?.animals.filter(animal=>animal.status==='alive')??[];
- const pasture=industry?.pastures?.reduce((total,pasture)=>total+pasture.forage,0)??0;
+ const pasture=industry?.pastures?.filter(p=>p.status!=='retired').reduce((total,pasture)=>total+pasture.forage,0)??0;
  const freshWater=w.resources.find(resource=>resource.kind==='spring'&&w.map.settlement&&Math.abs(resource.at.x-w.map.settlement.x)+Math.abs(resource.at.y-w.map.settlement.y)<12);
  const fields=[...w.plots].sort((a,b)=>Number(!!b.crop)-Number(!!a.crop)||soilFertility(w,a.id)-soilFertility(w,b.id));
  const ecologicalFacts=w.events.filter(event=>['production','hazard','trade','construction'].includes(event.kind)).slice(-10).reverse();
  const designCount=w.designs?.records.length??0;
+ const predators=w.frontierHazards?.predatorEcology,population=w.frontierHazards?.wildlifePopulation;
  return `<p class="panel-intro">村民从同一片山谷取得食物、饲料、清水和建材。下面列的是当前存量与实际发生的变化。</p>
  <div class="flow-observer">
  <article class="duty-card"><b>草料、牲畜与土地</b><p>牧草 ${Math.floor(pasture)} 份 · 活畜 ${herds.length} 只 · 居民随身饲料 ${carried('fodder')} 份</p>
@@ -25,11 +29,21 @@ export function ecologyPanel(w:World):string {
  <p>地上畜粪 ${nutrients?.heaps.reduce((sum,pile)=>sum+pile.units,0)??0} 份 · 随身畜粪 ${carried('manure')} 份 · 随身堆肥 ${carried('compost')} 份</p>
  <button data-panel="wild">查看牧场与动物</button></article>
  <article class="duty-card"><b>河水、鱼群与村里的餐食</b><p>此刻${w.weather==='rain'?'下雨，露天田地可得到雨水':'晴朗，田地需要实际取水浇灌'}。${freshWater?`就近水源剩 ${Math.floor(freshWater.amount)} 份。`:''}</p>
- <p>${school?`村边水域有 ${school.amount} 份鱼群存量。`:''}累计钓获 ${industry?.totals.fish??0} 份 · 居民随身鲜鱼 ${carried('fish')} 份 · 随身餐食 ${carried('meal')} 份</p>
+ <p>${school?`村边水域有 ${school.amount} 份鱼群存量（${school.stocks.map(s=>s.name+' '+s.amount).join('、')}）。`:''}累计钓获 ${industry?.totals.fish??0} 份 · 居民随身分种鲜鱼 ${fishSpecies.reduce((n,i)=>n+carried(i),0)} 份 · 未分种旧鲜鱼 ${carried('fish')} 份 · 随身餐食 ${carried('meal')} 份</p>
  ${school?`<button data-tile="${school.at.x},${school.at.y}">查看鱼群位置</button>`:''} ${freshWater?`<button data-tile="${freshWater.at.x},${freshWater.at.y}">查看取水点</button>`:''}</article>
  <article class="duty-card"><b>从图纸到实物</b><p>${designCount?`居民完成了 ${designCount} 份设计。可以分别追踪图纸、实际工具与工地。`:'居民可以在有条件时自行起草图纸。材料、劳动和场地由后续实际行动落实。'}</p>
  <button data-panel="designs">查看居民图纸</button> <button data-panel="market">查看实际交易</button></article>
  </div>
+ ${predators?`<h3 class="section-label">狼狐栖地与有限种群</h3><p class="panel-intro">只统计已登记的真实个体。迁移保留身份，全部死亡后不会自动补种。食源、水路与遮蔽在繁育和迁移时重新核验。</p>
+ <div class="duty-list">${predators.habitats.map(h=>{
+  const beasts=w.frontierHazards!.beasts.filter(b=>b.habitatId===h.id&&b.status==='alive');
+  return `<article class="duty-card"><b>${beastNames[h.species]} · ${esc(h.id)}</b><p>存活 ${beasts.length}/${h.capacity} · 登记 ${h.registered} · 出生 ${h.born} · 死亡 ${h.deaths} · 迁入 ${h.arrived} / 迁出 ${h.departed}</p><button data-tile="${h.at.x},${h.at.y}">查看巢位</button>${beasts.map(b=>` <button data-animal-detail="beast/${esc(b.id)}">${b.sex==='male'?'雄':'雌'} · ${b.migration?'迁移中':b.disease?'患病':b.pregnancy?'孕育中':'查看个体'}</button>`).join('')}</article>`;
+ }).join('')}</div>`:''}
+ ${population?`<h3 class="section-label">野猪、鹿、野兔与野鸭的有限种群</h3><p class="panel-intro">只从实际亲代繁育，不自动补种，也不假定镇外来源。登记后的出生、死亡与驯化转出分别计数，旧经历保持未知。</p>
+ <div class="duty-list">${localWildSpecies.map(kind=>{
+  const stock=population.species[kind],beasts=w.frontierHazards!.beasts.filter(b=>b.species===kind&&b.status==='alive');
+  return `<article class="duty-card"><b>${beastNames[kind]}</b><p>存活 ${beasts.length}/${stock.capacity} · 登记 ${stock.registered} · 出生 ${stock.born} · 死亡 ${stock.deaths} · 驯化转出 ${stock.tamed}</p>${beasts.map(b=>` <button data-animal-detail="beast/${esc(b.id)}">${b.sex==='male'?'雄':'雌'} · ${b.pregnancy?'孕育中':'查看个体'}</button>`).join('')}</article>`;
+ }).join('')}</div>`:''}
  <h3 class="section-label">农地现况</h3>
  <div class="duty-list">${fields.slice(0,12).map(plot=>{
   const crop=plot.crop,def=crop?w.definitions[crop.definition]:undefined;

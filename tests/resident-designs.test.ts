@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import type {Action,Resident,World} from '../src/shared/types.js';
-import {parseChoice} from '../src/server/affordances.js';
+import {buildChoices,parseChoice} from '../src/server/affordances.js';
 import {decisionChoices,decisionContext} from '../src/server/decisions.js';
 import {WorldStore} from '../src/server/store.js';
 import {ValleyRuntime} from '../src/server/runtime.js';
@@ -93,7 +93,20 @@ test('a model-designed greenhouse follows land, supply and work rules and become
   const parcel=productionParcels(w).find(p=>p.ownerId===author.id)!;
   const lot={x:parcel.x+Math.floor(parcel.width/2),y:parcel.y+parcel.height};
   assert.ok(walkable(w,lot));
-  choose(w,author,a=>a.type==='move'&&same(a.to,lot));
+  const inspect=(a:Action)=>a.type==='move'&&same(a.to,lot);
+  assert.ok(buildChoices(decisionContext(w,author)).some(c=>inspect(c.action)),'the known land inspection is an eligible ordinary choice');
+  // The bounded overview rotates ordinary exploration after reserving self-care.
+  // Choose a real wait from the live menu instead of inventing a move or jumping time.
+  let rotations=0;
+  while(!decisionChoices(decisionContext(w,author)).some(c=>inspect(c.action))){
+   assert.ok(rotations++<4,'the known land direction must reappear within a few overview rotations');
+   assert.ok(buildChoices(decisionContext(w,author)).some(c=>inspect(c.action)),'waiting must not manufacture land knowledge or eligibility');
+   const menu=decisionChoices(decisionContext(w,author));assert.ok(menu.length<=56);
+   assert.ok(menu.some(c=>c.action.type==='eat'));assert.ok(menu.some(c=>c.action.type==='sleep'));
+   const before=w.minute,position={...author.at};choose(w,author,a=>a.type==='wait',{minutes:30});
+   assert.ok(w.minute>=before+30);assert.deepEqual(author.at,position);
+  }
+  choose(w,author,inspect);
   assert.match(constructionReason(w,other,{type:'construction',operation:'propose',kind:'greenhouse',scope:'private',
    definition,at:{x:parcel.x,y:parcel.y},wagePerHour:0,prices:{wood:2,stone:2}})??'',/尚未亲自查阅/);
   choose(w,author,a=>a.type==='construction'&&a.operation==='propose'&&a.definition===definition&&a.scope==='private');

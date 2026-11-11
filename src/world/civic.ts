@@ -1,3 +1,5 @@
+import {publicCargoDeliveryReason,completePublicCargoDelivery} from './public-food-procurement.js';
+import {authorizeFoodReserve,reserveMeasureError,reserveDeliveryReason,completeReserveDelivery,advanceFoodReserves} from './public-food-reserves.js';
 import {hasReceipt} from './receipts.js';
 import {fixtureMeasureError,authorizeFixtureRemoval} from './fixture-removal.js';
 import {authorizeLongCare} from './long-care.js';
@@ -5,6 +7,7 @@ import {authorizePension,supportEligible} from './support.js';
 import {coLocated} from './proximity.js';
 import {foodTransaction} from './food.js';
 import {authorizeEducation,subjects} from './education.js';
+import {itemLabels} from '../shared/items.js';
 import type {Building,Inventory,Item,Resident,Vec,World} from '../shared/types.js';
 import type {CivicAction,CivicBudget,CivicMeasure,CivicProposal} from '../shared/civic.js';
 import type {PublicShift} from '../shared/public-duties.js';
@@ -18,7 +21,10 @@ import {constructionNames} from './construction-sites.js';
 const prices:Inventory={turnip:2,meal:4,water:1,wood:2,stone:2};
 const integer=(n:number,min:number,max:number)=>Number.isSafeInteger(n)&&n>=min&&n<=max;
 const capable=(w:World,r:Resident)=>r.status==='alive'&&r.residency!=='outside'&&r.canDecide&&r.canExpress&&ageYears(r.bornAt,w.minute)>=18;
-const citizen=(w:World,r:Resident)=>capable(w,r)&&r.residency==='resident';
+// Incapacity does not erase representation; the proposal keeps its original unique roll.
+const elector=(w:World,r:Resident)=>r.status==='alive'&&r.residency==='resident'&&ageYears(r.bornAt,w.minute)>=18;
+const citizen=(w:World,r:Resident)=>elector(w,r)&&capable(w,r);
+export const MIN_CIVIC_ELECTORATE=3;
 const board=(w:World,id:string)=>w.buildings.find(b=>b.id===id&&b.ownerId==='commons'&&b.condition>=0);
 const local=(r:Resident,b:Building)=>distance(r.at,b.door)<=8&&(r.inside===null||r.inside===b.id);
 const has=(bag:Inventory,cost:Inventory)=>Object.entries(cost).every(([i,n])=>(bag[i as Item]??0)>=n!);
@@ -30,10 +36,12 @@ export function initializeCivic(w:World):void {
  if(w.mode!=='formal')return;
  initializeEconomy(w);
  w.civic??={proposals:[],budgets:[],stores:{},salesTax:null,nextSerial:1,totals:{donations:0,wages:0,procurement:0,repairs:0}};
+ w.civic.reserves??=[];
 }
 function quotePrices(m:Extract<CivicMeasure,{kind:'service'|'repair'}>):Inventory {const source={...prices,...m.prices};return m.kind==='repair'?{wood:source.wood,stone:source.stone}:{turnip:source.turnip,meal:source.meal,water:source.water};}
 function priceLabel(m:Extract<CivicMeasure,{kind:'service'|'repair'}>){return Object.entries(quotePrices(m)).map(([item,n])=>`${itemNames[item]}每份${n}钱`).join('、');}
 export function measureLabel(w:World,m:CivicMeasure):string {
+ if(m.kind==='foodReserve')return `${m.foreignProcurement?`另授权${w.residents.find(r=>r.id===m.foreignProcurement!.handlerId)?.name??'原经办人'}向${w.foreignTrade?.merchants.find(x=>x.id===m.foreignProcurement!.merchantId)?.name??'原商人'}以同一单价协商镇外采购（含既有陆运，不另付运费；税额也占总预算），对方另行接受，公共货单另行携至原共屋，携运期间须先交付再离谷，不能变私产；未成交到期或经办失能/死亡退运后退款，已购货到期后仅可送原公共库，死亡原位保全。` :''}${w.buildings.find(b=>b.id===m.buildingId)?.name??'原共屋'}的可食储备：${itemLabels[m.item]}累计入库至多${m.quantity}份，采购每份${m.unitPrice}钱、总额${m.suppliesBudget}钱；有能力的6岁以上居民和访客亲自领取，跨共屋与开拓口粮合计滚动24小时最多${m.dailyNutrition}营养；授权${m.durationDays}日，到期余款退回、剩余现物原址转回普通公共库存。可另行到场启用未承诺公粮，不动种粮、服务专用款或原预留物资`;
  if(m.kind==='fixtureRemoval')return `拆卸${w.buildings.find(b=>b.id===m.buildingId)?.name??'原公共场所'}的具体设备${m.stationId}，授权${m.durationDays}日，总工资上限${m.wage}钱，按实际工时分次支付，回收物留原公共库存；有效服务承诺须先处理`;
  if(m.kind==='salesTax')return `货币买卖向买方加收 ${m.basisPoints/100}% 公共销售税，施行 ${m.durationDays} 日`;
  if(m.kind==='careSupport'){const c=w.longCare?.agreements.find(c=>c.id===m.agreementId);return c?`为${w.residents.find(r=>r.id===c.beneficiaryId)?.name}的具体托育或长期照护预存${m.amount}钱，照护者${w.residents.find(r=>r.id===c.providerId)?.name}，每日${c.visitsPerDay}次、每次${c.fee}钱，从约定日起持续${m.durationDays}日，仍须各方另行同意，未完成服务不付薪`:'原具体照护议案';}
@@ -49,6 +57,7 @@ export function measureLabel(w:World,m:CivicMeasure):string {
 }
 function measureError(w:World,m:CivicMeasure):string|null {
  if(!m||!integer(m.durationDays,1,28))return '公共授权期限须为 1 至 28 日';
+ if(m.kind==='foodReserve')return reserveMeasureError(w,m);
  if(m.kind==='fixtureRemoval')return fixtureMeasureError(w,m);
  if(m.kind==='salesTax')return integer(m.basisPoints,0,1500)?null:'销售税须在 0% 至 15% 之间';
  if(m.kind==='careSupport'){const c=w.longCare?.agreements.find(c=>c.id===m.agreementId);return c&&c.status==='offered'&&!c.funding&&integer(m.amount,1,2000)&&m.amount===c.fee*(c.endDay-c.startDay)*c.visitsPerDay&&m.durationDays===c.endDay-c.startDay&&w.minute<c.startDay*DAY+c.startMinute+c.windowMinutes?null:'需要尚未接受的具体照护约定，以及与其完整次数、费用和期限一致的有限额度';}
@@ -79,15 +88,18 @@ function duplicateMeasure(a:CivicMeasure,b:CivicMeasure){
 }
 function finishProposal(w:World,p:CivicProposal):void {
  if(p.status!=='open')return;
- const yes=Object.values(p.votes).filter(Boolean).length,no=Object.values(p.votes).filter(v=>!v).length;
- const majority=Math.floor(p.electorate.length/2)+1,quorum=Math.ceil(p.electorate.length/2);
+ const electorate=[...new Set(p.electorate)];
+ const votes=electorate.map(id=>p.votes[id]);
+ const yes=votes.filter(v=>v===true).length,no=votes.filter(v=>v===false).length;
+ const majority=Math.max(2,Math.floor(electorate.length/2)+1),quorum=Math.max(2,Math.ceil(electorate.length/2));
  if(w.minute<p.closesAt&&yes<majority&&no<majority)return;
- const passed=yes>no&&yes+no>=quorum&&(w.minute>=p.closesAt||yes>=majority);
+ const passed=electorate.length>=MIN_CIVIC_ELECTORATE&&yes>=2&&yes>no&&yes+no>=quorum&&(w.minute>=p.closesAt||yes>=majority);
  p.decidedAt=w.minute;p.status=passed?'approved':'rejected';
  const place=w.buildings.find(b=>b.id===p.buildingId)!;
  if(passed){
   const m=p.measure;
-  if(m.kind==='fixtureRemoval'){const error=authorizeFixtureRemoval(w,m,p.id);if(error){p.status='unfunded';p.executionError=error;}}
+  if(m.kind==='foodReserve'){const error=authorizeFoodReserve(w,m,p.id);if(error){p.status='unfunded';p.executionError=error;}}
+  else if(m.kind==='fixtureRemoval'){const error=authorizeFixtureRemoval(w,m,p.id);if(error){p.status='unfunded';p.executionError=error;}}
   else if(m.kind==='salesTax')w.civic!.salesTax={basisPoints:m.basisPoints,expiresAt:w.minute+m.durationDays*DAY,proposalId:p.id};
   else if(m.kind==='careSupport'){const error=authorizeLongCare(w,m.agreementId,m.amount,m.durationDays,p.id);if(error){p.status='unfunded';p.executionError=error;}}
   else if(m.kind==='pension'){const error=authorizePension(w,m.beneficiaryId,m.amountPerDay,m.durationDays,p.id);if(error){p.status='unfunded';p.executionError=error;}}
@@ -115,6 +127,7 @@ function refund(w:World,account:string,reference:string){const balance=accountBa
 export function advanceCivic(w:World):void {
  if(w.mode!=='formal')return;
  initializeCivic(w);
+ advanceFoodReserves(w);
  for(const p of w.civic!.proposals)if(p.status==='open')finishProposal(w,p);
  if(w.civic!.salesTax&&w.civic!.salesTax.expiresAt<=w.minute)w.civic!.salesTax=null;
  for(const b of w.civic!.budgets){
@@ -130,13 +143,13 @@ export function advanceCivic(w:World):void {
  }
  // Closed proposals and budgets retain a bounded public history; no active obligation is discarded.
  const active=new Set(w.duties?.shifts.filter(s=>!['finished','unfilled'].includes(s.status)).map(s=>s.funding?.budgetId));
- w.civic!.proposals=w.civic!.proposals.filter((p,i,all)=>p.status==='open'||i>=all.length-80||w.civic!.budgets.some(b=>b.proposalId===p.id&&b.status==='active'));
+ w.civic!.proposals=w.civic!.proposals.filter((p,i,all)=>p.status==='open'||i>=all.length-80||w.civic!.budgets.some(b=>b.proposalId===p.id&&b.status==='active')||w.civic!.reserves?.some(r=>r.proposalId===p.id&&r.status==='active'));
  w.civic!.budgets=w.civic!.budgets.filter((b,i,all)=>b.status==='active'||active.has(b.id)||i>=all.length-80);
 }
 function actionPlace(w:World,a:CivicAction):Building|undefined {
  if(a.operation==='donate'||a.operation==='propose')return board(w,a.buildingId);
  if(a.operation==='vote')return w.buildings.find(b=>b.ownerId==='commons'&&b.condition>=0&&w.civic?.proposals.some(p=>p.id===a.proposalId));
- const budget=w.civic?.budgets.find(b=>b.id===a.budgetId);
+ const budget=a.operation==='supplyReserve'||a.operation==='openReserve'||a.operation==='deliverReserve'?w.civic?.reserves?.find(p=>p.id===a.reserveId):w.civic?.budgets.find(b=>b.id===a.budgetId);
  return budget?w.buildings.find(b=>b.id===budget.buildingId&&b.ownerId==='commons'&&b.condition>=0):undefined;
 }
 export function civicReason(w:World,r:Resident,a:CivicAction):string|null {
@@ -145,9 +158,13 @@ export function civicReason(w:World,r:Resident,a:CivicAction):string|null {
  if(a.operation==='vote')place=w.buildings.find(b=>board(w,b.id)&&local(r,b));
  if(!place)return '须在真实的公共公告板或预算用房办理';
  if(!local(r,place))return '请先亲自到公告板或交货地点查看';
+ if(a.operation==='deliverReserve')return publicCargoDeliveryReason(w,r,a);
+ if(a.operation==='supplyReserve'||a.operation==='openReserve'){if(place.kind!=='lodge'||place.condition<=0)return '储备须有完好的公共共屋';return reserveDeliveryReason(w,r,a);}
  if(a.operation==='donate')return integer(a.amount,1,1000)&&r.coins>=a.amount?null:'捐款需要本人真实持有的钱款';
  if(a.operation==='propose'){
+  if(a.measure.kind==='foodReserve'&&a.measure.foreignProcurement?.handlerId!==undefined&&a.measure.foreignProcurement.handlerId!==r.id)return '本轮镇外采购须由提议人自愿担任经办人';
   if(!citizen(w,r))return '公共议案由成年常住居民提出';
+  if(new Set(w.residents.filter(p=>elector(w,p)).map(p=>p.id)).size<MIN_CIVIC_ELECTORATE)return '不足三位成年常住选民，不得新设公共支出、税收或常规授权；仅保留既有有限救助和已生效义务';
   const problem=measureError(w,a.measure);if(problem)return problem;
   if(a.measure.kind==='careSupport'){const id=a.measure.agreementId;const c=w.longCare?.agreements.find(c=>c.id===id);if(!c||(c.knownBy??[]).includes(r.id)===false)return '本人尚未实际获知这项具体照护约定';}
   if(a.measure.kind==='pension'){const id=a.measure.beneficiaryId;const p=w.residents.find(p=>p.id===id);if(!p||p.id!==r.id&&!r.knownPeople.includes(p.id)||ageYears(p.bornAt,w.minute)<65&&!coLocated(w,r,p,6))return '本人须实际认识受助者，行动受限需要本人眼前可观察的实际情况';}
@@ -179,7 +196,7 @@ export function civicReason(w:World,r:Resident,a:CivicAction):string|null {
 export function civicTarget(w:World,r:Resident,a:CivicAction):{target:Vec;duration:number;error?:string} {
  const error=civicReason(w,r,a);if(error)return {target:r.at,duration:0,error};
  const place=a.operation==='vote'?w.buildings.find(b=>board(w,b.id)&&local(r,b))!:actionPlace(w,a)!;
- return {target:{...place.door},duration:a.operation==='repair'?120:2};
+ return {target:{...place.door},duration:a.operation==='repair'?120:a.operation==='supplyReserve'||a.operation==='openReserve'||a.operation==='deliverReserve'?5:2};
 }
 /** First actual arrival claims the single repair assignment; a plan on the road cannot reserve the worksite. */
 export function civicWorkError(w:World,r:Resident,a:CivicAction):string|null {
@@ -196,6 +213,12 @@ export function civicWorkError(w:World,r:Resident,a:CivicAction):string|null {
 function completeCivicAtomic(w:World,r:Resident,a:CivicAction):string|null {
  const mark=r.activity?.planId?`civic-action:${r.activity.planId}:${r.activity.startedAt}:${a.operation}`:null;
  if(mark&&hasReceipt(w,mark))return null;
+ if(a.operation==='deliverReserve'){const error=civicReason(w,r,a);if(error)return error;return completePublicCargoDelivery(w,r,a);}
+ if(a.operation==='supplyReserve'||a.operation==='openReserve'){
+  const previous=w.civic?.reserves?.find(p=>p.id===a.reserveId)?.receipts.find(x=>x.id===a.receiptId);
+  if(previous)return previous.personId===r.id&&previous.operation===a.operation&&previous.quantity===a.quantity?null:'原交付回执不属于本次行动';
+  const error=civicReason(w,r,a);if(error)return error;return completeReserveDelivery(w,r,a);
+ }
  const error=a.operation==='repair'?civicWorkError(w,r,a):civicReason(w,r,a);if(error)return error;
  const place=a.operation==='vote'?w.buildings.find(b=>board(w,b.id)&&same(r.at,b.door))!:actionPlace(w,a)!;
  if(!place||!same(r.at,place.door))return '须亲自完成到场、交货或投票';
@@ -205,8 +228,9 @@ function completeCivicAtomic(w:World,r:Resident,a:CivicAction):string|null {
   if(!moveCoins(w,`resident:${r.id}`,'treasury',a.amount,'自愿公共捐款',reference))return '捐款未能完成';
   c.totals.donations+=a.amount;tell(w,place,`${r.name}自愿将 ${a.amount} 钱交入公共金库；支出仍需居民议案与表决。`,[r.id]);
  }else if(a.operation==='propose'){
-  const electorate=w.residents.filter(p=>citizen(w,p)).map(p=>p.id);
-  const p:CivicProposal={id:`civic-proposal:${w.id}:${c.nextSerial++}`,proposerId:r.id,buildingId:place.id,createdAt:w.minute,closesAt:w.minute+4*DAY,electorate,votes:{},measure:a.measure.kind==='fixtureRemoval'||a.measure.kind==='salesTax'||a.measure.kind==='construction'||a.measure.kind==='education'||a.measure.kind==='careSupport'||a.measure.kind==='pension'?structuredClone(a.measure):{...structuredClone(a.measure),prices:quotePrices(a.measure)},status:'open',decidedAt:null,budgetId:null};
+  if(a.measure.kind==='foodReserve'&&a.measure.foreignProcurement?.handlerId!==undefined&&a.measure.foreignProcurement.handlerId!==r.id)return '本轮镇外采购须由提议人自愿担任经办人';
+  const electorate=[...new Set(w.residents.filter(p=>elector(w,p)).map(p=>p.id))];
+  const p:CivicProposal={id:`civic-proposal:${w.id}:${c.nextSerial++}`,proposerId:r.id,buildingId:place.id,createdAt:w.minute,closesAt:w.minute+4*DAY,electorate,votes:{},measure:a.measure.kind==='foodReserve'||a.measure.kind==='fixtureRemoval'||a.measure.kind==='salesTax'||a.measure.kind==='construction'||a.measure.kind==='education'||a.measure.kind==='careSupport'||a.measure.kind==='pension'?structuredClone(a.measure):{...structuredClone(a.measure),prices:quotePrices(a.measure)},status:'open',decidedAt:null,budgetId:null};
   c.proposals.push(p);tell(w,place,`${r.name}提出公共议案：${measureLabel(w,a.measure)}。全体登记成年居民各自表决，最迟四日后计票。`,[r.id]);
  }else if(a.operation==='vote'){
   const p=c.proposals.find(p=>p.id===a.proposalId)!;p.votes[r.id]=a.accept;

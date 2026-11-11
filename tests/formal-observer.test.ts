@@ -7,11 +7,11 @@ import {applyObserverUpdate} from '../src/shared/observer.js';
 import {createFormalWorld} from '../src/world/formal-seed.js';
 import {mkdtempSync, rmSync} from 'node:fs';
 import {join} from 'node:path';
-import {tmpdir} from 'node:os';
+import {testTmpdir} from '../scripts/repository-temporary.mjs';
 import {createObserverServer} from '../src/server/http.js';
 
 test('formal saves restore terrain, harvested resources, additions and removals together',()=>{
- const directory=mkdtempSync(join(tmpdir(),'valley-restart-')),file=join(directory,'world.sqlite');
+ const directory=mkdtempSync(join(testTmpdir(),'valley-restart-')),file=join(directory,'world.sqlite');
  let store=new WorldStore(file);
  try {
   const world=createFormalWorld();store.commit(world,null);

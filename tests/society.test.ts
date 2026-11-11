@@ -6,7 +6,7 @@ import {advanceLife,recordDeath} from '../src/world/life.js';
 import {YEAR} from '../src/world/time.js';
 
 function nearby(){const w=createWorld();w.clock.paused=false;const [a,b,c]=w.residents;a.at={x:30,y:29};b.at={x:31,y:29};c.at={x:70,y:50};return {w,a,b,c};}
-test('emergency care requires real incapacity, urgency, volunteer supplies and no timely proxy',()=>{
+test('emergency care requires real incapacity, urgency, volunteer supplies and no current child guardian',()=>{
  const {w,a,b,c}=nearby();a.skills.care=2;a.inventory={meal:2,water:2};b.health=10;
  assert.equal(careAuthority(w,a,b).allowed,false,'model delay/silence alone never grants authority');
  b.canDecide=false;b.canExpress=true;
@@ -16,15 +16,16 @@ test('emergency care requires real incapacity, urgency, volunteer supplies and n
  assert.equal(a.inventory.meal,1);assert.equal(b.coins,balance);assert.deepEqual(b.guardianIds,[]);
  b.canDecide=true;assert.equal(careAuthority(w,a,b).allowed,false,'recovered full capacity ends exception');
  b.canDecide=false;b.refusesCare=true;assert.equal(careAuthority(w,a,b).allowed,false);
- b.refusesCare=false;b.guardianIds=[c.id];c.at={...b.at};assert.equal(careAuthority(w,a,b).allowed,false,'timely proxy restores ordinary route');
+ b.refusesCare=false;b.guardianIds=[c.id];c.at={...b.at};assert.equal(careAuthority(w,a,b).basis,'emergency','childhood guardian history does not confer adult proxy authority');
+ b.bornAt=w.minute-13*YEAR;assert.equal(careAuthority(w,a,b).allowed,false,'a current child guardian still blocks the stranger emergency exception');
 });
 test('ordinary care is a separately accepted single episode and rechecks refusal/resources',()=>{
  const {w,a,b}=nearby();a.skills.care=2;a.inventory={meal:1,water:1};b.health=60;
  assert.equal(executeSocialAction(w,a,{type:'propose',proposal:'care',targetId:b.id}).ok,true);
  const proposal=w.proposals[0];assert.equal(executeSocialAction(w,a,{type:'care',targetId:b.id}).ok,false);
  assert.equal(executeSocialAction(w,b,{type:'respond',proposalId:proposal.id,accept:true}).ok,true);
- b.refusesCare=true;assert.equal(executeSocialAction(w,a,{type:'care',targetId:b.id}).ok,false);assert.equal(a.inventory.meal,1);
- b.refusesCare=false;assert.equal(executeSocialAction(w,a,{type:'care',targetId:b.id}).ok,true);
+ b.refusesCare=true;assert.equal(executeSocialAction(w,a,{type:'care',targetId:b.id,proposalId:proposal.id}).ok,false);assert.equal(a.inventory.meal,1);
+ b.refusesCare=false;assert.equal(executeSocialAction(w,a,{type:'care',targetId:b.id,proposalId:proposal.id}).ok,true);
  assert.equal(proposal.status,'expired');assert.equal(executeSocialAction(w,a,{type:'care',targetId:b.id}).ok,false);
 });
 test('backup branch sees delivered evidence, never an internal death flag',()=>{

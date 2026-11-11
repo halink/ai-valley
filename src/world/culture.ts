@@ -1,3 +1,4 @@
+import {currentPremisesLease} from '../shared/premises.js';
 import {cultureDefinition} from './process-definitions.js';
 import {estateStock,estateBuildingLocation} from './estate-custody.js';
 import type {Building,FormalOpportunity,Inventory,Item,Resident,World} from '../shared/types.js';import type {CultureAction,CultureEvent,CultureKind} from '../shared/culture.js';import {goods,itemKeys,itemLabels} from '../shared/items.js';import {ageYears,DAY} from './time.js';import {coLocated} from './proximity.js';import {distance,findPath,same} from './navigation.js';import {roomLayout,assemblySeats} from '../shared/rooms.js';import {canObserve,deathProof} from './knowledge.js';import {educationConflict} from './education.js';import {foodTransaction} from './food.js';import {emitEvent,emitLedgerEvent} from './events.js';
@@ -8,7 +9,7 @@ const adult=(w:World,r:Resident|undefined):r is Resident=>capable(w,r)&&ageYears
 const integer=(n:unknown,a:number,b:number):n is number=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=a&&n<=b;
 const has=(bag:Inventory,cost:Inventory)=>Object.entries(cost).every(([i,n])=>(bag[i as Item]??0)>=n!),nonempty=(bag:Inventory)=>Object.values(bag).some(n=>n!>0);
 function change(bag:Inventory,cost:Inventory,sign:number){for(const [i,n]of Object.entries(cost))bag[i as Item]=(bag[i as Item]??0)+n!*sign;}
-function venue(w:World,r:Resident,id?:string){return w.buildings.find(b=>b.id===id&&b.condition>0&&r.knownBuildings.includes(b.id)&&['home','lodge','school','store'].includes(b.kind)&&(b.ownerId==='commons'&&['lodge','school'].includes(b.kind)||b.ownerId===r.id||b.residents.includes(r.id)));}
+function venue(w:World,r:Resident,id?:string){return w.buildings.find(b=>b.id===id&&b.condition>0&&!currentPremisesLease(w,b.id)&&r.knownBuildings.includes(b.id)&&['home','lodge','school','store'].includes(b.kind)&&(b.ownerId==='commons'&&['lodge','school'].includes(b.kind)||b.ownerId===r.id||b.residents.includes(r.id)));}
 function nearby(w:World,r:Resident,e:CultureEvent){return canObserve(w,r)&&distance(r.at,e.at)<=8&&(!r.inside||r.inside===e.buildingId);}
 function knows(w:World,r:Resident,e:CultureEvent){return e.knownBy.includes(r.id)||nearby(w,r,e);}
 export function atCulture(w:World,r:Resident,e:CultureEvent){return r.inside===e.buildingId&&same(r.at,e.at)&&!!r.roomAt;}

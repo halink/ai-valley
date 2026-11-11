@@ -2,7 +2,7 @@ import type {Vec} from './types.js';
 
 export const animalActivities={
  forage:'觅食',drink:'寻找清水',rest:'休息',flee:'躲避危险',hunt:'追猎',raid:'接近村落',
- defend:'警戒',roam:'巡视领地',shelter:'在畜舍内',transport:'被护送',
+ defend:'警戒',roam:'巡视领地',shelter:'在畜舍内',transport:'被护送',migrate:'迁往邻近栖地',
 } as const;
 
 export interface AnimalActivity {

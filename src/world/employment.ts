@@ -1,9 +1,13 @@
+import {activeBusinessRelocation} from '../shared/business-relocation.js';
+import {premisesBusinessRight,premisesWorkReason} from '../shared/premises.js';
 import {hasReceipt} from './receipts.js';
+import {occupiesKitchen} from '../shared/rooms.js';
 import {markPromiseEnd} from './known-promises.js';
 import {industryRecipe,bindRecipeSnapshot} from './industry-definitions.js';
+import {promisedEmploymentRecipe,isolateEmploymentBatch,employmentBatchIntact} from './employment-recipes.js';
 import {estateStock,estateBuildingLocation} from './estate-custody.js';
 import {foodTransaction} from './food.js';
-import {recipeById} from './industry-content.js';
+import {craftFoodFlowInputs,recordFoodFlow,finishFoodFlowAction} from './food-consumption-evidence.js';
 import {educationConflict} from './education.js';
 import type {Building,Inventory,Resident,Vec,World} from '../shared/types.js';
 import type {CraftRecipe} from '../shared/industry.js';
@@ -16,7 +20,7 @@ import {ageYears,DAY} from './time.js';
 
 export const employmentRoles={cook:'餐食制作',seedkeeper:'留种加工',carpenter:'木工加工',smith:'铁锭冶炼',miller:'谷物制面包',dairyworker:'乳品加工',weaver:'纺织加工',preserver:'罐藏加工',herbalist:'照护用品配制'};
 const roleRecipes={carpenter:'plank',smith:'bar',miller:'bread',dairyworker:'cheese',weaver:'cloth',preserver:'preserve',herbalist:'medicine'};
-function jobRecipe(w:World,role:EmploymentTerms['role'],legacy=false):CraftRecipe|undefined {if(role==='seedkeeper')return {id:'employment-seed',name:'留种加工',input:{turnip:1},output:{seed:2},minutes:15,station:null,skill:'farming',minimum:0};if(role==='cook'){const key=legacy?'recipe/meal@1':w.activeDefinitions['recipe/meal']??'recipe/meal@1',d=w.definitions[key];return d?{id:'employment-cook',name:'餐食制作',input:structuredClone(d.cost??{}),output:{meal:Number(d.data.yield)},minutes:d.minutes??20,station:null,skill:'farming',minimum:0}:undefined;}return role in roleRecipes?industryRecipe(w,roleRecipes[role as keyof typeof roleRecipes])?.recipe:undefined;}
+function jobRecipe(w:World,role:EmploymentTerms['role'],legacy=false):CraftRecipe|undefined {if(role==='seedkeeper')return {id:'employment-seed',name:'留种加工',input:{turnip:1},output:{seed:2},minutes:15,station:null,skill:'farming',minimum:0};if(role==='cook'){const key=legacy?'recipe/meal@1':w.activeDefinitions['recipe/meal']??'recipe/meal@1',d=w.definitions[key];return d?{id:'employment-cook',name:'餐食制作',input:structuredClone(d.cost??{}),output:{meal:Number(d.data.yield)},minutes:d.minutes??20,station:null,skill:'farming',minimum:0}:undefined;}const id=roleRecipes[role as keyof typeof roleRecipes];return id?industryRecipe(w,id,legacy?'recipe/industry/'+id+'@1':undefined)?.recipe:undefined;}
 function qualified(w:World,r:Resident,t:EmploymentTerms,buildingId:string,recipe=jobRecipe(w,t.role)){return !recipe||(r.skills[recipe.skill]>=recipe.minimum&&(!recipe.station||w.industry?.stations.some(s=>s.buildingId===buildingId&&s.kind===recipe.station&&!(s.removalWorked!>0))));}
 
 const whole=(n:unknown,min:number,max:number):n is number=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=min&&n<=max;
@@ -26,10 +30,10 @@ const has=(bag:Inventory,cost:Inventory)=>Object.entries(cost).every(([key,n])=>
 function add(bag:Inventory,cost:Inventory,sign=1){for(const [key,n]of Object.entries(cost))bag[key as keyof Inventory]=(bag[key as keyof Inventory]??0)+sign*n!;}
 function business(w:World,id:string):Business|undefined{return w.economy?.businesses.find(b=>b.id===id);}
 function site(w:World,id:string):Building|undefined{return w.buildings.find(b=>b.id===id);}
-function operating(w:World,b:Business|undefined):b is Business {
+function operating(w:World,b:Business|undefined,at=w.minute):b is Business {
  if(!b||b.closedAt!==null)return false;
  const owner=w.residents.find(p=>p.id===b.ownerId),place=site(w,b.buildingId);
- return !!owner&&capable(w,owner)&&!!place&&place.ownerId===owner.id&&place.condition>0;
+ return !!owner&&capable(w,owner)&&!!place&&premisesBusinessRight(w,owner.id,place,at)&&place.condition>0;
 }
 function termsError(t:EmploymentTerms|undefined):string|null {
  if(!t||!Object.hasOwn(employmentRoles,t.role)||!whole(t.wage,1,100)||!whole(t.days,2,28)
@@ -42,10 +46,25 @@ export function employmentTermsLabel(t:EmploymentTerms):string {
 }
 export function initializeEmployment(w:World):void {
  if(w.mode!=='formal')return;initializeEconomy(w);
- w.employment??={posts:[],contracts:[],nextSerial:1,totals:{paid:0,worked:0,produced:0,hired:0}};for(const c of [...w.employment.posts,...w.employment.contracts]){c.recipe??=jobRecipe(w,c.terms.role,true);if(c.recipe)c.recipeDefinition??=bindRecipeSnapshot(w,c.recipe);}
+ w.employment??={posts:[],contracts:[],nextSerial:1,totals:{paid:0,worked:0,produced:0,hired:0}};
+ for(const c of w.employment.posts)restoreRecipe(w,c);
+ for(const c of w.employment.contracts){
+  isolateEmploymentBatch(c);
+  // The recruiting snapshot is independent evidence only for this exact promise.
+  const p=w.employment.posts.find(p=>p.id===c.postId&&p.businessId===c.businessId&&p.employerId===c.employerId&&JSON.stringify(p.terms)===JSON.stringify(c.terms));
+  restoreRecipe(w,c,p);
+ }
+}
+function restoreRecipe(w:World,c:EmploymentPost|EmploymentContract,post?:EmploymentPost):void {
+ if(!c.recipeDefinition&&post){const recipe=promisedEmploymentRecipe(w,post);if(recipe){c.recipe=structuredClone(recipe);c.recipeDefinition=post.recipeDefinition??bindRecipeSnapshot(w,recipe);}}
+ // Saves predating recipe snapshots used the original version, not today's active content.
+ if(!c.recipe&&!c.recipeDefinition)c.recipe=jobRecipe(w,c.terms.role,true);
+ const recipe=promisedEmploymentRecipe(w,c);if(!recipe)return;
+ if(JSON.stringify(c.recipe)!==JSON.stringify(recipe))c.recipe=structuredClone(recipe);
+ c.recipeDefinition??=bindRecipeSnapshot(w,recipe);
 }
 function announce(w:World,buildingId:string,text:string,actors:string[]=[]){
- const place=site(w,buildingId);if(place)emitEvent(w,{kind:'trade',actors,place:{...place.door},text});
+ const place=site(w,buildingId);if(place)return emitEvent(w,{kind:'trade',actors,place:{...place.door},text});
 }
 function refundAccount(w:World,businessId:string,employerId:string):string|undefined {
  const b=business(w,businessId);if(b?.closedAt===null)return `business:${b.id}`;
@@ -55,7 +74,7 @@ function refundAccount(w:World,businessId:string,employerId:string):string|undef
 function refundStockAtomic(w:World,c:EmploymentContract){
  if(!c.batch)return;
  const b=business(w,c.businessId),owner=w.residents.find(r=>r.id===c.employerId);
- const stock=b?.closedAt===null?b.inventory:owner?.status==='dead'?estateStock(w,owner.id,'employment:'+c.id,estateBuildingLocation(w,c.buildingId,'原雇佣加工工位',true,c.recipe?.station??undefined)):owner?.inventory;
+ const stock=b&&owner?.status!=='dead'?b.inventory:owner?.status==='dead'?estateStock(w,owner.id,'employment:'+c.id,estateBuildingLocation(w,c.buildingId,'原雇佣加工工位',true,c.recipe?.station??undefined)):owner?.inventory;
  if(stock){add(stock,c.batch.inventory);c.batch=null;}
 }
 function closeOffer(w:World,p:EmploymentPost,outcome:'declined'|'expired'='expired'){
@@ -137,8 +156,31 @@ function renewedStartDay(w:World,p:EmploymentPost):number {
  const old=p.renewalOf?w.employment?.contracts.find(c=>c.id===p.renewalOf):undefined;
  return Math.max(Math.floor(w.minute/DAY)+1,old?.endDay??0);
 }
-export function employmentReason(w:World,r:Resident,a:EmploymentAction):string|null {
+function leasedScheduleError(w:World,ownerId:string,buildingId:string,t:EmploymentTerms,startDay:number,recipe=jobRecipe(w,t.role)){
+ const key=recipe?.station?'station:'+recipe.station:t.role==='cook'?'kitchen':'table';
+ for(let day=startDay;day<startDay+t.days;day++){
+  const start=day*DAY+t.startMinute,problem=premisesWorkReason(w,ownerId,buildingId,key,start,start+t.durationMinutes);if(problem)return problem;
+ }
+ return null;
+}
+/** Recheck the remaining original promise at a separately accepted destination. */
+export function relocatedEmploymentReason(w:World,c:EmploymentContract,buildingId:string):string|null {
+ const worker=w.residents.find(r=>r.id===c.workerId),b=site(w,buildingId);
+ if(!worker||!capable(w,worker)||!b||!premisesBusinessRight(w,c.employerId,b)||!qualified(w,worker,c.terms,buildingId,c.recipe))return '新址经营权、员工能力或真实工位不适用';
+ const startDay=Math.max(c.startDay,Math.floor(w.minute/DAY));
+ if(startDay>=c.endDay)return '原聘约已经届满，不能藉迁址延长';
+ const terms={...c.terms,days:c.endDay-startDay};
+ return leasedScheduleError(w,c.employerId,buildingId,terms,startDay,c.recipe)??scheduleConflict(w,worker,terms,buildingId,startDay,c.id);
+}
+export function employmentReason(w:World,r:Resident,a:EmploymentAction,workStart=w.minute):string|null {
  if(!w.employment||!capable(w,r))return '当前不能签订或履行私人聘约';
+ const boundContract=contractFor(w,a),boundPost=postFor(w,a);
+ if(a.contractId&&a.postId||a.operation==='post'&&(a.contractId||a.postId)||a.businessId&&(boundContract??boundPost)&&a.businessId!==(boundContract??boundPost)!.businessId)return '聘约、招聘与商铺身份不相符';
+ const promised=boundContract??boundPost,shop=business(w,promised?.businessId??a.businessId??'');
+ if(a.buildingId!==undefined&&a.buildingId!==(promised?.buildingId??shop?.buildingId))return '工作地点已改变，须重新决定';
+ const move=shop&&activeBusinessRelocation(w,shop.id);
+ if(move&&['post','renew','apply','select','accept'].includes(a.operation))return '迁址准备期间不新增旧址招聘承诺';
+ if(move?.status==='moving'&&a.operation==='work')return '各方同意搬迁期间暂停工作，原工资与期限不变';
  if(a.operation==='post'||a.operation==='renew'){
   const old=a.operation==='renew'?contractFor(w,a):undefined;
   const b=business(w,a.operation==='renew'?old?.businessId??'':a.businessId??'');
@@ -146,6 +188,7 @@ export function employmentReason(w:World,r:Resident,a:EmploymentAction):string|n
   if(!local(r,site(w,b.buildingId)!))return '须回到自己的商铺查看账目并张贴招聘';
   if(a.operation==='renew'&&(!old||old.employerId!==r.id||old.status!=='active'||old.endDay*DAY-w.minute>3*DAY))return '只能在本人有效聘约的最后三日提出续约';
   const invalid=termsError(a.terms);if(invalid)return invalid;
+  const leaseError=leasedScheduleError(w,r.id,b.buildingId,a.terms!,Math.max(Math.floor(w.minute/DAY)+1,old?.endDay??0));if(leaseError)return leaseError;
   const recipe=jobRecipe(w,a.terms!.role);if(recipe?.station&&!w.industry?.stations.some(s=>s.buildingId===b.buildingId&&s.kind===recipe.station&&!(s.removalWorked!>0)))return '需要先实际安装该行业的加工工位';
   if(w.employment.posts.some(p=>p.businessId===b.id&&['open','offered'].includes(p.status)&&p.terms.role===a.terms!.role))return '本店同类岗位已有未完结招聘';
   if(w.employment.contracts.some(c=>c.businessId===b.id&&c.status==='active'&&c.terms.role===a.terms!.role&&c.id!==old?.id))return '本店这一工作位置已有有效聘约';
@@ -156,8 +199,9 @@ export function employmentReason(w:World,r:Resident,a:EmploymentAction):string|n
   if(a.operation==='dismiss')return c.employerId===r.id?null:'只能结束自己作为雇主的聘约';
   if(c.workerId!==r.id)return '只能履行或辞去本人的聘约';
   if(a.operation==='quit')return null;
+  if(!promisedEmploymentRecipe(w,c))return '原聘约的加工配方缺少可信历史记录，当前不能加工；仍可结束聘约退回剩余实物';
   if(!qualified(w,r,c.terms,c.buildingId,c.recipe))return '本人实际技能或现场加工设备不再适用';
-  if(!operating(w,business(w,c.businessId))||r.health<45||r.energy<10)return '场所、身体或经营条件暂不适合开工';
+  if(!operating(w,business(w,c.businessId),workStart)||r.health<45||r.energy<10)return '场所、身体或经营条件暂不适合开工';
   if(!whole(a.minutes,1,120))return '本次自愿工作的时长须为 1 至 120 分钟';
   const day=Math.floor(w.minute/DAY),start=day*DAY+c.terms.startMinute,end=start+c.terms.durationMinutes;
   if(day<c.startDay||day>=c.endDay||w.minute<start||w.minute>end)return '当前不在本人约定的班次时段';
@@ -184,6 +228,7 @@ export function employmentReason(w:World,r:Resident,a:EmploymentAction):string|n
   const person=w.residents.find(person=>person.id===a.applicantId);
   if(!applicant||!person||!capable(w,person))return '没有这位仍有效的申请人';
   if(a.operation==='reject')return null;
+  const leaseError=leasedScheduleError(w,p.employerId,p.buildingId,p.terms,renewedStartDay(w,p),p.recipe);if(leaseError)return leaseError;
   if(b.coins<p.terms.wage*p.terms.days)return '本店资金不足以预留整段聘期的工资';
   return null;
  }
@@ -191,6 +236,7 @@ export function employmentReason(w:World,r:Resident,a:EmploymentAction):string|n
   if(p.status!=='offered'||p.offer?.workerId!==r.id||p.offer.expiresAt<=w.minute)return '本人没有这份仍有效的录用邀请';
   if(p.offer.notifiedAt===undefined&&!local(r,site(w,p.buildingId)!))return '须先到本人应聘的店前读取录用回复';
   if(a.operation==='decline')return null;
+  const leaseError=leasedScheduleError(w,p.employerId,p.buildingId,p.terms,renewedStartDay(w,p),p.recipe);if(leaseError)return leaseError;
   if(!qualified(w,r,p.terms,p.buildingId,p.recipe))return '本人当前不具备该岗位需要的实际技能或工位';
   if(accountBalance(w,p.offer.account)<p.terms.wage*p.terms.days)return '承诺的整段工资未足额预存';
   return scheduleConflict(w,r,p.terms,p.buildingId,renewedStartDay(w,p),p.renewalOf);
@@ -200,7 +246,7 @@ export function employmentReason(w:World,r:Resident,a:EmploymentAction):string|n
 export function employmentTarget(w:World,r:Resident,a:EmploymentAction):{target:Vec;duration:number;error?:string} {
  const error=employmentReason(w,r,a);if(error)return {target:r.at,duration:0,error};
  const p=postFor(w,a),c=contractFor(w,a);
- const b=business(w,a.businessId??c?.businessId??p?.businessId??'');
+ const b=business(w,c?.businessId??p?.businessId??a.businessId??'');
  const place=site(w,b!.buildingId)!;
  if(a.operation==='quit'||a.operation==='dismiss'||a.operation==='withdrawApplication'||a.operation==='decline')return {target:{...r.at},duration:1};
  if(a.operation==='work'){
@@ -213,18 +259,21 @@ export function employmentTarget(w:World,r:Resident,a:EmploymentAction):{target:
 export function employmentKitchenReason(w:World,r:Resident,buildingId:string):string|null {
  const active=w.residents.some(other=>other.id!==r.id&&other.status==='alive'&&other.residency!=='outside'&&other.activity?.action.type==='employment'
   &&other.activity.action.operation==='work'&&other.activity.path.length===0&&same(other.at,site(w,buildingId)?.door??{x:-1,y:-1})
+  &&other.activity.room?.mode!=='exit'&&(other.inside===null||other.inside===buildingId)
   &&w.employment?.contracts.some(c=>c.id===(other.activity!.action as EmploymentAction).contractId&&c.status==='active'&&c.terms.role==='cook'&&c.buildingId===buildingId));
  return active?'厨房工位正由实际到岗的受雇者使用':null;
 }
 /** This hook receives only time actually spent after the worker has reached the contracted station. */
 export function employmentWorkError(w:World,r:Resident,a:EmploymentAction,minutes=1):string|null {
  if(a.operation!=='work')return null;
- const problem=employmentReason(w,r,a);if(problem)return problem;
+ initializeEmployment(w);
+ const problem=employmentReason(w,r,a,w.minute-minutes);if(problem)return problem;
  const c=contractFor(w,a)!,b=business(w,c.businessId)!,place=site(w,c.buildingId)!;
+ const key=c.recipe?.station?'station:'+c.recipe.station:c.terms.role==='cook'?'kitchen':'table';
+ const leaseError=premisesWorkReason(w,c.employerId,c.buildingId,key,w.minute-minutes,w.minute);if(leaseError)return leaseError;
  if(!same(r.at,place.door))return '须亲自抵达聘约指定的工作地点';
  if(!r.activity||r.activity.action.type!=='employment'||r.activity.action.operation!=='work'||r.activity.action.contractId!==c.id)return '没有本人已提交并开始执行的工作安排';
- if(c.terms.role==='cook'&&w.residents.some(other=>other.id!==r.id&&other.status==='alive'&&other.residency!=='outside'&&same(other.at,place.door)
-   &&other.activity?.action.type==='cook'&&other.activity.path.length===0))return '厨房工位已有居民在烹饪，请待其交还工位';
+ if(c.terms.role==='cook'&&w.residents.some(other=>other.id!==r.id&&occupiesKitchen(w,other,place.id)))return '厨房工位已有居民在烹饪，请待其交还工位';
  const day=Math.floor(w.minute/DAY),start=day*DAY+c.terms.startMinute,end=start+c.terms.durationMinutes;
  const entry=c.attendance.find(d=>d.day===day)??{day,worked:0,paid:0,produced:0,firstArrival:null,lastWork:null};
  const dt=Math.min(Math.max(0,minutes),Math.max(0,w.minute-start),c.terms.durationMinutes-entry.worked,Math.max(0,end-(w.minute-minutes)),r.activity.remaining);
@@ -232,10 +281,11 @@ export function employmentWorkError(w:World,r:Resident,a:EmploymentAction,minute
  // The checkpoint's bounded attendance record deduplicates physical ticks; only actual coin
  // transfers need permanent journal receipts. A fractional runtime tick must not grow that journal.
  if(entry.lastWork!==null&&entry.lastWork>=w.minute-1e-9)return null;
+ if(c.batch&&!employmentBatchIntact(w,c)){refundStock(w,c);return '未完成批次的实际材料或加工记录已不完整，当前不能继续计工时';}
  if(!c.batch){
-  const recipe=c.recipe??jobRecipe(w,c.terms.role);const cost=recipe?.input??(c.terms.role==='cook'?{turnip:2,water:1}:{turnip:1});
+  const recipe=promisedEmploymentRecipe(w,c)!;const cost=recipe.input;
   if(!has(b.inventory,cost))return '店内尚未备齐实际加工材料，当前不能计工时';
-  foodTransaction(w,()=>{add(b.inventory,cost,-1);c.batch={inventory:cost,progress:0,minutes:recipe?.minutes??(c.terms.role==='cook'?20:15),output:recipe?.output??(c.terms.role==='cook'?{meal:1}:{seed:2})};});
+  foodTransaction(w,()=>{add(b.inventory,cost,-1);c.batch={inventory:structuredClone(cost),progress:0,minutes:recipe.minutes,output:structuredClone(recipe.output)};});
  }
  if(!c.batch)return '实际批次未建立';
  if(!c.attendance.includes(entry))c.attendance.push(entry);
@@ -248,11 +298,23 @@ export function employmentWorkError(w:World,r:Resident,a:EmploymentAction,minute
   entry.paid+=due;c.paid+=due;w.employment!.totals.paid+=due;
  }
  w.employment!.totals.worked+=dt;
- if(c.batch.progress+1e-8>=c.batch.minutes)foodTransaction(w,()=>{
-  add(b.inventory,c.batch!.output);entry.produced++;w.employment!.totals.produced++;
-  announce(w,c.buildingId,`${r.name}在${b.name}完成一批${employmentRoles[c.terms.role]}加工，使用店内原料，成品归该店，今日已挣得 ${entry.paid} 钱。`,[r.id,c.employerId]);
-  c.batch=null;
- });
+ if(c.batch.progress+1e-8>=c.batch.minutes){
+  const recipe=c.recipe!,inputs=craftFoodFlowInputs(w,'employment:'+c.id,c.batch.inventory,recipe);
+  try{foodTransaction(w,()=>{
+   add(b.inventory,c.batch!.output);entry.produced++;w.employment!.totals.produced++;
+   const event=announce(w,c.buildingId,`${r.name}在${b.name}完成一批${employmentRoles[c.terms.role]}加工，使用店内原料，成品归该店，今日已挣得 ${entry.paid} 钱。`,[r.id,c.employerId]);
+   if(inputs&&event){
+    const snapshot={id:recipe.id,input:recipe.input,output:recipe.output,minutes:recipe.minutes,
+     station:recipe.station,skill:recipe.skill,minimum:recipe.minimum};
+    recordFoodFlow(w,{type:'processed',action:'employment_processing',at:w.minute,residentId:r.id,eventId:event.id,
+     planId:r.activity!.planId,container:'business:'+b.id,inputContainer:'employment:'+c.id,
+     contractId:c.id,businessId:b.id,employerId:c.employerId,buildingId:c.buildingId,
+     day,batchNumber:entry.produced,definition:c.recipeDefinition!,recipe:structuredClone(snapshot),
+     inputs,output:c.batch!.output});
+   }
+   c.batch=null;
+  });}finally{finishFoodFlowAction(w);}
+ }
  r.activity.remaining=Math.min(r.activity.remaining,end-w.minute+dt);
  return null;
 }
@@ -262,7 +324,7 @@ function completeEmploymentAtomic(w:World,r:Resident,a:EmploymentAction):string|
  if(mark&&hasReceipt(w,mark))return null;
  const error=employmentReason(w,r,a);if(error)return error;
  const state=w.employment!,p=postFor(w,a),c=contractFor(w,a);
- const b=business(w,a.businessId??c?.businessId??p?.businessId??'')!;
+ const b=business(w,c?.businessId??p?.businessId??a.businessId??'')!;
  const remote=['quit','dismiss','withdrawApplication','decline'].includes(a.operation);
  if(!remote&&!same(r.at,site(w,b.buildingId)!.door))return '须本人实际到店办理聘用约定';
  if(a.operation==='post'||a.operation==='renew'){
