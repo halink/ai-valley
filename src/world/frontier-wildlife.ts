@@ -291,8 +291,9 @@ function forage(w:World,state:FrontierHazardState,beast:WildBeast):boolean {
 
 function seekWater(w:World,state:FrontierHazardState,beast:WildBeast):boolean {
  if((beast.thirst??0)<56)return false;
- const springs=w.resources.filter(r=>r.kind==='spring'&&r.floodDamage?.clearedAt!==null&&r.amount>=1&&distance(beast.at,r.at)<=70);
- const nearBank=state.shore&&distance(beast.at,state.shore)<=65&&!state.disasters.some(d=>d.kind==='flashFlood'&&d.phase==='active'&&disasterContains(d,state.shore!))?state.shore:null;
+ const danger=(at:Vec)=>state.disasters.some(d=>d.phase==='active'&&disasterContains(d,at));
+ const springs=w.resources.filter(r=>r.kind==='spring'&&r.floodDamage?.clearedAt!==null&&r.amount>=1&&distance(beast.at,r.at)<=70&&!danger(r.at));
+ const nearBank=state.shore&&distance(beast.at,state.shore)<=65&&!danger(state.shore)?state.shore:null;
  const sources=[...springs.map(spring=>({at:spring.at,spring})),...(nearBank?[{at:nearBank,spring:undefined}]:[])]
   .sort((a,b)=>distance(beast.at,a.at)-distance(beast.at,b.at));
  for(const source of sources){
@@ -302,11 +303,22 @@ function seekWater(w:World,state:FrontierHazardState,beast:WildBeast):boolean {
    activity(beast,'drink','在可到达的清水处饮水',source.at,source.spring?.id);
    return true;
   }
-  if(moveToward(w,beast,source.at,80)){
-   activity(beast,'drink','口渴，前往可到达的清水处',source.at,source.spring?.id);
-   return true;
+  // Water alone revalidates its complete cached route. Other animal movement keeps its original rules.
+  let from=beast.at;
+  const safePath=beast.path&&same(beast.path.to,source.at)&&beast.path.steps.length&&beast.path.steps.every(at=>{
+   const safe=distance(from,at)===1&&walkable(w,at,from)&&!danger(at);from=at;return safe;
+  });
+  if(!safePath){
+   delete beast.path;
+   const path=findPath(w,beast.at,source.at,false,80,(_from,to)=>!danger(to));
+   if(!path?.length)continue;
+   beast.path={to:{...source.at},steps:path};
   }
+  beast.at=beast.path!.steps.shift()!;
+  activity(beast,'drink','口渴，前往可到达的清水处',source.at,source.spring?.id);
+  return true;
  }
+ if(beast.activity?.kind==='drink')delete beast.path;
  return false;
 }
 

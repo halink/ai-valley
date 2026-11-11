@@ -32,6 +32,8 @@
 
 只有watchdog实际零退出、worker实际零退出、worker组已确认absent、监督报告无issues、持久watchdog报告匹配、源码仍一致，guardian才独立重开并核对world/session/model。它不依赖worker自报sealed。即使session seal已持久完成，随后卡死或SIGKILL，也不满足本层干净结束条件。
 
+watchdog 的信号适配器另处理正常退出竞态：第一次进程组探测仍为 present，随后 leader 的 `/proc/<pid>/stat` 已消失（ENOENT）时，再次探测整个组；只有确认 absent 才记 `not_found`，不发送信号。leader 消失但后代仍在、组未知、身份不匹配或其他读取错误继续返回 unknown，并保留 `signal_failed`。不清除已有 issues，不把 leader 消失当作组消失，也不延长原截止；[回归与独立审查](../reviews/production-model-process-signal-race.md)。
+
 ## 安全目录与输入
 
 `production-model-process-storage.ts` 只接受仓库output下显式新目录，或带本协议marker的旧合成目录。目录逐级NOFOLLOW，私有0700；数据库、sidecar与JSON验证文件类型、单链接、所有者、权限和大小。子进程只继承已经验证的目录FD，不接受任意数据库路径。

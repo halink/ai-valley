@@ -4,6 +4,7 @@ import {spawn} from 'node:child_process';
 import {readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {AcceptanceProcessSupervisor} from '../src/server/acceptance-process-supervisor.ts';
+import {signalSyntheticProcessGroup} from '../src/server/production-model-process-signals.ts';
 import {SyntheticProcessDirectory} from '../src/server/production-model-process-storage.ts';
 import {bootIdentity} from '../src/server/production-model-process-state.ts';
 import {sanitizeSyntheticDiagnostic} from '../src/server/production-model-process-diagnostics.ts';
@@ -38,9 +39,7 @@ try{
   const onMessage=message=>{if(message?.type==='synthetic_worker_diagnostic'&&diagnostics++<3)send({type:'synthetic_worker_diagnostic',diagnostic:sanitizeSyntheticDiagnostic(message.diagnostic)});
    else if(['synthetic_worker_ready','synthetic_fault_ready','synthetic_worker_finished'].includes(message?.type))send(message);};
   child.on('spawn',onSpawn);child.on('error',onError);child.on('exit',onExit);child.on('message',onMessage);
-  return {groupState:group,signalGroup(signal){if(group()==='absent')return 'not_found';if(!identity)return 'unknown';
-    try{const raw=readFileSync(`/proc/${identity.pid}/stat`,'utf8'),start=raw.slice(raw.lastIndexOf(')')+2).split(' ')[19];if(start!==identity.startTicks)return 'unknown';
-     process.kill(-identity.pid,signal);return 'sent';}catch(e){return e.code==='ESRCH'?'not_found':'unknown';}},
+  return {groupState:group,signalGroup:signal=>signalSyntheticProcessGroup(identity,signal,group),
    dispose(){child.off('spawn',onSpawn);child.off('error',onError);child.off('exit',onExit);child.off('message',onMessage);child.on('error',()=>{});if(child.connected)child.disconnect();child.unref();}};
  });
  const result={schema:1,kind:'synthetic-price-process-observation',id,identity,process:report,realModelExecuted:false,liveExecutionEnabled:false,actualProviderCostCny:null,acceptancePassed:null};

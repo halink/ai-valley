@@ -59,6 +59,8 @@ node --import tsx --test tests/dev-preview.test.ts tests/dev-preview-review.test
 
 运行 `node scripts/acceptance-long-run.mjs 3` 可在构建后验证隔离世界的多年生命周期。脚本使用本机内存中的测试数据库。
 
+[野生动物饮水的有限灾害安全](docs/implementation/wildlife-water-safety.md)只修复实际饮水与安全水路不一致：活动灾害中的泉/岸不供饮水，缓存水路逐边重验并实际绕行，仍到接触处才扣水。失败复现、独立审查与三种子七日完整步进对照分别记录；不改变食物预算、一般动物行为或启用搁置的野猪候选，不代表长期生态平衡或真实模型验收。
+
 增加 `--daily-json` 可输出隔离运行的逐日事实证据，包含口粮端点、已完成动作计数、变质、等待采样、人口，以及明确只覆盖成功 `eat` 的逐人实际份数与营养明细；没有完整账本的总产量、总消费和毛伤害仍明确留空。[字段范围与重现](docs/implementation/isolation-evidence.md)。该脚本不调用真实模型，也不替代真实模型长期验收。
 
 [有限物理食物流证据](docs/implementation/food-flow-evidence.md)另行记录成功采浆果、田地收获，以及普通 `cook` 的投入/产出；来源新增与加工各自列账，原批次营养缺失保持未知。沿用默认关闭的运行时证据入口，仅持久提交后发布，不能据此宣称完整食物收支。
