@@ -317,7 +317,7 @@ function begin(world:World,r:Resident,elapsed=0){
  if(!world.definitions[definition]){failure(world,r,'行为引用的定义版本不存在');return;}
  const route=targetFor(world,r,action,definition,elapsed);if(route.error){failure(world,r,route.error,action);return;}
  if(action.type==='cook'&&route.buildingId)action.buildingId=route.buildingId;
- let path=findPath(world,r.at,route.target,route.adjacent,Infinity,action.type==='frontierHazard'&&action.operation==='retreat'||action.type==='health'&&action.operation==='rescue'&&action.evacuationDangerId?frontierRetreatStepAllowed(world,r):undefined);
+ let path=findPath(world,r.at,route.target,route.adjacent,Infinity,action.type==='frontierHazard'&&(action.operation==='retreat'||action.operation==='shelter')||action.type==='health'&&action.operation==='rescue'&&action.evacuationDangerId?frontierRetreatStepAllowed(world,r):undefined);
  if(route.adjacent&&['talk','offer','accept'].includes(action.type))path=socialApproachPath(world,r.at,route.target);
  if(action.type==='gather'){
   const berry=world.resources.find(s=>s.id===action.resourceId&&s.kind==='bush');
@@ -531,7 +531,7 @@ function processActivity(world:World,r:Resident,minutes:number){
  if(interior.moving){endDecisionProtection(world,r,'decision');return;}
  if(activity.path.length){
   let available=minutes*movementRate(world,r),progress=activity.travelProgress??0;
-  const canStep=activity.action.type==='health'&&activity.action.operation==='rescue'&&activity.action.evacuationDangerId?(from:Vec,to:Vec)=>distance(from,to)===1&&frontierRetreatStepAllowed(world,r)(from,to):activity.action.type==='frontierHazard'&&activity.action.operation==='retreat'?frontierRetreatStepAllowed(world,r):(from:Vec,to:Vec)=>walkable(world,to,from);
+  const canStep=activity.action.type==='health'&&activity.action.operation==='rescue'&&activity.action.evacuationDangerId?(from:Vec,to:Vec)=>distance(from,to)===1&&frontierRetreatStepAllowed(world,r)(from,to):activity.action.type==='frontierHazard'&&(activity.action.operation==='retreat'||activity.action.operation==='shelter')?frontierRetreatStepAllowed(world,r):(from:Vec,to:Vec)=>walkable(world,to,from);
   while(available>1e-9&&activity.path.length){const next=activity.path[0];
    if(activity.action.type==='health'){syncMedicalTransport(world);if(r.activity!==activity)return;const error=healthReason(world,r,activity.action);if(error){failure(world,r,error);syncMedicalTransport(world);return;}}
    if(!canStep(r.at,next)){failure(world,r,'原路线出现阻挡，需要重新决定');return;}

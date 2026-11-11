@@ -179,4 +179,6 @@ node --import tsx --test tests/dev-preview.test.ts tests/dev-preview-review.test
 
 [已知自有田址导航](docs/implementation/known-land-menu.md)按身份而非远程田况单次轮换，饱和议程至多另加一项，不替换生存、避险、拒绝或停止。本人仍须明确选择、实际行走，到场后另选浇水；合成回归不替代真实模型长期验收。
 
+[临时进屋避险的已知危险路线](docs/implementation/shelter-danger-route.md)让正常编号菜单、开工寻路与逐边通行复用既有避险边界，避免为躲野兽而走入已见危险圈。原地点、权限、容量与实际到场重验保留；已在圈内撤出、途中变化、0.25/1.2分钟、SQLite旧路线及[独立审查](docs/reviews/shelter-danger-route.md)均为离线合成验证，不代表长期供给或完整1.0验收通过。
+
 [四种野生动物有限种群](docs/implementation/wildlife-population.md)新增真实亲代繁育、幼崽需求、妊娠预留与失败、旧档不补种和驯化转出核对。整年合成测试只验证实际推进与有限数量边界，不证明默认开局或真实模型长期存活。

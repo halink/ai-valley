@@ -72,8 +72,10 @@ export function frontierHazardOpportunities(w:World,r:Resident):FormalOpportunit
  }
  const danger=dangers[0];
  if(danger){
+  // A usable roof is not proof that its approach avoids already-seen danger.
+  const canStep=frontierRetreatStepAllowed(w,r);
   const shelter=w.buildings.filter(b=>b.id!==r.inside&&distance(r.at,b.door)<=32&&canInspectBuilding(w,r,b)&&usableFrontierShelter(w,r,b,danger.id))
-   .sort((a,b)=>distance(r.at,a.door)-distance(r.at,b.door)).find(b=>findPath(w,r.at,b.door,false,48)!==null);
+   .sort((a,b)=>distance(r.at,a.door)-distance(r.at,b.door)).find(b=>findPath(w,r.at,b.door,false,48,canStep)!==null);
   if(shelter)offer('shelter',`暂避${danger.label}，沿路到${shelter.name}内遮蔽`,{type:'frontierHazard',operation:'shelter',dangerId:danger.id,buildingId:shelter.id});
   if(!r.inside){
    const at=retreatPoint(w,r,dangers);
