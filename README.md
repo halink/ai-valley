@@ -38,7 +38,7 @@ npm run dev
 
 需要持久观察存档时，先 `npm run build`，再 `npm start`，打开[正式本机观察页](http://127.0.0.1:3412/ai-town/)。**正式服务会打开或创建 `runtime/formal.sqlite`，可能迁移并提交存档；它不是隔离预览。当前正式入口默认 `no-model`，不读取模型密钥、不自动调用模型。** 显式请求实时模型模式也会显示 `blocked`，直到真实运行授权、免费状态与旧未知请求完成核对；不能靠已有 key 或环境变量自称免费来解锁。[生产模型安全边界](docs/implementation/production-model-safety.md)仅有合成候选验证，未接通实时生产模型。
 
-普通观察页默认仍为2D，可手动选择[2.5D（试用）](docs/implementation/isometric-formal-entry.md)，两种视图共用同一只读快照。[共屋室内与普通烹饪](docs/implementation/isometric-lodge-cooking.md)、[工坊室内与普通制作](docs/implementation/isometric-workshop.md)、[商店真实室内布局](docs/implementation/isometric-store.md)与[诊所真实室内布局](docs/implementation/isometric-clinic.md)已有限接入；商店不补造货架、库存或室内交易，买卖仍在真实门外结算。诊所只画真实床位、桌台、静态厨房与原人物，不补造药品、器械或病人；治疗手势未支持，在场不表示治疗或治愈。全图、住宅/共屋/工坊/商店/诊所之外的室内及未支持姿态会明确回到2D，可随时按Escape或2D按钮返回。该入口尚未通过真实浏览器、触控与GPU验收，不表示整体2.5D已经完成。
+普通观察页默认仍为2D，可手动选择[2.5D（试用）](docs/implementation/isometric-formal-entry.md)，两种视图共用同一只读快照。[共屋室内与普通烹饪](docs/implementation/isometric-lodge-cooking.md)、[工坊室内与普通制作](docs/implementation/isometric-workshop.md)、[商店真实室内布局](docs/implementation/isometric-store.md)、[诊所真实室内布局](docs/implementation/isometric-clinic.md)与[学校真实室内布局](docs/implementation/isometric-school.md)已有限接入；商店不补造货架、库存或室内交易，买卖仍在真实门外结算。诊所只画真实床位、桌台、静态厨房与原人物，不补造药品、器械或病人；治疗手势未支持，在场不表示治疗或治愈。学校只画真实桌台、静态厨房与原人物，不补造黑板、书本或教学手势，在场不表示学习完成；当前合成路线明确新增测试校舍，不冒充默认种子已有学校。全图、住宅/共屋/工坊/商店/诊所/学校之外的室内及未支持姿态会明确回到2D，可随时按Escape或2D按钮返回。该入口尚未通过真实浏览器、触控与GPU验收，不表示整体2.5D已经完成。
 
 正式存档独占启动目前仅支持 Linux，其他平台会失败关闭；这仍是跨平台发布阻断项，不代表 1.0 已就绪。
 

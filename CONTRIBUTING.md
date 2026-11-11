@@ -42,6 +42,8 @@ node --import tsx --test tests/dev-preview.test.ts tests/dev-preview-review.test
 
 这是选定文件的部分验证，不是完整测试，也不证明跨平台已实测；提交时分别列出执行、失败与未运行的检查。完整 Linux 测试命令仍是 `npm test`，没有自动跳过平台测试。
 
+[学校室内2.5D有限观察](docs/implementation/isometric-school.md)复用真实 `school` 布局与人物位置；默认种子没有学校，合成路线仅显式新增按真实定义的测试校舍并解除暂停。原人、物资、技能与钱不预改，实际引擎分开验证单方等待、双方共同学习和最后0.25分钟结算；不补造黑板、书本或教学手势，在场不表示学习完成。[独立审查](docs/reviews/isometric-school.md)与源码合成图不是浏览器验收，原2D仍为默认。
+
 [诊所室内2.5D有限观察](docs/implementation/isometric-clinic.md)复用真实 `clinic` 布局与人物位置，`care/bodyBay` 不画成设施；不新增医疗动作或改变原2D。使用原种子诊所与原居民，另立明确的测试药剂/伤病例夹具验证真实引擎进出、单方等待、双方结算及[独立审查](docs/reviews/isometric-clinic.md)。图像为标注合成的源码像素栅格，不是浏览器验收。
 
 - 提交问题时写清版本、预期、复现步骤和观察到的状态。分享前移除密钥、真实服务器地址、存档和私人运行日志。
