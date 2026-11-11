@@ -119,7 +119,11 @@ export interface Grave {reservedBy?:string|null;condition?:number;lastMaintained
 export interface EstateParcel {id:string;ownerId:string;inventory:Inventory;location:{at:Vec;inside:string|null;roomAt:Vec|null;label?:string;regional?:RegionalLocation};createdAt:number;source:string;claimId:string|null;}
 export interface Estate {spouseIds?:string[];location?:EstateParcel['location'];parcels?:EstateParcel[];personId:string;inventory:Inventory;coins:number;status:'protected'|'settled';heirs:string[];}
 export interface ModelCharge {startedAt:number;input:number;output:number;finishedAt?:number;}
-export interface ModelMetrics {regionalDecisions?:number;localDecisions?:number;requests:number;successes:number;failures:number;inputTokens:number;outputTokens:number;lastLatencyMs:number;unmeteredFailures?:number;lastError:string|null;inFlight:string[];model:string;configured:boolean;lastAttemptModel?:string;usageWindow?:Record<string,ModelCharge[]>;routing?:{primary:string;primaryConfigured:boolean;backup:string;backupConfigured:boolean};}
+/** Bounded opt-in receipt for an explicitly rejected, already counted local
+ * request start. It does not represent a model call, decision, refund or bill. */
+export interface ModelAdmissionCancellation {actorId:string;model:string;requestNumber:number;revision:number;atMs:number;monotonicNs:string;
+ count:number;baselineRequests:number;baselineCancellations:number;previousReceiptHash:string|null;}
+export interface ModelMetrics {admissionCancellation?:ModelAdmissionCancellation;regionalDecisions?:number;localDecisions?:number;requests:number;successes:number;failures:number;inputTokens:number;outputTokens:number;lastLatencyMs:number;unmeteredFailures?:number;lastError:string|null;inFlight:string[];model:string;configured:boolean;lastAttemptModel?:string;usageWindow?:Record<string,ModelCharge[]>;routing?:{primary:string;primaryConfigured:boolean;backup:string;backupConfigured:boolean};}
 export interface World {ferries?:import('./ferry.js').FerryState;buildingMigrations?:import('./building-migration.js').BuildingUpgrade[];regions?:Array<{id:string;name:string;openedAt:number;width:number;height:number;access:Vec;sourceIds:string[];fishKeys:string[]}>;
  pregnancyPreparation?:import('./pregnancy-preparation.js').PregnancyPreparationState;
  regionSurveys?:import('./region-survey.js').RegionSurveyState;

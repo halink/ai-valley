@@ -3,7 +3,7 @@
  * trusted caller owns all three isolated SQLite handles and their safe paths.
  * Two journals plus the world are NOT an atomic transaction. Every uncertain
  * boundary fails closed; nothing here creates/replaces a session or clears it. */
-import {ValleyRuntime,type DecisionCommittedEvent} from './runtime.js';
+import {ValleyRuntime,type DecisionCommittedEvent,type DecisionAdmissionCancelledEvent} from './runtime.js';
 import type {WorldStore} from './store.js';
 import {ProductionModelJournal,CLEAN_RUNTIME_STOP_REASONS,modelEvidenceHash as hash} from './production-model-journal.js';
 import {SyntheticPriceSession,SYNTHETIC_PRICE_SESSION_LIMITS as L} from './production-model-price-session.js';
@@ -14,6 +14,10 @@ import {parseModelCompletion,prepareModelDecision,type ModelResult} from './deci
 import {persistedWorldFingerprint as fingerprint} from './acceptance-offline-protocol.js';
 import {offlineProductionRuntimeOwners as owners} from './production-model-runtime-ownership.js';
 import type {AcceptanceStopStatus} from './acceptance-stop-control.js';
+
+export type SyntheticAdmissionCancellation=DecisionAdmissionCancelledEvent&{reason:'cutoff'|'drain';
+ sessionAttempts:number;sessionCompleted:number;modelAttempts:number;modelCompleted:number;transportInvocations:number;
+ worldFingerprint:string;sessionHash:string;journalHash:string};
 
 export function createSyntheticPriceRuntimeSegment(options:{store:WorldStore;journal:ProductionModelJournal;
  session:SyntheticPriceSession;transport:ProductionHttpTransport;endGameMinute:number}){
@@ -56,6 +60,7 @@ export function createSyntheticPriceRuntimeSegment(options:{store:WorldStore;jou
  let cutoffTimer:ReturnType<typeof setTimeout>|undefined,hardTimer:ReturnType<typeof setTimeout>|undefined,
   pendingTimer:ReturnType<typeof setTimeout>|undefined;
  const original=store.commit,results=new WeakMap<ModelResult,{id:number;actorId:string}>();
+ const admissionCancellations:SyntheticAdmissionCancellation[]=[];
  const load=()=>{const w=store.loadForRuntime();if(!w)throw new Error('price_runtime_world_missing');return w;};
  const checkpoint=()=>({worldId:c.worldId,fingerprint:fingerprint(load())});
  const fail=(reason:string)=>{
@@ -124,6 +129,23 @@ export function createSyntheticPriceRuntimeSegment(options:{store:WorldStore;jou
    fail(reason);candidate.stop('model_failed');throw error;
   }
  };
+ const decisionAdmissionCancelled=(event:DecisionAdmissionCancelledEvent)=>{
+  try{
+   const sp=session.status(),jp=journal.status(),world=load(),at=Date.now(),invocations=candidate.status().transportInvocations;
+   if(failure||closed||sealed||admissionCancellations.length||sp.failure||jp.failure||!sp.persistenceHealthy||!jp.persistenceHealthy
+    ||sp.phase!=='draining'||!sp.segment||sp.pending||jp.pending||jp.runtimeStop||event.model!==P.model
+    ||world.revision!==event.revision||world.metrics.requests!==event.requestNumber
+    ||hash(world.metrics.admissionCancellation)!==hash(event)
+    ||world.metrics.inFlight.length!==1||world.metrics.inFlight[0]!==event.actorId
+    ||sp.attempts!==sp.completed||sp.attempts!==jp.attempts||sp.completed!==jp.completed
+    ||invocations!==sp.attempts-s.attempts||event.requestNumber-initial.metrics.requests!==invocations+1
+    ||!Number.isSafeInteger(at)||at<sp.lastObservedAtMs||at>=sp.segment.deadlineAtMs
+    ||fingerprint(world)!==sp.worldFingerprint||sp.worldFingerprint!==jp.worldFingerprint)throw new Error('admission_cancellation_unmatched');
+   admissionCancellations.push({...event,reason:event.atMs>=sp.segment.admissionCutoffMs?'cutoff':'drain',
+    sessionAttempts:sp.attempts,sessionCompleted:sp.completed,modelAttempts:jp.attempts,modelCompleted:jp.completed,transportInvocations:invocations,
+    worldFingerprint:sp.worldFingerprint,sessionHash:sp.auditHash,journalHash:jp.auditHash});
+  }catch(error){fail('admission_cancellation_failed');candidate.stop('model_failed');throw error;}
+ };
  try{
   if(initial.metrics.inFlight.length){const clean=structuredClone(initial);clean.metrics.inFlight=[];clean.revision++;store.commit(clean,initial.revision);}
   const segment=session.status().segment!;
@@ -141,7 +163,7 @@ export function createSyntheticPriceRuntimeSegment(options:{store:WorldStore;jou
     const result=parseModelCompletion(context,request,response.reply,Math.max(0,Date.now()-started));
     results.set(result,{id,actorId:context.actor.id});return result;
    }catch(error){fail('model_decision_failed');candidate.stop('model_failed');throw error;}
-  },{mode:'formal',dayMinutes:20,modelSlots:1,decisionCommitted,acceptanceAdmission:admission,
+  },{mode:'formal',dayMinutes:20,modelSlots:1,decisionCommitted,decisionAdmissionCancelled,acceptanceAdmission:admission,
    acceptanceLifecycle:{stopping:control=>{
     try{clearTimers();}catch(error){fail('price_runtime_timer_failed');throw error;}
     if(failure||journal.status().failure||session.status().failure){fail(failure??'price_runtime_ledger_failed');return;}
@@ -171,7 +193,7 @@ export function createSyntheticPriceRuntimeSegment(options:{store:WorldStore;jou
   hardTimer=setTimeout(()=>stopFailed('price_runtime_segment_deadline'),Math.max(0,segment.deadlineAtMs-Date.now()));
   const ownedRuntime=runtime;
   const status=()=>({executionKind:'synthetic-price-runtime' as const,closed,sealed,failure:failure??journal.status().failure??session.status().failure,
-   persistenceIssues:[...persistenceIssues],
+   persistenceIssues:[...persistenceIssues],admissionCancellations:structuredClone(admissionCancellations),
    journal:journal.status(),session:session.status(),control:ownedRuntime.acceptanceStopStatus(),realModelExecuted:false as const,
    liveExecutionEnabled:false as const,actualProviderCostCny:null,readyForProduction:false as const,requiresExternalWatchdog:true as const,acceptancePassed:null});
   return {runtime:ownedRuntime,status,

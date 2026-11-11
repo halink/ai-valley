@@ -33,8 +33,9 @@ const finish=()=>{if(finished)return;finished=true;clearInterval(poll);let statu
   if(sustained&&status?.sealed&&!status.failure){
    stage='worker_rehearsal';
    report.after=rehearsalSnapshot(state.store.loadForRuntime());report.finishedAtMs=Date.now();report.finishedMonotonicNs=process.hrtime.bigint().toString();report.stopReason=status.control?.reason??null;
+   report.admissionCancellations=status.admissionCancellations;
    checkSyntheticRehearsal(report,receipt,{runId:manifest.contract.runId,sourceFingerprint:manifest.contract.sourceFingerprint,
-    originalDeadlineAtMs:manifest.contract.deadlineAtMs,attempts:status.session.attempts,completed:status.session.completed,after:report.after});
+    originalDeadlineAtMs:manifest.contract.deadlineAtMs,attempts:status.session.attempts,completed:status.session.completed,after:report.after,cancellationCheckpoint:state.cancellationCheckpoint});
    stage='worker_report_write';directory.writeJson(`rehearsal-${id}.json`,report);
   }
   send({type:'synthetic_worker_finished',id,sealed:status?.sealed===true,failure:status?.failure??null});}

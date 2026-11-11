@@ -7,7 +7,7 @@ import {SyntheticProcessDirectory} from '../src/server/production-model-process-
 import {createSyntheticProcessState,processManifest,openSyntheticProcessState,monotonicStamp} from '../src/server/production-model-process-state.ts';
 import {SyntheticLaunchLedger} from '../src/server/production-model-process-ledger.ts';
 import {createSyntheticPriceEvidence,syntheticRecordHash as hash} from '../src/server/production-model-price-evidence.ts';
-import {rehearsalSnapshot,checkSyntheticRehearsal} from '../src/server/production-model-process-rehearsal.ts';
+import {rehearsalSnapshot,checkSyntheticRehearsal,checkSyntheticCancellationHistory} from '../src/server/production-model-process-rehearsal.ts';
 import {syntheticFailureDiagnostic,sanitizeSyntheticDiagnostic} from '../src/server/production-model-process-diagnostics.ts';
 const [flag,mode,output,scenario='normal',...extra]=process.argv.slice(2),root=fileURLToPath(new URL('..',import.meta.url)).replace(/\/$/,'');
 const scenarios=['normal','init_block','sync_block','crash_intent','crash_response','crash_ack','crash_seal','seal_block','late_headers','crash_reserved','watchdog_missing','sustained','sustained_crash_response'];
@@ -34,12 +34,15 @@ try{
  const previous=ledger.status();if(previous.failure||previous.pending)throw Error('synthetic_launch_blocked');
  // Preserve all bound evidence, not merely the newest completion. The launch
  // constructor already validated these rows and their chain before this read.
+ const priorRehearsals=[];
  for(const row of db.prepare('SELECT body FROM synthetic_launch_audit ORDER BY sequence').iterate()){
   const event=JSON.parse(row.body);if(event.type!=='finished')continue;
   const prior=directory.readJson(`process-${event.id}.json`);
   if(hash(prior)!==event.reportHash||prior.rehearsalHash&&hash(directory.readJson(`rehearsal-${event.id}.json`))!==prior.rehearsalHash)throw Error('synthetic_process_report_mismatch');
+  if(prior.rehearsalHash)priorRehearsals.push(directory.readJson(`rehearsal-${event.id}.json`));
  }
  state=openSyntheticProcessState(directory,manifest,previous);let before=state.session.status();
+ checkSyntheticCancellationHistory(priorRehearsals,rehearsalSnapshot(state.store.loadForRuntime()));
  if(before.segments!==previous.finished||before.epochs!==previous.finished||before.attempts!==previous.attempts||before.completed!==previous.completed||before.reservedWallMs!==previous.finished*30000)throw Error('synthetic_launch_count_mismatch');
  const startedAtMs=Date.now(),startedMonotonicNs=monotonicStamp(),deadlineAtMs=startedAtMs+30000;
  if(deadlineAtMs>manifest.contract.deadlineAtMs)throw Error('synthetic_launch_time_exhausted');
@@ -87,9 +90,11 @@ try{
  if(scenario==='sustained'||scenario==='sustained_crash_response'){
   const rehearsal=directory.readJson(`rehearsal-${receipt.id}.json`);
   checkSyntheticRehearsal(rehearsal,receipt,{runId:manifest.contract.runId,sourceFingerprint:manifest.contract.sourceFingerprint,
-   originalDeadlineAtMs:manifest.contract.deadlineAtMs,attempts:ss.attempts,completed:ss.completed,after:rehearsalSnapshot(state.store.loadForRuntime())});
+   originalDeadlineAtMs:manifest.contract.deadlineAtMs,attempts:ss.attempts,completed:ss.completed,after:rehearsalSnapshot(state.store.loadForRuntime()),cancellationCheckpoint:state.cancellationCheckpoint});
   rehearsalHash=hash(rehearsal);
+  priorRehearsals.push(rehearsal);
  }
+ checkSyntheticCancellationHistory(priorRehearsals,rehearsalSnapshot(state.store.loadForRuntime()));
  const result={schema:1,kind:'synthetic-price-supervised-result',id:receipt.id,receiptHash:hash(receipt),observation:directory.readJson(`watchdog-${receipt.id}.json`),
   watchdogExit,sessionHash:ss.auditHash,journalHash:js.auditHash,worldFingerprint:ss.worldFingerprint,attempts:ss.attempts,completed:ss.completed,
   originalDeadlineAtMs:manifest.contract.deadlineAtMs,reservedWallMs:ledger.status().reservedWallMs,...(rehearsalHash?{rehearsalHash}:{}),realModelExecuted:false,liveExecutionEnabled:false,actualProviderCostCny:null,readyForProduction:false,acceptancePassed:null};

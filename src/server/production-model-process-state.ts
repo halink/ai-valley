@@ -8,6 +8,7 @@ import {sourceManifest,persistedWorldFingerprint as fingerprint} from './accepta
 import {syntheticPriceSessionContract,SyntheticPriceSession,type SyntheticPriceSessionContract} from './production-model-price-session.js';
 import {productionCandidateContract,ProductionModelJournal,type ProductionCandidateContract} from './production-model-journal.js';
 import {SyntheticProcessDirectory,SYNTHETIC_PROCESS_MARKER} from './production-model-process-storage.js';
+import type {SyntheticAdmissionCancellation} from './production-model-price-runtime.js';
 export type SyntheticProcessManifest={kind:typeof SYNTHETIC_PROCESS_MARKER;bootId:string;contract:SyntheticPriceSessionContract;
  modelContract:ProductionCandidateContract;initialWorldFingerprint:string;initialSessionHash:string;initialJournalHash:string};
 export const bootIdentity=()=>readFileSync('/proc/sys/kernel/random/boot_id','utf8').trim();
@@ -44,6 +45,27 @@ export function openSyntheticProcessState(directory:SyntheticProcessDirectory,ma
   const j=journal.status(),s=session.status();
   if(j.failure||s.failure||j.pending||s.pending||s.segment||j.runtimeStop||j.attempts!==s.attempts||j.completed!==s.completed)throw Error('synthetic_process_unresolved');
   const ownedStore=store,ownedModel=md,ownedSession=sd;
-  return {store,journal,session,close(){ownedStore.close();ownedModel.close();ownedSession.close();}};
+  // Both constructors have validated the complete durable chains. Independently
+  // locate and replay the captured historical tips, not just their present totals.
+  const cancellationCheckpoint=(cancelled:SyntheticAdmissionCancellation)=>{
+   const matches=(db:DatabaseSync,table:string,tip:string,isSession:boolean)=>{
+    let attempts=0,completed=0,pending=false,draining=false,segment=0,worldFingerprint='';
+    for(const row of db.prepare(`SELECT body,hash FROM ${table} ORDER BY sequence`).iterate() as Iterable<{body:string;hash:string}>){
+     const e=JSON.parse(row.body);
+     if(e.type==='intent'){attempts++;pending=true;}
+     if(e.type===(isSession?'acknowledged':'world_committed')){completed++;pending=false;}
+     if(e.type==='segment_started'){segment++;draining=false;}
+     if(e.type==='drain_started')draining=true;
+     if(['created','world_checkpoint','world_committed','acknowledged','segment_finished','runtime_stop_finished'].includes(e.type)&&e.worldFingerprint)worldFingerprint=e.worldFingerprint;
+     if(row.hash===tip)return !pending&&attempts===cancelled.modelAttempts&&completed===cancelled.modelCompleted
+      &&worldFingerprint===cancelled.worldFingerprint&&(isSession?draining&&segment===session.status().segments
+       &&['drain_started','world_checkpoint'].includes(e.type):e.type==='world_checkpoint');
+    }
+    return false;
+   };
+   return matches(ownedModel,'production_model_audit',cancelled.journalHash,false)
+    &&matches(ownedSession,'synthetic_price_session_audit',cancelled.sessionHash,true);
+  };
+  return {store,journal,session,cancellationCheckpoint,close(){ownedStore.close();ownedModel.close();ownedSession.close();}};
  }catch(error){store?.close();md?.close();sd?.close();throw error;}
 }

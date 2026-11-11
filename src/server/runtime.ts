@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 import {nextDailyBoundary,checkedDailySnapshotConfig,type DailySnapshotConfig} from './acceptance-daily-snapshots.js';
 import {hasCareWithdrawal,careWithdrawalOnly} from '../world/care-withdrawal.js';
 import {expressiveTransportControl} from '../world/medical-transport.js';
@@ -22,7 +23,7 @@ import {settlementFoodCoverage} from '../world/food-coverage.js';
 import {initializeRooms} from '../world/rooms.js';
 import {initializeIndustry} from '../world/industry.js';
 import {initializeEducation,educationDeadline} from '../world/education.js';
-import type {World,Snapshot,Plan,Resident} from '../shared/types.js';
+import type {World,Snapshot,Plan,Resident,ModelAdmissionCancellation} from '../shared/types.js';
 import {stepWorld,stepWorldWithFoodEvidence,submitPlan,planStartError} from '../world/engine.js';
 import type {DirectEatingObservation} from '../world/food-consumption-evidence.js';
 import {createWorld} from '../world/seed.js';
@@ -55,6 +56,9 @@ type Model = (key:string,context:ReturnType<typeof decisionContext>,feedback?:st
  * subscribers; it does not assert that the selected action has completed. */
 export type DecisionCommittedEvent=Readonly<{result:ModelResult;actorId:string;accepted:boolean;revision:number;
  rejection:'actor_changed'|'plan_invalid'|'regional_changed'|'foreign_changed'|null}>;
+/** A persisted local start rejected by the optional admission gate, before the
+ * injected model is called. This is not a transport attempt or cost receipt. */
+export type DecisionAdmissionCancelledEvent=Readonly<ModelAdmissionCancellation&{model:ModelName}>;
 export type AcceptanceLifecycleObserver={stopping?:(status:AcceptanceStopStatus)=>unknown;stopped?:(status:AcceptanceStopStatus)=>unknown};
 type Provider = ModelConnection & {slots:number;maxSlots:number;blockedUntil:number;admitAfter:number;limitCount:number;successesSinceLimit:number;transientFailures:number;budget?:ModelBudget};
 export const capabilities={
@@ -108,17 +112,21 @@ export class ValleyRuntime {
  private readonly decisionEvidence?:DecisionWaitEvidence;
  private readonly foodEvidence?:RuntimeFoodEvidence;
  private readonly decisionCommitted?: (event:DecisionCommittedEvent)=>unknown;
+ private readonly decisionAdmissionCancelled?: (event:DecisionAdmissionCancelledEvent)=>unknown;
+ private readonly admissionBaseline:{requests:number;cancellations:number};
  private readonly acceptanceLifecycle?:AcceptanceLifecycleObserver;
  private readonly acceptanceAdmission?:()=>unknown;
  private acceptanceDraining=false;
  private tickTimer?:ReturnType<typeof setInterval>;
- constructor(private store:WorldStore,credentials:string|null|readonly ModelConnection[],private model:Model=callModel,options:{dailySnapshots?:DailySnapshotConfig;dayMinutes?:number;mode?:World['mode'];modelSlots?:number;decisionWaitEvidence?:DecisionWaitEvidenceOptions;directEatingEvidence?:RuntimeFoodEvidenceOptions;acceptanceStop?:AcceptanceStopOptions;acceptanceEvidence?:{writer:AcceptanceEvidenceWriter;sourceFingerprintAfter:()=>string};decisionCommitted?:(event:DecisionCommittedEvent)=>unknown;acceptanceLifecycle?:AcceptanceLifecycleObserver;acceptanceAdmission?:()=>unknown}={}){
+ constructor(private store:WorldStore,credentials:string|null|readonly ModelConnection[],private model:Model=callModel,options:{dailySnapshots?:DailySnapshotConfig;dayMinutes?:number;mode?:World['mode'];modelSlots?:number;decisionWaitEvidence?:DecisionWaitEvidenceOptions;directEatingEvidence?:RuntimeFoodEvidenceOptions;acceptanceStop?:AcceptanceStopOptions;acceptanceEvidence?:{writer:AcceptanceEvidenceWriter;sourceFingerprintAfter:()=>string};decisionCommitted?:(event:DecisionCommittedEvent)=>unknown;decisionAdmissionCancelled?:(event:DecisionAdmissionCancelledEvent)=>unknown;acceptanceLifecycle?:AcceptanceLifecycleObserver;acceptanceAdmission?:()=>unknown}={}){
   if(options.dailySnapshots&&!options.acceptanceStop)throw new Error('daily_snapshots_require_acceptance_control');
   this.dailySnapshots=options.dailySnapshots?checkedDailySnapshotConfig(options.dailySnapshots):undefined;
   if(options.decisionCommitted&&!options.acceptanceStop)throw new Error('decision_commit_observer_requires_control');
   if(options.acceptanceLifecycle&&!options.acceptanceStop)throw new Error('acceptance_lifecycle_requires_control');
   if(options.acceptanceAdmission&&!options.acceptanceStop)throw new Error('acceptance_admission_requires_control');
+  if(options.decisionAdmissionCancelled&&(!options.acceptanceStop||!options.acceptanceAdmission))throw new Error('admission_cancel_observer_requires_control');
   this.decisionCommitted=options.decisionCommitted;
+  this.decisionAdmissionCancelled=options.decisionAdmissionCancelled;
   this.acceptanceLifecycle=options.acceptanceLifecycle?{...options.acceptanceLifecycle}:undefined;
   this.acceptanceAdmission=options.acceptanceAdmission;
   if(options.acceptanceEvidence&&(!options.acceptanceStop||options.decisionWaitEvidence||options.directEatingEvidence))throw new Error('acceptance_evidence_requires_exclusive_controlled_channels');
@@ -144,6 +152,7 @@ export class ValleyRuntime {
   try{
   const saved=store.loadForRuntime();const previousRevision=saved?.revision??null;if(saved && options.mode && saved.mode!==options.mode)throw new Error('world_mode_mismatch');
   this.world=saved??(options.mode==='formal'?createFrontierWorld():createWorld());
+  this.admissionBaseline={requests:this.world.metrics.requests,cancellations:this.world.metrics.admissionCancellation?.count??0};
   if(this.acceptanceEvidence){const identity=this.acceptanceEvidence.writer.identity();
    if(identity.worldId!==this.world.id||identity.fromMinute!==this.world.minute)throw new Error('acceptance_evidence_world_mismatch');}
   const originalEvents=this.world.events.length,originalReceipts=this.world.processed.length;
@@ -472,18 +481,44 @@ export class ValleyRuntime {
   this.requestTokens.set(actorId,requestToken);
   const live=()=>!this.stopped&&this.generation===generation&&this.requestTokens.get(actorId)===requestToken;
   let evidenceRequest:ReturnType<DecisionWaitEvidence['requestStarted']>=null;
+  let requestNumber:number|null=null;
+  const admissionReady=()=>{
+   if(this.acceptanceAdmissionReady())return true;
+   // Only an explicit clean admission rejection qualifies. Stops, thrown
+   // admission, price failure and stale generations must never be relabelled.
+   if(requestNumber!==null&&live()&&this.acceptanceDraining&&this.decisionAdmissionCancelled){
+    let cancelled!:DecisionAdmissionCancelledEvent;
+    const atMs=Date.now(),monotonicNs=process.hrtime.bigint().toString();
+    this.commit(w=>{
+     const prior=w.metrics.admissionCancellation?.count??0;
+     if(!Number.isSafeInteger(prior)||prior<0||!Number.isSafeInteger(prior+1)
+      ||!Number.isSafeInteger(this.admissionBaseline.requests)||this.admissionBaseline.requests<0
+      ||!Number.isSafeInteger(this.admissionBaseline.cancellations)||this.admissionBaseline.cancellations<0)throw new Error('admission_cancel_receipt_invalid');
+     cancelled={actorId,model:provider.model,requestNumber:requestNumber!,revision:this.world.revision+1,atMs,monotonicNs,
+      count:prior+1,baselineRequests:this.admissionBaseline.requests,baselineCancellations:this.admissionBaseline.cancellations,
+      previousReceiptHash:w.metrics.admissionCancellation?createHash('sha256').update(JSON.stringify(w.metrics.admissionCancellation)).digest('hex'):null};
+     w.metrics.admissionCancellation={...cancelled};
+    });
+    if(!live())return false;
+    const returned=this.decisionAdmissionCancelled(Object.freeze({...cancelled}));
+    if(returned&&typeof (returned as {then?:unknown}).then==='function'){
+     void Promise.resolve(returned).catch(()=>{});throw new Error('admission_cancel_observer_must_be_synchronous');
+    }
+   }
+   return false;
+  };
   const evidenceTrigger=this.fallbackPending.has(actorId)?'fallback_pending':provider!==this.providers[0]&&started<this.providers[0].blockedUntil?'primary_blocked':'normal';
   this.fallbackPending.delete(actorId);
   this.inFlight.set(actorId,provider);
   if(!foreign&&!traveller)this.pendingChoices.set(actorId,prepared.choices.map(choice=>choice.action));
   try{
-  this.commit(w=>{w.metrics.requests++;w.metrics.lastAttemptModel=provider.model;w.metrics.inFlight=[...this.inFlight.keys()];this.saveUsage(w,provider);});
+  this.commit(w=>{requestNumber=++w.metrics.requests;w.metrics.lastAttemptModel=provider.model;w.metrics.inFlight=[...this.inFlight.keys()];this.saveUsage(w,provider);});
   evidenceRequest=this.decisionEvidence?.requestStarted(actorId,provider.model,provider===this.providers[0]?'primary':'backup',evidenceTrigger,this.world.minute)??null;
-   if(!live()||!this.acceptanceReady()||!this.acceptanceAdmissionReady()||this.acceptance&&!this.acceptance.dispatch(acceptanceRequest!,this.world.minute))return;
+   if(!live()||!this.acceptanceReady()||!admissionReady()||this.acceptance&&!this.acceptance.dispatch(acceptanceRequest!,this.world.minute))return;
    // dispatch() assesses price through trusted synchronous user code. It can
    // request drain while this slot is already reserved, so check once more
    // before invoking the model. A control reservation is not a transport call.
-   if(!live()||!this.acceptanceAdmissionReady())return;
+   if(!live()||!admissionReady())return;
    const signal=acceptanceRequest?AbortSignal.any([requestToken.controller.signal,acceptanceRequest.signal]):requestToken.controller.signal;
    const result=await this.model(provider.key,context,feedback,provider.model,prepared,{signal});
    if(!live())return;

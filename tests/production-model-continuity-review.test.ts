@@ -36,6 +36,7 @@ function readOwn(path:string):ContinuityData&{names:Record<string,string>}{
   w.processed=[];raw=w;
  }finally{db.close();}
  const world={worldId:raw.id,minute:raw.minute,revision:raw.revision,worldFingerprint:hash(canonical(raw)),requests:raw.metrics.requests,successes:raw.metrics.successes,failures:raw.metrics.failures,
+  ...(raw.metrics.admissionCancellation?{admissionCancellation:{...raw.metrics.admissionCancellation}}:{}),
   localDecisions:raw.metrics.localDecisions??0,inFlight:raw.metrics.inFlight,dayMinutes:raw.clock.realMinutesPerDay,
   residents:raw.residents.map((p:any)=>({id:p.id,name:p.name,lastDecisionAt:p.lastDecisionAt,status:p.status,recentActions:(p.recentActions??[]).map((a:any)=>({...a}))}))};
  return {manifest,launch,model,session,receipts,reports,rehearsals,observations,world,names:Object.fromEntries(raw.residents.map((p:any)=>[p.id,p.name]))};
@@ -55,7 +56,10 @@ test('continuity review: real progress and rehash-consistent evidence attacks',{
   assert.deepEqual([...new Set(r.requests.map(q=>q.actorId))].sort(),ids);
   assert.ok(r.finishedAtMs>=receipt.deadlineAtMs-6000);assert.ok(run.finishedAtMs-run.startedAtMs>=24000);
   assert.ok(r.finishedAtMs<receipt.deadlineAtMs);assert.ok(r.after.minute-r.before.minute>=10&&r.after.minute-r.before.minute<=36);
-  assert.equal(r.after.dayMinutes,20);assert.equal(r.after.requests-r.before.requests,r.requests.length);
+  assert.equal(r.after.dayMinutes,20);
+  // The independent reconciliation above validates every terminal cancellation
+  // against both durable audit tips. No unexplained start is tolerated.
+  assert.equal(r.after.requests-r.before.requests,r.requests.length+(r.admissionCancellations?.length??0));
   assert.equal(r.after.successes-r.before.successes,r.requests.length);assert.equal(r.after.localDecisions-r.before.localDecisions,r.requests.length);
   let priorAck=BigInt(r.startedMonotonicNs);
   for(const q of r.requests){

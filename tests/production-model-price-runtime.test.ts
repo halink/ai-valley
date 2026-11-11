@@ -74,6 +74,26 @@ test('exact cutoff with no requests drains and seals without dispatch or budget 
  const f=fixture(t),b=f.open();f.now+=24000;b.runtime.start();
  assert.equal(b.status().sealed,true);assert.equal(f.memory.requests().length,0);assert.equal(f.session.status().attempts,0);assert.equal(f.session.status().reservedWallMs,30000);
 });
+test('durable runtime start crossing cutoff is explicitly canceled before any transport or ledger intent',t=>{
+ const f=fixture(t),b=f.open(),before=f.store.loadForRuntime()!.metrics.requests,commit=f.store.commit.bind(f.store);
+ const cutoff=f.session.status().segment!.admissionCutoffMs;
+ t.mock.method(f.store,'commit',(...args:Parameters<WorldStore['commit']>)=>{
+  commit(...args);if(args[0].metrics.requests===before+1)f.now=cutoff;
+ });
+ b.runtime.start();const s=b.status(),saved=f.store.loadForRuntime()!;
+ assert.equal(saved.metrics.requests-before,1);assert.equal(saved.metrics.successes,0);assert.equal(saved.metrics.localDecisions??0,0);
+ assert.equal(saved.metrics.failures,0);assert.deepEqual(saved.metrics.inFlight,[]);
+ assert.equal(f.memory.requests().length,0);assert.equal(s.session.attempts,0);assert.equal(s.session.completed,0);
+ assert.equal(s.journal.attempts,0);assert.equal(s.journal.completed,0);assert.equal(s.session.pending,null);assert.equal(s.journal.pending,null);
+ assert.equal(s.control?.requestReservations,1);assert.equal(s.control?.dispatchedRequests,0);assert.equal(s.control?.unknownCostRequests,0);
+ assert.equal(s.session.reservedWallMs,30000);assert.equal(s.sealed,true);assert.equal(s.failure,null);
+ assert.equal(s.admissionCancellations.length,1);const cancellation=s.admissionCancellations[0];
+ assert.equal(cancellation.reason,'cutoff');assert.equal(cancellation.requestNumber,before+1);assert.equal(cancellation.atMs,cutoff);
+ assert.equal(cancellation.transportInvocations,0);assert.equal(cancellation.sessionAttempts,0);assert.equal(cancellation.modelAttempts,0);
+ assert.ok(cancellation.revision<saved.revision);assert.ok(saved.residents.some(r=>r.id===cancellation.actorId));
+ assert.equal(saved.metrics.requests-before,f.memory.requests().length+s.admissionCancellations.length);
+ f.reopen();assert.equal(f.store.loadForRuntime()!.metrics.requests,before+1);assert.equal(f.session.status().attempts,0);assert.equal(f.journal.status().attempts,0);
+});
 test('two price epochs across actual database reopen preserve world, original deadline and lifetime request count',async t=>{
  const f=fixture(t,2),first=f.open();first.runtime.start();first.drain();f.respond();await flush();assert.equal(first.status().sealed,true);
  const minute=f.store.loadForRuntime()!.minute;f.now+=900001;f.reopen();assert.equal(f.session.status().phase,'awaiting_price');f.install();

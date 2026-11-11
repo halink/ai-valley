@@ -6,7 +6,7 @@ import {test} from 'node:test';
 import type {Action,Resident,World} from '../src/shared/types.js';
 import {disasterContains} from '../src/shared/frontier-hazards.js';
 import {createWorld} from '../src/world/seed.js';
-import {initializeFrontierHazards,frontierShelterOccupants} from '../src/world/frontier-hazards.js';
+import {initializeFrontierHazards,frontierShelterOccupants,frontierRetreatStepAllowed} from '../src/world/frontier-hazards.js';
 import {setWeatherHazardsEnabled} from '../src/world/weather-hazards.js';
 import {initializeWaterSupply,waterDrunkToday} from '../src/world/water-supply.js';
 import {assistedWaterNeed} from '../src/world/water-support.js';
@@ -14,6 +14,7 @@ import {decisionChoices,decisionContext} from '../src/server/decisions.js';
 import {parseChoice} from '../src/server/affordances.js';
 import {stepWorld,submitPlan} from '../src/world/engine.js';
 import {WorldStore} from '../src/server/store.js';
+import {findPath} from '../src/world/navigation.js';
 import {YEAR} from '../src/world/time.js';
 
 // Every fact below belongs to a newly synthesized world. No runtime entry point,
@@ -118,7 +119,19 @@ test('generated flood joins voluntary retreat, actual injury, alternate water, c
 });
 
 test('warning shelter capacity is rechecked for a stale competing arrival without beds, supplies or automatic evacuation',()=>{
- const f=fixture(),{w,evacuee,patient,hall}=f,d=warn(f);
+ const f=fixture(),{w,evacuee,patient,hall}=f;
+ // This case isolates capacity, not an unsafe approach through the simultaneous storm.
+ // Keep the door on the south edge of the same 5x6 hall, outside the storm radius.
+ hall.at={x:15,y:13};hall.door={x:19,y:19};
+ const d=warn(f),storm=w.frontierHazards!.disasters.find(d=>d.kind==='windstorm')!;
+ assert.ok(storm);assert.equal(disasterContains(storm,hall.door),false);
+ for(const resident of [evacuee,patient]){
+  const allowed=frontierRetreatStepAllowed(w,resident),path=findPath(w,resident.at,hall.door,false,Infinity,allowed);
+  assert.ok(path&&path.length>0,'capacity fixture has an actual safe shelter approach');
+  let from=resident.at;
+  for(const to of path){assert.ok(allowed(from,to));assert.equal(disasterContains(storm,to),false);from=to;}
+  assert.deepEqual(from,hall.door);assert.equal(disasterContains(d,from),false);
+ }
  const first=select(w,evacuee,a=>a.type==='frontierHazard'&&a.operation==='shelter'),second=select(w,patient,a=>a.type==='frontierHazard'&&a.operation==='shelter');
  const inventory=structuredClone(w.residents.map(r=>r.inventory)),water=totalWater(w);
  run(w,evacuee,first);assert.equal(evacuee.inside,hall.id);assert.equal(frontierShelterOccupants(w,hall).size,1);

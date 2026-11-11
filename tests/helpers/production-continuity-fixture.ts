@@ -70,10 +70,12 @@ export function reconcileContinuity(data:ContinuityData,clean=true){
  const requests=(events:any[],rows:Row[],session:boolean)=>{
   const all:Array<{id:number;requestHash:string;responseHash:string|null;worldFingerprint:string|null;epoch:number}>=[];
   let pending:typeof all[number]|null=null,epoch=0,segment=0,open=false,priceHash:string|null=null,worldFingerprint=manifest.initialWorldFingerprint,completed=0,runtimeStop=false;
-  const tips=new Map<string,{attempts:number;completed:number;worldFingerprint:string;epoch:number;segment:number;open:boolean;pending:boolean;runtimeStop:boolean}>();
+  let draining=false;
+  const tips=new Map<string,{attempts:number;completed:number;worldFingerprint:string;epoch:number;segment:number;open:boolean;pending:boolean;runtimeStop:boolean;draining:boolean;type:string}>();
   for(const [index,e] of events.entries()){
    if(session&&e.type==='price_installed'){const price=parseSyntheticPriceRecord(e.evidence);assert.equal(price.scopeHash,ch);assert.equal(price.sequence,++epoch);assert.equal(price.previousEvidenceHash,priceHash);priceHash=hash(price);assert.equal(open,false);}
-   else if(session&&e.type==='segment_started'){assert.equal(open,false);open=true;segment++;assert.equal(epoch,segment);}
+   else if(session&&e.type==='segment_started'){assert.equal(open,false);open=true;segment++;draining=false;assert.equal(epoch,segment);}
+   else if(session&&e.type==='drain_started')draining=true;
    else if(e.type==='intent'){assert.equal(pending,null);const id=all.length+1;if(!session)assert.equal(e.id,id);else assert.equal(open,true);pending={id,requestHash:e.requestHash,responseHash:null,worldFingerprint:null,epoch};all.push(pending);}
    else if(e.type==='response'){assert.ok(pending);assert.equal(e.id,pending.id);assert.equal(pending.responseHash,null);pending.responseHash=e.responseHash;}
    else if(e.type===(session?'acknowledged':'world_committed')){assert.ok(pending);assert.equal(e.id,pending.id);assert.ok(pending.responseHash);if(session)assert.equal(e.worldId,c.worldId);pending.worldFingerprint=e.worldFingerprint;pending=null;completed++;}
@@ -81,7 +83,7 @@ export function reconcileContinuity(data:ContinuityData,clean=true){
    else if(!session&&e.type==='runtime_stop_started'){assert.equal(runtimeStop,false);runtimeStop=true;}
    else if(!session&&e.type==='runtime_stop_finished'){assert.equal(runtimeStop,true);runtimeStop=false;if(clean)assert.equal(e.failed,false);}
    if(['created','world_checkpoint','world_committed','acknowledged','segment_finished','runtime_stop_finished'].includes(e.type)&&e.worldFingerprint)worldFingerprint=e.worldFingerprint;
-   tips.set(rows[index].hash,{attempts:all.length,completed,worldFingerprint,epoch,segment,open,pending:pending!==null,runtimeStop});
+   tips.set(rows[index].hash,{attempts:all.length,completed,worldFingerprint,epoch,segment,open,pending:pending!==null,runtimeStop,draining,type:e.type});
   }
   return {all,pending,epoch,segment,open,tips};
  };
@@ -115,7 +117,13 @@ export function reconcileContinuity(data:ContinuityData,clean=true){
   for(const tip of [st,mt]){assert.equal(tip.attempts,f.attempts);assert.equal(tip.completed,f.completed);assert.equal(tip.worldFingerprint,f.worldFingerprint);assert.equal(tip.pending,false);assert.equal(tip.runtimeStop,false);}
   assert.equal(st.segment,r.id);assert.equal(st.epoch,r.id);assert.equal(st.open,false);
   if(p.rehearsalHash){const rr=data.rehearsals.find(v=>v.id===r.id)!;assert.ok(rr);assert.equal(hash(rr),p.rehearsalHash);
-   checkSyntheticRehearsal(rr,r,{runId:c.runId,sourceFingerprint:c.sourceFingerprint,originalDeadlineAtMs:c.deadlineAtMs,attempts:p.attempts,completed:p.completed,after:rr.after});
+   checkSyntheticRehearsal(rr,r,{runId:c.runId,sourceFingerprint:c.sourceFingerprint,originalDeadlineAtMs:c.deadlineAtMs,attempts:p.attempts,completed:p.completed,after:rr.after,
+    cancellationCheckpoint:cancelled=>{
+     const mt=model.tips.get(cancelled.journalHash),st=session.tips.get(cancelled.sessionHash);
+     return !!mt&&!!st&&mt.type==='world_checkpoint'&&st.draining&&st.segment===r.id&&st.epoch===r.id&&st.open
+      &&['drain_started','world_checkpoint'].includes(st.type)&&[mt,st].every(t=>!t.pending&&!t.runtimeStop
+       &&t.attempts===p.attempts&&t.completed===p.completed&&t.worldFingerprint===cancelled.worldFingerprint);
+    }});
    assert.equal(rr.after.worldFingerprint,p.worldFingerprint);
    for(const q of rr.requests){const m=model.all[q.id-1],s=session.all[q.id-1];assert.ok(m&&s);assert.equal(s.epoch,r.id);
     assert.equal(hash(q.requestBody),m.requestHash);assert.equal(hash(q.reply),m.responseHash);assert.equal(q.requestHash,s.requestHash);assert.equal(q.responseHash,s.responseHash);
@@ -132,6 +140,18 @@ export function reconcileContinuity(data:ContinuityData,clean=true){
   if(data.reports.at(-1)?.rehearsalHash)assert.deepEqual(world,data.rehearsals.find(r=>r.id===data.reports.at(-1).id)!.after);
   for(const [i,q] of model.all.entries()){assert.ok(q.worldFingerprint);assert.equal(q.responseHash,session.all[i].responseHash);assert.equal(q.worldFingerprint,session.all[i].worldFingerprint);}
  }
+ // Independent historical receipt replay, anchored in decoded durable world.
+ const cancellationReceipts=new Map<number,NonNullable<typeof world.admissionCancellation>>();
+ for(const snapshot of [...data.rehearsals.flatMap(r=>[r.before,r.after]),world]){
+  const receipt=snapshot.admissionCancellation;if(!receipt)continue;
+  assert.ok(Number.isSafeInteger(receipt.count)&&receipt.count>=1&&receipt.count<=720);
+  assert.ok(receipt.revision<=snapshot.revision&&receipt.requestNumber<=snapshot.requests);
+  const previous=cancellationReceipts.get(receipt.count);if(previous)assert.deepEqual(receipt,previous);
+  cancellationReceipts.set(receipt.count,receipt);
+ }
+ const cancellations=world.admissionCancellation?.count??0;assert.equal(cancellationReceipts.size,cancellations);
+ let previousCancellationHash:string|null=null;
+ for(let n=1;n<=cancellations;n++){const receipt=cancellationReceipts.get(n);assert.ok(receipt);assert.equal(receipt.previousReceiptHash,previousCancellationHash);previousCancellationHash=hash(receipt);}
  return {launches:reserved.length,finished:finished.length,reservedWallMs:reserved.length*30000,modelAttempts:model.all.length,sessionAttempts:session.all.length,
   modelCompleted:model.all.filter(q=>q.worldFingerprint!==null).length,sessionCompleted:session.all.filter(q=>q.worldFingerprint!==null).length,
   modelPending:model.pending,sessionPending:session.pending,fromMinute:data.rehearsals[0]?.before.minute??null,toMinute:world.minute,

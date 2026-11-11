@@ -26,6 +26,8 @@ worker必须实际覆盖全部九人、多个自然tick和世界分钟推进，�
 
 world的requests是runtime预留计数，不总等于内存transport次数；分别记录并核对实际模型账attempts、completed、观察到的请求和世界成功决定。不能用单个累计数字替代逐笔对应。
 
+2026-11-11 的 CI 修正进一步要求精确守恒：本地开始数 = 实际合成请求数 + 有独立持久回执的发出前取消数，不再容许没有解释的较大计数。固定单槽片段至多一个终末取消，原成功、localDecisions、响应与双账 ack 仍严格相等。实现、历史回执链和验证边界见[准入取消证据](production-model-admission-cancellation.md)。
+
 只在合成目录内保存可复查的SQLite、完整观察JSON、监督/启动报告、调用记录及对账摘要。正例结束后还实际启动第四期，在第九次新增ack之后、第十个response已入model账时退出。此时session仍为intent，双方均保留同一未决ID，全部启动额度不退款，下一次resume不得创建新预留或进程。
 
 ## 复验
