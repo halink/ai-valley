@@ -1,4 +1,4 @@
-/** Read-only home/lodge/workshop/store interiors in the world's pixel/projection space. */
+/** Read-only home/lodge/workshop/store/clinic interiors in the world's pixel/projection space. */
 import type {Snapshot,World,Vec,Resident} from '../shared/types.js';
 import {roomLayout,type RoomLayout,type RoomSlot} from '../shared/rooms.js';
 import {projectIsometric,unprojectIsometric,orderIsometricObjects,type Footprint,type IsometricCamera} from './isometric-projection.js';
@@ -22,16 +22,16 @@ export function homeInteriorSupport(w:World,roomId:string):HomeInteriorSupport {
  if(!Array.isArray(w.buildings)||!Array.isArray(w.residents))return reject('房间记录不可用');
  const b=w.buildings.find(b=>b.id===roomId);
  if(!b)return reject('所在建筑记录已不可用');
- if(!['home','lodge','workshop','store'].includes(b.kind))return reject('此等距视图目前只支持住宅、共屋、工坊与商店室内');
- if(![b.width,b.height].every(n=>Number.isInteger(n)&&n>0)||!Number.isInteger(b.capacity)||b.capacity<0)return reject('住宅、共屋、工坊或商店布局尺寸无效');
+ if(!['home','lodge','workshop','store','clinic'].includes(b.kind))return reject('此等距视图目前只支持住宅、共屋、工坊、商店与诊所室内');
+ if(![b.width,b.height].every(n=>Number.isInteger(n)&&n>0)||!Number.isInteger(b.capacity)||b.capacity<0)return reject('住宅、共屋、工坊、商店或诊所布局尺寸无效');
  const nonResidential=b.kind==='workshop'||b.kind==='store',beds=nonResidential?0:b.capacity;
  const size={width:Math.max(16,b.width*2),height:Math.max(nonResidential?16:13,Math.ceil(beds/2)*3+7,b.height*2+3)};
- const fixedSlots=b.kind==='lodge'?5:3;
- if(!validSize(size)||beds+fixedSlots>HOME_INTERIOR_LIMITS.slots)return reject('住宅、共屋、工坊或商店布局超过等距室内显示上限');
- if(w.industry&&!Array.isArray(w.industry.stations))return reject('住宅、共屋、工坊或商店工位记录不可用');
- if((w.industry?.stations.filter(s=>s.buildingId===b.id).length??0)+beds+fixedSlots>HOME_INTERIOR_LIMITS.slots)return reject('住宅、共屋、工坊或商店工位超过等距室内显示上限');
+ const fixedSlots=b.kind==='lodge'||b.kind==='clinic'?5:3;
+ if(!validSize(size)||beds+fixedSlots>HOME_INTERIOR_LIMITS.slots)return reject('住宅、共屋、工坊、商店或诊所布局超过等距室内显示上限');
+ if(w.industry&&!Array.isArray(w.industry.stations))return reject('住宅、共屋、工坊、商店或诊所工位记录不可用');
+ if((w.industry?.stations.filter(s=>s.buildingId===b.id).length??0)+beds+fixedSlots>HOME_INTERIOR_LIMITS.slots)return reject('住宅、共屋、工坊、商店或诊所工位超过等距室内显示上限');
  const layout=roomLayout(w,b),keys=new Set<string>();
- if(!validSize(layout)||!inRoom(layout,layout.entry)||layout.slots.some(s=>!s||typeof s.key!=='string'||keys.has(s.key)||!keys.add(s.key)||!inRoom(layout,s.at)))return reject('住宅、共屋、工坊或商店布局或工位坐标无效');
+ if(!validSize(layout)||!inRoom(layout,layout.entry)||layout.slots.some(s=>!s||typeof s.key!=='string'||keys.has(s.key)||!keys.add(s.key)||!inRoom(layout,s.at)))return reject('住宅、共屋、工坊、商店或诊所布局或工位坐标无效');
  return {supported:true,reason:null,layout};
 }
 function cameraInput(camera:IsometricCamera,layout:RoomLayout,width:number,height:number){
@@ -139,7 +139,7 @@ export class IsometricHomeInterior {
   const mark=(kind:StudySubject['kind'],id:string,at:Vec|null|undefined,reason:string)=>{
    check(kind,id);unsupported++;if(!inRoom(layout,at)){unknown++;return;}add({kind,id,at,placeholder:reason},placeholder(at));
   };
-  const workshop=w.buildings.find(b=>b.id===roomId)!.kind==='workshop',fixtures=w.industry?.stations.filter(s=>s.buildingId===roomId&&s.kind==='bench')??[];
+  const kind=w.buildings.find(b=>b.id===roomId)!.kind,workshop=kind==='workshop',clinic=kind==='clinic',fixtures=w.industry?.stations.filter(s=>s.buildingId===roomId&&s.kind==='bench')??[];
   const bench=workshop&&fixtures.length===1&&typeof fixtures[0].id==='string'&&!!fixtures[0].id&&Number.isFinite(fixtures[0].installedAt)&&fixtures[0].installedAt>=0&&fixtures[0].installedAt<=w.minute&&(fixtures[0].removalWorked??0)===0&&layout.slots.find(s=>s.key==='station:bench');
   for(const slot of layout.slots){
    // Care and body bays are navigation destinations, not installed furniture.
@@ -171,7 +171,7 @@ export class IsometricHomeInterior {
    const sleeping=visual.pose==='sleep'&&r.lifeStage!=='infant',sleepingMarks=sleeping?sleepMarks(resident):null,cooking=ordinaryCookingVisual(w,r,layout,visual),crafting=ordinaryCraftVisual(w,r,layout,visual),ordinary=cooking??crafting;
    const make=(elapsed:number)=>sleepingMarks??ordinary?.marks(elapsed)??residentMarks(w,resident,elapsed,visual),marks=make(0);
    if(!marks||marks.length>VIEWPORT_LIMITS.residentMarks){mark('resident',r.id,r.roomAt,'居民记录：'+(r.lifeStage??'年龄阶段未知')+'，'+visual.pose+'；此姿态未绘制');continue;}
-   check('resident',r.id);add({kind:'resident',id:r.id,at:r.roomAt,...(ordinary?{description:ordinary.description}:{})},make,undefined,!sleeping);
+   check('resident',r.id);add({kind:'resident',id:r.id,at:r.roomAt,...(ordinary?{description:ordinary.description}:clinic?{description:'诊所室内原人物；未绘制治疗、给药或护理手势，不表示正在诊疗或已经治愈'}:{})},make,undefined,!sleeping);
   }
   type Location={inside?:string|null;roomAt?:Vec|null;regional?:unknown};
   const containers=new Map<string,Location>();

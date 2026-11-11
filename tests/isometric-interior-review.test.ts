@@ -81,7 +81,7 @@ test('independent home review: missing positions and home ownership cannot inven
 });
 
 test('independent home review: room restrictions are explicit and oversized or duplicate slots fail closed',()=>{
- for(const kind of ['barn','clinic','school','greenhouse'] as const){const s=inside();s.world.buildings.find(b=>b.id===route.buildingId)!.kind=kind;const support=homeInteriorSupport(s.world,route.buildingId);assert.equal(support.supported,false);assert.ok(support.reason);}
+ for(const kind of ['barn','school','greenhouse'] as const){const s=inside();s.world.buildings.find(b=>b.id===route.buildingId)!.kind=kind;const support=homeInteriorSupport(s.world,route.buildingId);assert.equal(support.supported,false);assert.ok(support.reason);}
  for(const patch of [{capacity:1e9},{width:0},{height:NaN}]){const s=inside();Object.assign(s.world.buildings.find(b=>b.id===route.buildingId)!,patch);assert.equal(homeInteriorSupport(s.world,route.buildingId).supported,false);}
  const old=inside();delete old.world.rooms;assert.equal(homeInteriorSupport(old.world,route.buildingId).supported,false);
  const station=inside();station.world.industry!.stations.push({id:'review-station-a',buildingId:route.buildingId,kind:'bench'} as any,{id:'review-station-b',buildingId:route.buildingId,kind:'bench'} as any);assert.equal(homeInteriorSupport(station.world,route.buildingId).supported,false);
@@ -158,7 +158,7 @@ test('independent home review: ordinary room fit keeps all projected corners ins
 });
 
 test('independent home review: unsupported follow and room mutation restore original2D without losing resident or room',()=>{
- for(const mutate of [(s:Snapshot)=>{s.world.residents.find(r=>r.id===route.personId)!.roomAt=null;},(s:Snapshot)=>{s.world.buildings.find(b=>b.id===route.buildingId)!.kind='clinic';}]){
+ for(const mutate of [(s:Snapshot)=>{s.world.residents.find(r=>r.id===route.personId)!.roomAt=null;},(s:Snapshot)=>{s.world.buildings.find(b=>b.id===route.buildingId)!.kind='school';}]){
   const h=integrated();h.accept(route.snapshots[0]);h.toggle();h.scene.focusPerson(route.personId);const s=inside();mutate(s);h.accept(s);
   assert.equal(h.canvas.hidden,true);assert.equal(h.scene.followState?.personId,route.personId);assert.equal(h.room(),route.buildingId);assert.equal(h.timers.size,0);assert.equal(h.frames.length,0);h.dispose();
  }

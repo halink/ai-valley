@@ -9,7 +9,7 @@ import {IsometricViewport,fitWorldCamera,constrainWorldCamera,zoomWorldCamera,ty
 import {IsometricHomeInterior,homeInteriorSupport,fitRoomCamera,constrainRoomCamera,zoomRoomCamera,type IsometricHomeInteriorScene} from './isometric-interior.js';
 export {fitWorldCamera,constrainWorldCamera,zoomWorldCamera};
 export const PREVIEW_FRAME_MS=125;
-export const PREVIEW_LIMITATIONS='2.5D试用观察 · 与2D共用快照，不推进模拟。户外支持八类建筑、真实新建阶段、林木/矿石/浆果/泉/果树，以及已核实位置的行走、工作、婴儿、重病、携运和未葬遗体。六种野兽、五种家畜、登记鱼群和墓位沿用同一记录。住宅、共屋、工坊与商店室内复用真实布局及roomAt，支持原有姿态、实际到厨房的普通烹饪，以及工坊真实桌台/木工作台上已核实批次的普通制作；商店只显示真实桌台、静态厨房与原人物，不补造货架、库存或交易手势，买卖仍由引擎在门外结算；其他设备外观用记录标记，其他室内姿态/其他类型室内回2D。未知外观或预算不足用问号，未知位置与预算省略另计，不猜坐标或补造状态。全图、区域路线和未支持跟随回原2D。暂停人物使用静止第0相位；显示动作不证明成功或产出。浏览器、触控与GPU尚未验收，正式默认仍2D。';
+export const PREVIEW_LIMITATIONS='2.5D试用观察 · 与2D共用快照，不推进模拟。户外支持八类建筑、真实新建阶段、林木/矿石/浆果/泉/果树，以及已核实位置的行走、工作、婴儿、重病、携运和未葬遗体。六种野兽、五种家畜、登记鱼群和墓位沿用同一记录。住宅、共屋、工坊、商店与诊所室内复用真实布局及roomAt，支持原有姿态、实际到厨房的普通烹饪，以及工坊真实桌台/木工作台上已核实批次的普通制作；商店只显示真实桌台、静态厨房与原人物，不补造货架、库存或交易手势，买卖仍由引擎在门外结算；诊所只显示真实床位、桌台、静态厨房与原人物，不补造药品、器械或病人；care/bodyBay仅为导航点，不画成设施；治疗、给药与护理手势未支持，人物在场不等于治疗或治愈；其他设备外观用记录标记，其他室内姿态/其他类型室内回2D。未知外观或预算不足用问号，未知位置与预算省略另计，不猜坐标或补造状态。全图、区域路线和未支持跟随回原2D。暂停人物使用静止第0相位；显示动作不证明成功或产出。浏览器、触控与GPU尚未验收，正式默认仍2D。';
 const finite=(at:Vec)=>Number.isFinite(at.x)&&Number.isFinite(at.y);
 export function previewHome(w:World):Vec {
  const b=w.buildings.find(b=>b.kind==='home'&&finite(b.at)&&b.at.x>=0&&b.at.y>=0&&b.at.x<w.map.width&&b.at.y<w.map.height);
@@ -26,7 +26,7 @@ export class IsometricPreview {
  private outdoorCamera:IsometricCamera|null=null;
  private roomName='';
  private roomKind='';
- private describeRoom(){const b=this.snapshot?.world.buildings.find(b=>b.id===this.roomId);this.roomName=this.roomId?(b?.name??this.roomId):'';this.roomKind=b?({home:'住宅',lodge:'共屋',workshop:'工坊',store:'商店'}[b.kind as 'home'|'lodge'|'workshop'|'store']??'建筑'):'';}
+ private describeRoom(){const b=this.snapshot?.world.buildings.find(b=>b.id===this.roomId);this.roomName=this.roomId?(b?.name??this.roomId):'';this.roomKind=b?({home:'住宅',lodge:'共屋',workshop:'工坊',store:'商店',clinic:'诊所'}[b.kind as 'home'|'lodge'|'workshop'|'store'|'clinic']??'建筑'):'';}
  private size={width:0,height:0};
  private active=false;
  private connected=false;
