@@ -482,11 +482,13 @@ export class ValleyRuntime {
   const live=()=>!this.stopped&&this.generation===generation&&this.requestTokens.get(actorId)===requestToken;
   let evidenceRequest:ReturnType<DecisionWaitEvidence['requestStarted']>=null;
   let requestNumber:number|null=null;
+  let modelInvoked=false;
   const admissionReady=()=>{
    if(this.acceptanceAdmissionReady())return true;
    // Only an explicit clean admission rejection qualifies. Stops, thrown
    // admission, price failure and stale generations must never be relabelled.
-   if(requestNumber!==null&&live()&&this.acceptanceDraining&&this.decisionAdmissionCancelled){
+   if(requestNumber!==null&&!modelInvoked&&live()&&this.acceptanceDraining&&this.decisionAdmissionCancelled){
+    const budgetCancellation=charge?provider.budget!.prepareUnsentCancellation(charge):undefined;
     let cancelled!:DecisionAdmissionCancelledEvent;
     const atMs=Date.now(),monotonicNs=process.hrtime.bigint().toString();
     this.commit(w=>{
@@ -498,7 +500,10 @@ export class ValleyRuntime {
       count:prior+1,baselineRequests:this.admissionBaseline.requests,baselineCancellations:this.admissionBaseline.cancellations,
       previousReceiptHash:w.metrics.admissionCancellation?createHash('sha256').update(JSON.stringify(w.metrics.admissionCancellation)).digest('hex'):null};
      w.metrics.admissionCancellation={...cancelled};
-    });
+     // The local start persisted this estimate, but the model was never called.
+     // Bind its removal to the same durable world as the cancellation receipt.
+     if(budgetCancellation)(w.metrics.usageWindow??={})[provider.model]=budgetCancellation.snapshot;
+    },()=>budgetCancellation?.committed());
     if(!live())return false;
     const returned=this.decisionAdmissionCancelled(Object.freeze({...cancelled}));
     if(returned&&typeof (returned as {then?:unknown}).then==='function'){
@@ -520,6 +525,7 @@ export class ValleyRuntime {
    // before invoking the model. A control reservation is not a transport call.
    if(!live()||!admissionReady())return;
    const signal=acceptanceRequest?AbortSignal.any([requestToken.controller.signal,acceptanceRequest.signal]):requestToken.controller.signal;
+   modelInvoked=true;
    const result=await this.model(provider.key,context,feedback,provider.model,prepared,{signal});
    if(!live())return;
    if(this.acceptance&&!this.acceptance.settle(acceptanceRequest!,this.world.minute,result.acceptanceCostUsd))return;

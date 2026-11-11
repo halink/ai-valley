@@ -32,6 +32,16 @@ export class ModelBudget {
   if(usage?.outputTokens&&Number.isSafeInteger(usage.outputTokens)&&usage.outputTokens>0)charge.output=usage.outputTokens;
  }
 
+ /** Caller must prove the model has never been invoked for this exact current
+  * reservation. Stage the durable snapshot first; a failed persistence must
+  * not refund the in-memory budget. Restored lookalikes are not capabilities. */
+ prepareUnsentCancellation(charge:ModelCharge){
+  const check=()=>{if(charge.finishedAt!==undefined||!this.charges.includes(charge))throw new Error('model_budget_reservation_not_pending');};
+  check();
+  return {snapshot:this.charges.filter(c=>c!==charge).map(c=>({...c})),
+   committed:()=>{check();this.charges=this.charges.filter(c=>c!==charge);}};
+ }
+
  snapshot():ModelCharge[]{return this.charges.map(charge=>({...charge}));}
 
  private prune(now:number){this.charges=this.charges.filter(charge=>charge.finishedAt===undefined||Math.max(charge.startedAt,charge.finishedAt)>now-WINDOW);}
