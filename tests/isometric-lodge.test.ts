@@ -79,7 +79,7 @@ test('unsupported lodge work, illness, carrying and infancy remain markers and h
 test('lodge boundaries reject missing, excessive or malformed layouts before scanning stations',()=>{
  for(const patch of [{capacity:1e9},{width:33},{height:32},{capacity:NaN},{width:0}]){const w=stage('cook:working').world;Object.assign(w.buildings.find(b=>b.id===route.buildingId)!,patch);Object.defineProperty(w,'industry',{get(){throw new Error('oversized layout reached station scan');}});assert.equal(homeInteriorSupport(w,route.buildingId).supported,false);}
  const missing=stage('cook:working').world;delete missing.rooms;assert.equal(homeInteriorSupport(missing,route.buildingId).supported,false);
- for(const kind of ['barn','greenhouse'] as const){const w=stage('cook:working').world;w.buildings.find(b=>b.id===route.buildingId)!.kind=kind;assert.equal(homeInteriorSupport(w,route.buildingId).supported,false);}
+ for(const kind of ['greenhouse'] as const){const w=stage('cook:working').world;w.buildings.find(b=>b.id===route.buildingId)!.kind=kind;assert.equal(homeInteriorSupport(w,route.buildingId).supported,false);}
 });
 
 test('cooking animation is pause-aware and detached from subsequent world collection reads',()=>{

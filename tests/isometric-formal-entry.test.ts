@@ -69,7 +69,7 @@ test('formal optional entry: bad active snapshots restore 2D and require a later
 test('formal optional entry: unsupported routes explicitly fall back instead of hiding or inventing scenes',()=>{
  const h=observerPreviewHarness();h.accept(route.snapshots[0]);
  for(const dataset of [{panel:'atlas'},{region:'outside'},{project:'unrestored'},{action:'trade-station'}] as Array<Record<string,string>>){h.handle.activate();const target=new ObserverElement();target.dataset=dataset;h.document.emit('click',{target});assert.equal(h.canvas.hidden,true);assert.match(h.tray.querySelector('.preview-notice').textContent,/2D/);assert.equal(h.intervals.size,0);}
- const inside=structuredClone(route.snapshots.find(s=>s.world.residents.find(r=>r.id===route.personId)?.inside)!);inside.world.buildings.find(b=>b.id===route.buildingId)!.kind='barn';h.accept(inside);h.enter(route.buildingId);h.handle.activate();assert.equal(h.canvas.hidden,true);assert.equal(h.room(),route.buildingId);assert.match(h.tray.querySelector('.preview-notice').textContent,/2D/);h.dispose();
+ const inside=structuredClone(route.snapshots.find(s=>s.world.residents.find(r=>r.id===route.personId)?.inside)!);inside.world.buildings.find(b=>b.id===route.buildingId)!.kind='greenhouse';h.accept(inside);h.enter(route.buildingId);h.handle.activate();assert.equal(h.canvas.hidden,true);assert.equal(h.room(),route.buildingId);assert.match(h.tray.querySelector('.preview-notice').textContent,/2D/);h.dispose();
 });
 
 test('formal optional entry: disposing an active mount is idempotent, inert and allows clean reinstall',()=>{

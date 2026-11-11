@@ -79,7 +79,7 @@ test('independent workshop: real scene follow preserves identity through entry, 
  const {scene}=residentSceneHarness(),h=observerPreviewHarness(undefined,scene);h.accept(stage('seed'));h.toggle();h.startFollow(route.personId);
  for(const s of route.snapshots.slice(1)){h.accept(s);assert.equal(scene.followState?.personId,route.personId);assert.equal(h.room(),person(s).inside);assert.equal(h.canvas.hidden,false);}
  h.toggle('2d');assert.equal(scene.followState?.personId,route.personId);assert.equal(h.room(),null);assert.equal(h.intervals.size,0);assert.equal(h.warnings.length,0);h.dispose();
- for(const badPosition of [true,false]){const s=stage();if(badPosition)person(s).roomAt=null;else building(s).kind='barn';const h=observerPreviewHarness();h.accept(s);h.startFollow(route.personId);h.toggle();assert.equal(h.canvas.hidden,true);assert.equal(h.follow.state?.personId,route.personId);h.dispose();}
+ for(const badPosition of [true,false]){const s=stage();if(badPosition)person(s).roomAt=null;else building(s).kind='greenhouse';const h=observerPreviewHarness();h.accept(s);h.startFollow(route.personId);h.toggle();assert.equal(h.canvas.hidden,true);assert.equal(h.follow.state?.personId,route.personId);h.dispose();}
 });
 
 test('independent workshop: pause/visibility/disconnect freeze; accepted evidence is resolved once',()=>{

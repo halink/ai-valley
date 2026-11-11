@@ -61,7 +61,7 @@ test('independent school: exact-position picks, source immutability and atomic f
 });
 
 test('independent school: missing exact position, infant pose and unsupported room return to 2D without losing follow',()=>{
- for(const mode of ['position','infant','room']){const s=inside();if(mode==='position')person(s).roomAt=null;if(mode==='infant')person(s).lifeStage='infant';if(mode==='room')building(s).kind='barn';
+ for(const mode of ['position','infant','room']){const s=inside();if(mode==='position')person(s).roomAt=null;if(mode==='infant')person(s).lifeStage='infant';if(mode==='room')building(s).kind='greenhouse';
   const {scene}=residentSceneHarness(),h=observerPreviewHarness(undefined,scene);h.accept(route.snapshots[0]);h.toggle();h.startFollow(route.personId);h.accept(s);assert.equal(h.canvas.hidden,true,mode);assert.equal(scene.followState?.personId,route.personId);assert.equal(h.room(),route.buildingId);assert.equal(h.intervals.size,0);h.dispose();
  }
 });

@@ -1,4 +1,4 @@
-/** Read-only home/lodge/workshop/store/clinic/school interiors in the world's pixel/projection space. */
+/** Read-only home/lodge/workshop/store/clinic/school/barn interiors in the world's pixel/projection space. */
 import type {Snapshot,World,Vec,Resident} from '../shared/types.js';
 import {roomLayout,type RoomLayout,type RoomSlot} from '../shared/rooms.js';
 import {projectIsometric,unprojectIsometric,orderIsometricObjects,type Footprint,type IsometricCamera} from './isometric-projection.js';
@@ -22,16 +22,19 @@ export function homeInteriorSupport(w:World,roomId:string):HomeInteriorSupport {
  if(!Array.isArray(w.buildings)||!Array.isArray(w.residents))return reject('房间记录不可用');
  const b=w.buildings.find(b=>b.id===roomId);
  if(!b)return reject('所在建筑记录已不可用');
- if(!['home','lodge','workshop','store','clinic','school'].includes(b.kind))return reject('此等距视图目前只支持住宅、共屋、工坊、商店、诊所与学校室内');
- if(![b.width,b.height].every(n=>Number.isInteger(n)&&n>0)||!Number.isInteger(b.capacity)||b.capacity<0)return reject('住宅、共屋、工坊、商店、诊所或学校布局尺寸无效');
+ if(!['home','lodge','workshop','store','clinic','school','barn'].includes(b.kind))return reject('此等距视图目前只支持住宅、共屋、工坊、商店、诊所、学校与畜舍室内');
+ if(![b.width,b.height].every(n=>Number.isInteger(n)&&n>0)||!Number.isInteger(b.capacity)||b.capacity<0)return reject('室内布局尺寸无效');
  const tallRoom=b.kind==='workshop'||b.kind==='store',beds=['home','lodge','clinic'].includes(b.kind)?b.capacity:0;
- const size={width:Math.max(16,b.width*2),height:Math.max(tallRoom?16:13,Math.ceil(beds/2)*3+7,b.height*2+3)};
+ // Match roomLayout's barn pen geometry before calling any capacity/slot loops.
+ // Pens are navigation destinations, never a count or position of actual animals.
+ const pens=b.kind==='barn'?Math.max(4,Math.floor(b.width*b.height/8)):0;
+ const size={width:Math.max(16,b.width*2),height:Math.max(tallRoom?16:13,Math.ceil(beds/2)*3+7,Math.ceil(pens/2)*4+5,b.height*2+3)};
  const fixedSlots=b.kind==='lodge'||b.kind==='clinic'?5:3;
- if(!validSize(size)||beds+fixedSlots>HOME_INTERIOR_LIMITS.slots)return reject('住宅、共屋、工坊、商店、诊所或学校布局超过等距室内显示上限');
- if(w.industry&&!Array.isArray(w.industry.stations))return reject('住宅、共屋、工坊、商店、诊所或学校工位记录不可用');
- if((w.industry?.stations.filter(s=>s.buildingId===b.id).length??0)+beds+fixedSlots>HOME_INTERIOR_LIMITS.slots)return reject('住宅、共屋、工坊、商店、诊所或学校工位超过等距室内显示上限');
+ if(!validSize(size)||beds+pens+fixedSlots>HOME_INTERIOR_LIMITS.slots)return reject('室内布局超过等距室内显示上限');
+ if(w.industry&&!Array.isArray(w.industry.stations))return reject('室内工位记录不可用');
+ if((w.industry?.stations.filter(s=>s.buildingId===b.id).length??0)+beds+pens+fixedSlots>HOME_INTERIOR_LIMITS.slots)return reject('室内工位超过等距室内显示上限');
  const layout=roomLayout(w,b),keys=new Set<string>();
- if(!validSize(layout)||!inRoom(layout,layout.entry)||layout.slots.some(s=>!s||typeof s.key!=='string'||keys.has(s.key)||!keys.add(s.key)||!inRoom(layout,s.at)))return reject('住宅、共屋、工坊、商店、诊所或学校布局或工位坐标无效');
+ if(!validSize(layout)||!inRoom(layout,layout.entry)||layout.slots.some(s=>!s||typeof s.key!=='string'||keys.has(s.key)||!keys.add(s.key)||!inRoom(layout,s.at)))return reject('室内布局或工位坐标无效');
  return {supported:true,reason:null,layout};
 }
 function cameraInput(camera:IsometricCamera,layout:RoomLayout,width:number,height:number){
@@ -139,12 +142,13 @@ export class IsometricHomeInterior {
   const mark=(kind:StudySubject['kind'],id:string,at:Vec|null|undefined,reason:string)=>{
    check(kind,id);unsupported++;if(!inRoom(layout,at)){unknown++;return;}add({kind,id,at,placeholder:reason},placeholder(at));
   };
-  const kind=w.buildings.find(b=>b.id===roomId)!.kind,workshop=kind==='workshop',clinic=kind==='clinic',school=kind==='school',fixtures=w.industry?.stations.filter(s=>s.buildingId===roomId&&s.kind==='bench')??[];
+  const kind=w.buildings.find(b=>b.id===roomId)!.kind,workshop=kind==='workshop',clinic=kind==='clinic',school=kind==='school',barn=kind==='barn',fixtures=w.industry?.stations.filter(s=>s.buildingId===roomId&&s.kind==='bench')??[];
   const bench=workshop&&fixtures.length===1&&typeof fixtures[0].id==='string'&&!!fixtures[0].id&&Number.isFinite(fixtures[0].installedAt)&&fixtures[0].installedAt>=0&&fixtures[0].installedAt<=w.minute&&(fixtures[0].removalWorked??0)===0&&layout.slots.find(s=>s.key==='station:bench');
   for(const slot of layout.slots){
    // Care and body bays are navigation destinations, not installed furniture.
    // Actual bodies continue through the separate resident-record marker path.
    if(slot.kind==='care'||slot.kind==='bodyBay')continue;
+   if(slot.kind==='pen'){mark('roomSlot',slot.key,slot.at,'真实栏位导航点：'+slot.key+'；不是动物位置或数量，不表示围栏、饲槽、干草或占用');continue;}
    // Bench and table share the authoritative footprint. Draw the installed bench once, with its real slot identity.
    if(bench&&slot.key==='table')continue;
    const art=furniture(bench&&slot.key==='station:bench'?{...slot,kind:'table'}:slot);if(!art){mark('roomSlot',slot.key,slot.at,'真实工位记录：'+slot.key+'；未绘制设施外观');continue;}
@@ -171,7 +175,7 @@ export class IsometricHomeInterior {
    const sleeping=visual.pose==='sleep'&&r.lifeStage!=='infant',sleepingMarks=sleeping?sleepMarks(resident):null,cooking=ordinaryCookingVisual(w,r,layout,visual),crafting=ordinaryCraftVisual(w,r,layout,visual),ordinary=cooking??crafting;
    const make=(elapsed:number)=>sleepingMarks??ordinary?.marks(elapsed)??residentMarks(w,resident,elapsed,visual),marks=make(0);
    if(!marks||marks.length>VIEWPORT_LIMITS.residentMarks){mark('resident',r.id,r.roomAt,'居民记录：'+(r.lifeStage??'年龄阶段未知')+'，'+visual.pose+'；此姿态未绘制');continue;}
-   check('resident',r.id);add({kind:'resident',id:r.id,at:r.roomAt,...(ordinary?{description:ordinary.description}:clinic?{description:'诊所室内原人物；未绘制治疗、给药或护理手势，不表示正在诊疗或已经治愈'}:school?{description:'学校室内原人物；未绘制授课、读写或学习手势，在场不表示正在授课、取得进度或完成学习'}:{})},make,undefined,!sleeping);
+   check('resident',r.id);add({kind:'resident',id:r.id,at:r.roomAt,...(ordinary?{description:ordinary.description}:clinic?{description:'诊所室内原人物；未绘制治疗、给药或护理手势，不表示正在诊疗或已经治愈'}:school?{description:'学校室内原人物；未绘制授课、读写或学习手势，在场不表示正在授课、取得进度或完成学习'}:barn?{description:'畜舍室内原人物；未绘制喂食、喂水、挤奶、剪毛或护送手势，在场不表示照料、繁育或产出完成'}:{})},make,undefined,!sleeping);
   }
   type Location={inside?:string|null;roomAt?:Vec|null;regional?:unknown};
   const containers=new Map<string,Location>();
@@ -184,7 +188,7 @@ export class IsometricHomeInterior {
    if(carrier?.inside===roomId&&!carrier.regional)mark('animal',a.id,carrier.roomAt,'随真实携带者的动物记录；未绘制动物或携带姿态');
    else if(a.carrierId&&!carrier&&a.inside===roomId)mark('animal',a.id,null,'动物携带者位置缺失；不沿用旧室内坐标');
    else if(!a.carrierId&&a.inside===roomId)mark('animal',a.id,a.roomAt,'室内动物记录：'+a.kind+'；未绘制动物外观');
-   else if(!a.carrierId&&!a.at&&!a.inside&&a.barnId===roomId)mark('animal',a.id,null,'旧动物记录只有建筑归属，缺少室内精确位置');
+   else if(!a.carrierId&&!a.at&&!a.inside&&a.barnId===roomId)mark('animal',a.id,null,'动物仅有畜舍归属或栏位记录，缺少室内精确位置；不按pen补画动物');
   }
   // A building-only cargo address is not an exact room point. In particular, never use the 2D resolver's default entry.
   containers.set('public:'+roomId,{inside:roomId});
@@ -235,7 +239,11 @@ export class IsometricHomeInterior {
    if(r.animated)entries.set(r.key,r);else remaining-=marks.length;
    objects.push({key:r.key,subject:r.subject,footprint:r.footprint,marks});
   }
-  const scene:IsometricHomeInteriorScene={roomId:this.roomId,width:sourceWidth,height:sourceHeight,camera:{origin,zoom:1},displayCamera,bounds,terrain,objects:orderIsometricObjects(objects),snapshotRevision:this.revision,omittedObjects:omitted,unsupportedObjects:this.counters.unsupportedObjects,omitted,renderedMarkerCount:objects.filter(o=>!!o.subject.placeholder).length,unknownLocationCount:this.counters.unknownLocationCount};
+  // Navigation markers are annotations, not obstacles. Paint them under real
+  // furniture/people so a resident at a pen target keeps their body and hit ID.
+  const penMarker=(o:StudyObject)=>o.subject.kind==='roomSlot'&&o.subject.id.startsWith('pen:');
+  const ordered=[...orderIsometricObjects(objects.filter(penMarker)),...orderIsometricObjects(objects.filter(o=>!penMarker(o)))];
+  const scene:IsometricHomeInteriorScene={roomId:this.roomId,width:sourceWidth,height:sourceHeight,camera:{origin,zoom:1},displayCamera,bounds,terrain,objects:ordered,snapshotRevision:this.revision,omittedObjects:omitted,unsupportedObjects:this.counters.unsupportedObjects,omitted,renderedMarkerCount:objects.filter(o=>!!o.subject.placeholder).length,unknownLocationCount:this.counters.unknownLocationCount};
   this.sceneEntries.set(scene,entries);this.counters={...this.counters,visibleCandidates:candidates.length,omittedObjects:omitted,renderedMarkerCount:scene.renderedMarkerCount,renderedMarks:terrain.length+objects.reduce((n,o)=>n+o.marks.length,0)};return scene;
  }
  animate(scene:IsometricHomeInteriorScene,elapsed:number):IsometricHomeInteriorScene {

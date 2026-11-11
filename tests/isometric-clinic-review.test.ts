@@ -63,7 +63,7 @@ test('independent clinic: exact original identity picking, deep freezing and ato
 });
 
 test('independent clinic: unknown location, infant and unsupported building hand back to 2D retaining identity',()=>{
- for(const mode of ['position','infant','room']){const s=fixture();if(mode==='position')person(s).roomAt=null;if(mode==='infant')person(s).lifeStage='infant';if(mode==='room')building(s).kind='barn';
+ for(const mode of ['position','infant','room']){const s=fixture();if(mode==='position')person(s).roomAt=null;if(mode==='infant')person(s).lifeStage='infant';if(mode==='room')building(s).kind='greenhouse';
   const {scene}=residentSceneHarness(),h=observerPreviewHarness(undefined,scene);h.accept(fixture());h.toggle();h.startFollow(personId);h.accept(s);assert.equal(h.canvas.hidden,true,mode);assert.equal(scene.followState?.personId,personId);assert.equal(h.room(),roomId);assert.equal(h.intervals.size,0);h.dispose();
  }
 });
