@@ -17,6 +17,7 @@ export function observerDevelopmentScripts(url=''){
  const entries=['development-preview.ts'];
  const params=new URL(url,'http://127.0.0.1').searchParams;
  if(params.getAll('storybook').length===1&&params.get('storybook')==='1')entries.push('storybook-development-entry.ts');
+ if(params.getAll('storybook-ui').length===1&&params.get('storybook-ui')==='1')entries.push('storybook-ui-entry.ts');
  return entries.map(name=>({tag:'script',attrs:{type:'module',src:'/ai-town/src/client/'+name},injectTo:'body'}));
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
