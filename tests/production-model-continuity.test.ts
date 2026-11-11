@@ -9,7 +9,7 @@ test('real-wall nine-person runtime crosses three price epochs, then retains all
  const f=continuityFixture(t);let previous:ReturnType<typeof f.read>|undefined;
  for(let epoch=1;epoch<=3;epoch++){
   if(epoch===2){const old=previous!.receipts[0] as any;await pause(Math.max(0,old.deadlineAtMs+50-Date.now()));}
-  const result=await f.launch('sustained',epoch===1?'new':'resume');assert.equal(result.code,0,JSON.stringify(result));assert.equal(result.signal,null);
+  const result=await f.launch('sustained',epoch===1?'new':'resume');assert.equal(result.code,0,JSON.stringify(result.diagnostic));assert.equal(result.signal,null);
   const data=f.read(),summary=reconcileContinuity(data);assert.equal(summary.finished,epoch);assert.equal(summary.reservedWallMs,epoch*30000);
   const now=data.rehearsals.at(-1)!,receipt=data.receipts.at(-1) as any;
   assert.equal(now.after.residents.length,9);assert.ok(now.requests.length>=9);assert.ok(now.after.minute>now.before.minute);

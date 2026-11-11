@@ -8,10 +8,13 @@ import {createSyntheticProcessState,processManifest,openSyntheticProcessState,mo
 import {SyntheticLaunchLedger} from '../src/server/production-model-process-ledger.ts';
 import {createSyntheticPriceEvidence,syntheticRecordHash as hash} from '../src/server/production-model-price-evidence.ts';
 import {rehearsalSnapshot,checkSyntheticRehearsal} from '../src/server/production-model-process-rehearsal.ts';
+import {syntheticFailureDiagnostic,sanitizeSyntheticDiagnostic} from '../src/server/production-model-process-diagnostics.ts';
 const [flag,mode,output,scenario='normal',...extra]=process.argv.slice(2),root=fileURLToPath(new URL('..',import.meta.url)).replace(/\/$/,'');
 const scenarios=['normal','init_block','sync_block','crash_intent','crash_response','crash_ack','crash_seal','seal_block','late_headers','crash_reserved','watchdog_missing','sustained','sustained_crash_response'];
 const emit=value=>{try{process.stdout.write(JSON.stringify(value)+'\n');}catch{}};process.stdout.on('error',()=>{});
-let directory,db,ledger,state,watchdog,workerIdentity,finished=false;
+let directory,db,ledger,state,watchdog,workerIdentity,finished=false,receipt,stage='guardian_prepare';
+let observation=null,watchdogExit=null,watchdogError=false,outerTimedOut=false;
+const workerDiagnostics=[];
 const signalOwnedWorker=signal=>{if(!workerIdentity)return 'unknown';try{const raw=readFileSync(`/proc/${workerIdentity.pid}/stat`,'utf8'),start=raw.slice(raw.lastIndexOf(')')+2).split(' ')[19];
  if(start!==workerIdentity.startTicks)return 'unknown';process.kill(-workerIdentity.pid,signal);return 'sent';}catch(e){return e.code==='ESRCH'?'not_found':'unknown';}};
 const cleanupKnownWorker=async()=>{
@@ -43,13 +46,13 @@ try{
  state.session.installPrice(createSyntheticPriceEvidence({scopeHash:state.session.contractHash,sequence:before.epochs+1,previousEvidenceHash:before.evidenceHash,
   fixtureId:'fixed-offline-process-price',observedAtMs:startedAtMs,validUntilMs:deadlineAtMs}),startedAtMs);
  before=state.session.status();
- const receipt=ledger.reserve({worldFingerprint:previous.worldFingerprint,attempts:before.attempts,completed:before.completed,previousSessionHash:previous.sessionHash,
+ receipt=ledger.reserve({worldFingerprint:previous.worldFingerprint,attempts:before.attempts,completed:before.completed,previousSessionHash:previous.sessionHash,
   sessionHash:before.auditHash,journalHash:state.journal.status().auditHash,evidenceHash:before.evidenceHash,startedAtMs,deadlineAtMs,startedMonotonicNs,
   deadlineMonotonicNs:(BigInt(startedMonotonicNs)+30_000_000_000n).toString()});
  directory.writeJson(`launch-${receipt.id}.json`,receipt);state.close();state=undefined;
  emit({type:'synthetic_launch_reserved',id:receipt.id,reservedWallMs:ledger.status().reservedWallMs,attempts:receipt.attempts,deadlineAtMs,realModelExecuted:false});
  if(scenario==='crash_reserved')process.exit(73);
- let observation=null,watchdogExit=null,watchdogError=false,outerTimedOut=false,outerTimer,killTimer;
+ let outerTimer,killTimer;stage='guardian_supervise';
  const script=scenario==='watchdog_missing'?'production-model-process-missing.mjs':'production-model-process-watchdog.mjs';
  watchdog=spawn(process.execPath,['--import',root+'/scripts/acceptance-offline-guard.mjs','--import',root+'/node_modules/tsx/dist/loader.mjs',root+'/scripts/'+script,String(receipt.id),scenario],
   {cwd:'/',env:{},shell:false,detached:true,stdio:['pipe','ignore','ignore','ipc',directory.descriptor()]});
@@ -60,6 +63,7 @@ try{
   if(message?.type==='synthetic_worker_identity'&&Number.isSafeInteger(message.pid)&&message.pid>1&&/^\d+$/.test(message.startTicks)){
    workerIdentity={pid:message.pid,startTicks:message.startTicks};emit(message);
   }else if(message?.type==='synthetic_watchdog_result')observation=message;
+  else if(message?.type==='synthetic_worker_diagnostic'&&workerDiagnostics.length<3){const diagnostic=sanitizeSyntheticDiagnostic(message.diagnostic);workerDiagnostics.push(diagnostic);emit({type:'synthetic_worker_diagnostic',diagnostic});}
   else if(['synthetic_worker_ready','synthetic_fault_ready','synthetic_worker_finished'].includes(message?.type))emit(message);
  });
  emit({type:'synthetic_watchdog_started',pid:watchdog.pid,id:receipt.id});
@@ -77,7 +81,7 @@ try{
   ||processReport.issues.length||observation.id!==receipt.id||hash(directory.readJson(`watchdog-${receipt.id}.json`))!==hash(Object.fromEntries(Object.entries(observation).filter(([key])=>key!=='type'))))throw Error('synthetic_process_not_clean');
  if(!workerIdentity||observation.identity?.pid!==workerIdentity.pid||observation.identity?.startTicks!==workerIdentity.startTicks)throw Error('synthetic_worker_identity_unknown');
  try{process.kill(-workerIdentity.pid,0);throw Error('synthetic_worker_group_present');}catch(e){if(e.code!=='ESRCH')throw e;}
- processManifest(directory,root);state=openSyntheticProcessState(directory,manifest);const ss=state.session.status(),js=state.journal.status();
+ stage='guardian_reconcile';processManifest(directory,root);state=openSyntheticProcessState(directory,manifest);const ss=state.session.status(),js=state.journal.status();
  if(ss.segments!==receipt.id||ss.epochs!==receipt.id||ss.reservedWallMs!==receipt.id*30000||ss.evidenceHash!==receipt.evidenceHash||ss.attempts<receipt.attempts||ss.attempts!==ss.completed)throw Error('synthetic_process_seal_mismatch');
  let rehearsalHash;
  if(scenario==='sustained'||scenario==='sustained_crash_response'){
@@ -89,14 +93,17 @@ try{
  const result={schema:1,kind:'synthetic-price-supervised-result',id:receipt.id,receiptHash:hash(receipt),observation:directory.readJson(`watchdog-${receipt.id}.json`),
   watchdogExit,sessionHash:ss.auditHash,journalHash:js.auditHash,worldFingerprint:ss.worldFingerprint,attempts:ss.attempts,completed:ss.completed,
   originalDeadlineAtMs:manifest.contract.deadlineAtMs,reservedWallMs:ledger.status().reservedWallMs,...(rehearsalHash?{rehearsalHash}:{}),realModelExecuted:false,liveExecutionEnabled:false,actualProviderCostCny:null,readyForProduction:false,acceptancePassed:null};
- directory.writeJson(`process-${receipt.id}.json`,result);
+ stage='guardian_report_write';directory.writeJson(`process-${receipt.id}.json`,result);
  ledger.finish({id:receipt.id,worldFingerprint:ss.worldFingerprint,attempts:ss.attempts,completed:ss.completed,sessionHash:ss.auditHash,journalHash:js.auditHash,
   reportHash:hash(result),at:Date.now(),monotonicNs:monotonicStamp()});finished=true;
  emit({type:'synthetic_process_finished',...ledger.status()});
-}catch{
+}catch(error){
  try{ledger?.fail('supervised_launch_failed');}catch{}
  await cleanupKnownWorker();
- emit({type:'synthetic_process_blocked',status:ledger?.status()??null,realModelExecuted:false,acceptancePassed:null});process.exitCode=1;
+ process.exitCode=1;
+ let diagnostic;try{diagnostic=syntheticFailureDiagnostic({stage,error,receipt,observation,watchdogExit,watchdogError,outerTimedOut});}catch{diagnostic=sanitizeSyntheticDiagnostic({stage});}
+ try{if(receipt)directory?.writeJson(`guardian-failure-${receipt.id}.json`,diagnostic);}catch{}
+ emit({type:'synthetic_process_blocked',status:ledger?.status()??null,diagnostic,workerDiagnostics,realModelExecuted:false,acceptancePassed:null});
 }finally{
  if(!finished&&watchdog&&watchdog.exitCode===null&&watchdog.signalCode===null){try{watchdog.stdin.end();watchdog.kill('SIGTERM');}catch{}}
  try{state?.close();}finally{db?.close();directory?.close();}

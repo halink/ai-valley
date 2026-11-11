@@ -26,7 +26,20 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      - name: Prepare private synthetic diagnostics
+        run: |
+          mkdir -p output
+          evidence="$(mktemp -d "$PWD/output/continuity-ci-XXXXXX")"
+          printf 'VALLEY_CONTINUITY_DIAGNOSTICS=%s\n' "$evidence" >> "$GITHUB_ENV"
       - run: npm test -- --test-shard=${{ matrix.shard }}/4
+      - name: Preserve sanitized synthetic diagnostics
+        if: ${{ always() && env.VALLEY_CONTINUITY_DIAGNOSTICS != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: continuity-diagnostics-${{ matrix.shard }}
+          path: ${{ env.VALLEY_CONTINUITY_DIAGNOSTICS }}/case-*/invocation-*.json
+          if-no-files-found: ignore
+          retention-days: 7
 
   # Keep the original required-check name. A skipped or cancelled shard is not a pass.
   verify:

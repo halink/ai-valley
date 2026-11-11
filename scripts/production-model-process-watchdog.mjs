@@ -6,6 +6,7 @@ import {fileURLToPath} from 'node:url';
 import {AcceptanceProcessSupervisor} from '../src/server/acceptance-process-supervisor.ts';
 import {SyntheticProcessDirectory} from '../src/server/production-model-process-storage.ts';
 import {bootIdentity} from '../src/server/production-model-process-state.ts';
+import {sanitizeSyntheticDiagnostic} from '../src/server/production-model-process-diagnostics.ts';
 const [idText,scenario,...extra]=process.argv.slice(2),id=Number(idText),root=fileURLToPath(new URL('..',import.meta.url)).replace(/\/$/,'');
 if(!globalThis.__valleyOfflineGuard||Object.keys(process.env).length||extra.length||!process.connected||!Number.isSafeInteger(id)||id<1)throw Error('synthetic_watchdog_bootstrap_required');
 const send=value=>{if(process.connected)try{process.send?.(value,()=>{});}catch{}};
@@ -33,7 +34,9 @@ try{
     else child.stdio[5].end('SYNTHETIC_PRICE_WATCHDOG_READY');
    }catch{child.stdio[5].destroy();observe({type:'transport_error'});}};
   const onError=()=>observe({type:!spawned&&!child.pid?'spawn_failed':'transport_error'}),onExit=(code,signal)=>observe({type:'exit',code,signal});
-  const onMessage=message=>{if(['synthetic_worker_ready','synthetic_fault_ready','synthetic_worker_finished'].includes(message?.type))send(message);};
+  let diagnostics=0;
+  const onMessage=message=>{if(message?.type==='synthetic_worker_diagnostic'&&diagnostics++<3)send({type:'synthetic_worker_diagnostic',diagnostic:sanitizeSyntheticDiagnostic(message.diagnostic)});
+   else if(['synthetic_worker_ready','synthetic_fault_ready','synthetic_worker_finished'].includes(message?.type))send(message);};
   child.on('spawn',onSpawn);child.on('error',onError);child.on('exit',onExit);child.on('message',onMessage);
   return {groupState:group,signalGroup(signal){if(group()==='absent')return 'not_found';if(!identity)return 'unknown';
     try{const raw=readFileSync(`/proc/${identity.pid}/stat`,'utf8'),start=raw.slice(raw.lastIndexOf(')')+2).split(' ')[19];if(start!==identity.startTicks)return 'unknown';

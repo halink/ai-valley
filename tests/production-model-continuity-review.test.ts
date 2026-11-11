@@ -48,7 +48,7 @@ function rebindObservation(d:ContinuityData){
 }
 
 test('continuity review: real progress and rehash-consistent evidence attacks',{timeout:60000},async t=>{
- const f=continuityFixture(t),run=await f.launch('sustained');assert.equal(run.code,0,JSON.stringify(run));
+ const f=continuityFixture(t),run=await f.launch('sustained');assert.equal(run.code,0,JSON.stringify(run.diagnostic));
  const clean=readOwn(f.path),summary=reconcileContinuity(clean),r=clean.rehearsals[0],receipt=clean.receipts[0] as any;
  t.diagnostic(JSON.stringify({evidence:f.path,summary}));
  await t.test('actual default-clock progress, nine real prompt identities and request/response/ack triples',()=>{
@@ -117,7 +117,7 @@ test('continuity review: real progress and rehash-consistent evidence attacks',{
    assert.throws(()=>reconcileContinuity(d),'a present hash is insufficient unless its replayed counts and world match the report');
   });
   const path=join(f.path,'rehearsal-1.json'),changed=json(path);changed.requests[0].requestBody+=' ';writeFileSync(path,JSON.stringify(changed),{mode:0o600});
-  const resumed=await f.launch('normal','resume');assert.equal(resumed.code,1,JSON.stringify(resumed));
+  const resumed=await f.launch('normal','resume');assert.equal(resumed.code,1,JSON.stringify(resumed.diagnostic));
   assert.equal(resumed.messages.some(m=>m.type==='synthetic_launch_reserved'||m.type==='synthetic_watchdog_started'),false);
  });
 });

@@ -17,19 +17,28 @@ const {createMemoryProductionHttp}=await import('../src/server/production-model-
 const {syntheticRecordHash:hash}=await import('../src/server/production-model-price-evidence.ts');
 const {PRODUCTION_MODEL_CANDIDATE:P}=await import('../src/server/production-model-policy.ts');
 const {rehearsalSnapshot,checkSyntheticRehearsal}=await import('../src/server/production-model-process-rehearsal.ts');
+const {syntheticFailureDiagnostic}=await import('../src/server/production-model-process-diagnostics.ts');
 const root=fileURLToPath(new URL('..',import.meta.url)).replace(/\/$/,''),directory=SyntheticProcessDirectory.inherit(4);
 const sustained=scenario==='sustained'||scenario==='sustained_crash_response';
-let state,bridge,finished=false,poll,report,receipt,manifest,unsubscribe;
+let state,bridge,finished=false,poll,report,receipt,manifest,unsubscribe,stage='worker_initialize',diagnosticCount=0;
+// Supplemental diagnostics are not a successful rehearsal or recovery evidence.
+const diagnose=(error,status,reason)=>{try{
+ status??=bridge?.status();
+ const diagnostic=syntheticFailureDiagnostic({stage,error,reason,receipt,status,report});
+ send({type:'synthetic_worker_diagnostic',diagnostic});
+ try{directory.writeJson(`worker-failure-${id}-${++diagnosticCount}.json`,diagnostic);}catch{}
+}catch{}};
 const finish=()=>{if(finished)return;finished=true;clearInterval(poll);let status;
- try{status=bridge?.close();if(!status?.sealed||status.failure)process.exitCode=1;
+ try{stage='worker_close';status=bridge?.close();if(!status?.sealed||status.failure){process.exitCode=1;diagnose(undefined,status,'runtime_not_clean');}
   if(sustained&&status?.sealed&&!status.failure){
+   stage='worker_rehearsal';
    report.after=rehearsalSnapshot(state.store.loadForRuntime());report.finishedAtMs=Date.now();report.finishedMonotonicNs=process.hrtime.bigint().toString();report.stopReason=status.control?.reason??null;
    checkSyntheticRehearsal(report,receipt,{runId:manifest.contract.runId,sourceFingerprint:manifest.contract.sourceFingerprint,
     originalDeadlineAtMs:manifest.contract.deadlineAtMs,attempts:status.session.attempts,completed:status.session.completed,after:report.after});
-   directory.writeJson(`rehearsal-${id}.json`,report);
+   stage='worker_report_write';directory.writeJson(`rehearsal-${id}.json`,report);
   }
   send({type:'synthetic_worker_finished',id,sealed:status?.sealed===true,failure:status?.failure??null});}
- catch{process.exitCode=1;}finally{unsubscribe?.();try{state?.close();}finally{directory.close();process.off('SIGINT',finish);process.off('SIGTERM',finish);process.off('disconnect',finish);if(process.connected)process.disconnect();}}};
+ catch(error){process.exitCode=1;diagnose(error,status);}finally{unsubscribe?.();try{state?.close();}finally{directory.close();process.off('SIGINT',finish);process.off('SIGTERM',finish);process.off('disconnect',finish);if(process.connected)process.disconnect();}}};
 try{
  manifest=processManifest(directory,root);receipt=directory.readJson(`launch-${id}.json`);
  if(receipt.id!==id||receipt.contractHash!==hash(manifest.contract)||receipt.bootId!==manifest.bootId||Date.now()<receipt.startedAtMs||Date.now()>=receipt.deadlineAtMs
@@ -82,5 +91,6 @@ try{
   memory.headers(index);memory.chunk(index,Buffer.from(JSON.stringify({model:P.model,choices:[{message:{content},finish_reason:'stop'}],usage})));memory.end(index);
  };
  bridge.runtime.start();if(!sustained)bridge.drain();respond();
- poll=setInterval(()=>{try{if(sustained)respond();if(bridge.status().control?.phase==='stopped')finish();}catch{process.exitCode=1;finish();}},20);
-}catch{process.exitCode=1;finish();}
+ stage='worker_observe';
+ poll=setInterval(()=>{try{if(sustained)respond();if(bridge.status().control?.phase==='stopped')finish();}catch(error){process.exitCode=1;diagnose(error);finish();}},20);
+}catch(error){process.exitCode=1;diagnose(error);finish();}

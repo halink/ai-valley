@@ -10,11 +10,12 @@ import {SyntheticProcessDirectory} from '../../src/server/production-model-proce
 import {rehearsalSnapshot,checkSyntheticRehearsal,type SyntheticRehearsalReport} from '../../src/server/production-model-process-rehearsal.js';
 import {syntheticRecordHash as hash,parseSyntheticPriceRecord} from '../../src/server/production-model-price-evidence.js';
 import type {SyntheticLaunchReceipt} from '../../src/server/production-model-process-ledger.js';
+import {continuityDiagnosticArtifacts,continuityInvocationDiagnostic} from './continuity-diagnostic-artifacts.js';
 export const pause=(ms:number)=>new Promise<void>(r=>setTimeout(r,ms));
 const root=resolve('.'),base=join(root,'output','continuity-rehearsal');
 type Row={sequence:number;previous_hash:string;body:string;hash:string};
 export function continuityFixture(t:TestContext){
- mkdirSync(base,{recursive:true});const path=join(mkdtempSync(join(base,'case-')),'run');let invocation=0;
+ mkdirSync(base,{recursive:true});const path=join(mkdtempSync(join(base,'case-')),'run'),artifact=continuityDiagnosticArtifacts(root);let invocation=0;
  const children:ChildProcess[]=[];
  t.after(async()=>{for(const child of children)if(child.exitCode===null&&child.signalCode===null){child.kill('SIGTERM');await pause(100);if(child.exitCode===null&&child.signalCode===null)child.kill('SIGKILL');}});
  return {path,async launch(scenario='sustained',mode:'new'|'resume'='new'){
@@ -26,7 +27,8 @@ export function continuityFixture(t:TestContext){
   const result=await new Promise<{code:number|null;signal:string|null}>(resolve=>{child.once('error',e=>{stderr+=e;resolve({code:null,signal:null});});child.once('close',(code,signal)=>resolve({code,signal}));});
   const report={...result,scenario,mode,startedAtMs,finishedAtMs:Date.now(),messages,stderr};
   // Each invocation capture is outside the run protocol and never trusted by guardian.
-  writeFileSync(join(path,'..',`invocation-${number}.json`),JSON.stringify(report,null,2),{mode:0o600});return report;
+  writeFileSync(join(path,'..',`invocation-${number}.json`),JSON.stringify(report,null,2),{mode:0o600});
+  artifact?.(number,report);return {...report,diagnostic:continuityInvocationDiagnostic(report)};
  },read(){return readContinuity(path);}};
 }
 export function readContinuity(path:string){
