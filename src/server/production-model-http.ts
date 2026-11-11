@@ -19,11 +19,18 @@ const transports=new WeakMap<ProductionHttpTransport,TransportState>();
 export function createMemoryProductionHttp(){
  type Call={request:Request;headers:Deferred<WireResponse>;body:ReadableStream<Uint8Array>;controller:ReadableStreamDefaultController<Uint8Array>;cancelled:boolean};
  const calls:Call[]=[],transport=Object.freeze({kind:'synthetic-production-http'} as const);
+ const observations=new WeakMap<Request,Readonly<{observedAtMs:number;observedMonotonicNs:string}>>();
  transports.set(transport,{claimed:false,kind:transport.kind,invocations:0,invoke:request=>{
+  // Observe the actual memory invocation, not a later response-poll callback.
+  // Native clocks only; the private map binds this immutable record to the
+  // original request object in this factory, never a caller-supplied ID/time.
+  const observedAtMs=Date.now(),observedMonotonicNs=process.hrtime.bigint().toString();
+  observations.set(request,Object.freeze({observedAtMs,observedMonotonicNs}));
   let controller!:Call['controller'];const call={request,headers:deferred<WireResponse>(),body:new ReadableStream<Uint8Array>({
    start(value){controller=value;},cancel(){call.cancelled=true;}}),controller,cancelled:false};calls.push(call);return call.headers.promise;
  }});
- return {transport,requests:()=>calls.map(c=>c.request),reject:(index:number)=>calls[index].headers.reject(),
+ return {transport,requests:()=>calls.map(c=>c.request),dispatchObservation:(request:Request)=>observations.get(request)??null,
+  reject:(index:number)=>calls[index].headers.reject(),
   headers:(index:number,meta:Partial<Headers>={},hasBody=true)=>{const c=calls[index];c.headers.resolve({status:200,url:P.endpoint,redirected:false,
    contentType:'application/json',contentLength:null,...meta,body:hasBody?c.body:null});},
   chunk:(index:number,value:Uint8Array)=>calls[index].controller.enqueue(new Uint8Array(value)),

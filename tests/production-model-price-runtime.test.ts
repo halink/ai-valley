@@ -66,9 +66,18 @@ test('real nine-person runtime drains one in-flight response through both ledger
  assert.equal(readProductionModelPolicy({VALLEY_MODEL_MODE:'siliconflow-free-only',VALLEY_MODEL_PROVIDER:'siliconflow',VALLEY_MODEL_ID:P.model}).state,'blocked');
 });
 test('cutoff timer closes admission but lets earlier request finish before response and seal deadlines',async t=>{
- const f=fixture(t),b=f.open();f.advance(23999);b.runtime.start();assert.equal(f.memory.requests().length,1);
+ const f=fixture(t),b=f.open(),cutoff=f.session.status().segment!.admissionCutoffMs;
+ t.mock.method(process.hrtime,'bigint',()=>BigInt(f.now)*1000000n);
+ f.advance(23999);b.runtime.start();assert.equal(f.memory.requests().length,1);
  f.advance(1);assert.equal(f.session.status().phase,'draining');assert.equal(f.memory.requests()[0].signal.aborted,false);
- f.advance(100);f.respond();await flush();assert.equal(b.status().sealed,true);assert.equal(b.status().failure,null);assert.equal(f.memory.requests().length,1);
+ f.advance(147);
+ const request=f.memory.requests()[0],observation=f.memory.dispatchObservation(request)!;
+ assert.equal(observation.observedAtMs,cutoff-1);
+ assert.equal(observation.observedMonotonicNs,String(BigInt(cutoff-1)*1000000n));
+ assert.equal(Date.now(),cutoff+147,'response polling may run after cutoff without moving the actual dispatch');
+ f.respond();await flush();assert.equal(b.status().sealed,true);assert.equal(b.status().failure,null);assert.equal(f.memory.requests().length,1);
+ assert.equal(b.status().session.completed,1);assert.equal(b.status().journal.completed,1);
+ assert.equal(f.memory.dispatchObservation(request),observation);
 });
 test('exact cutoff with no requests drains and seals without dispatch or budget reset',t=>{
  const f=fixture(t),b=f.open();f.now+=24000;b.runtime.start();

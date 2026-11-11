@@ -9,7 +9,9 @@ const {readPrivatePipe}=await import('./acceptance-private-pipe.mjs');
 if(await readPrivatePipe(5)!=='SYNTHETIC_PRICE_WATCHDOG_READY'||parentGone||!process.connected)throw Error('synthetic_watchdog_gate_required');
 const send=value=>{if(process.connected)process.send?.(value,()=>{});};
 if(scenario==='init_block'){send({type:'synthetic_fault_ready',point:'init_block'});for(;;){}}
-const {register}=await import('../node_modules/tsx/dist/esm/api/index.mjs');register();
+const {registerSyntheticCompiler}=await import('./production-model-process-loader.mjs');
+const compiler=registerSyntheticCompiler();
+const {register}=await import('../node_modules/tsx/dist/esm/api/index.mjs'),unregister=register();
 const {SyntheticProcessDirectory}=await import('../src/server/production-model-process-storage.ts');
 const {processManifest,openSyntheticProcessState}=await import('../src/server/production-model-process-state.ts');
 const {createSyntheticPriceRuntimeSegment}=await import('../src/server/production-model-price-runtime.ts');
@@ -28,7 +30,7 @@ const diagnose=(error,status,reason)=>{try{
  send({type:'synthetic_worker_diagnostic',diagnostic});
  try{directory.writeJson(`worker-failure-${id}-${++diagnosticCount}.json`,diagnostic);}catch{}
 }catch{}};
-const finish=()=>{if(finished)return;finished=true;clearInterval(poll);let status;
+const finish=async()=>{if(finished)return;finished=true;clearInterval(poll);let status;
  try{stage='worker_close';status=bridge?.close();if(!status?.sealed||status.failure){process.exitCode=1;diagnose(undefined,status,'runtime_not_clean');}
   if(sustained&&status?.sealed&&!status.failure){
    stage='worker_rehearsal';
@@ -38,8 +40,14 @@ const finish=()=>{if(finished)return;finished=true;clearInterval(poll);let statu
     originalDeadlineAtMs:manifest.contract.deadlineAtMs,attempts:status.session.attempts,completed:status.session.completed,after:report.after,cancellationCheckpoint:state.cancellationCheckpoint});
    stage='worker_report_write';directory.writeJson(`rehearsal-${id}.json`,report);
   }
-  send({type:'synthetic_worker_finished',id,sealed:status?.sealed===true,failure:status?.failure??null});}
- catch(error){process.exitCode=1;diagnose(error,status);}finally{unsubscribe?.();try{state?.close();}finally{directory.close();process.off('SIGINT',finish);process.off('SIGTERM',finish);process.off('disconnect',finish);if(process.connected)process.disconnect();}}};
+ }
+ catch(error){process.exitCode=1;diagnose(error,status);}finally{
+  try{unsubscribe?.();state?.close();}catch(error){process.exitCode=1;diagnose(error,status);}
+  try{stage='worker_close';await compiler.close(unregister);}
+  catch(error){process.exitCode=1;diagnose(error,status);}
+  finally{directory.close();process.off('SIGINT',finish);process.off('SIGTERM',finish);process.off('disconnect',finish);
+   send({type:'synthetic_worker_finished',id,sealed:status?.sealed===true,failure:status?.failure??null});if(process.connected)process.disconnect();}
+ }};
 try{
  manifest=processManifest(directory,root);receipt=directory.readJson(`launch-${id}.json`);
  if(receipt.id!==id||receipt.contractHash!==hash(manifest.contract)||receipt.bootId!==manifest.bootId||Date.now()<receipt.startedAtMs||Date.now()>=receipt.deadlineAtMs
@@ -83,10 +91,11 @@ try{
   const content=JSON.stringify({choice,minutes:15}),usage={prompt_tokens:1,completion_tokens:1};
   if(sustained){const ss=state.session.status(),js=state.journal.status(),actorId=bridge.runtime.world.metrics.inFlight[0];
    if(!ss.pending||ss.pending.id!==request.id||js.pending?.id!==request.id||ss.pending.requestHash!==hash(request.body)||bridge.runtime.world.metrics.inFlight.length!==1)throw Error('synthetic_request_observation_unmatched');
-   // First observation is a conservative upper bound on actual memory invoke,
-   // not an instrumented invocation timestamp. This fixed profile fails closed
-   // if its observation arrives at/after cutoff; the core drain rule is unchanged.
-   report.requests.push({id:request.id,actorId,requestBody:request.body,reply:{content,finish:'stop',usage},requestHash:hash(request.body),responseHash:hash({content,finish:'stop',usage}),observedAtMs:Date.now(),observedMonotonicNs:process.hrtime.bigint().toString(),
+   const observation=memory.dispatchObservation(request);if(!observation)throw Error('synthetic_request_observation_unmatched');
+   // The immutable observation was captured synchronously at memory invoke.
+   // A delayed poll may answer an earlier request during drain, but a truly
+   // late invocation still fails the unchanged wall/monotonic cutoff checks.
+   report.requests.push({id:request.id,actorId,requestBody:request.body,reply:{content,finish:'stop',usage},requestHash:hash(request.body),responseHash:hash({content,finish:'stop',usage}),...observation,
     acknowledgedAtMs:null,acknowledgedMonotonicNs:null,worldFingerprint:null,revision:null,minute:null});
   }
   memory.headers(index);memory.chunk(index,Buffer.from(JSON.stringify({model:P.model,choices:[{message:{content},finish_reason:'stop'}],usage})));memory.end(index);

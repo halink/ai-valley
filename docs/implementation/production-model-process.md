@@ -34,6 +34,10 @@
 
 watchdog 的信号适配器另处理正常退出竞态：第一次进程组探测仍为 present，随后 leader 的 `/proc/<pid>/stat` 已消失（ENOENT）时，再次探测整个组；只有确认 absent 才记 `not_found`，不发送信号。leader 消失但后代仍在、组未知、身份不匹配或其他读取错误继续返回 unknown，并保留 `signal_failed`。不清除已有 issues，不把 leader 消失当作组消失，也不延长原截止；[回归与独立审查](../reviews/production-model-process-signal-race.md)。
 
+worker 的正常收尾另显式管理 tsx 编译服务：gate 后在 ESM loader 所属线程安装独立 offline guard，并在固定 esbuild initialize 的同步窗口捕获其唯一实际 ChildProcess。完成全部运行时工作后先 unregister tsx，再在同一 loader 线程 stop esbuild，等待该 child 的真实 `close` 后才关闭 worker IPC、允许自然退出。`stop()` 已返回、`exit`、管道 EOF 或 kill 成功都不能替代 close；不按 PID 扫描或收养其他进程。正常主动 stop 的 compiler SIGTERM 可以接受，worker 本身仍必须真实零退出且无信号。
+
+主线程私有消息端口在等待期间保持 ref，缺失 close/确认不会让 worker 提前零退出；等待消耗原30秒预留，原watchdog的绝对截止及TERM/KILL窗口仍是外部失败界限，没有新增执行额度。提前 compiler 退出、子进程错误、缺失/重复 child、unregister失败、异常确认或端口断开均不能产生干净完成。强制崩溃路径仍然是真实 `process.exit(73)`，未改造成优雅退出；未知与残留仍按原规则失败。[生命周期独立审查与反例](../reviews/production-model-process-loader-lifecycle.md)。
+
 ## 安全目录与输入
 
 `production-model-process-storage.ts` 只接受仓库output下显式新目录，或带本协议marker的旧合成目录。目录逐级NOFOLLOW，私有0700；数据库、sidecar与JSON验证文件类型、单链接、所有者、权限和大小。子进程只继承已经验证的目录FD，不接受任意数据库路径。

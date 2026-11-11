@@ -51,6 +51,18 @@ test('diagnostics: clocks, identity coverage and counters are observations, neve
  assert.equal(d.finishedFromCutoffMs,200);assert.equal(d.gameMinutes,10);assert.equal(d.sealed,true);assert.equal(d.acceptancePassed,null);assert.equal(d.readyForProduction,false);
  assert.equal(sanitizeSyntheticDiagnostic({...d,acceptancePassed:true,readyForProduction:true}).acceptancePassed,null);
 });
+test('rehearsal request timing accepts pre-cutoff dispatch with later ack but rejects polling-time substitution and either-clock late dispatch',()=>{
+ const f=fixture(),request=f.report.requests.at(-1)!;
+ Object.assign(request,{observedAtMs:24999,observedMonotonicNs:mono(24999),acknowledgedAtMs:25147,acknowledgedMonotonicNs:mono(25147)});
+ assert.equal(checkSyntheticRehearsal(f.report,f.receipt,f.context).requests,9);
+ // The old worker sampled here, at response polling, rather than when the
+ // transport received the request. That timestamp must still be rejected.
+ for(const [wall,monotonic] of [[25147,25147],[25000,24999],[24999,25000],[25001,24999],[24999,25001]]){
+  const report=structuredClone(f.report);Object.assign(report.requests.at(-1)!,{observedAtMs:wall,observedMonotonicNs:mono(monotonic)});
+  assert.throws(()=>checkSyntheticRehearsal(report,f.receipt,f.context),error=>
+   error instanceof Error&&Object.getOwnPropertyDescriptor(error,'syntheticCheck')?.value==='request_timing');
+ }
+});
 test('diagnostics: real timeout failure keeps its original charge and cannot reserve or spawn on resume',{timeout:45000},async t=>{
  const f=continuityFixture(t),failed=await f.launch('late_headers');assert.equal(failed.code,1,JSON.stringify(failed.diagnostic));
  const worker=failed.diagnostic.workerDiagnostics.find(d=>d.stage==='worker_close');assert.ok(worker);assert.equal(worker.reason,'runtime_not_clean');assert.equal(worker.sealed,false);assert.equal(worker.runtimeFailed,true);

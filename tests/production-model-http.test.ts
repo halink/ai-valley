@@ -62,6 +62,30 @@ test('fake HTTP uses FULL intent then pinned request, bounded Unicode response a
  assert.equal(f.client.acknowledgeWorldCommit(result.id,'b'.repeat(64)),true);
  assert.equal(f.client.status().completed,1);assert.equal(readFileSync(f.path).includes(Buffer.from(reply.choices[0].message.content)),false);
 });
+test('memory dispatch observations capture immutable native clocks before delayed response polling',async t=>{
+ const f=fixture(t);let wall=24999,mono=24999000000n;
+ t.mock.method(Date,'now',()=>wall);t.mock.method(process.hrtime,'bigint',()=>mono);
+ const pending=f.client.complete(messages),request=f.memory.requests()[0],observation=f.memory.dispatchObservation(request)!;
+ assert.equal(observation.observedAtMs,24999);assert.equal(observation.observedMonotonicNs,'24999000000');
+ wall=25147;mono=25147274191n;
+ const delayed=f.memory.dispatchObservation(request)!;assert.equal(delayed,observation);
+ assert.equal(delayed.observedAtMs,24999);assert.equal(delayed.observedMonotonicNs,'24999000000');
+ assert.ok(Object.isFrozen(observation));assert.ok(Object.isFrozen(request));
+ assert.throws(()=>Object.assign(observation,{observedAtMs:0}));
+ assert.equal(f.memory.dispatchObservation({...request}),null,'a cloned request with the same ID is not the dispatched object');
+ assert.equal(createMemoryProductionHttp().dispatchObservation(request),null,'another factory cannot supply this request observation');
+ f.respond();const first=await pending;assert.ok(first);assert.equal(f.memory.dispatchObservation(request),observation);
+ assert.equal(f.client.acknowledgeWorldCommit(first.id,fingerprint),true);
+ const next=f.client.complete(messages),second=f.memory.requests()[1],secondObservation=f.memory.dispatchObservation(second)!;
+ assert.notEqual(second,request);assert.notEqual(secondObservation,observation);
+ assert.equal(secondObservation.observedAtMs,25147);assert.equal(secondObservation.observedMonotonicNs,'25147274191');
+ assert.equal(f.memory.dispatchObservation(request),observation);f.respond(1);assert.ok(await next);
+});
+test('memory dispatch observations never invent a call for a failed durable intent',async t=>{
+ const f=fixture(t);f.db.exec('PRAGMA query_only=ON');
+ assert.equal(await f.client.complete(messages),null);assert.deepEqual(f.memory.requests(),[]);
+ assert.equal(f.memory.dispatchObservation({id:1,endpoint:P.endpoint,method:'POST',redirect:'error',body:'synthetic',signal:new AbortController().signal}),null);
+});
 for(const status of [301,401,402,403,429,500])test(`HTTP ${status} locks once, never retries and restart preserves pending`,async t=>{
  const f=fixture(t),pending=f.client.complete(messages);f.memory.headers(0,{status});assert.equal(await pending,null);
  assert.equal(await f.client.complete(messages),null);assert.equal(f.memory.requests().length,1);assert.ok(f.journal.status().pending);
