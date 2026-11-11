@@ -25,7 +25,7 @@ test('only authoritative bounded home, lodge and workshop layouts are supported,
  const {world,home}=setup(),before=structuredClone(world);freeze(world);const support=homeInteriorSupport(world,home.id);assert.equal(support.supported,true);if(support.supported)assert.deepEqual(support.layout,roomLayout(world,home));assert.deepEqual(world,before);
  const missing=structuredClone(world);delete missing.rooms;assert.equal(homeInteriorSupport(missing,home.id).supported,false);assert.equal(homeInteriorSupport(world,'missing').supported,false);
  const lodge=structuredClone(world);lodge.buildings[0].kind='lodge';assert.equal(homeInteriorSupport(lodge,home.id).supported,true);
- for(const kind of ['barn','clinic','store'] as const){const other=structuredClone(world);other.buildings[0].kind=kind;assert.equal(homeInteriorSupport(other,home.id).supported,false);}
+ for(const kind of ['barn','clinic','greenhouse'] as const){const other=structuredClone(world);other.buildings[0].kind=kind;assert.equal(homeInteriorSupport(other,home.id).supported,false);}
  for(const change of [{capacity:1e9},{width:1e9},{height:1e9},{capacity:NaN},{width:0},{height:1.5}]){
   const huge=structuredClone(world);Object.assign(huge.buildings[0],change);Object.defineProperty(huge,'industry',{get(){throw new Error('unbounded layout reached stations');}});
   const result=homeInteriorSupport(huge,home.id);assert.equal(result.supported,false);assert.ok(result.reason);

@@ -81,7 +81,7 @@ test('independent home review: missing positions and home ownership cannot inven
 });
 
 test('independent home review: room restrictions are explicit and oversized or duplicate slots fail closed',()=>{
- for(const kind of ['barn','clinic','school','store'] as const){const s=inside();s.world.buildings.find(b=>b.id===route.buildingId)!.kind=kind;const support=homeInteriorSupport(s.world,route.buildingId);assert.equal(support.supported,false);assert.ok(support.reason);}
+ for(const kind of ['barn','clinic','school','greenhouse'] as const){const s=inside();s.world.buildings.find(b=>b.id===route.buildingId)!.kind=kind;const support=homeInteriorSupport(s.world,route.buildingId);assert.equal(support.supported,false);assert.ok(support.reason);}
  for(const patch of [{capacity:1e9},{width:0},{height:NaN}]){const s=inside();Object.assign(s.world.buildings.find(b=>b.id===route.buildingId)!,patch);assert.equal(homeInteriorSupport(s.world,route.buildingId).supported,false);}
  const old=inside();delete old.world.rooms;assert.equal(homeInteriorSupport(old.world,route.buildingId).supported,false);
  const station=inside();station.world.industry!.stations.push({id:'review-station-a',buildingId:route.buildingId,kind:'bench'} as any,{id:'review-station-b',buildingId:route.buildingId,kind:'bench'} as any);assert.equal(homeInteriorSupport(station.world,route.buildingId).supported,false);

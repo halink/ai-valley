@@ -1,4 +1,4 @@
-/** Read-only home/lodge/workshop interiors in the same pixel/projection space as the world viewport. */
+/** Read-only home/lodge/workshop/store interiors in the world's pixel/projection space. */
 import type {Snapshot,World,Vec,Resident} from '../shared/types.js';
 import {roomLayout,type RoomLayout,type RoomSlot} from '../shared/rooms.js';
 import {projectIsometric,unprojectIsometric,orderIsometricObjects,type Footprint,type IsometricCamera} from './isometric-projection.js';
@@ -22,16 +22,16 @@ export function homeInteriorSupport(w:World,roomId:string):HomeInteriorSupport {
  if(!Array.isArray(w.buildings)||!Array.isArray(w.residents))return reject('房间记录不可用');
  const b=w.buildings.find(b=>b.id===roomId);
  if(!b)return reject('所在建筑记录已不可用');
- if(!['home','lodge','workshop'].includes(b.kind))return reject('此等距视图目前只支持住宅、共屋与工坊室内');
- if(![b.width,b.height].every(n=>Number.isInteger(n)&&n>0)||!Number.isInteger(b.capacity)||b.capacity<0)return reject('住宅、共屋或工坊布局尺寸无效');
- const beds=b.kind==='workshop'?0:b.capacity;
- const size={width:Math.max(16,b.width*2),height:Math.max(b.kind==='workshop'?16:13,Math.ceil(beds/2)*3+7,b.height*2+3)};
+ if(!['home','lodge','workshop','store'].includes(b.kind))return reject('此等距视图目前只支持住宅、共屋、工坊与商店室内');
+ if(![b.width,b.height].every(n=>Number.isInteger(n)&&n>0)||!Number.isInteger(b.capacity)||b.capacity<0)return reject('住宅、共屋、工坊或商店布局尺寸无效');
+ const nonResidential=b.kind==='workshop'||b.kind==='store',beds=nonResidential?0:b.capacity;
+ const size={width:Math.max(16,b.width*2),height:Math.max(nonResidential?16:13,Math.ceil(beds/2)*3+7,b.height*2+3)};
  const fixedSlots=b.kind==='lodge'?5:3;
- if(!validSize(size)||beds+fixedSlots>HOME_INTERIOR_LIMITS.slots)return reject('住宅、共屋或工坊布局超过等距室内显示上限');
- if(w.industry&&!Array.isArray(w.industry.stations))return reject('住宅、共屋或工坊工位记录不可用');
- if((w.industry?.stations.filter(s=>s.buildingId===b.id).length??0)+beds+fixedSlots>HOME_INTERIOR_LIMITS.slots)return reject('住宅、共屋或工坊工位超过等距室内显示上限');
+ if(!validSize(size)||beds+fixedSlots>HOME_INTERIOR_LIMITS.slots)return reject('住宅、共屋、工坊或商店布局超过等距室内显示上限');
+ if(w.industry&&!Array.isArray(w.industry.stations))return reject('住宅、共屋、工坊或商店工位记录不可用');
+ if((w.industry?.stations.filter(s=>s.buildingId===b.id).length??0)+beds+fixedSlots>HOME_INTERIOR_LIMITS.slots)return reject('住宅、共屋、工坊或商店工位超过等距室内显示上限');
  const layout=roomLayout(w,b),keys=new Set<string>();
- if(!validSize(layout)||!inRoom(layout,layout.entry)||layout.slots.some(s=>!s||typeof s.key!=='string'||keys.has(s.key)||!keys.add(s.key)||!inRoom(layout,s.at)))return reject('住宅、共屋或工坊布局或工位坐标无效');
+ if(!validSize(layout)||!inRoom(layout,layout.entry)||layout.slots.some(s=>!s||typeof s.key!=='string'||keys.has(s.key)||!keys.add(s.key)||!inRoom(layout,s.at)))return reject('住宅、共屋、工坊或商店布局或工位坐标无效');
  return {supported:true,reason:null,layout};
 }
 function cameraInput(camera:IsometricCamera,layout:RoomLayout,width:number,height:number){
