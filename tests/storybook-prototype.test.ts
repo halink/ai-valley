@@ -1,3 +1,4 @@
+import {storybookProductionImportViolations} from './helpers/storybook-production-boundary.js';
 /** Offline synthetic contract tests, never a live model/save or browser acceptance. */
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
@@ -98,7 +99,7 @@ test('prototype graph stays opt-in and contains no transport, model, storage, si
   const source=readFileSync(new URL(`../src/client/${file}.ts`,import.meta.url),'utf8');
   assert.doesNotMatch(source,/\b(?:fetch|EventSource|WebSocket|XMLHttpRequest|submitPlan|stepWorld|setInterval|requestAnimationFrame|setTimeout|localStorage)\s*\(/);
  }
- for(const file of ['main','development-preview'])assert.doesNotMatch(readFileSync(new URL(`../src/client/${file}.ts`,import.meta.url),'utf8'),/storybook-/);
+ for(const file of ['main','development-preview'])assert.deepEqual(storybookProductionImportViolations(readFileSync(new URL(`../src/client/${file}.ts`,import.meta.url),'utf8'),file==='main'),[]);
 });
 
 test('unchanged frontier nine-resident seed maps through a bounded sample without a world-sized image or extra residents',()=>{

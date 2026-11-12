@@ -1,3 +1,4 @@
+import {forbiddenStorybookProductionModules,forbiddenStorybookProductionAssets} from './helpers/storybook-production-boundary.js';
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {build} from 'vite';
@@ -6,6 +7,10 @@ test('production loading graph keeps optional renderers out of all initial chunk
  const result=await build({configFile:false,envFile:false,base:'/ai-town/',logLevel:'silent',build:{write:false}});
  assert.ok(!Array.isArray(result));assert.ok('output' in result);
  const chunks=result.output.filter(output=>output.type==='chunk');
+ assert.deepEqual(forbiddenStorybookProductionAssets(result.output.filter(output=>output.type==='asset').map(output=>output.fileName)),[],'no development storybook worker/URL asset emitted');
+ const allModules=chunks.flatMap(chunk=>Object.keys(chunk.modules));
+ assert.deepEqual(forbiddenStorybookProductionModules(allModules),[],'no opt-in storybook renderer/animation/development module in any production chunk');
+ assert.ok(allModules.some(id=>id.endsWith('/src/client/storybook-ui-shell.ts')),'formal presentation shell remains in production');
  const entry=chunks.find(chunk=>chunk.isEntry)!;assert.ok(entry);
  const initial=new Set<string>();
  const visit=(name:string)=>{if(initial.has(name))return;initial.add(name);for(const dependency of chunks.find(c=>c.fileName===name)?.imports??[])visit(dependency);};

@@ -44,3 +44,5 @@
 - 较早扩大到档案、观察器等的回归 **190/190 通过**；其中世界运行用合成记录，不能称真实模型长期验证。日志：`output/ui-refactor-regression.log`。
 - `npm run check` 与 `git diff --check` 通过。定向集含 `client-bundle.test.ts`：Vite生产构建（`configFile:false, envFile:false`）通过，可选详情仍延迟加载。
 - 未改后端或世界模型。只确认 `.env` / `.env.local` 被忽略且追踪项只有 `.env.example`，没有读取密钥或真实存档。未 push。
+
+远端完整CI随后发现四处旧的 `storybook-` 一概禁止断言与正式UI入口冲突。已保留隔离语义并改为精确正式UI白名单，补上源码变体/URL资产及全部生产chunk检查；[修复与完整绘本回归](storybook-production-boundary.md)。此前本页定向通过不代表这四个未覆盖的旧断言已通过。

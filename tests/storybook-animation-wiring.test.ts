@@ -1,3 +1,4 @@
+import {storybookProductionImportViolations} from './helpers/storybook-production-boundary.js';
 /** Synthetic snapshot-to-texture contracts, not browser/Phaser GPU or autonomous-life acceptance. */
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
@@ -109,8 +110,8 @@ test('actual synthetic submitPlan/stepWorld route reaches pick and settles only 
   }
   assert.ok(clips.has('walk') && clips.has('pick')); assert.ok(f.world.events.some(e => e.workCompleted?.action === 'gather')); assert.notEqual(record(h).clip, 'pick'); h.dispose();
 });
-test('default views/feed remain unchanged and optional wiring creates no transport, scene/game, timers, storage or model actions', () => {
-  for (const file of ['main', 'development-preview', 'scene', 'observer-map', 'isometric-observer']) assert.doesNotMatch(readFileSync(new URL(`../src/client/${file}.ts`, import.meta.url), 'utf8'), /storybook-/);
+test('default UI permits only its presentation shell and optional wiring creates no transport, scene/game, timers, storage or model actions', () => {
+  for (const file of ['main', 'development-preview', 'scene', 'observer-map', 'isometric-observer']) assert.deepEqual(storybookProductionImportViolations(readFileSync(new URL(`../src/client/${file}.ts`, import.meta.url), 'utf8'), file === 'main'), []);
   for (const file of ['storybook-animated-observer', 'storybook-animation-phaser', 'storybook-phaser', 'storybook-render-plan']) assert.doesNotMatch(readFileSync(new URL(`../src/client/${file}.ts`, import.meta.url), 'utf8'), /\b(?:fetch|EventSource|WebSocket|XMLHttpRequest|submitPlan|stepWorld|setInterval|requestAnimationFrame|setTimeout)\s*\(|new\s+(?:Phaser\.)?(?:Game|Scene)\s*\(|localStorage|process\.env/);
 });
 test('offscreen residents do not advance limb phase or trigger redraws; returning to the window does not catch up', () => {

@@ -1,3 +1,4 @@
+import {storybookProductionImportViolations} from './helpers/storybook-production-boundary.js';
 /** Mock DOM and Phaser contracts, not actual browser layout/GPU acceptance. */
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
@@ -44,9 +45,9 @@ test('environment-only draw fault restores immediately without a Scene tick, and
     h.original.events.emit('shutdown'); assert.equal(h.tray.removed, true); assert.equal(h.feeds.size + h.rooms.size + h.follows.size + h.changes.size, 0);
   } finally {await h.cleanup();}
 });
-test('production entry only exports the existing Scene; transport ownership and default entry remain unchanged', () => {
+test('production entry permits the UI shell, exports the existing Scene and keeps sole transport ownership', () => {
   const main = readFileSync(new URL('../src/client/main.ts', import.meta.url), 'utf8');
-  assert.match(main, /export \{scene as observerScene\}/); assert.doesNotMatch(main, /from [^\n]*storybook|import\([^\n]*storybook/);
+  assert.match(main, /export \{scene as observerScene\}/); assert.deepEqual(storybookProductionImportViolations(main,true), []);
   assert.equal((main.match(/new Phaser.Game\(/g) ?? []).length, 1); assert.equal((main.match(/new EventSource\(/g) ?? []).length, 1); assert.equal((main.match(/fetch\(new URL\('world'/g) ?? []).length, 1);
   for (const name of ['storybook-development-session.ts', 'storybook-development-preview.ts', 'storybook-development-entry.ts']) {
     const text = readFileSync(new URL('../src/client/' + name, import.meta.url), 'utf8');

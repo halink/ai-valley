@@ -1,3 +1,4 @@
+import {storybookProductionImportViolations} from './helpers/storybook-production-boundary.js';
 /** CPU-only geometry contracts. Synthetic world factory only; no saved state, scene or browser. */
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
@@ -85,5 +86,5 @@ test('overlaps and depth ties are explicit and deterministic, not artwork-size b
 test('storybook geometry is not connected to either renderer or any state/transport',()=>{
  const source=readFileSync(new URL('../src/client/storybook-geometry.ts',import.meta.url),'utf8');
  assert.doesNotMatch(source,/\b(?:fetch|EventSource|WebSocket|XMLHttpRequest|localStorage|stepWorld|submitPlan)\b|from ['"]phaser|process\.env|projectedFacing/);
- for(const file of ['main.ts','scene.ts','isometric-observer.ts'])assert.doesNotMatch(readFileSync(new URL('../src/client/'+file,import.meta.url),'utf8'),/storybook-/);
+ for(const file of ['main.ts','scene.ts','isometric-observer.ts'])assert.deepEqual(storybookProductionImportViolations(readFileSync(new URL('../src/client/'+file,import.meta.url),'utf8'),file==='main.ts'),[]);
 });
