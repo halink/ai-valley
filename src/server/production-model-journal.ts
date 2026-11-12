@@ -104,15 +104,15 @@ export class ProductionModelJournal{
    if(s.pending?.id!==e.id||s.pending.phase!=='response'||!digest(e.worldFingerprint))throw new Error('production_journal_invalid');
    s.completed++;s.pending=null;s.worldFingerprint=e.worldFingerprint;
   }else if(e.type==='world_checkpoint'){
-   // Offline runtime wiring only. Ordinary ticks/start/stop must not acknowledge
+   // Both integration bridges use this ordering. Ordinary ticks/start/stop must not acknowledge
    // a response, even when they occur between response and decision adoption.
-   if(this.contract.executionKind!=='synthetic-production-candidate'||!digest(e.worldFingerprint))throw new Error('production_journal_invalid');
+   if(!digest(e.worldFingerprint))throw new Error('production_journal_invalid');
    s.worldFingerprint=e.worldFingerprint;
   }else if(e.type==='runtime_stop_started'){
-   if(this.contract.executionKind!=='synthetic-production-candidate'||!ACCEPTANCE_STOP_REASONS.includes(e.reason))throw new Error('production_journal_invalid');
+   if(!ACCEPTANCE_STOP_REASONS.includes(e.reason))throw new Error('production_journal_invalid');
    s.runtimeStop={reason:e.reason};
   }else if(e.type==='runtime_stop_finished'){
-   if(this.contract.executionKind!=='synthetic-production-candidate'||!s.runtimeStop||typeof e.failed!=='boolean'
+   if(!s.runtimeStop||typeof e.failed!=='boolean'
     ||!digest(e.worldFingerprint)||e.worldFingerprint!==s.worldFingerprint)throw new Error('production_journal_invalid');
    if(!e.failed&&(s.pending||!CLEAN_RUNTIME_STOP_REASONS.some(reason=>reason===s.runtimeStop!.reason)))throw new Error('production_journal_invalid');
    s.runtimeStop=null;if(e.failed)s.failure='runtime_control_failed';
@@ -157,15 +157,12 @@ export class ProductionModelJournal{
  response(id:number,responseHash:string,at:number){this.check(at);this.append({type:'response',id,responseHash,at});}
  acknowledgeWorldCommit(id:number,worldFingerprint:string,at:number){this.check(at);this.append({type:'world_committed',id,worldFingerprint,at});}
  checkpointWorld(worldFingerprint:string,at:number){
-  if(this.contract.executionKind!=='synthetic-production-candidate')throw new Error('production_checkpoint_offline_only');
   this.check(at);this.append({type:'world_checkpoint',worldFingerprint,at});
  }
  beginRuntimeStop(reason:AcceptanceStopReason,at:number){
-  if(this.contract.executionKind!=='synthetic-production-candidate')throw new Error('production_checkpoint_offline_only');
   this.check(at);this.append({type:'runtime_stop_started',reason,at});
  }
  finishRuntimeStop(worldFingerprint:string,failed:boolean,at:number){
-  if(this.contract.executionKind!=='synthetic-production-candidate')throw new Error('production_checkpoint_offline_only');
   this.check(at);this.append({type:'runtime_stop_finished',worldFingerprint,failed,at});
  }
  block(failure:string){if(!this.state.failure)this.append({type:'blocked',reason:reason(failure)?failure:'model_failed'});}

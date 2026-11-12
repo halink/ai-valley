@@ -84,20 +84,24 @@ const reasons=new Set(('clock_invalid model_failed model_stopped manual_stop sig
 const safeReason=(error:unknown)=>error instanceof Error&&reasons.has(error.message)?error.message:'model_failed';
 export class ProductionSiliconFlowHttpCandidate{
  private transport:TransportState;private clock:Clock;private failure:string|null;private closed=false;private lastNow:number;
- private healthy=true;private observedResponses=0;
+ private healthy=true;private observedResponses=0;private executionGuard?:()=>void;
  private active:{id:number;at:number;controller:AbortController;cancel:()=>void;timer:unknown;armed:boolean}|null=null;
- constructor(private journal:ProductionModelJournal,transport:ProductionHttpTransport,options:{clock?:Clock}={}){
+ constructor(private journal:ProductionModelJournal,transport:ProductionHttpTransport,options:{clock?:Clock;executionGuard?:()=>void}={}){
   const state=transports.get(transport);if(!state||state.claimed)throw new Error('production_transport_invalid');
   const synthetic=state.kind==='synthetic-production-http';
   if(synthetic!== (journal.contract.executionKind==='synthetic-production-candidate'))throw new Error('transport_journal_mismatch');
   if(!synthetic&&state.contractHash!==modelEvidenceHash(journal.contract))throw new Error('transport_contract_mismatch');
   if(!synthetic&&options.clock)throw new Error('live_clock_override_rejected');
+  this.executionGuard=options.executionGuard;
   state.claimed=true;this.transport=state;this.clock=options.clock??systemClock;this.lastNow=journal.status().lastObservedAtMs;
   this.failure=journal.status().failure;this.closed=!!this.failure;
  }
  private now(){const at=this.clock.now();if(!Number.isSafeInteger(at)||at<this.lastNow)throw new Error('clock_invalid');this.lastNow=at;return at;}
  private check(){
-  if(this.closed)throw new Error(this.failure??'model_stopped');const now=this.now();this.journal.check(now);
+  if(this.closed)throw new Error(this.failure??'model_stopped');
+  const guarded:unknown=this.executionGuard?.();
+  if(guarded!==undefined){if(guarded&&typeof (guarded as {then?:unknown}).then==='function')void Promise.resolve(guarded).catch(()=>{});throw new Error('model_stopped');}
+  const now=this.now();this.journal.check(now);
   if(this.transport.kind==='gated-production-http'){
    const gate=evaluateProductionHttpAdmission(this.journal.contract,this.transport.admission,now);if(!gate.allowed)throw new Error(gate.reason);
   }

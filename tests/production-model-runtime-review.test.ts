@@ -36,13 +36,18 @@ test('review: forged synthetic label is rejected before runtime mutation',t=>{
  assert.throws(()=>createProductionModelOfflineRuntime({store:f.store,journal:f.journal,transport:{kind:'synthetic-production-http'},endGameMinute:510}),/production_transport_invalid/);
  assert.equal(fingerprint(f.store.loadForRuntime()),before);assert.equal(f.journal.status().attempts,0);
 });
-test('review: checkpoint preserves exact pending response and live journal rejects it',t=>{
+test('review: checkpoint preserves exact pending response for synthetic and gated lifecycle',t=>{
  const f=fixture(t),at=Date.now(),id=f.journal.intent('a'.repeat(64),at);f.journal.response(id,'b'.repeat(64),at);
  const before=f.journal.status().pending;f.journal.checkpointWorld('c'.repeat(64),at);
  assert.deepEqual(f.journal.status().pending,before);assert.equal(f.journal.status().completed,0);
  const dir=mkdtempSync(join(testTmpdir(),'production-runtime-review-gated-')),db=new DatabaseSync(join(dir,'journal.sqlite'));
  try{const journal=new ProductionModelJournal(db,productionGatedCandidateContract({...f.contract,admissionHash:'d'.repeat(64)}),{create:true,worldFingerprint:'a'.repeat(64)});
- assert.throws(()=>journal.checkpointWorld('b'.repeat(64),at),/production_checkpoint_offline_only/);assert.equal(journal.status().auditRecords,1);
+ const id=journal.intent('b'.repeat(64),at);journal.response(id,'c'.repeat(64),at);
+ const pending=journal.status().pending;journal.checkpointWorld('e'.repeat(64),at);
+ assert.deepEqual(journal.status().pending,pending);assert.equal(journal.status().completed,0);
+ journal.beginRuntimeStop('manual_stop',at);
+ assert.throws(()=>journal.finishRuntimeStop('e'.repeat(64),false,at),/production_journal_invalid/);
+ assert.deepEqual(journal.status().pending,pending);
  }finally{db.close();rmSync(dir,{recursive:true,force:true});}
 });
 test('review: close aborts pending request and late headers cannot acknowledge it',async t=>{

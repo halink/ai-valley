@@ -14,6 +14,10 @@ export type FreePriceAssessment={model:ModelName;currency:'USD';inputPerMillion:
 export type AcceptanceEndpointSample={worldId:string;gameMinute:number;revision:number;
  residents:ReadonlyArray<Readonly<{id:string;status:World['residents'][number]['status'];health:number;hunger:number;energy:number}>>};
 export type AcceptanceStopOptions={endGameMinute:number;maxWallMs:number;maxRequests:number;
+ /** Optional earlier absolute deadline; never extends maxWallMs. */
+ deadlineMonotonicMs?:number;
+ /** Revalidate even when no actor is requesting a model. */
+ revalidatePriceOnProgress?:boolean;
  allowedModels:readonly ModelName[];assessPrice:(model:ModelName)=>FreePriceAssessment|null;
  /** Explicit official-price basis only; does NOT turn missing bills into zero. */
  unreceiptedFreePolicy?:'siliconflow-deepseek-published-zero';
@@ -57,7 +61,8 @@ export class AcceptanceStopControl {
   if(!finite(options.endGameMinute)||!Number.isSafeInteger(options.maxWallMs)||options.maxWallMs<1||options.maxWallMs>2_147_483_647
    ||!Number.isSafeInteger(options.maxRequests)||options.maxRequests<1||!options.allowedModels.length
    ||options.allowedModels.some(model=>!ACCEPTANCE_FREE_MODEL_ALLOWLIST.some(allowed=>allowed===model))
-   ||new Set(options.allowedModels).size!==options.allowedModels.length)throw new Error('invalid_acceptance_stop_options');
+   ||new Set(options.allowedModels).size!==options.allowedModels.length
+   ||options.deadlineMonotonicMs!==undefined&&!finite(options.deadlineMonotonicMs))throw new Error('invalid_acceptance_stop_options');
   if(options.unreceiptedFreePolicy!==undefined&&(options.unreceiptedFreePolicy!=='siliconflow-deepseek-published-zero'
    ||options.allowedModels.length!==1||options.allowedModels[0]!==DEEPSEEK_MODEL))throw new Error('invalid_official_free_policy');
   this.options={...options,allowedModels:[...options.allowedModels]};this.allowed=new Set(options.allowedModels);this.clock=options.clock??systemClock;
@@ -75,13 +80,13 @@ export class AcceptanceStopControl {
   let now:number;try{now=this.clock.now();}catch{now=NaN;}
   if(!finite(now)||this.lastMs!==null&&now<this.lastMs){this.elapsedMs=null;this.stop('clock_invalid');return false;}
   this.startMs??=now;this.lastMs=now;this.elapsedMs=now-this.startMs;
-  if(this.elapsedMs>=this.options.maxWallMs){this.stop('wall_limit');return false;}
+  if(this.elapsedMs>=this.options.maxWallMs||this.options.deadlineMonotonicMs!==undefined&&now>=this.options.deadlineMonotonicMs){this.stop('wall_limit');return false;}
   return this.phase==='running';
  }
  private armTimer(){
   if(this.phase!=='running')return;
   try{
-   this.timer=this.clock.setTimer(()=>{this.timerArmed=false;if(this.phase==='running'&&this.readClock())this.armTimer();},this.options.maxWallMs-this.elapsedMs!);
+   this.timer=this.clock.setTimer(()=>{this.timerArmed=false;if(this.phase==='running'&&this.readClock())this.armTimer();},Math.min(this.options.maxWallMs-this.elapsedMs!,this.options.deadlineMonotonicMs===undefined?Infinity:Math.max(0,this.options.deadlineMonotonicMs-this.lastMs!)));
    this.timerArmed=true;
   }catch{this.issues.add('timer_failed');this.stop('runtime_failed');}
  }
@@ -90,7 +95,8 @@ export class AcceptanceStopControl {
   if(!finite(gameMinute)||this.gameMinute!==null&&gameMinute<this.gameMinute){this.stop('game_time_invalid');return false;}
   this.gameMinute=gameMinute;
   if(gameMinute>this.options.endGameMinute){this.stop('endpoint_missed');return false;}
-  return this.readClock();
+  if(!this.readClock())return false;
+  return !this.options.revalidatePriceOnProgress||[...this.allowed].every(model=>this.priceAllowed(model));
  }
  /** Track a successful store commit before fallible observers can request stop.
   * This updates only the durable position, never fabricates an endpoint sample. */
