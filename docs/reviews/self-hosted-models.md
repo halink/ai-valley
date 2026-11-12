@@ -15,3 +15,9 @@ Limitations: no account-wide cross-process ownership, provider billing guarantee
 A separate audit reproduced 429 → normal close → immediate restart issuing a second request before 30 seconds. The initial implementation incorrectly treated memory-only backoff as restart-safe. The correction persists per-model observed time, deadline and capped consecutive limit count atomically with failure metrics, restores them at startup, and rejects malformed or backward-clock state. Five additional synthetic tests cover repeated real close/reopen through the 15-minute cap, both configured providers, clock rollback, and separate processes exiting cleanly or killed after 429. Actual power loss has not been tested.
 
 Independent follow-up audit: the original natural-clock reproducer changed from two requests to one across immediate restart; then-current focused regression 23/23, TypeScript and diff checks passed. An additional success-after-expiry cleanup test also passed (cooldown suite 5/5). Eight-file regression before that last added case passed 51/51.
+
+## Explicit provider declarations
+
+Primary and optional backup now require paired provider/model fields. Supported provider IDs are `siliconflow` and `dashscope`, each restricted to its existing fixed model/endpoint/key mapping. Missing declarations on old enabled configurations fail before save startup, with migration instructions rather than silently inferred routing. Paid opt-in remains separate and is not a zero-cost guarantee.
+
+Independent review of configuration, startup and cooldown suites: 15/15 synthetic tests passed, including missing/wrong/unknown providers, incomplete backup pair, correct credential selection and retained paid-model guard. No actual `.env`, keys or provider calls were used. Shared type checking also passed.

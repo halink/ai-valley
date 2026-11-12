@@ -52,7 +52,7 @@ node --env-file=.env build/server/main.js
 
 ## 自行配置主/备用模型
 
-独立 `self-hosted-main.js` 入口支持 `.env` 显式配置主/备用型号和密钥，默认禁用。详见[自托管模型配置、费用边界和未决重启](implementation/self-hosted-models.md)。此入口单并发，只有 429 可退避或使用明确备用；未知结果停表，不沿用下面历史路由的超时 fallback。正式 `main.js` 仍关闭，不受该配置启用。
+独立 `self-hosted-main.js` 入口支持 `.env` 显式配置主/备用供应商（`VALLEY_PRIMARY_PROVIDER` / `VALLEY_BACKUP_PROVIDER`）、型号和密钥，默认禁用。详见[自托管模型配置、费用边界和未决重启](implementation/self-hosted-models.md)。此入口单并发，只有 429 可退避或使用明确备用；未知结果停表，不沿用下面历史路由的超时 fallback。正式 `main.js` 仍关闭，不受该配置启用。
 
 ## 自托管
 

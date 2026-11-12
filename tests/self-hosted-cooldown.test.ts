@@ -7,7 +7,7 @@ import {startSelfHostedServer} from '../src/server/self-hosted-startup.js';
 import {GLM_MODEL,DEEPSEEK_MODEL} from '../src/server/model-completion.js';
 import {readSelfHostedCooldowns,cooldownDelay} from '../src/server/self-hosted-cooldown.js';
 const flush=()=>new Promise<void>(r=>setImmediate(r));
-function fixture(t:any){const root=mkdtempSync(join(testTmpdir(),'cooldown-'));t.after(()=>rmSync(root,{recursive:true,force:true}));return {port:0,root,database:join(root,'test.sqlite'),dayMinutes:20,env:{VALLEY_SELF_HOSTED:'enabled',VALLEY_PRIMARY_MODEL:GLM_MODEL,SILICONFLOW_API_KEY:'fake-only'}};}
+function fixture(t:any){const root=mkdtempSync(join(testTmpdir(),'cooldown-'));t.after(()=>rmSync(root,{recursive:true,force:true}));return {port:0,root,database:join(root,'test.sqlite'),dayMinutes:20,env:{VALLEY_SELF_HOSTED:'enabled',VALLEY_PRIMARY_PROVIDER:'siliconflow',VALLEY_PRIMARY_MODEL:GLM_MODEL,SILICONFLOW_API_KEY:'fake-only'}};}
 test('429 survives real close/reopen, expires normally, increases backoff across starts and caps at 15 minutes',async t=>{
  let now=Date.now();t.mock.method(Date,'now',()=>now);const options=fixture(t);let calls=0;
  const model=async()=>{calls++;throw Error('model_http_429');};
@@ -23,7 +23,7 @@ test('429 survives real close/reopen, expires normally, increases backoff across
 });
 test('primary and backup cooldowns both survive restart, then only expired provider resumes',async t=>{
  let now=Date.now();t.mock.method(Date,'now',()=>now);const options=fixture(t),calls:string[]=[];
- const settings={...options,env:{...options.env,VALLEY_BACKUP_MODEL:DEEPSEEK_MODEL},model:async(_k:string,_c:unknown,_f:unknown,model?:string)=>{calls.push(model!);now+=1000;throw Error('model_http_429');}};
+ const settings={...options,env:{...options.env,VALLEY_BACKUP_PROVIDER:'siliconflow',VALLEY_BACKUP_MODEL:DEEPSEEK_MODEL},model:async(_k:string,_c:unknown,_f:unknown,model?:string)=>{calls.push(model!);now+=1000;throw Error('model_http_429');}};
  const run=await startSelfHostedServer(settings);await flush();assert.deepEqual(calls,[GLM_MODEL,DEEPSEEK_MODEL]);
  const records=run.runtime.world.metrics.selfHostedCooldowns!;await run.close();
  const next=await startSelfHostedServer(settings);await flush();assert.equal(calls.length,2);await next.close();

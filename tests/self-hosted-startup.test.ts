@@ -5,7 +5,7 @@ import {join} from 'node:path';
 import {testTmpdir} from '../scripts/repository-temporary.mjs';
 import {startSelfHostedServer} from '../src/server/self-hosted-startup.js';
 import {DEEPSEEK_MODEL,GLM_MODEL} from '../src/server/model-completion.js';
-const env={VALLEY_SELF_HOSTED:'enabled',VALLEY_PRIMARY_MODEL:DEEPSEEK_MODEL,VALLEY_BACKUP_MODEL:GLM_MODEL,SILICONFLOW_API_KEY:'fake-only'};
+const env={VALLEY_SELF_HOSTED:'enabled',VALLEY_PRIMARY_PROVIDER:'siliconflow',VALLEY_PRIMARY_MODEL:DEEPSEEK_MODEL,VALLEY_BACKUP_PROVIDER:'siliconflow',VALLEY_BACKUP_MODEL:GLM_MODEL,SILICONFLOW_API_KEY:'fake-only'};
 const result={decision:{intention:'等待',actions:[{type:'wait' as const,minutes:15}]},inputTokens:10,outputTokens:5,latencyMs:1};
 const flush=()=>new Promise<void>(r=>setImmediate(r));
 function fixture(t:any){const root=mkdtempSync(join(testTmpdir(),'self-hosted-'));t.after(()=>rmSync(root,{recursive:true,force:true}));return {port:0,root,database:join(root,'test.sqlite'),dayMinutes:20,env};}

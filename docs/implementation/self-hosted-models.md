@@ -11,15 +11,17 @@ cp .env.example .env
 node --env-file=.env build/server/self-hosted-main.js
 ```
 
-必须显式设置 `VALLEY_SELF_HOSTED=enabled`、`VALLEY_PRIMARY_MODEL` 和对应密钥。备用模型在 `VALLEY_BACKUP_MODEL` 中显式填写；留空绝不自动添加备用。存在另一家的 key 不意味着允许使用它。配置错误在打开存档前拒绝，错误不打印配置值。
+必须显式设置 `VALLEY_SELF_HOSTED=enabled`、`VALLEY_PRIMARY_PROVIDER`、`VALLEY_PRIMARY_MODEL` 和对应密钥。备用供应商与模型须成对填写 `VALLEY_BACKUP_PROVIDER`、`VALLEY_BACKUP_MODEL`；两个都留空则不使用备用，只填一个会拒绝启动。存在另一家的 key 不意味着允许使用它。配置错误在打开存档前拒绝，错误不打印配置值。
+
+供应商只能是 `siliconflow`（中国区固定端点）或 `dashscope`（固定 Qwen 端点）。不接受自定义地址或供应商与型号错配，也不会改用另一供应商的 key。
 
 支持的固定型号与端点：
 
-| 型号 | 密钥 | 端点 |
-| --- | --- | --- |
-| `deepseek-ai/DeepSeek-R1-0528-Qwen3-8B` | `SILICONFLOW_API_KEY` | SiliconFlow CN `/v1/chat/completions` |
-| `THUDM/GLM-Z1-9B-0414` | `SILICONFLOW_API_KEY` | 同上 |
-| `qwen3.8-flash` | `DASHSCOPE_API_KEY` | `https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1/chat/completions` |
+| 型号 | 供应商 | 密钥 | 端点 |
+| --- | --- | --- | --- |
+| `deepseek-ai/DeepSeek-R1-0528-Qwen3-8B` | `siliconflow` | `SILICONFLOW_API_KEY` | SiliconFlow CN `/v1/chat/completions` |
+| `THUDM/GLM-Z1-9B-0414` | `siliconflow` | `SILICONFLOW_API_KEY` | 同上 |
+| `qwen3.8-flash` | `dashscope` | `DASHSCOPE_API_KEY` | `https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1/chat/completions` |
 
 Qwen 另需 `VALLEY_ALLOW_PAID_MODELS=yes`，不能默认为免费。**SiliconFlow 型号名称、空余额、配置中的声明都不能证明当前免费。** 启动前自行检查官方当日价格、账号免费资格及历史未决用量。服务没有供应商侧零费用保证或自动价格认证，不把 token 上限当费用上限。若只能接受零费用，请仅配置当日已核实免费的型号；免费资格或价格变化时停止服务。不会自动选择未配置的付费替代。
 
@@ -44,3 +46,18 @@ Qwen 另需 `VALLEY_ALLOW_PAID_MODELS=yes`，不能默认为免费。**SiliconFl
 冷却记录与请求失败结果在同一 SQLite 事务中提交，存档使用 WAL 与 `synchronous=FULL`。正常关闭和重启不能清除未到期冷却；断电/异常终止仍由保守会话标记阻塞，不能通过换进程自动重试。实际 SIGKILL 已合成验证，未做真实断电/硬件故障验证。
 
 启动时发现冷却记录畸形、时间早于已记录的限流时刻会拒绝；运行中检测墙钟倒退会停表并保留标记。跨进程到期恢复依赖部署机器正确的墙钟，不能认证 NTP 或识别停机期间向前跳时；请维持系统时间准确，不通过修改时间绕过供应商限流。冷却状态是本存档/型号级，不是跨数据库或跨机器账号配额。
+
+## 从旧配置迁移到显式供应商
+
+旧的已启用配置不会自动猜测供应商。缺少声明将报 `self_hosted_primary_provider_required` 或 `self_hosted_backup_provider_required`，在打开存档和调用模型前拒绝。直接编辑现有 `.env` 增加字段，不要用模板覆盖已保存密钥。例如只配置 SiliconFlow 主模型：
+
+```dotenv
+VALLEY_SELF_HOSTED=enabled
+VALLEY_PRIMARY_PROVIDER=siliconflow
+VALLEY_PRIMARY_MODEL=deepseek-ai/DeepSeek-R1-0528-Qwen3-8B
+VALLEY_BACKUP_PROVIDER=
+VALLEY_BACKUP_MODEL=
+VALLEY_ALLOW_PAID_MODELS=no
+```
+
+需要备用时，明确填写供应商与其支持的另一个型号。仅允许免费调用时，不启用付费开关，并在运行前核实所选 SiliconFlow 型号当前免费资格；`VALLEY_ALLOW_PAID_MODELS=no` 仅禁止已知需另行启用的 Qwen 路径，不是供应商零费用硬上限。
