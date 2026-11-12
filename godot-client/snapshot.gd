@@ -5,6 +5,9 @@ extends RefCounted
 static func validate(value: Variant) -> String:
 	if not value is Dictionary or not value.get("world") is Dictionary:
 		return "Missing world"
+	if value.has("mvp"):
+		if not value.mvp is Dictionary or value.mvp.get("driver") not in ["local-rules", "model", "disabled"] or not value.mvp.get("ephemeral") is bool:
+			return "Invalid MVP mode"
 	var world: Dictionary = value.world
 	if not world.get("id") is String or not world.get("revision") is float and not world.get("revision") is int:
 		return "Invalid world identity"
@@ -93,3 +96,14 @@ static func valid_position(at: Variant) -> bool:
 		if not (at.get(axis) is float or at.get(axis) is int) or not is_finite(at[axis]):
 			return false
 	return true
+
+static func mode_label(snapshot: Dictionary) -> String:
+	var mode = snapshot.get("mvp")
+	if not mode is Dictionary:
+		return "Observer API · decision source not verified by this client"
+	var label := "MODEL DISABLED · no rule fallback"
+	if mode.driver == "local-rules":
+		label = "RULE-DRIVEN SYNTHETIC MVP · no LLM"
+	elif mode.driver == "model":
+		label = "MODEL-CONFIGURED MVP · provider responses are not an acceptance result"
+	return label + (" · no persistent save" if mode.ephemeral else " · persistent world")

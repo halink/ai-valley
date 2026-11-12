@@ -2,7 +2,7 @@
 
 用户最新方向是先做最小可行性版本，再不断加功能、扩大地图，不做移动端。见[版本路线](../docs/godot-migration.md)。已有静态观察器是技术基线；本次增量开始构建生活闭环，不以搬齐旧版功能为目标。
 
-## 当前范围与运行
+## 规则工程版：范围与运行
 
 32×24 地图、两位居民、一处共屋、四个有限果丛、一处泉。服务端用**本地规则**选择动作，既有动作引擎负责真实寻路、采集、进食、睡眠和结算。不是大模型自主行为，不能作为 AI 版本验收。水源目前只是可见场景资源，尚未加入喝水循环。场景使用既有引擎 `validation` 模式，睡眠以走到共屋门口后进入 `inside` 的简化表示执行，并非正式房间/床位系统，也不证明室内功能完成。
 
@@ -21,13 +21,42 @@ godot --path godot-client
 
 旧静态预览仍可使用 `node --import tsx src/server/preview-main.ts`，在客户端改为端口 `3413`。现有正式服务和浏览器入口均未改动。
 
+## 新增：可保存/恢复的模型接线版
+
+这是同一小地图的第二个独立启动入口，不再使用本地规则驱动。复用既有 SQLite 存档、进程所有权锁、模型调度与主备配置。**模型默认禁用且停表，没有规则回退**；没有模型也可以打开、保存并重启检查同一世界。
+
+```sh
+# 安全启动：即使外部环境有其他配置，也显式禁用模型
+VALLEY_SELF_HOSTED=disabled node --import tsx src/server/godot-mvp-persistent-main.ts
+```
+
+Godot 地址改为 `http://127.0.0.1:3415`。默认专用存档为 `runtime/godot-mvp/world.sqlite`。Ctrl+C 正常退出后用同命令再启动，世界 ID、资源、居民和未完成行动从该存档恢复；不会把离线时间自动补算为已发生的行为。不要把 `VALLEY_MVP_DB` 指向旧正式世界：非 MVP 世界会被拒绝，不会迁移/覆盖成小地图。备份应在服务干净关闭后复制专用保存目录，不手工删数据库或旁路安全标记。
+
+当前服务端复用的进程锁只支持 **Linux 本地文件系统**。这不代表 macOS/Windows 服务端已经支持；原生 Godot 客户端的其他桌面平台同样尚未实测。网络共享盘不支持。不要为绕过锁改用不受支持的文件系统。
+
+模型接线采用既有环境变量：
+
+- `VALLEY_SELF_HOSTED=enabled`：用户显式开启模型；不设置或 disabled 不会调用。
+- `VALLEY_PRIMARY_PROVIDER` / `VALLEY_PRIMARY_MODEL`：必须显式匹配。
+- `VALLEY_BACKUP_PROVIDER` / `VALLEY_BACKUP_MODEL`：可选，必须成对；不配置就不会隐式选择其他模型。
+- 对应供应商 key 仍只在服务端环境；沿用已有配置解析器的供应商/模型白名单与付费开关。配置不是免费额度或价格证明。
+- `VALLEY_MVP_DB` / `VALLEY_MVP_PORT`：本入口专用，默认如上；`VALLEY_DAY_MINUTES` 默认20，范围20–1440。
+
+入口不自动读取 `.env`。用户准备好后可用 Node 的 `--env-file=.env` 显式加载自己已有配置并开启模型；这一步可能产生供应商调用和费用，本轮开发**没有执行**。不要把真实 key 写进命令、文档、测试或 Godot 项目。开启后界面仅标“MODEL-CONFIGURED”，不声称真实模型效果已验收。
+
+429 会使用已配置的主备调度与持久冷却；未知响应、请求中断保留未决标记并阻止再次启动，避免重发不明请求。即使改为 disabled 也不清除此保护。遇到 `godot_mvp_unresolved_session` 时先核对请求和存档状态，不靠删标记重试。该保守恢复流程目前还需要人工核实，没有自动修复按钮。数据库关闭失败时保留所有权，可重试关闭；数据库已确认关闭后，标记清理失败不会泄漏锁，但仍保留/恢复保护标记，不把失败当干净退出。
+
+这一版保存路径和模型协议链路使用假模型/假HTTP完成测试；还缺真实模型短程验收、原生桌面交互和最终绘本样板，不能据此宣称自主 AI MVP 完成。
+
 ## 有界验证
 
 ```sh
-node --import tsx --test tests/godot-mvp.test.ts
+node --import tsx --test tests/godot-mvp.test.ts tests/godot-mvp-persistent.test.ts
 godot --headless --path godot-client --script tests/test_snapshot.gd
 # 上面的 MVP 服务运行期间
 godot --headless --path godot-client --script tests/test_mvp.gd
+# 端口3415的模型禁用持久版运行期间
+godot --headless --path godot-client --script tests/test_persistent.gd
 # 如运行旧隔离静态预览（端口3413），可继续测其协议回归
 godot --headless --path godot-client --script tests/test_http.gd
 godot --headless --path godot-client --quit-after 3
@@ -36,7 +65,8 @@ godot --headless --path godot-client --quit-after 3
 本工作环境通过 `XDG_CONFIG_HOME`、`XDG_DATA_HOME`、`XDG_CACHE_HOME` 指向可写临时目录，避免编辑器设置目录权限错误。这些目录不提交。
 
 已验证的工程证据：
-- TypeScript 5 项测试：独立小世界、600 世界分钟有界循环、真实移动/采集/消耗食物/睡眠恢复/重复决策、故障停表、HTTP 拒绝写入。
+- 规则版 TypeScript 5 项测试：独立小世界、600 世界分钟有界循环、真实移动/采集/消耗食物/睡眠恢复/重复决策、故障停表、HTTP 拒绝写入。
+- 持久版 TypeScript 13 项测试：重启恢复、假模型计划持久、429主备/冷却、未决阻断/迟到响应、错库拒绝/并发锁、错误配置拒绝、动作中途路径/剩余工作恢复、关闭失败重试与标记保护；mock HTTP → 既有callModel解析 → 真实采集结算。没有真实模型网络请求。
 - Godot headless 通过真实 HTTP 服务接收连续修订的 32×24 小世界，验证两位居民、规则模式标识及选择详情。
 - 快照验证、坏响应保旧、地址冻结、旧修订拒绝、世界更换、重连清详情、缩放命中、拖动释放/失焦等基础回归。
 
@@ -45,12 +75,12 @@ godot --headless --path godot-client --quit-after 3
 ## 当前缺口
 
 - 无原生窗口/GPU交互验收；当前环境没有可用 DISPLAY 或 xvfb-run，不擅自安装。headless 不证明看起来正确。
-- 无模型接入及保存恢复，不能将当前规则工程版称作自主 AI MVP 完成。
+- 模型与保存已接线并做合成验证，尚无真实模型效果验收；规则工程版和持久接线版不能冒充自主 AI MVP 完成。
 - 视觉仅几何样板，无完整共屋立面/遮挡、室内场景或最终绘本角色；已有 UI 仍是工程界面，不是正式绘本界面。
 - 尚无导出模板/分发包；未安装模板。桌面是当前目标，移动端不在计划内，Web 不是 MVP 前置要求。
 - 全快照轮询尚未优化；当前小世界无需先迁所有旧面板或完整事件增量协议。
 
-下一步先验收这个小循环的桌面可观察性，再接最小决策/保存边界；不先扩地图或功能清单掩盖已有问题。
+下一步验收这个小循环的桌面可观察性、最小决策/保存边界的实际使用；不先扩地图或功能清单掩盖已有问题。
 
 ## 可追溯的审查记录
 

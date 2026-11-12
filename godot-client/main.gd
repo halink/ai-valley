@@ -129,7 +129,7 @@ func _received(result: int, code: int, _headers: PackedStringArray, body: Packed
 		first = false
 	var paused: bool = world.get("clock", {}).get("paused", false)
 	status.text = "Connected · revision %s · %s · full snapshot polling (2s), no SSE yet" % [world.revision, "PAUSED" if paused else "server clock running"]
-	mode_label.text = "RULE-DRIVEN SYNTHETIC MVP · no LLM · no persistent save" if parsed.has("mvp") else "Observer API · decision source not verified by this client"
+	mode_label.text = Snapshot.mode_label(parsed)
 	if paused:
 		mode_label.text += " · reason: " + str(world.clock.get("reason", "unknown"))
 	var lines: Array[String] = []

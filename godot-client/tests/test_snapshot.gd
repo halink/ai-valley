@@ -3,6 +3,8 @@ const Snapshot = preload("res://snapshot.gd")
 func _initialize() -> void:
 	var good := {"world": {"id": "synthetic", "revision": 1, "clock": {"paused": true}, "map": {"width": 2, "height": 1, "tiles": ["grass", "water"]}, "residents": [{"id": "p", "at": {"x": 0, "y": 0}, "status": "alive"}]}}
 	assert(Snapshot.validate(good) == "")
+	assert(Snapshot.validate({"world": good.world, "mvp": {"driver": "unknown", "ephemeral": false}}) != "")
+	assert(Snapshot.validate({"world": good.world, "mvp": {"driver": "disabled", "ephemeral": false}}) == "")
 	assert(Snapshot.validate({"world": {"id": "synthetic", "revision": 2}}) != "")
 	assert(Snapshot.validate(null) != "")
 	assert(Snapshot.project({"x": 1, "y": 1}) == Vector2(0, 16))
@@ -39,5 +41,9 @@ func _initialize() -> void:
 	assert(Snapshot.validate(good) != "")
 	assert(Snapshot.activity_label({"activity": {"path": [{"x": 1, "y": 1}], "action": {"type": "gather"}}}) == "travelling")
 	assert(Snapshot.activity_label({"activity": {"path": [], "action": {"type": "gather"}}}) == "on-site: gather")
+	assert(Snapshot.mode_label({"mvp": {"driver": "disabled", "ephemeral": false}}).contains("MODEL DISABLED"))
+	assert(Snapshot.mode_label({"mvp": {"driver": "model", "ephemeral": false}}).contains("MODEL-CONFIGURED"))
+	assert(Snapshot.mode_label({"mvp": {"driver": "local-rules", "ephemeral": true}}).contains("no LLM"))
+	assert(not Snapshot.mode_label({"mvp": {"driver": "model", "ephemeral": false}}).contains("no persistent save"))
 	print("PASS: snapshot validation, projection, indoor visibility")
 	quit()
