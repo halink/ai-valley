@@ -33,6 +33,12 @@ export function recordWildlifeExit(w:World,b:WildBeast,reason:'deaths'|'tamed'){
  w.frontierHazards.wildlifePopulation!.species[b.species][reason]++;
 }
 
+/** A bank supplies water only through an actual adjacent safe water tile. */
+export function safeWildlifeBank(w:World,shore:Vec):boolean {
+ return !threatened(w,shore)&&neighbors(shore).some(at=>at.x>=0&&at.y>=0&&at.x<w.map.width&&at.y<w.map.height&&
+  w.map.tiles[at.y*w.map.width+at.x]==='water'&&!threatened(w,at));
+}
+
 /** Existing food and drinking places must be physically reachable, not merely in the same species record. */
 export function localWildlifeHabitat(w:World,b:WildBeast){
  const s=w.frontierHazards!,patch=s.foodPatches.find(p=>p.id==='habitat:'+b.species);
@@ -40,8 +46,7 @@ export function localWildlifeHabitat(w:World,b:WildBeast){
  const spring=w.resources.some(r=>r.kind==='spring'&&r.amount>=1&&r.floodDamage?.clearedAt!==null&&
   distance(b.at,r.at)<=70&&route(w,b.at,r.at,80)!==null);
  const shore=s.shore;
- const bank=!!shore&&distance(b.at,shore)<=65&&neighbors(shore).some(at=>at.x>=0&&at.y>=0&&at.x<w.map.width&&at.y<w.map.height&&
-  w.map.tiles[at.y*w.map.width+at.x]==='water'&&!threatened(w,at))&&route(w,b.at,shore,80)!==null;
+ const bank=!!shore&&distance(b.at,shore)<=65&&safeWildlifeBank(w,shore)&&route(w,b.at,shore,80)!==null;
  return {food,watered:spring||bank};
 }
 const capable=(w:World,b:WildBeast)=>living(b)&&!b.disease&&b.health>=75&&b.hunger<53&&(b.thirst??0)<65&&w.minute-b.bornAt>=28*DAY;

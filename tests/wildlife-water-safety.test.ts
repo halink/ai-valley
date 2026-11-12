@@ -3,6 +3,9 @@ import {test} from 'node:test';
 import type {FrontierDisaster,WildBeast} from '../src/shared/frontier-hazards.js';
 import {disasterContains} from '../src/shared/frontier-hazards.js';
 import {createFrontierWorld} from '../src/world/formal-seed.js';
+import {stepWorld} from '../src/world/engine.js';
+import {mkdirSync,mkdtempSync,rmSync} from 'node:fs';
+import {join} from 'node:path';
 import {advanceWildlife} from '../src/world/frontier-wildlife.js';
 import {distance,walkable} from '../src/world/navigation.js';
 import {WorldStore} from '../src/server/store.js';
@@ -113,4 +116,42 @@ test('SQLite water-route continuation revalidates danger and matches uninterrupt
 
 for(const kind of ['boar','wolf','deer','hare','fox','duck'] as const)test(`${kind} retains ordinary safe spring use`,()=>{
  const f=fixture(kind);f.spring.at={x:6,y:10};advance(f.w);assert.equal(f.spring.amount,2);assert.ok(f.beast.thirst!<25);
+});
+
+for(const kind of ['flashFlood','windstorm'] as const)test(`safe ground beside active ${kind} water cannot supply a drink`,()=>{
+ const f=fixture();f.w.resources=[];f.s.shore={x:6,y:10};const water={x:7,y:10};f.w.map.tiles[water.y*32+water.x]='water';
+ f.s.disasters=[danger(water,kind)];advance(f.w);
+ assert.ok(f.beast.thirst!>70);assert.notEqual(f.beast.activity?.kind,'drink');
+});
+
+test('a bank with another safe water contact still supplies one ordinary drink',()=>{
+ const f=fixture();f.w.resources=[];f.s.shore={x:6,y:10};f.w.map.tiles[10*32+7]='water';f.w.map.tiles[9*32+6]='water';
+ f.s.disasters=[danger({x:7,y:10},'flashFlood')];advance(f.w);
+ assert.equal(f.beast.activity?.kind,'drink');assert.ok(Math.abs(f.beast.thirst!-(70+1/82-46))<1e-9);
+});
+
+test('a dry shore address is not an inexhaustible water source',()=>{
+ const f=fixture();f.w.resources=[];f.s.shore={x:6,y:10};advance(f.w);
+ assert.ok(f.beast.thirst!>70);assert.notEqual(f.beast.activity?.kind,'drink');
+});
+
+
+test('world steps and a closed SQLite restart keep unsafe water unavailable until the flood ends',()=>{
+ const f=fixture();f.w.clock.paused=false;f.w.resources=[];f.s.shore={x:6,y:10};
+ f.w.map.tiles[10*32+7]='water';f.s.disasters=[danger({x:7,y:10},'flashFlood')];f.s.nextDisasterAt=1e12;
+ stepWorld(f.w,1);assert.ok(f.beast.thirst!>70);
+ mkdirSync('output',{recursive:true});
+ const dir=mkdtempSync('output/wildlife-bank-'),file=join(dir,'fixture.sqlite');
+ let store=new WorldStore(file);
+ try{
+  store.commit(f.w,null);store.close();store=new WorldStore(file);
+  const loaded=store.loadForRuntime()!,control=structuredClone(f.w);
+  for(const w of [control,loaded]){
+   w.frontierHazards!.disasters[0].phase='ended';
+   for(let i=0;i<16;i++)stepWorld(w,1);
+   assert.ok(w.frontierHazards!.beasts[0].thirst!<30,'the same real bank works once water is safe');
+  }
+  assert.deepEqual(loaded.frontierHazards,control.frontierHazards);
+  assert.equal(loaded.metrics.requests,0);
+ }finally{store.close();rmSync(dir,{recursive:true,force:true});}
 });

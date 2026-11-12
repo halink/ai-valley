@@ -1,4 +1,4 @@
-import {initializeWildlifePopulation,recordWildlifeExit,reviewWildlifePopulation} from './wildlife-population.js';
+import {initializeWildlifePopulation,recordWildlifeExit,reviewWildlifePopulation,safeWildlifeBank} from './wildlife-population.js';
 import {disasterContains} from '../shared/frontier-hazards.js';
 import {fishNames} from '../shared/fishing-rules.js';
 import {beastNames,type FrontierHazardState,type WildBeast,type WildFoodPatch} from '../shared/frontier-hazards.js';
@@ -293,7 +293,7 @@ function seekWater(w:World,state:FrontierHazardState,beast:WildBeast):boolean {
  if((beast.thirst??0)<56)return false;
  const danger=(at:Vec)=>state.disasters.some(d=>d.phase==='active'&&disasterContains(d,at));
  const springs=w.resources.filter(r=>r.kind==='spring'&&r.floodDamage?.clearedAt!==null&&r.amount>=1&&distance(beast.at,r.at)<=70&&!danger(r.at));
- const nearBank=state.shore&&distance(beast.at,state.shore)<=65&&!danger(state.shore)?state.shore:null;
+ const nearBank=state.shore&&distance(beast.at,state.shore)<=65&&safeWildlifeBank(w,state.shore)?state.shore:null;
  const sources=[...springs.map(spring=>({at:spring.at,spring})),...(nearBank?[{at:nearBank,spring:undefined}]:[])]
   .sort((a,b)=>distance(beast.at,a.at)-distance(beast.at,b.at));
  for(const source of sources){
