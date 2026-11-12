@@ -1,10 +1,11 @@
 /** Read-only observer controller sharing original outdoor and room identities. */
 import type {Snapshot,World,Vec} from '../shared/types.js';
+import type {ObserverViewArea} from './observer-view-area.js';
 import {calendar,daylight,daylightLabels} from '../world/time.js';
 import {residentFollowTarget,residentRoomPositionKnown} from './resident-follow.js';
 import type {FollowTarget} from './resident-follow.js';
 import {pickIsometricStudy,type StudySubject} from './isometric-study.js';
-import {screenToIsometric,type IsometricCamera} from './isometric-projection.js';
+import {screenToIsometric,projectIsometric,type IsometricCamera} from './isometric-projection.js';
 import {IsometricViewport,fitWorldCamera,constrainWorldCamera,zoomWorldCamera,type IsometricViewportScene} from './isometric-viewport.js';
 import {IsometricHomeInterior,homeInteriorSupport,fitRoomCamera,constrainRoomCamera,zoomRoomCamera,type IsometricHomeInteriorScene} from './isometric-interior.js';
 export {fitWorldCamera,constrainWorldCamera,zoomWorldCamera};
@@ -29,6 +30,33 @@ export class IsometricPreview {
  private describeRoom(){const b=this.snapshot?.world.buildings.find(b=>b.id===this.roomId);this.roomName=this.roomId?(b?.name??this.roomId):'';this.roomKind=b?({home:'住宅',lodge:'共屋',workshop:'工坊',store:'商店',clinic:'诊所',school:'学校',barn:'畜舍'}[b.kind as 'home'|'lodge'|'workshop'|'store'|'clinic'|'school'|'barn']??'建筑'):'';}
  private size={width:0,height:0};
  private active=false;
+ private viewArea:ObserverViewArea|null=null;
+ private frameAnchor:Vec|null=null;
+ private frameOffset:Vec={x:0,y:0};
+ get viewOccluded(){return !!this.viewArea&&(this.viewArea.width===0||this.viewArea.height===0);}
+ private get viewCenter():Vec {
+  const a=this.viewArea;
+  return a?{x:(a.x+a.width/2)*this.size.width/a.frameWidth,y:(a.y+a.height/2)*this.size.height/a.frameHeight}:{x:this.size.width/2,y:this.size.height/2};
+ }
+ /** Layout coordinates only. This never changes a room, selected identity or follow state. */
+ setViewArea(area:ObserverViewArea|null){
+  this.viewArea=area&&[area.x,area.y,area.width,area.height,area.frameWidth,area.frameHeight].every(Number.isFinite)&&area.width>=0&&area.height>=0&&area.frameWidth>0&&area.frameHeight>0&&area.x>=0&&area.y>=0&&area.x+area.width<=area.frameWidth&&area.y+area.height<=area.frameHeight?{...area}:null;
+ }
+ /** Reframe only a verified resident in the space already being observed. */
+ frameResident(id:string):boolean {
+  if(this.viewOccluded)return false;
+  const w=this.snapshot?.world,r=w?.residents.find(r=>r.id===id);
+  if(!w||!r||r.status!=='alive'||r.residency==='outside'||r.regionalLocation)return false;
+  if(!this.roomId){
+   this.viewport.accept(this.snapshot!);const target=this.viewport.residentTarget(id);
+   if(!target?.anchor||target.reason)return false;
+   this.viewport.prioritize('resident:'+id);return this.center({x:target.anchor.x+.5,y:target.anchor.y+.5});
+  }
+  const target=residentFollowTarget(w,id);
+  if('reason'in target||target.roomId!==this.roomId||!residentRoomPositionKnown(w,r)||!r.roomAt)return false;
+  return this.center({x:r.roomAt.x+.5,y:r.roomAt.y+.5});
+ }
+
  private connected=false;
  private visible=true;
  private previous:number|null=null;
@@ -43,10 +71,10 @@ export class IsometricPreview {
  /** Change only the viewing space. Original scene routes own room entry and follow. */
  setRoom(id:string|null):string|null {
   const reason=this.roomReason(id);if(reason)return reason;if(id===this.roomId)return null;
-  const saved={roomId:this.roomId,roomName:this.roomName,roomKind:this.roomKind,camera:this.camera,outdoorCamera:this.outdoorCamera,scene:this.scene};
+  const saved={frameOffset:this.frameOffset,frameAnchor:this.frameAnchor,roomId:this.roomId,roomName:this.roomName,roomKind:this.roomKind,camera:this.camera,outdoorCamera:this.outdoorCamera,scene:this.scene};
   try{
    if(!this.roomId)this.outdoorCamera=this.camera;
-   this.roomId=id;this.describeRoom();
+   this.roomId=id;this.frameAnchor=null;this.describeRoom();
    if(this.snapshot&&this.size.width>0&&this.size.height>0){
     this.camera=id?fitRoomCamera(this.layout!,null,this.size.width,this.size.height):this.outdoorCamera?constrainWorldCamera(this.outdoorCamera,this.snapshot.world,this.size.width,this.size.height):fitWorldCamera(this.snapshot.world,previewHome(this.snapshot.world),this.size.width,this.size.height);
     if(this.active)this.rebuild();else this.scene=null;
@@ -58,39 +86,47 @@ export class IsometricPreview {
   if(snapshot===this.snapshot||this.snapshot?.world.id===snapshot.world.id&&snapshot.world.revision<this.snapshot.world.revision)return false;
   const w=snapshot.world;
   if(!Number.isInteger(w.map.width)||!Number.isInteger(w.map.height)||w.map.width<1||w.map.height<1)throw new Error('observer_map_dimensions');
-  const saved={snapshot:this.snapshot,scene:this.scene,camera:this.camera,roomId:this.roomId,roomName:this.roomName,roomKind:this.roomKind,outdoorCamera:this.outdoorCamera,elapsed:this.elapsed,previous:this.previous,lastFrame:this.lastFrame};
+  const saved={frameOffset:this.frameOffset,frameAnchor:this.frameAnchor,snapshot:this.snapshot,scene:this.scene,camera:this.camera,roomId:this.roomId,roomName:this.roomName,roomKind:this.roomKind,outdoorCamera:this.outdoorCamera,elapsed:this.elapsed,previous:this.previous,lastFrame:this.lastFrame};
   try{
    const changed=this.snapshot?.world.id!==w.id;
    if(changed||this.snapshot?.world.clock.paused!==w.clock.paused)this.previous=null;
    this.snapshot=snapshot;if(this.roomId)this.describeRoom();
-   if(changed){this.roomId=null;this.roomName='';this.roomKind='';this.outdoorCamera=null;this.elapsed=0;this.lastFrame=0;if(this.camera)this.camera=fitWorldCamera(w,previewHome(w),this.size.width,this.size.height);}
+   if(changed){this.roomId=null;this.frameAnchor=null;this.roomName='';this.roomKind='';this.outdoorCamera=null;this.elapsed=0;this.lastFrame=0;if(this.camera)this.camera=fitWorldCamera(w,previewHome(w),this.size.width,this.size.height);}
    if(this.active&&this.camera)this.rebuild();else this.scene=null;
    return changed;
   }catch(error){Object.assign(this,saved);throw error;}
  }
- resize(width:number,height:number){
-  if(!this.snapshot)return;
-  const center=this.camera?screenToIsometric({x:this.size.width/2,y:this.size.height/2},this.camera):null,layout=this.layout;
+ resize(width:number,height:number,preserveManualCenter=false){
+  if(!this.snapshot||this.viewOccluded)return;
+  if(preserveManualCenter&&this.camera&&width===this.size.width&&height===this.size.height)return;
+  const center=this.camera?screenToIsometric(preserveManualCenter?{x:this.size.width/2,y:this.size.height/2}:this.viewCenter,this.camera):null,layout=this.layout;
+  if(preserveManualCenter)this.frameAnchor=null;
   // The saved outdoor camera is re-centered in the new viewport independently of room coordinates.
   if(this.roomId&&this.outdoorCamera){const at=screenToIsometric({x:this.size.width/2,y:this.size.height/2},this.outdoorCamera);if(at)this.outdoorCamera=fitWorldCamera(this.snapshot.world,at,width,height,this.outdoorCamera.zoom);}
   this.size={width,height};
   this.camera=layout?fitRoomCamera(layout,center,width,height,this.camera?.zoom):fitWorldCamera(this.snapshot.world,center??previewHome(this.snapshot.world),width,height,this.camera?.zoom??1);
-  if(this.active)this.rebuild();
+  if(center&&!preserveManualCenter)this.center(center);else if(this.active)this.rebuild();
  }
  rebuild(){
-  if(!this.snapshot||!this.camera)return;
-  if(this.roomId){this.interior.accept(this.snapshot,this.roomId);this.scene=this.interior.render(this.camera,this.size.width,this.size.height,this.elapsed);}
-  else {this.viewport.accept(this.snapshot);this.scene=this.viewport.render(this.camera,this.size.width,this.size.height,this.elapsed);}
+  if(!this.snapshot||!this.camera||this.viewOccluded)return;
+  if(this.roomId){this.interior.accept(this.snapshot,this.roomId);this.scene=this.interior.render(this.camera,this.size.width,this.size.height,this.elapsed,this.frameAnchor?this.frameOffset:{x:0,y:0});}
+  else {this.viewport.accept(this.snapshot);this.scene=this.viewport.render(this.camera,this.size.width,this.size.height,this.elapsed,this.frameAnchor?this.frameOffset:{x:0,y:0});}
   this.camera=this.scene.displayCamera;
+
  }
  moveCamera(camera:IsometricCamera){
-  if(!this.snapshot)return;const layout=this.layout;
+  if(!this.snapshot)return;this.frameAnchor=null;const layout=this.layout;
   this.camera=layout?constrainRoomCamera(camera,layout,this.size.width,this.size.height):constrainWorldCamera(camera,this.snapshot.world,this.size.width,this.size.height);this.rebuild();
  }
  center(at:Vec){
+  if(this.viewOccluded)return false;
   if(!this.snapshot||!this.camera||!finite(at))return false;
   const layout=this.layout,bounds=layout??this.snapshot.world.map;if(at.x<0||at.y<0||at.x>=bounds.width||at.y>=bounds.height)return false;
-  this.camera=layout?fitRoomCamera(layout,at,this.size.width,this.size.height,this.camera.zoom):fitWorldCamera(this.snapshot.world,at,this.size.width,this.size.height,this.camera.zoom);this.rebuild();return true;
+  this.camera=layout?fitRoomCamera(layout,at,this.size.width,this.size.height,this.camera.zoom):fitWorldCamera(this.snapshot.world,at,this.size.width,this.size.height,this.camera.zoom);
+  this.frameAnchor=this.viewArea?{...at}:null;
+  this.frameOffset={x:this.viewCenter.x-this.size.width/2,y:this.viewCenter.y-this.size.height/2};
+  if(this.frameAnchor){const p=projectIsometric(at),target=this.viewCenter;this.camera={...this.camera,origin:{x:target.x-p.x*this.camera.zoom,y:target.y-p.y*this.camera.zoom}};}
+  this.rebuild();return true;
  }
  zoom(delta:number,anchor:Vec){if(this.snapshot&&this.camera){const layout=this.layout;this.moveCamera(layout?zoomRoomCamera(this.camera,layout,this.size.width,this.size.height,anchor,delta):zoomWorldCamera(this.camera,this.snapshot.world,this.size.width,this.size.height,anchor,delta));}}
  home(){if(this.snapshot){this.setRoom(null);this.center(previewHome(this.snapshot.world));}}
@@ -105,6 +141,7 @@ export class IsometricPreview {
   return null;
  }
  followResident(id:string):string|null {
+  if(this.viewOccluded)return null;
   const w=this.snapshot?.world;if(!w)return '尚无世界记录';
   const r=w.residents.find(r=>r.id===id);
   if(!r||r.status!=='alive'||r.residency==='outside')return '该居民不在可观察范围';
@@ -144,9 +181,10 @@ export class IsometricPreview {
   this.setRoom(null);if(!this.center({x:at.x+.5,y:at.y+.5}))return false;
   return !!this.scene?.objects.some(o=>o.subject.kind===resolved&&o.subject.id===id&&!o.subject.placeholder);
  }
- get centerPoint(){return this.camera?screenToIsometric({x:this.size.width/2,y:this.size.height/2},this.camera):null;}
+ get centerPoint(){return this.camera?screenToIsometric(this.viewCenter,this.camera):null;}
  get centerTile(){return this.roomId?null:this.centerPoint;}
  tick(now:number){
+  if(this.viewOccluded)return false;
   if(!Number.isFinite(now))return false;
   const prior=this.previous;this.previous=now;
   if(!this.active||!this.visible||!this.connected||!this.snapshot||!this.scene||this.snapshot.world.clock.paused||prior===null)return false;

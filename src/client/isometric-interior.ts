@@ -46,11 +46,12 @@ function minZoom(layout:RoomLayout,width:number,height:number){
  if(layout.width<=VIEWPORT_LIMITS.cells&&layout.height<=VIEWPORT_LIMITS.cells)return Math.max(width,height)/HOME_INTERIOR_LIMITS.sourceAxis;
  return (width/32+height/16)/(VIEWPORT_LIMITS.cells-2-VIEWPORT_LIMITS.halo*2*(1/32+1/16));
 }
-export function constrainRoomCamera(camera:IsometricCamera,layout:RoomLayout,width:number,height:number):IsometricCamera {
+export function constrainRoomCamera(camera:IsometricCamera,layout:RoomLayout,width:number,height:number,offset:Vec={x:0,y:0}):IsometricCamera {
  cameraInput(camera,layout,width,height);const zoom=Math.max(minZoom(layout,width,height),Math.min(8,camera.zoom));
- const center=unprojectIsometric({x:(width/2-camera.origin.x)/camera.zoom,y:(height/2-camera.origin.y)/camera.zoom});
+ if(![offset.x,offset.y].every(Number.isFinite)||Math.abs(offset.x)>width/2||Math.abs(offset.y)>height/2)throw new Error('isometric_ui_offset');
+ const center=unprojectIsometric({x:(width/2-camera.origin.x+offset.x)/camera.zoom,y:(height/2-camera.origin.y+offset.y)/camera.zoom});
  const p=projectIsometric({x:clamp(center.x,0,layout.width),y:clamp(center.y,0,layout.height)});
- return {zoom,origin:{x:width/2-p.x*zoom,y:height/2-p.y*zoom}};
+ return {zoom,origin:{x:width/2-p.x*zoom+offset.x,y:height/2-p.y*zoom+offset.y}};
 }
 /** Null centres the actual room. An omitted zoom fits it, subject to bounded rendering. */
 export function fitRoomCamera(layout:RoomLayout,at:Vec|null,width:number,height:number,zoom?:number):IsometricCamera {
@@ -63,8 +64,8 @@ export function zoomRoomCamera(camera:IsometricCamera,layout:RoomLayout,width:nu
  const zoom=Math.max(minZoom(layout,width,height),Math.min(8,camera.zoom+delta));
  return constrainRoomCamera({zoom,origin:{x:anchor.x-(anchor.x-camera.origin.x)*zoom/camera.zoom,y:anchor.y-(anchor.y-camera.origin.y)*zoom/camera.zoom}},layout,width,height);
 }
-export function visibleRoomBounds(camera:IsometricCamera,layout:RoomLayout,width:number,height:number):Footprint {
- const c=constrainRoomCamera(camera,layout,width,height),h=VIEWPORT_LIMITS.halo;
+export function visibleRoomBounds(camera:IsometricCamera,layout:RoomLayout,width:number,height:number,offset:Vec={x:0,y:0}):Footprint {
+ const c=constrainRoomCamera(camera,layout,width,height,offset),h=VIEWPORT_LIMITS.halo;
  const points=[[-h,-h],[width/c.zoom+h,-h],[-h,height/c.zoom+h],[width/c.zoom+h,height/c.zoom+h]].map(([x,y])=>unprojectIsometric({x:x-c.origin.x/c.zoom,y:y-c.origin.y/c.zoom}));
  const x=clamp(Math.floor(Math.min(...points.map(p=>p.x))),0,layout.width),y=clamp(Math.floor(Math.min(...points.map(p=>p.y))),0,layout.height);
  return {x,y,width:clamp(Math.ceil(Math.max(...points.map(p=>p.x))),0,layout.width)-x,height:clamp(Math.ceil(Math.max(...points.map(p=>p.y))),0,layout.height)-y};
@@ -218,9 +219,9 @@ export class IsometricHomeInterior {
   while(this.chunks.size>VIEWPORT_LIMITS.chunks||count>VIEWPORT_LIMITS.chunkMarks){const first=this.chunks.keys().next().value!;count-=this.chunks.get(first)!.marks.length;this.chunks.delete(first);}
   return c;
  }
- render(camera:IsometricCamera,width:number,height:number,elapsed=0):IsometricHomeInteriorScene {
+ render(camera:IsometricCamera,width:number,height:number,elapsed=0,offset:Vec={x:0,y:0}):IsometricHomeInteriorScene {
   if(!this.layout||!this.world||!this.roomId)throw new Error('isometric_interior_empty');
-  const displayCamera=constrainRoomCamera(camera,this.layout,width,height),bounds=visibleRoomBounds(displayCamera,this.layout,width,height);
+  const displayCamera=constrainRoomCamera(camera,this.layout,width,height,offset),bounds=visibleRoomBounds(displayCamera,this.layout,width,height,offset);
   const origin={x:Math.ceil(displayCamera.origin.x/displayCamera.zoom),y:Math.ceil(displayCamera.origin.y/displayCamera.zoom)},sourceWidth=Math.ceil(width/displayCamera.zoom)+2,sourceHeight=Math.ceil(height/displayCamera.zoom)+2;
   const visible=(m:PixelMark)=>m.x+m.width>-origin.x&&m.x<sourceWidth-origin.x&&m.y+m.height>-origin.y&&m.y<sourceHeight-origin.y;
   const terrain:PixelMark[]=[],ids=new Set<string>(),s=VIEWPORT_LIMITS.chunkSize;

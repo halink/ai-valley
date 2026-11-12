@@ -73,16 +73,16 @@ test('missing snapshots, unknown positions and interrupted mount never fabricate
   } finally {h.cleanup();}
 });
 
-test('exact dev opt-in and unchanged formal entry keep one existing world GET/SSE', async () => {
+test('legacy dev URL and default formal UI keep one existing world GET/SSE', async () => {
   const {observerDevelopmentScripts} = await import(new URL('../scripts/dev-observer-web.mjs', import.meta.url).href);
   for (const query of ['', '?storybook-ui', '?storybook-ui=0', '?storybook-ui=true', '?storybook-ui=1&storybook-ui=0', '?storybook-ui=1&storybook-ui=1', '#storybook-ui=1']) assert.equal(observerDevelopmentScripts('/ai-town/' + query).length, 1, query);
   assert.equal(observerDevelopmentScripts('/ai-town/?storybook-ui=1').length, 2);
   assert.equal(observerDevelopmentScripts('/ai-town/?storybook=1&storybook-ui=1').length, 3);
   const h = storybookUIHarness(); try {
     const main = await clientMainHarness(h.snapshot, async () => ({})); assert.equal(main.worldRequests, 1); assert.equal(main.eventSources, 1);
-    assert.doesNotMatch(read('src/client/main.ts'), /storybook-ui/);
+    assert.match(read('src/client/main.ts'), /mountStorybookUIShell\(observerMap,\{mode:'live'\}\)/);
     for (const file of ['src/client/storybook-ui-shell.ts', 'src/client/storybook-ui-entry.ts']) assert.doesNotMatch(read(file), /\b(?:fetch|EventSource|WebSocket|setInterval|requestAnimationFrame|submitPlan|stepWorld)\s*\(|localStorage/);
-    assert.match(read('src/client/storybook-ui-entry.ts'), /import\.meta\.env\.DEV/);
+    assert.doesNotMatch(read('src/client/storybook-ui-entry.ts'), /mountStorybookUIShell|hot\.dispose/);
   } finally {h.cleanup();}
 });
 

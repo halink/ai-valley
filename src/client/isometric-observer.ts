@@ -33,6 +33,7 @@ const staticCanvas=document.createElement('canvas'),frameCanvas=document.createE
 const details=tray.querySelector<HTMLElement>('.preview-details')!,notice=tray.querySelector<HTMLElement>('.preview-notice')!,hitText=tray.querySelector<HTMLElement>('.preview-hit')!,switchButton=tray.querySelector<HTMLButtonElement>('[data-view="iso"]')!,resetButton=tray.querySelector<HTMLButtonElement>('[data-reset]')!;
 resetButton.disabled=true;
 let active=false,timer:number|undefined,staticKey:unknown=null,geometry='';
+let selectedResident:string|null=null,manualView=false;
 let drag:{id:number;start:Vec;origin:Vec;moved:boolean}|null=null;
 cleanup.push(()=>restore2D());
 function cancelDrag(){const id=drag?.id;drag=null;if(id!==undefined&&canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);}
@@ -53,7 +54,14 @@ function paint(){
  const follow=observerMap.currentFollow();if(follow)hitText.textContent=residentFollowText(follow);
 }
 function resize(){
- cancelDrag();const rect=canvas.getBoundingClientRect();canvas.width=Math.max(1,Math.min(2560,Math.round(rect.width)));canvas.height=Math.max(1,Math.min(1600,Math.round(rect.height)));model.resize(canvas.width,canvas.height);paint();
+ if(model.viewOccluded)return;
+ cancelDrag();const rect=canvas.getBoundingClientRect();canvas.width=Math.max(1,Math.min(2560,Math.round(rect.width)));canvas.height=Math.max(1,Math.min(1600,Math.round(rect.height)));model.resize(canvas.width,canvas.height,manualView||(!selectedResident&&observerMap.currentFollow()?.status!=='following'));reframeSelection();paint();
+}
+function reframeSelection(){
+ if(model.viewOccluded)return;
+ const follow=observerMap.currentFollow();
+ if(follow?.status==='following')model.followResident(follow.personId);
+ else if(selectedResident&&!manualView)model.frameResident(selectedResident);
 }
 function restore2D(message=''){
  const wasActive=active;active=false;model.setActive(false);
@@ -75,41 +83,44 @@ function setActive(value:boolean,message=''){
  observerMap.setFollowResolver((world,id)=>{try{return model.observerFollowTarget(world,id);}catch{return null;}});
  canvas.hidden=false;details.hidden=false;resetButton.disabled=false;document.getElementById('canvas')!.classList.toggle('covered-by-preview',true);document.querySelector('.map-hint')?.classList.toggle('covered-by-preview',true);observerMap.cover(true);
  tray.querySelectorAll<HTMLButtonElement>('[data-view]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.view==='iso')));notice.hidden=!message;notice.textContent=message;
- model.setRoom(observerMap.currentRoom());resize();if(!observerMap.currentRoom()&&!observerMap.currentFollow())model.center(observerMap.currentTile());syncFollow();if(!active)return;paint();timer=window.setInterval(()=>safely(()=>{if(model.tick(performance.now()))paint();}),PREVIEW_FRAME_MS);
+ model.setRoom(observerMap.currentRoom());resize();if(!observerMap.currentRoom()&&!observerMap.currentFollow())model.center(observerMap.currentTile());reframeSelection();syncFollow();if(!active)return;paint();timer=window.setInterval(()=>safely(()=>{if(model.tick(performance.now()))paint();}),PREVIEW_FRAME_MS);
 }
 function safely(action:()=>void){if(disposed)return;try{action();}catch(error){console.warn('Optional isometric observer stopped',error);restore2D('等距观察暂不可用，已恢复原2D。下一有效快照可重试。');switchButton.disabled=true;}}
 function syncFollow(){
- if(!active)return;const priorRoom=model.roomId,reason=model.setRoom(observerMap.currentRoom());if(reason){setActive(false,reason+'，已恢复原2D房间。');return;}if(priorRoom!==model.roomId)cancelDrag();const state=observerMap.currentFollow();
- if(state?.status==='following'){const reason=model.followResident(state.personId);if(reason){setActive(false,`${reason}，已返回2D继续观察同一居民。`);return;}}
+ if(!active||model.viewOccluded)return;const priorRoom=model.roomId,reason=model.setRoom(observerMap.currentRoom());if(reason){setActive(false,reason+'，已恢复原2D房间。');return;}if(priorRoom!==model.roomId)cancelDrag();const state=observerMap.currentFollow();
+ if(state?.status==='following'){manualView=false;const reason=model.followResident(state.personId);if(reason){setActive(false,`${reason}，已返回2D继续观察同一居民。`);return;}}
  paint();
 }
 const point=(event:PointerEvent|WheelEvent):Vec=>{const rect=canvas.getBoundingClientRect();return {x:(event.clientX-rect.left)*canvas.width/Math.max(1,rect.width),y:(event.clientY-rect.top)*canvas.height/Math.max(1,rect.height)};};
 listen(canvas,'pointerdown',event=>safely(()=>{if(!active||!model.camera||event.button!==0||!event.isPrimary||drag)return;drag={id:event.pointerId,start:point(event),origin:{...model.camera.origin},moved:false};canvas.setPointerCapture(event.pointerId);canvas.focus({preventScroll:true});}));
 listen(canvas,'pointermove',event=>safely(()=>{
  if(!active||!drag||event.pointerId!==drag.id||!model.camera)return;const at=point(event),dx=at.x-drag.start.x,dy=at.y-drag.start.y;if(Math.hypot(dx,dy)>6)drag.moved=true;
- if(drag.moved){observerMap.stopFollowing();model.moveCamera({...model.camera,origin:{x:drag.origin.x+dx,y:drag.origin.y+dy}});paint();}
+ if(drag.moved){manualView=true;observerMap.stopFollowing();model.moveCamera({...model.camera,origin:{x:drag.origin.x+dx,y:drag.origin.y+dy}});paint();}
 }));
 listen(canvas,'pointerup',event=>safely(()=>{
- if(!drag||event.pointerId!==drag.id)return;const moved=drag.moved;cancelDrag();if(moved)return;const hit=model.pick(point(event));observerMap.select(previewSelection(hit));hitText.textContent=model.snapshot?previewHitLabel(model.snapshot.world,hit):'等待快照';
+ if(!drag||event.pointerId!==drag.id)return;const moved=drag.moved;cancelDrag();if(moved)return;const hit=model.pick(point(event));manualView=false;const selection=previewSelection(hit);selectedResident=selection?.kind==='person'?selection.id:null;observerMap.select(selection);reframeSelection();paint();hitText.textContent=model.snapshot?previewHitLabel(model.snapshot.world,hit):'等待快照';
 }));
 listen(canvas,'pointercancel',cancelDrag);listen(canvas,'lostpointercapture',()=>{drag=null;});
-function zoom(delta:number,anchor={x:canvas.width/2,y:canvas.height/2}){cancelDrag();model.zoom(delta,anchor);paint();}
+function zoom(delta:number,anchor={x:canvas.width/2,y:canvas.height/2}){cancelDrag();model.zoom(delta,anchor);reframeSelection();paint();}
 listen(canvas,'wheel',event=>{event.preventDefault();safely(()=>zoom(event.deltaY>0?-.25:.25,point(event)));},{passive:false});
 listen(canvas,'keydown',event=>safely(()=>{
  if(!active||!model.camera)return;const offsets:Record<string,Vec>={ArrowLeft:{x:24,y:0},ArrowRight:{x:-24,y:0},ArrowUp:{x:0,y:24},ArrowDown:{x:0,y:-24}},move=offsets[event.key];
- if(move){event.preventDefault();observerMap.stopFollowing();model.moveCamera({...model.camera,origin:{x:model.camera.origin.x+move.x,y:model.camera.origin.y+move.y}});paint();}
+ if(move){event.preventDefault();manualView=true;observerMap.stopFollowing();model.moveCamera({...model.camera,origin:{x:model.camera.origin.x+move.x,y:model.camera.origin.y+move.y}});paint();}
  if(event.key==='+'||event.key==='='){event.preventDefault();zoom(.25);}if(event.key==='-'){event.preventDefault();zoom(-.25);}
 }));
-function resetHome(){observerMap.stopFollowing();if(model.snapshot)observerMap.frame(previewHome(model.snapshot.world));model.home();paint();}
+function resetHome(){manualView=true;observerMap.stopFollowing();if(model.snapshot)observerMap.frame(previewHome(model.snapshot.world));model.home();paint();}
 listen(tray,'click',event=>safely(()=>{const b=(event.target as Element).closest<HTMLButtonElement>('button');if(!b)return;if(b.dataset.view)setActive(b.dataset.view==='iso');else if(b.hasAttribute('data-reset')&&active)resetHome();}));
 const capture=(event:MouseEvent)=>safely(()=>{
  if(!active||!(event.target instanceof Element))return;
- if(observerMap.isFullMapTarget(event.target)){setActive(false,'全图定位仍使用原2D。');return;}
+ if(observerMap.isFullMapTarget(event.target)){manualView=true;setActive(false,'全图定位仍使用原2D。');return;}
  const b=event.target.closest<HTMLElement>('[data-action],[data-panel],[data-follow],[data-enter],[data-locate],[data-tile],[data-region],[data-project],[data-animal-map]');if(!b)return;cancelDrag();
+ // Explicit observation navigation wins over a still-open resident card.
+ // Main routes retain authority over follow/selection/room changes.
+ if(['enter','locate','tile','region','project','animalMap'].some(key=>b.dataset[key]!==undefined)||b.dataset.panel==='atlas'||['home','exitroom','trade-station','stopfollow','closeselection'].includes(b.dataset.action??''))manualView=true;
  if(b.dataset.enter!==undefined){const reason=model.roomReason(b.dataset.enter);if(reason)setActive(false,reason+'，室内入口已切回原2D。');return;}
  const action=b.dataset.action;
  if(action==='home'||action==='zoomin'||action==='zoomout'){event.preventDefault();event.stopImmediatePropagation();if(action==='home'){resetHome();}else zoom(action==='zoomin'?.25:-.25);return;}
- if(b.dataset.follow){const reason=model.followResident(b.dataset.follow);if(reason)setActive(false,`${reason}，已返回2D。`);return;}
+ if(b.dataset.follow){manualView=false;const reason=model.followResident(b.dataset.follow);if(reason)setActive(false,`${reason}，已返回2D。`);return;}
  if(b.dataset.locate){if(!model.locateBuilding(b.dataset.locate))setActive(false,'该建筑尚未支持，已返回2D。');return;}
  if(b.dataset.tile){const [x,y]=b.dataset.tile.split(',').map(Number);model.setRoom(null);if(!model.center({x,y}))setActive(false,'该位置暂不可绘制，已返回2D。');return;}
  if(b.dataset.animalMap!==undefined){if(!model.locateEcology(b.dataset.animalMap))setActive(false,'该动物的位置或姿态尚未支持，已返回2D。');return;}
@@ -120,6 +131,10 @@ const afterRoute=(event:MouseEvent)=>safely(()=>{if(!active||!(event.target inst
 listen(document,'click',capture,true);listen(document,'click',afterRoute);
 const escape=(event:KeyboardEvent)=>{if(active&&event.key==='Escape'){event.preventDefault();event.stopImmediatePropagation();setActive(false);tray.querySelector<HTMLButtonElement>('[data-view="2d"]')!.focus();}};listen(document,'keydown',escape,true);
 const visibility=()=>model.setVisible(!document.hidden);listen(document,'visibilitychange',visibility);visibility();
+if(observerMap.subscribeViewArea)cleanup.push(observerMap.subscribeViewArea((area,id)=>safely(()=>{
+ if(id!==selectedResident)manualView=false;selectedResident=id;model.setViewArea(area);
+ if(active&&!model.viewOccluded){resize();syncFollow();reframeSelection();paint();}
+})));
 const onResize=()=>safely(()=>{if(active)resize();});listen(window,'resize',onResize);
 if(!context){notice.hidden=false;notice.textContent='当前设备不支持2.5D画布，继续使用原2D。';}
 cleanup.push(observerMap.subscribe((snapshot,connected)=>safely(()=>{model.setConnected(connected);if(!snapshot)return;model.accept(snapshot);switchButton.disabled=!context;if(active)syncFollow();})));

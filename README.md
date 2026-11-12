@@ -25,6 +25,10 @@
 
 [室内外连续跟随](docs/implementation/resident-follow.md)、[有限儿童照护](docs/implementation/emergency-child-care.md)、[财产代管](docs/implementation/protected-custody.md)及[本地公共储备采购](docs/implementation/public-food-reserves.md)已有实现，各自保留同意、权限、实物和失败边界；不代表连续照护或全村供给已获保障。
 
+## 观察界面
+
+默认入口已采用[绘本式UI](docs/implementation/storybook-ui-shell.md)：桌面六项导航、右侧对象卡与按需档案；手机底栏、更多入口和可展开阅读抽屉。保留原跟随、室内、全图与所有档案功能，无需开发参数。地图与头像仍沿用现有资产，UI改版不代表手绘地图或2.5D美术已完成；浏览器视觉与触控验收边界见实现文档。
+
 ## 快速开始
 
 需要 Node.js **22.13 或更新版本**。本地开发与测试以 Node 22 为基准。

@@ -60,3 +60,7 @@ The [first supply-only water stage (Chinese)](docs/implementation/safe-water-sup
 The [game design guide (Chinese)](docs/design/README.md) documents the opening world, ecology, generations, economy, construction, and observer experience. The [survival forecast benchmark (Chinese)](docs/implementation/survival-performance.md) documents the controlled nine-resident performance results and their limits; end-to-end service latency and large-population worst cases remain unverified.
 
 Original project source and documentation use the [MIT license](LICENSE). See the [third-party notices](public/THIRD_PARTY_NOTICES.txt) and [art credits](docs/art.md) for separate credits and terms.
+
+## Observer interface
+
+The default entry uses the [storybook UI](docs/implementation/storybook-ui-shell.md): six desktop destinations, an object card, on-demand records, and mobile navigation with expandable drawers. Existing follow, room, atlas and archive actions remain available without a development query parameter. Map and portrait assets are unchanged. UI integration does not mean the hand-painted map or 2.5D art is complete; actual browser, touch and accessibility acceptance remains outstanding.

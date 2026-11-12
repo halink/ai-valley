@@ -19,6 +19,8 @@ import {calendar,daylight,daylightLabels,knownAgeYears,YEAR} from '../world/time
 import {ValleyScene} from './scene.js';
 import {ObserverNavigation} from './observer-navigation.js';
 import './styles.css';
+import './storybook-ui-shell.css';
+import {mountStorybookUIShell} from './storybook-ui-shell.js';
 import './isometric-observer.css';
 import {mountIsometricObserver} from './isometric-observer.js';
 import {createObserverMap,type ObserverSelection} from './observer-map.js';
@@ -55,10 +57,10 @@ app.innerHTML=`
  <div class="map-controls" aria-label="镜头控制"><button data-action="home" title="回到村落" aria-label="回到村落">${icon('focus')}</button><button class="hidden" id="atlas-shortcut" data-panel="atlas" aria-label="查看全图" title="山谷全图">${icon('atlas')}</button><span></span><button data-action="zoomout" aria-label="缩小地图">${icon('minus')}</button><button data-action="zoomin" aria-label="放大地图">${icon('plus')}</button></div>
  <p class="map-hint">拖动漫游 · 滚轮缩放 · 点击地图对象查看状态</p>
  <nav class="dock" aria-label="观察入口">
-  ${[['people','people','居民'],['relations','network','关系'],['conversations','chat','交谈'],['places','house','场所'],['wild','leaf','野外'],['chronicle','book','年表']].map(([p,i,n])=>`<button data-panel="${p}" aria-label="查看${n}"${p==='wild'?' id="wild-shortcut" class="hidden"':''}>${icon(i)}<span>${n}</span></button>`).join('')}
+  ${[['people','people','居民'],['relations','network','关系'],['conversations','chat','交谈'],['places','house','场所'],['wild','leaf','野外'],['chronicle','book','年表']].map(([p,i,n])=>`<button data-panel="${p}" aria-controls="panel" aria-label="查看${n}"${p==='wild'?' id="wild-shortcut" class="hidden"':''}>${icon(i)}<span>${n}</span></button>`).join('')}
  </nav>
  <div class="observer-note"><span></span>居民自主决定，你只需观看</div>
- <section class="panel hidden" id="panel" aria-modal="false" aria-labelledby="panel-title"><div class="panel-header"><div><span class="eyebrow" id="panel-kicker"></span><h2 id="panel-title"></h2></div><button class="icon-button" data-action="closepanel" aria-label="关闭面板">${icon('close')}</button></div><div id="panel-tools" class="panel-tools hidden"></div><div class="panel-body" id="panel-body"></div></section>
+ <section class="panel hidden" id="panel" aria-labelledby="panel-title"><div class="panel-header"><div><span class="eyebrow" id="panel-kicker"></span><h2 id="panel-title"></h2></div><button class="icon-button" data-action="closepanel" aria-label="关闭面板">${icon('close')}</button></div><div id="panel-tools" class="panel-tools hidden"></div><div class="panel-body" id="panel-body"></div></section>
 `;
 const navigation=new ObserverNavigation();
 const scene=new ValleyScene(navigation);
@@ -73,6 +75,7 @@ export const observerMap=createObserverMap({
  currentSnapshot(){return snapshot;},
  subscribe(listener){mapListeners.add(listener);try{listener(snapshot,connected);}catch(error){mapListeners.delete(listener);throw error;}return ()=>{mapListeners.delete(listener);};},
 },navigation,{
+ setViewArea(area,id){scene.setObservationArea(area,id);},
  currentTile(){return scene.cameraTile();},
  stopFollowing(){scene.stopFollowing();},
  setFollowResolver(resolver){scene.setObserverFollowResolver(resolver);},
@@ -325,7 +328,7 @@ document.addEventListener('click',e=>{
  if(button.dataset.project){const p=snapshot?.world.construction?.projects.find(p=>p.id===button.dataset.project);if(p){scene.watchTile({x:p.at.x+p.width/2,y:p.at.y+p.height/2});selection={kind:'project',id:p.id};closePanel();renderSelection();}return;}
  if(button.dataset.locate){scene.focusBuilding(button.dataset.locate);selection={kind:'building',id:button.dataset.locate};closePanel();renderSelection();return;}
  if(button.dataset.enter){scene.enterRoom(button.dataset.enter);closePanel();selection=null;renderSelection();return;}
- switch(button.dataset.action){case'retry-panels':void panelRenderers.request(true);renderPanel();break;case'stopfollow':scene.stopFollowing();renderSelection();break;case'trade-station':if(snapshot?.world.foreignTrade){scene.watchTile(snapshot.world.foreignTrade.station);closePanel();}break;case'home':scene.home();break;case'zoomin':scene.zoom(.25);break;case'zoomout':scene.zoom(-.25);break;case'closepanel':closePanel();break;case'closeselection':selection=null;scene.clearSelection();renderSelection();break;case'exitroom':scene.exitRoom();break;}
+ switch(button.dataset.action){case'retry-panels':void panelRenderers.request(true);renderPanel();break;case'stopfollow':scene.stopFollowing(true);renderSelection();break;case'trade-station':if(snapshot?.world.foreignTrade){scene.watchTile(snapshot.world.foreignTrade.station);closePanel();}break;case'home':scene.home();break;case'zoomin':scene.zoom(.25);break;case'zoomout':scene.zoom(-.25);break;case'closepanel':closePanel();break;case'closeselection':selection=null;scene.clearSelection();renderSelection();break;case'exitroom':scene.exitRoom();break;}
 });
 document.addEventListener('submit',e=>{
  const form=(e.target as Element).closest<HTMLFormElement>('form[data-history-filters]');if(!form)return;e.preventDefault();if(document.activeElement instanceof HTMLElement)document.activeElement.blur();
@@ -370,3 +373,6 @@ async function connect(){
 void connect();
 // Optional presentation must never prevent the original client from connecting.
 try{mountIsometricObserver(observerMap);}catch(error){console.warn('Optional isometric observer unavailable; original 2D retained',error);}
+
+// Default observer UI, shared by formal and preview worlds. No second connection.
+try{mountStorybookUIShell(observerMap,{mode:'live'});}catch(error){console.warn('Observer layout unavailable; original controls retained',error);}

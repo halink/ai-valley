@@ -54,7 +54,7 @@ test('review: shell injection stays serve-only and requires the exact opt-in ind
     assert.ok(sources(query).every((src: string) => !src.endsWith('/storybook-ui-entry.ts')));
   }
   assert.equal(sources('?storybook-ui=1').filter((src: string) => src.endsWith('/storybook-ui-entry.ts')).length, 1);
-  assert.doesNotMatch(read('src/client/main.ts'), /storybook-ui/);
-  assert.match(read('src/client/storybook-ui-entry.ts'), /import\s*\{observerMap\}\s*from '\.\/main\.js'/);
-  assert.match(read('src/client/storybook-ui-entry.ts'), /import\.meta\.env\.DEV/);
+  assert.match(read('src/client/main.ts'), /mountStorybookUIShell\(observerMap,\{mode:'live'\}\)/);
+  assert.match(read('src/client/storybook-ui-entry.ts'), /import '\.\/main\.js'/);
+  assert.doesNotMatch(read('src/client/storybook-ui-entry.ts'), /mountStorybookUIShell|hot\.dispose/);
 });

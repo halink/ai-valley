@@ -1,3 +1,4 @@
+import * as observerViewArea from '../../src/client/observer-view-area.js';
 import {readFileSync} from 'node:fs';
 import ts from 'typescript';
 import {residentRoomPositionKnown,roomPositionKnown} from '../../src/client/resident-follow.js';
@@ -53,6 +54,7 @@ class Outdoors {
  accept(){}setVisible(){}draw(){}subjectAt(){return null;}subjectPosition(){return null;}
 }
 const dependencies:Record<string,unknown>={
+ './observer-view-area.js':observerViewArea,
  phaser:{Scene,Math:{Clamp:(n:number,min:number,max:number)=>Math.max(min,Math.min(max,n))}},
  './observer-navigation.js':{ObserverNavigation},'./resident-follow.js':{residentRoomPositionKnown,roomPositionKnown},'./person-pose.js':personPoses,'./work-feedback.js':{WorkFeedback},'./rooms-art.js':{roomHeat},
  './estate-custody.js':{estatePiles},'../shared/rooms.js':{roomLayout},'../world/education.js':{teachingPosition},

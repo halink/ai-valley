@@ -1,3 +1,4 @@
+import {observerCameraCenter,type ObserverViewArea} from './observer-view-area.js';
 import {residentRoomPositionKnown,roomPositionKnown,type ResidentFollowState,type ResidentFollowResolver} from './resident-follow.js';
 import {ObserverNavigation} from './observer-navigation.js';
 import type {ObserverSelection} from './observer-map.js';
@@ -39,6 +40,41 @@ export class ValleyScene extends Phaser.Scene {
  private snapActors=false;
  private selected:SceneSelection=null;
  private drag:{x:number;y:number;camX:number;camY:number;moved:boolean}|null=null;
+ private observationArea:ObserverViewArea|null=null;
+ private observationResident:string|null=null;
+ private manuallyPanned=false;
+ setObservationArea(area:ObserverViewArea|null,residentId:string|null){
+  if(this.observationResident!==residentId)this.manuallyPanned=false;
+  const wasMobile=!!this.observationArea;
+  this.observationResident=residentId;this.observationArea=area?{...area}:null;
+  if(this.ready)this.observationBounds();
+  if(area||wasMobile)this.reframeObservation();
+ }
+ private observationBounds(){
+  if(this.roomId||!this.snapshot)return;
+  const c=this.cameras.main,w=this.snapshot.world;
+  // Presentation-only margin makes edge residents visible without changing map cells.
+  const px=this.observationArea?c.width/c.zoom:0,py=this.observationArea?c.height/c.zoom:0;
+  c.setBounds(-px,-py,w.map.width*16+px*2,w.map.height*16+py*2);
+ }
+ private fitObservedRoom(width:number,height:number){
+  const area=this.observationArea;
+  if(area&&(area.width<=0||area.height<=0))return;
+  this.cameras.main.setZoom(Math.max(.25,Math.min(3.3,((area?.width??this.scale.width)-30)/width,((area?.height??this.scale.height)-(area?30:200))/height)));
+  this.centerObserved(width/2,height/2);
+ }
+ private centerObserved(x:number,y:number){if(this.observationArea&&(this.observationArea.width<=0||this.observationArea.height<=0))return;this.observationBounds();const camera=this.cameras.main;const center=observerCameraCenter({x,y},this.observationArea,camera.zoom);camera.centerOn(center.x,center.y);}
+ private reframeObservation(){
+  if(!this.ready||this.navigation.followResolver||this.observationArea&&(this.observationArea.width<=0||this.observationArea.height<=0))return;
+  if(this.navigation.followState?.status==='following'){this.centerFollow(true);return;}
+  if(this.manuallyPanned||!this.observationResident||!this.snapshot)return;
+  const resident=this.snapshot.world.residents.find(r=>r.id===this.observationResident);
+  if(!resident||resident.regionalLocation||resident.status==='dead'||resident.residency==='outside'||(resident.inside??null)!==this.roomId)return;
+  if(this.roomId&&!residentRoomPositionKnown(this.snapshot.world,resident))return;
+  if(!this.roomId&&(!Number.isFinite(resident.at.x)||!Number.isFinite(resident.at.y)||resident.at.x<0||resident.at.y<0||resident.at.x>=this.snapshot.world.map.width||resident.at.y>=this.snapshot.world.map.height))return;
+  const sprite=this.actors.get(resident.id);
+  if(sprite?.visible&&Number.isFinite(sprite.x)&&Number.isFinite(sprite.y))this.centerObserved(sprite.x,sprite.y);
+ }
  private ready=false;
  private animationClock=0;
  private animationLastTime:number|null=null;
@@ -51,7 +87,7 @@ export class ValleyScene extends Phaser.Scene {
  onCamera:(zoom:number)=>void=()=>{};
  onFollow:(state:ResidentFollowState|null)=>void=()=>{};
  get followState(){return this.navigation.followState;}
- stopFollowing(){this.navigation.clearFollowing();this.notifyFollow();}
+ stopFollowing(manual=false){if(manual)this.manuallyPanned=true;this.navigation.clearFollowing();this.notifyFollow();}
  /** A covered observer owns its camera; removing it immediately revalidates ordinary 2D following. */
  setObserverFollowResolver(resolver:ResidentFollowResolver|null){
   this.navigation.setFollowResolver(resolver);
@@ -71,17 +107,19 @@ export class ValleyScene extends Phaser.Scene {
   this.input.addPointer(1);
   this.input.on('pointerdown',(p:Phaser.Input.Pointer)=>{this.drag={x:p.x,y:p.y,camX:this.cameras.main.scrollX,camY:this.cameras.main.scrollY,moved:false};});
   this.input.on('pointermove',(p:Phaser.Input.Pointer)=>{
-   if(this.drag&&p.isDown){const dx=p.x-this.drag.x,dy=p.y-this.drag.y;if(Math.hypot(dx,dy)>6){this.drag.moved=true;this.stopFollowing();this.cameras.main.scrollX=this.drag.camX-dx/this.cameras.main.zoom;this.cameras.main.scrollY=this.drag.camY-dy/this.cameras.main.zoom;}}
+   if(this.drag&&p.isDown){const dx=p.x-this.drag.x,dy=p.y-this.drag.y;if(Math.hypot(dx,dy)>6){this.drag.moved=true;this.manuallyPanned=true;this.stopFollowing();this.cameras.main.scrollX=this.drag.camX-dx/this.cameras.main.zoom;this.cameras.main.scrollY=this.drag.camY-dy/this.cameras.main.zoom;}}
    if(!p.isDown)this.hover(p.worldX,p.worldY);
   });
   this.input.on('pointerup',(p:Phaser.Input.Pointer)=>{
-   if(this.drag&&!this.drag.moved)this.pick(p.worldX,p.worldY);this.drag=null;
+   if(this.drag&&!this.drag.moved){this.manuallyPanned=false;this.pick(p.worldX,p.worldY);if(this.selected?.kind==='person'&&this.selected.id===this.observationResident)this.reframeObservation();}this.drag=null;
   });
   this.input.on('wheel',(_p:unknown,_o:unknown,_dx:number,dy:number)=>this.zoom(dy>0?-.15:.15));
   this.scale.on('resize',(size:Phaser.Structs.Size,_base:Phaser.Structs.Size,_display:Phaser.Structs.Size,previousWidth:number,previousHeight:number)=>{
    const camera=this.cameras.main;
-   if(this.roomId){const b=this.snapshot?.world.buildings.find(b=>b.id===this.roomId),l=b&&this.snapshot?.world.rooms?roomLayout(this.snapshot.world,b):null;const width=l?l.width*16:256,height=l?l.height*16:208;camera.setZoom(Math.max(.25,Math.min(3.3,(size.width-30)/width,(size.height-200)/height))).centerOn(width/2,height/2);return;}
+   if(this.manuallyPanned){if(previousWidth&&previousHeight)camera.centerOn(camera.scrollX+previousWidth/2,camera.scrollY+previousHeight/2);return;}
+   if(this.roomId){const b=this.snapshot?.world.buildings.find(b=>b.id===this.roomId),l=b&&this.snapshot?.world.rooms?roomLayout(this.snapshot.world,b):null;const width=l?l.width*16:256,height=l?l.height*16:208;this.fitObservedRoom(width,height);this.reframeObservation();return;}
    if(this.snapshot&&previousWidth&&previousHeight)camera.centerOn(camera.scrollX+previousWidth/2,camera.scrollY+previousHeight/2);
+   this.reframeObservation();
   });
   this.ready=true;if(this.snapshot)this.accept(this.snapshot);
  }
@@ -199,15 +237,16 @@ export class ValleyScene extends Phaser.Scene {
   const p=this.projectAt(x,y);if(p){this.selected={kind:'project',id:p.id};this.onSelection(this.selected);return;}
   this.selected=null;this.onSelection(null);
  }
- clearSelection(){this.selected=null;this.stopFollowing();this.label.setVisible(false);}
+ clearSelection(){this.manuallyPanned=true;this.selected=null;this.stopFollowing();this.label.setVisible(false);}
  focusPerson(id:string,follow=true){
   if(!this.snapshot)return;
+  this.manuallyPanned=false;
   this.selected={kind:'person',id};
   this.navigation.startFollowing(this.snapshot.world,id);
   this.accept(this.snapshot);
   if(!follow)this.stopFollowing();
  }
- focusBuilding(id:string){const b=this.snapshot?.world.buildings.find(b=>b.id===id);if(!b)return;this.stopFollowing();if(this.roomId)this.exitRoom();this.selected={kind:'building',id};this.cameras.main.centerOn((b.at.x+b.width/2)*16,(b.at.y+b.height/2)*16);}
+ focusBuilding(id:string){const b=this.snapshot?.world.buildings.find(b=>b.id===id);if(!b)return;this.manuallyPanned=true;this.stopFollowing();if(this.roomId)this.exitRoom();this.selected={kind:'building',id};this.cameras.main.centerOn((b.at.x+b.width/2)*16,(b.at.y+b.height/2)*16);}
  focusEcology(selection:EcologySelection){
   if(!this.snapshot)return;
   selection=resolveEcologySelection(this.snapshot.world,selection);
@@ -216,7 +255,7 @@ export class ValleyScene extends Phaser.Scene {
   if(loc.roomId)this.enterRoom(loc.roomId);else this.watchTile(loc.at);
   this.stopFollowing();this.selected=selection;
  }
- zoom(delta:number){if(this.roomId)return;const c=this.cameras.main;c.setZoom(Phaser.Math.Clamp(c.zoom+delta,.7,3.5));this.onCamera(c.zoom);}
+ zoom(delta:number){if(this.roomId)return;const c=this.cameras.main;c.setZoom(Phaser.Math.Clamp(c.zoom+delta,.7,3.5));this.reframeObservation();this.onCamera(c.zoom);}
  cameraTile():Vec {
   if(this.roomId){
    const building=this.snapshot?.world.buildings.find(b=>b.id===this.roomId);
@@ -232,6 +271,7 @@ export class ValleyScene extends Phaser.Scene {
  }
  private centerTile():Vec{return this.snapshot?.world.map.settlement??(this.snapshot?.world.mode==='formal'?FORMAL_CENTER:{x:35,y:29});}
  watchTile(at:Vec){
+  this.manuallyPanned=true;
   if(this.roomId)this.exitRoom();
   this.clearSelection();
   this.cameras.main.centerOn(at.x*Art.TILE,at.y*Art.TILE);
@@ -243,10 +283,10 @@ export class ValleyScene extends Phaser.Scene {
  }
  enterRoom(id:string){
   if(!this.snapshot?.world.buildings.some(b=>b.id===id))return;
-  this.stopFollowing();this.changeRoom(id);this.accept(this.snapshot);
+  this.manuallyPanned=true;this.stopFollowing();this.changeRoom(id);this.accept(this.snapshot);
  }
  exitRoom(){
-  this.stopFollowing();if(!this.roomId||!this.snapshot)return;
+  this.manuallyPanned=true;this.stopFollowing();if(!this.roomId||!this.snapshot)return;
   this.changeRoom(null);this.accept(this.snapshot);
  }
  /** Change only the viewing coordinate space. Manual entry points cancel follow separately. */
@@ -276,13 +316,14 @@ export class ValleyScene extends Phaser.Scene {
  private centerFollow(frameUnknown=false){
   if(this.navigation.followResolver)return;
   const state=this.navigation.followState;if(state?.status!=='following')return;
+  if(this.snapshot?.world.residents.find(r=>r.id===state.personId)?.regionalLocation)return;
   if(!state.precise){
    if(!frameUnknown)return;
    const w=this.snapshot?.world,b=w?.buildings.find(b=>b.id===state.roomId);if(!w||!b)return;
    const l=w.rooms?roomLayout(w,b):null,width=l?l.width*16:256,height=l?l.height*16:208;
-   this.cameras.main.setZoom(Math.max(.25,Math.min(3.3,(this.scale.width-30)/width,(this.scale.height-200)/height))).centerOn(width/2,height/2);return;
+   this.fitObservedRoom(width,height);return;
   }
-  const sprite=this.actors.get(state.personId);if(sprite?.visible)this.cameras.main.centerOn(sprite.x,sprite.y);
+  const sprite=this.actors.get(state.personId);if(sprite?.visible)this.centerObserved(sprite.x,sprite.y);
  }
  update(time:number){
   if(!this.snapshot||!this.ready)return;

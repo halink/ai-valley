@@ -47,7 +47,7 @@ export async function clientMainHarness(snapshot:Snapshot,loadPanels:()=>Promise
  }
  const updates=new Map<string,(event:any)=>void>();
  class Source {constructor(){eventSources++;}addEventListener(type:string,fn:(event:any)=>void){updates.set(type,fn);}close(){}}
- const replacements={...dependencies,'./styles.css':{},'./isometric-observer.css':{},'./isometric-observer.js':{mountIsometricObserver:(adapter:unknown)=>{observerMountCalls++;mountObserver?.(adapter);}},phaser:{Game:class{},AUTO:0,Scale:{RESIZE:0}},
+ const replacements={...dependencies,'./storybook-ui-shell.css':{},'./storybook-ui-shell.js':{mountStorybookUIShell:()=>({active:true})},'./styles.css':{},'./isometric-observer.css':{},'./isometric-observer.js':{mountIsometricObserver:(adapter:unknown)=>{observerMountCalls++;mountObserver?.(adapter);}},phaser:{Game:class{},AUTO:0,Scale:{RESIZE:0}},
   './scene.js':{ValleyScene:Scene},'./atlas.js':{Atlas:class{canvas=new ElementSpy();},currentRegion:()=>null},
   './history.js':{...history,HistoryReader:class extends history.HistoryReader {
    constructor(base:string,changed:()=>void){super(base,changed,archiveFetch);}

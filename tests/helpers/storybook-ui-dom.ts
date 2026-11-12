@@ -1,7 +1,8 @@
+import type {ObserverViewArea} from '../../src/client/observer-view-area.js';
 /** Tiny DOM/event contract substitute, not browser layout, native focus or accessibility-tree QA. */
 import {mountStorybookUIShell} from '../../src/client/storybook-ui-shell.js';
 import {animatedFixture} from './storybook-animated-fixture.js';
-export function storybookUIHarness(mobile = false) {
+export function storybookUIHarness(mobile = false, mode: 'preview' | 'live' = 'preview') {
   type Listener = {fn: EventListener; capture: boolean};
   class Target {
     listeners = new Map<string, Listener[]>();
@@ -22,6 +23,8 @@ export function storybookUIHarness(mobile = false) {
   }
   class Element extends Node {
     attrs = new Map<string, string>(); dataset: Record<string, string> = {}; className = ''; textContent = ''; id = ''; hidden = false; open = false; type = '';
+    rect = {left:0,top:0,width:0,height:0};
+    getBoundingClientRect(){return this.hidden||this.classList.contains('hidden')?{left:0,top:0,width:0,height:0}:this.rect;}
     constructor(public tagName = 'div') {super();}
     classList = {
       contains: (name: string) => this.className.split(' ').includes(name),
@@ -94,16 +97,18 @@ export function storybookUIHarness(mobile = false) {
   const f = animatedFixture(); profile.setAttribute('data-person', f.r.id);
   const old = ['document', 'window', 'Element', 'HTMLElement', 'MutationObserver'].map(name => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const);
   for (const [name, value] of Object.entries({document: doc, window: win, Element, HTMLElement: Element, MutationObserver: Mutation})) Object.defineProperty(globalThis, name, {configurable: true, value});
-  const handle = mountStorybookUIShell(f.observer);
+  const viewportCalls: Array<{area:ObserverViewArea|null;id:string|null}> = [];
+  f.observer.setViewArea=(area,id)=>viewportCalls.push({area,id});
+  const handle = mountStorybookUIShell(f.observer, {mode});
   const find = (selector: string) => {const node = doc.querySelector(selector); if (!node) throw Error('missing ' + selector); return node;};
-  return {...f, handle, app, hud, topbar, calendar, badge, selection, profile, panel, panelHeader, closePanel, body, dock, buttons, controls, state, roomBanner: room, iso, doc, media, origin, hudOrigin, watchers, find, flush,
+  return {...f, viewportCalls, measure(){win.emit('resize',{});}, handle, app, hud, topbar, calendar, badge, selection, profile, panel, panelHeader, closePanel, body, dock, buttons, controls, state, roomBanner: room, iso, doc, media, origin, hudOrigin, watchers, find, flush,
     get routes() {return routes;}, get escaped() {return escaped;},
     open() {find('.storybook-ui-launch').click(); flush();},
     select() {selection.classList.remove('hidden'); flush();},
     resize(isMobile: boolean) {media.matches = isMobile; media.emit('change', {target: media}); flush();},
     escape() {return dispatch('keydown', doc.activeElement ?? app, 'Escape');},
     failObserve() {failObserve = true;},
-    remount() {return mountStorybookUIShell(f.observer);},
+    remount() {return mountStorybookUIShell(f.observer, {mode});},
     cleanup() {handle.dispose(); for (const [name, descriptor] of old) {if (descriptor) Object.defineProperty(globalThis, name, descriptor); else delete (globalThis as any)[name];}},
   };
 }

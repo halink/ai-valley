@@ -55,3 +55,102 @@
  .storybook-ui-shell .storybook-ui-more-panel{display:flex;flex-direction:column;grid-template-columns:none;left:auto;max-width:calc(100% - 16px);padding:8px;bottom:calc(80px + env(safe-area-inset-bottom));right:8px}.storybook-ui-shell .storybook-ui-more-panel button{width:100%;height:auto}
 }
 @media(prefers-reduced-motion:reduce){.storybook-ui-shell *,.storybook-ui-shell *::before,.storybook-ui-shell *::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+
+/* Formal observer: a paper margin, not a second application or simulated world. */
+.storybook-ui-active{--paper:#f4ecd9;--ink:#3e382f;--muted:#594c3d;--wood-dark:#594c3d;--slat:#b6aea0;--pressed:#80624c;--glow:#e5d7bb}
+.storybook-ui-top{pointer-events:none}
+.storybook-ui-shell{--pressed:#80624c;--muted:#594c3d;--light:#faf5e9}
+.storybook-ui-shell .room-banner{position:static;inset:auto;transform:none;gap:12px;box-shadow:none}
+.storybook-ui-shell .room-banner button{white-space:normal;text-align:left}
+.storybook-ui-shell .brand{padding:0 8px 0 2px;min-width:76px}
+.storybook-ui-shell .brand b{font-family:"Songti SC","STSong",Georgia,serif;font-size:26px;letter-spacing:3px}
+.storybook-ui-shell .topbar{border-bottom:3px solid #e5d7bb}
+.storybook-ui-shell .dock{border-radius:14px;padding:5px 8px;box-shadow:0 3px 14px #3e382f1a}
+.storybook-ui-shell .dock button+button{border-left:1px solid #b6aea066}
+.storybook-ui-shell .dock button:hover,.storybook-ui-shell .storybook-ui-more-panel button:hover{background:#e5d7bb}
+.storybook-ui-shell .dock button.active{border-bottom:3px solid #80624c}
+.storybook-ui-shell .selection-actions button{flex:1;justify-content:center;min-width:96px;background:#faf5e9}
+.storybook-ui-shell .selection-actions button:hover{background:#e5d7bb}
+.storybook-ui-shell .selection>p{padding:10px 12px;border-left:2px solid #b6aea0;background:#faf5e9;border-radius:0 8px 8px 0}
+.storybook-ui-shell .selection-title{align-items:flex-start}
+.storybook-ui-shell .selection-title>div{min-width:0}
+.storybook-ui-shell .selection .avatar{flex-shrink:0}
+.storybook-ui-shell .storybook-ui-location{border-top:1px solid #b6aea066;padding:10px 16px;color:#594c3d;background:#faf5e9}
+.storybook-ui-shell .panel-header{background:#faf5e9;border-bottom:1px solid #b6aea0}
+.storybook-ui-shell .panel-header h2{font-family:"Songti SC","STSong",Georgia,serif;letter-spacing:1px;margin:2px 0}
+.storybook-ui-shell .panel-body{scrollbar-gutter:stable}
+.storybook-ui-shell .panel-body :is(button,summary){min-height:44px;font-size:15px}
+.storybook-ui-shell .panel-body :is(.person-card-text>span,.place-card p){white-space:normal;overflow:visible;text-overflow:clip}
+.storybook-ui-shell :is(.person-card,.place-card,.conversation,.notice,.intention,.memorial){background:#faf5e9}
+.storybook-ui-shell .person-card:hover{background:#e5d7bb}
+.storybook-ui-shell :is(.profile-facts,.footnote,.panel-intro,.capabilities,.empty){font-size:15px;line-height:1.65}
+.storybook-ui-shell .profile-facts>div{flex-wrap:wrap;gap:8px}
+.storybook-ui-shell .profile-facts span{width:auto;min-width:64px}
+.storybook-ui-shell :is(.place-card,.profile-head,.relation-row,.conversation summary){flex-wrap:wrap}
+.storybook-ui-shell .place-card>div{min-width:0;flex:1}
+.storybook-ui-shell :is(.place-actions,.panel-tools,.archive-actions){flex-wrap:wrap;gap:8px}
+.storybook-ui-shell .place-actions button{border:1px solid #b6aea0;border-radius:8px;padding:6px 10px}
+.storybook-ui-shell .need>span{width:auto;min-width:44px}
+.storybook-ui-shell .need em{width:auto;min-width:36px}
+.storybook-ui-shell .timeline-dot{background:#80624c;box-shadow:none;border-color:#f4ecd9}
+.storybook-ui-shell .kind-death .timeline-dot{background:#55596b}
+.storybook-ui-shell .event-people button{padding:6px 10px;border:1px solid #b6aea0;border-radius:8px}
+.storybook-ui-shell .conversation-lines{padding-left:16px}
+.storybook-ui-shell .relation-legend{grid-template-columns:repeat(auto-fit,minmax(140px,1fr))}
+.storybook-ui-shell .graph-person text{font-size:15px}
+.storybook-ui-shell .panel-body table{display:block;max-width:100%;overflow:auto}
+.storybook-ui-shell .panel-body :is(input,select,textarea){background:#faf5e9;color:#3e382f;border:1px solid #b6aea0;border-radius:8px;padding:8px}
+.storybook-ui-shell .panel-body :is(button,summary):disabled{opacity:.55;cursor:not-allowed}
+.storybook-ui-shell .panel-tools{overflow:auto;max-height:30dvh}
+.storybook-ui-shell .panel-body a{color:#594c3d;text-decoration:underline;text-underline-offset:3px}
+.storybook-ui-shell .panel-body :is(pre,code){white-space:pre-wrap;overflow-wrap:anywhere}
+.storybook-ui-active .opening{background:#f4ecd9;color:#3e382f}
+@media(min-width:701px){
+ .storybook-ui-panel-open .storybook-ui-top{width:calc(100% - 508px)}
+}
+@media(max-width:700px){
+ .storybook-ui-shell .brand b{font-size:22px}
+ .storybook-ui-shell .dock button+button{border-left:0}
+ .storybook-ui-shell .storybook-ui-collapsed .selection-title span{font-size:13px}
+ .storybook-ui-shell .panel-tools{max-height:18dvh}
+ .storybook-ui-shell.storybook-ui-reading-expanded .panel-tools{max-height:25dvh}
+ .storybook-ui-shell .selection-actions{padding-bottom:4px}
+}
+@media(max-width:360px){
+ .storybook-ui-shell .topbar{gap:4px}
+ .storybook-ui-shell .sample-badge{width:100%;justify-content:center}
+ .storybook-ui-shell .panel-header h2{font-size:18px}
+}
+@media(forced-colors:active){
+ .storybook-ui-shell button.active{outline:2px solid Highlight}
+ .storybook-ui-shell :is(.panel,.storybook-ui-card,.dock){border:1px solid CanvasText}
+}
+/* Shared detail components: archives, community, wildlife and optional livelihood panels. */
+.storybook-ui-shell{--leaf:#526c4e;--pond:#4c7173;--heart:#875a59;--gold:#80624c;--bevel:#b6aea0;--dusk:#55596b}
+.storybook-ui-shell .panel-body :is(p,li,dt,dd,label,em){font-size:15px;line-height:1.65}
+.storybook-ui-shell .panel-body :is(small,.footnote,.shipment-status,.protection-summary){font-size:13px;line-height:1.6}
+.storybook-ui-shell .panel-body :is(h4,.section-label){font-size:15px}
+.storybook-ui-shell :is(.community-tabs,.commerce-tabs,.words-tabs){display:flex;flex-wrap:wrap;gap:6px}
+.storybook-ui-shell :is(.community-tabs,.commerce-tabs,.words-tabs) button{flex:1 1 auto;padding:8px 10px;border-radius:8px 8px 0 0}
+.storybook-ui-shell :is(.duty-heading,.project-stages li>div){flex-wrap:wrap;gap:8px}
+.storybook-ui-shell :is(.shipment-status,.project-stages span,.project-card .duty-heading>span,.education-card .duty-heading>span){white-space:normal}
+.storybook-ui-shell :is(.contract-terms,.project-card .contract-terms,.animal-facts){grid-template-columns:repeat(auto-fit,minmax(min(130px,100%),1fr))}
+.storybook-ui-shell .archive-check{min-height:44px}
+.storybook-ui-shell input[type=checkbox]{min-height:20px;width:20px;height:20px;flex-shrink:0;accent-color:#594c3d}
+.storybook-ui-shell .selection .follow-status{display:block;background:#faf5e9;color:#3e382f;border-color:#80624c;font-size:13px}
+@media(max-width:440px){
+ .storybook-ui-shell .archive-filters{grid-template-columns:1fr}
+ .storybook-ui-shell .status-facts>div{grid-template-columns:minmax(64px,1fr) minmax(0,2fr)}
+ .storybook-ui-shell .conversation summary{gap:8px;padding:12px}
+}
+.storybook-ui-shell .dock button.warning{color:#a6493e;border-bottom:3px solid #a6493e}
+.storybook-ui-shell .dock button{background:transparent;border:1px solid transparent;box-shadow:none}
+.storybook-ui-shell .dock button+button{border-left-color:#b6aea066}
+.storybook-ui-shell .dock button:hover{background:#e5d7bb}
+.storybook-ui-shell .dock button.active{background:#e5d7bb;border-bottom:3px solid #80624c;box-shadow:none}
+.storybook-ui-shell .dock button.warning{color:#a6493e;border-bottom:3px solid #a6493e}
+.storybook-ui-shell :is(.person-card,.place-card,.conversation,.primary-light,.notice,.intention,.memorial,.place-icon){border-radius:10px}
+.storybook-ui-shell .community-tabs button[aria-current=page]{background:#594c3d;color:#f4ecd9;border-color:#594c3d}
+@media(max-width:700px){.storybook-ui-shell .dock button+button{border-left-color:transparent}}
+/* Bare text containers must not inherit legacy 10–12px component rules. */
+.storybook-ui-shell .panel-body :is(article,div,section,dl,ul,ol){font-size:15px;line-height:1.65}

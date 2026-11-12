@@ -22,7 +22,7 @@ test('formal optional entry: actual main installs once and shares the sole GET a
  const next=structuredClone(route.snapshots[1]);h.update(next);
  assert.equal(seen.at(-1),h.accepted.at(-1));assert.deepEqual(adapter!.currentSnapshot()!.world,next.world);
  assert.equal(h.observerMountCalls,1);assert.equal(h.worldRequests,1);assert.equal(h.eventSources,1);unsubscribe();
- assert.deepEqual(Object.keys(adapter!).sort(),['cover','currentFollow','currentRoom','currentSnapshot','currentTile','frame','isFullMapTarget','select','setFollowResolver','stopFollowing','subscribe','subscribeFollow','subscribeRoom'].sort());
+ assert.deepEqual(Object.keys(adapter!).sort(),['cover','currentFollow','currentRoom','currentSnapshot','currentTile','frame','isFullMapTarget','select','setFollowResolver','setViewArea','subscribeViewArea','stopFollowing','subscribe','subscribeFollow','subscribeRoom'].sort());
 });
 
 test('formal optional entry: failed optional mounting cannot stop original connection or later updates',async()=>{

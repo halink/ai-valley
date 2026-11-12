@@ -15,12 +15,13 @@ const clamp=(v:number,a:number,b:number)=>Math.max(a,Math.min(b,v));
 function dimensions(width:number,height:number){if(![width,height].every(n=>Number.isFinite(n)&&n>0&&n<=16384))throw new Error('isometric_viewport_dimensions');}
 // Two rounded cell endpoints can add two cells to the continuous inverse AABB.
 function minZoom(width:number,height:number){return (width/32+height/16)/(VIEWPORT_LIMITS.cells-2-VIEWPORT_LIMITS.halo*2*(1/32+1/16));}
-export function constrainWorldCamera(camera:IsometricCamera,w:World,width:number,height:number):IsometricCamera{
+export function constrainWorldCamera(camera:IsometricCamera,w:World,width:number,height:number,offset:Vec={x:0,y:0}):IsometricCamera{
  dimensions(width,height);if(![camera.origin.x,camera.origin.y,camera.zoom].every(Number.isFinite)||camera.zoom<=0)throw new Error('isometric_viewport_camera');
  const zoom=Math.max(minZoom(width,height),Math.min(8,camera.zoom));
- const center=unprojectIsometric({x:(width/2-camera.origin.x)/camera.zoom,y:(height/2-camera.origin.y)/camera.zoom});
+ if(![offset.x,offset.y].every(Number.isFinite)||Math.abs(offset.x)>width/2||Math.abs(offset.y)>height/2)throw new Error('isometric_ui_offset');
+ const center=unprojectIsometric({x:(width/2-camera.origin.x+offset.x)/camera.zoom,y:(height/2-camera.origin.y+offset.y)/camera.zoom});
  const p=projectIsometric({x:clamp(center.x,0,w.map.width),y:clamp(center.y,0,w.map.height)});
- return {zoom,origin:{x:width/2-p.x*zoom,y:height/2-p.y*zoom}};
+ return {zoom,origin:{x:width/2-p.x*zoom+offset.x,y:height/2-p.y*zoom+offset.y}};
 }
 export function fitWorldCamera(w:World,at:Vec,width:number,height:number,zoom=1):IsometricCamera{
  const p=projectIsometric(at);return constrainWorldCamera({zoom,origin:{x:width/2-p.x*zoom,y:height/2-p.y*zoom}},w,width,height);
@@ -29,8 +30,8 @@ export function zoomWorldCamera(camera:IsometricCamera,w:World,width:number,heig
  const zoom=Math.max(minZoom(width,height),Math.min(8,camera.zoom+delta));
  return constrainWorldCamera({zoom,origin:{x:anchor.x-(anchor.x-camera.origin.x)*zoom/camera.zoom,y:anchor.y-(anchor.y-camera.origin.y)*zoom/camera.zoom}},w,width,height);
 }
-export function visibleWorldBounds(camera:IsometricCamera,w:World,width:number,height:number):Footprint{
- dimensions(width,height);const c=constrainWorldCamera(camera,w,width,height),h=VIEWPORT_LIMITS.halo;
+export function visibleWorldBounds(camera:IsometricCamera,w:World,width:number,height:number,offset:Vec={x:0,y:0}):Footprint{
+ dimensions(width,height);const c=constrainWorldCamera(camera,w,width,height,offset),h=VIEWPORT_LIMITS.halo;
  const points=[[-h,-h],[width/c.zoom+h,-h],[-h,height/c.zoom+h],[width/c.zoom+h,height/c.zoom+h]].map(([x,y])=>unprojectIsometric({x:x-c.origin.x/c.zoom,y:y-c.origin.y/c.zoom}));
  const x=clamp(Math.floor(Math.min(...points.map(p=>p.x))),0,w.map.width),y=clamp(Math.floor(Math.min(...points.map(p=>p.y))),0,w.map.height);
  return {x,y,width:clamp(Math.ceil(Math.max(...points.map(p=>p.x))),0,w.map.width)-x,height:clamp(Math.ceil(Math.max(...points.map(p=>p.y))),0,w.map.height)-y};
@@ -186,8 +187,8 @@ export class IsometricViewport {
   let count=[...this.chunks.values()].reduce((n,v)=>n+v.marks.length,0);
   while(this.chunks.size>VIEWPORT_LIMITS.chunks||count>VIEWPORT_LIMITS.chunkMarks){const oldest=this.chunks.keys().next().value!;count-=this.chunks.get(oldest)!.marks.length;this.chunks.delete(oldest);}return c;
  }
- render(camera:IsometricCamera,width:number,height:number,elapsed=0):IsometricViewportScene{
-  if(!this.world)throw new Error('isometric_viewport_empty');const w=this.world,displayCamera=constrainWorldCamera(camera,w,width,height),bounds=visibleWorldBounds(displayCamera,w,width,height),darkness=daylight(w.minute).darkness;
+ render(camera:IsometricCamera,width:number,height:number,elapsed=0,offset:Vec={x:0,y:0}):IsometricViewportScene{
+  if(!this.world)throw new Error('isometric_viewport_empty');const w=this.world,displayCamera=constrainWorldCamera(camera,w,width,height,offset),bounds=visibleWorldBounds(displayCamera,w,width,height,offset),darkness=daylight(w.minute).darkness;
   // Cached chunks may cross the requested cell AABB. Keep only marks intersecting the source viewport.
   const origin={x:Math.ceil(displayCamera.origin.x/displayCamera.zoom),y:Math.ceil(displayCamera.origin.y/displayCamera.zoom)},sourceWidth=Math.ceil(width/displayCamera.zoom)+2,sourceHeight=Math.ceil(height/displayCamera.zoom)+2;
   const visible=(m:Footprint)=>m.x+m.width>-origin.x&&m.x<sourceWidth-origin.x&&m.y+m.height>-origin.y&&m.y<sourceHeight-origin.y;
