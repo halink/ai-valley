@@ -85,6 +85,6 @@ npm test
 
 项目原创源码与文档采用 [MIT 许可证](LICENSE)。浏览器依赖的版权与许可声明见[第三方声明](public/THIRD_PARTY_NOTICES.txt)，画面参考与素材边界见[素材来源](docs/art.md)。
 
-### Godot 客户端迁移（分阶段开发）
+### Godot 小山谷（从 MVP 逐步生长）
 
-正在同一仓库内进行 Godot 4 重建，旧客户端仍为现有入口。见 [迁移里程碑](docs/godot-migration.md) 与 [M1 原生只读客户端运行及验证说明](godot-client/README.md)。M1 是几何占位的最小快照观察路径，不是完整绘本重构或发布候选版。
+在同一仓库内从小地图、两位居民的生活闭环开始 Godot 4 重建，再逐次加功能与扩大地图，不做移动端。旧客户端保留。见 [MVP 版本路线](docs/godot-migration.md) 与 [核心循环工程版运行及验证说明](godot-client/README.md)。当前本地规则驱动、几何占位与无模型测试不代表自主 AI MVP 或最终绘本画面完成。

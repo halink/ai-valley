@@ -7,6 +7,7 @@ func _initialize() -> void:
 	root.add_child.call_deferred(client)
 	_start.call_deferred()
 func _start() -> void:
+	client.endpoint.text = "http://127.0.0.1:3413"
 	client._connect_server()
 func _process(delta: float) -> bool:
 	elapsed += delta

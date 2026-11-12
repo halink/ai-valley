@@ -29,5 +29,15 @@ func _initialize() -> void:
 	good.world.map.erase("settlement")
 	good.world.residents[0].appearance = null
 	assert(Snapshot.validate(good) != "")
+	good.world.residents[0].erase("appearance")
+	good.world.buildings = [{"at": {"x": 1, "y": 1}, "door": {"x": 1, "y": 2}, "width": 2, "height": 2}]
+	assert(Snapshot.validate(good) == "")
+	good.world.buildings[0].width = -1
+	assert(Snapshot.validate(good) != "")
+	good.world.erase("buildings")
+	good.world.resources = [{"at": {"x": 1, "y": 1}, "kind": "bush", "amount": -1}]
+	assert(Snapshot.validate(good) != "")
+	assert(Snapshot.activity_label({"activity": {"path": [{"x": 1, "y": 1}], "action": {"type": "gather"}}}) == "travelling")
+	assert(Snapshot.activity_label({"activity": {"path": [], "action": {"type": "gather"}}}) == "on-site: gather")
 	print("PASS: snapshot validation, projection, indoor visibility")
 	quit()

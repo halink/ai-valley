@@ -34,9 +34,35 @@ static func validate(value: Variant) -> String:
 	for tile in map.tiles:
 		if not tile is String:
 			return "Invalid tile"
+	for field in ["buildings", "resources", "events"]:
+		if world.has(field) and not world[field] is Array:
+			return "Invalid " + field
+	for building in world.get("buildings", []):
+		if not building is Dictionary or not valid_position(building.get("at")) or not valid_position(building.get("door")):
+			return "Invalid building position"
+		for axis in ["width", "height"]:
+			var size = building.get(axis)
+			if not (size is float or size is int) or not is_finite(size) or size <= 0 or size > 1024:
+				return "Invalid building size"
+	for resource in world.get("resources", []):
+		if not resource is Dictionary or not valid_position(resource.get("at")) or not resource.get("kind") is String:
+			return "Invalid resource"
+		var amount = resource.get("amount")
+		if not (amount is float or amount is int) or not is_finite(amount) or amount < 0:
+			return "Invalid resource amount"
+	for entry in world.get("events", []):
+		if not entry is Dictionary:
+			return "Invalid event"
 	for person in world.residents:
 		if not person is Dictionary or not person.get("id") is String or not person.get("at") is Dictionary:
 			return "Invalid resident"
+		if person.has("inventory") and not person.inventory is Dictionary:
+			return "Invalid inventory"
+		var activity = person.get("activity")
+		if activity != null and (not activity is Dictionary or not activity.get("path") is Array or not activity.get("action") is Dictionary):
+			return "Invalid activity"
+		if activity is Dictionary and activity.get("room") != null and (not activity.room is Dictionary or not activity.room.get("path") is Array):
+			return "Invalid room activity"
 		if person.has("appearance") and not person.appearance is Dictionary:
 			return "Invalid appearance"
 		for axis in ["x", "y"]:
@@ -51,3 +77,19 @@ static func project(at: Dictionary) -> Vector2:
 
 static func visible(person: Dictionary) -> bool:
 	return person.get("inside") == null and person.get("regionalLocation") == null and person.get("residency") != "outside" and person.get("status") == "alive"
+
+static func activity_label(person: Dictionary) -> String:
+	var activity = person.get("activity")
+	if not activity is Dictionary:
+		return "waiting for decision"
+	if not activity.get("path", []).is_empty() or (activity.get("room") is Dictionary and not activity.room.get("path", []).is_empty()):
+		return "travelling"
+	return "on-site: " + str(activity.get("action", {}).get("type", "unknown"))
+
+static func valid_position(at: Variant) -> bool:
+	if not at is Dictionary:
+		return false
+	for axis in ["x", "y"]:
+		if not (at.get(axis) is float or at.get(axis) is int) or not is_finite(at[axis]):
+			return false
+	return true

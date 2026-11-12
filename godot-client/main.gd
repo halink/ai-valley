@@ -9,6 +9,8 @@ var active_endpoint := ""
 var endpoint: LineEdit
 var status: Label
 var detail: Label
+var events_label: Label
+var mode_label: Label
 var http: HTTPRequest
 var timer: Timer
 var busy := false
@@ -25,12 +27,12 @@ func _ready() -> void:
 	var box := VBoxContainer.new()
 	panel.add_child(box)
 	var title := Label.new()
-	title.text = "AI Valley · Godot M1 | Read-only · geometry placeholders, not final art"
+	title.text = "AI Valley · small valley MVP foundation | Read-only · placeholder art"
 	box.add_child(title)
 	var row := HBoxContainer.new()
 	box.add_child(row)
 	endpoint = LineEdit.new()
-	endpoint.text = "http://127.0.0.1:3413"
+	endpoint.text = "http://127.0.0.1:3414"
 	endpoint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(endpoint)
 	var connect_button := Button.new()
@@ -41,12 +43,22 @@ func _ready() -> void:
 	home.text = "Recenter"
 	home.pressed.connect(_recenter)
 	row.add_child(home)
+	var next_person := Button.new()
+	next_person.text = "Next resident (including indoors)"
+	next_person.pressed.connect(_next_resident)
+	row.add_child(next_person)
 	status = Label.new()
 	status.text = "Not connected. Start isolated preview, then Connect. Drag: middle mouse · Zoom: wheel · Select: click"
 	box.add_child(status)
 	detail = Label.new()
 	detail.text = "No resident selected. Indoor / off-map residents are not placed outdoors."
 	box.add_child(detail)
+	mode_label = Label.new()
+	mode_label.text = "No simulation connected"
+	box.add_child(mode_label)
+	events_label = Label.new()
+	events_label.text = "Recent events: none received"
+	box.add_child(events_label)
 	http = HTTPRequest.new()
 	http.timeout = 8.0
 	http.body_size_limit = 33554432
@@ -73,6 +85,8 @@ func _connect_server() -> void:
 	selected = ""
 	_update_detail()
 	status.text = "Connecting · waiting for a new snapshot"
+	mode_label.text = "No simulation connected"
+	events_label.text = "Recent events: none received"
 	first = true
 	queue_redraw()
 	timer.start()
@@ -115,6 +129,13 @@ func _received(result: int, code: int, _headers: PackedStringArray, body: Packed
 		first = false
 	var paused: bool = world.get("clock", {}).get("paused", false)
 	status.text = "Connected · revision %s · %s · full snapshot polling (2s), no SSE yet" % [world.revision, "PAUSED" if paused else "server clock running"]
+	mode_label.text = "RULE-DRIVEN SYNTHETIC MVP · no LLM · no persistent save" if parsed.has("mvp") else "Observer API · decision source not verified by this client"
+	if paused:
+		mode_label.text += " · reason: " + str(world.clock.get("reason", "unknown"))
+	var lines: Array[String] = []
+	for entry in world.get("events", []).slice(-3):
+		lines.append(str(entry.get("text", "")))
+	events_label.text = "Recent events:\n" + "\n".join(lines)
 	_update_detail()
 	queue_redraw()
 
@@ -130,8 +151,22 @@ func _update_detail() -> void:
 	for person in world.get("residents", []):
 		if person.id == selected:
 			detail.text = "%s · %s · health %s · %s" % [person.get("name", person.id), person.get("status", "unknown"), person.get("health", "unknown"), person.get("intention", "unknown")]
+			detail.text += " · " + Snapshot.activity_label(person) + " · hunger %s · energy %s · berries %s" % [person.get("hunger", "?"), person.get("energy", "?"), person.get("inventory", {}).get("berry", 0)]
+			detail.text += " · indoors" if person.get("inside") != null else " · outdoors"
 			return
 	selected = ""
+
+func _next_resident() -> void:
+	var people: Array = world.get("residents", [])
+	if people.is_empty():
+		return
+	var index := -1
+	for i in range(people.size()):
+		if people[i].id == selected:
+			index = i
+	selected = people[(index + 1) % people.size()].id
+	_update_detail()
+	queue_redraw()
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_MIDDLE and not event.pressed:
@@ -186,6 +221,22 @@ func _draw() -> void:
 			for point in [Vector2(0, -8), Vector2(16, 0), Vector2(0, 8), Vector2(-16, 0)]:
 				points.append(center + point * magnification)
 			draw_colored_polygon(points, Color(colors.get(map.tiles[y * int(map.width) + x], "b6aea0")))
+	# Footprints, not finished buildings: accurately show occupied tiles and door.
+	for building in world.get("buildings", []):
+		var polygon := PackedVector2Array()
+		for step in [Vector2.ZERO, Vector2(building.width, 0), Vector2(building.width, building.height), Vector2(0, building.height)]:
+			polygon.append(Snapshot.project({"x": building.at.x + step.x - 0.5, "y": building.at.y + step.y - 0.5}) * magnification + offset)
+		draw_colored_polygon(polygon, Color("e5d7bb"))
+		polygon.append(polygon[0])
+		draw_polyline(polygon, Color("80624c"), 2)
+		draw_circle(Snapshot.project(building.door) * magnification + offset, 4 * magnification, Color("80624c"))
+	for resource in world.get("resources", []):
+		var at: Vector2 = Snapshot.project(resource.at) * magnification + offset
+		var color := Color("70866c") if resource.amount > 0 else Color("b6aea0")
+		if resource.kind == "spring":
+			color = Color("71999a")
+		draw_circle(at, 5 * magnification, color)
+		draw_string(ThemeDB.fallback_font, at + Vector2(5, -4), str(resource.amount), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("3e382f"))
 	for person in world.residents:
 		if not Snapshot.visible(person):
 			continue
