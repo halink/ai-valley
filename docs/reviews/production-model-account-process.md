@@ -19,3 +19,10 @@ path marker. Immutable JS guard is defense in depth, not an adversarial sandbox.
 Unknown child/descendant cleanup is never promoted to success. Same-host/shared
 registry coordination only. This does not complete the production launcher or
 real-model long-run acceptance. Price/account statements are not authenticated.
+
+Final sequential targeted regression: **77/77 passed**, zero failed/cancelled/
+skipped (142 seconds), covering account registry, account supervisor, both new
+process suites, reviewed runtime and runtime review/regression suites. The
+concrete process suite contains seven cases, including early IPC disconnect.
+`tsc --noEmit` and `git diff --check` passed. This is not the full repository test
+suite and does not change the live-model/browser acceptance status.
