@@ -84,3 +84,7 @@ npm test
 ## 许可与素材
 
 项目原创源码与文档采用 [MIT 许可证](LICENSE)。浏览器依赖的版权与许可声明见[第三方声明](public/THIRD_PARTY_NOTICES.txt)，画面参考与素材边界见[素材来源](docs/art.md)。
+
+### Godot 客户端迁移（分阶段开发）
+
+正在同一仓库内进行 Godot 4 重建，旧客户端仍为现有入口。见 [迁移里程碑](docs/godot-migration.md) 与 [M1 原生只读客户端运行及验证说明](godot-client/README.md)。M1 是几何占位的最小快照观察路径，不是完整绘本重构或发布候选版。

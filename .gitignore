@@ -30,3 +30,7 @@ secrets/
 /scripts/ai-valley.caddy
 /scripts/prepare-probe.ts
 /scripts/verify-palette.py
+
+# Godot generated cache and exports (source scenes/scripts remain tracked)
+godot-client/.godot/
+godot-client/export/
