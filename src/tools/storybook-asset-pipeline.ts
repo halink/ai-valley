@@ -3,10 +3,11 @@
  */
 import {parseStorybookAnimationBundle, type StorybookAnimationBundle} from '../client/storybook-animation-assets.js';
 import {storybookFacing} from '../client/storybook-geometry.js';
-import type {StorybookAsset, StorybookFrame, StorybookPackPin} from '../client/storybook-assets.js';
+import {STORYBOOK_MAX_PIXELS_PER_UNIT, type StorybookAsset, type StorybookFrame, type StorybookPackPin} from '../client/storybook-assets.js';
 import {decodeRgbaPng, encodeRgbaPng, sha256, type RgbaImage} from './storybook-png.js';
 
 export const PIPELINE_VERSION = '1.0.0';
+export const DENSITY_PIPELINE_VERSION = '1.1.0';
 export const BUILD_LIMITS = Object.freeze({sources: 128, sourceBytes: 96_000_000, sourcePixels: 24_000_000, frames: 4096, atlasSide: 2048});
 const directions = ['north', 'east', 'south', 'west'] as const;
 type Direction = typeof directions[number];
@@ -26,13 +27,17 @@ type Building = {
   id: string; layers: {contact: string; body: string; roof: string; foreground: string[]};
   points: {door: Point; operations: {id: string; x: number; y: number}[]};
 };
-export type StorybookBuildRecipe = {
-  buildSchemaVersion: 1; packId: string; packVersion: string;
+type RecipeAtlas = {width: number; maxHeight: number; padding: number};
+type RecipeBody = {
+  packId: string; packVersion: string;
   purpose: 'production-candidate' | 'synthetic-diagnostic'; profile: 'first-batch' | 'custom';
-  atlas: {width: number; maxHeight: number; padding: number};
   provenance: {source: string; author: string; license: string};
   sources: Source[]; assets: InputAsset[]; characters: Character[]; buildings: Building[];
 };
+export type StorybookBuildRecipe = RecipeBody & (
+  {buildSchemaVersion: 1; atlas: RecipeAtlas} |
+  {buildSchemaVersion: 2; atlas: RecipeAtlas & {pixelsPerUnit: number}}
+);
 function fail(reason: string): never {throw Error(`invalid_storybook_build: ${reason}`);}
 function record(value: unknown, keys: readonly string[], path: string): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value) || ![null, Object.prototype].includes(Object.getPrototypeOf(value))) fail(path);
@@ -74,13 +79,14 @@ export function assetRelativePath(value: unknown, extension?: string): string {
 /** Parse before reading any sources. This declaration records permission; it cannot grant it. */
 export function parseStorybookBuildRecipe(value: unknown): StorybookBuildRecipe {
   const r = record(value, ['buildSchemaVersion', 'packId', 'packVersion', 'purpose', 'profile', 'atlas', 'provenance', 'sources', 'assets', 'characters', 'buildings'], 'recipe');
-  if (r.buildSchemaVersion !== 1) fail('schema_version');
+  if (r.buildSchemaVersion !== 1 && r.buildSchemaVersion !== 2) fail('schema_version');
   const packId = id(r.packId, 'packId'), packVersion = string(r.packVersion, 'packVersion');
   if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(packVersion)) fail('packVersion');
   if (r.purpose !== 'production-candidate' && r.purpose !== 'synthetic-diagnostic') fail('purpose');
   if (r.profile !== 'first-batch' && r.profile !== 'custom') fail('profile');
   if (r.purpose === 'synthetic-diagnostic' && !packId.startsWith('synthetic-')) fail('synthetic_pack_label');
-  const a = record(r.atlas, ['width', 'maxHeight', 'padding'], 'atlas');
+  const a = record(r.atlas, r.buildSchemaVersion === 1 ? ['width', 'maxHeight', 'padding'] : ['width', 'maxHeight', 'padding', 'pixelsPerUnit'], 'atlas');
+  const density = r.buildSchemaVersion === 2 ? integer(a.pixelsPerUnit, 1, STORYBOOK_MAX_PIXELS_PER_UNIT, 'atlas.pixelsPerUnit') : 1;
   const atlas = {width: integer(a.width, 1, BUILD_LIMITS.atlasSide, 'atlas.width'), maxHeight: integer(a.maxHeight, 1, BUILD_LIMITS.atlasSide, 'atlas.maxHeight'), padding: integer(a.padding, 1, 16, 'atlas.padding')};
   const p = record(r.provenance, ['source', 'author', 'license'], 'provenance');
   const provenance = {source: string(p.source, 'provenance.source'), author: string(p.author, 'provenance.author'), license: string(p.license, 'provenance.license')};
@@ -162,7 +168,8 @@ export function parseStorybookBuildRecipe(value: unknown): StorybookBuildRecipe 
   });
   unique(buildings.map(b => b.id), 'buildings.ids');
   if (r.profile === 'first-batch' && (characters.length !== 2 || characters.filter(c => c.clips.pick !== null).length !== 1 || refs.length * 4 !== 80 || buildings.length !== 1)) fail('first_batch_requires_two_characters_80_frames_one_building');
-  return {buildSchemaVersion: 1, packId, packVersion, purpose: r.purpose, profile: r.profile, atlas, provenance, sources, assets, characters, buildings};
+  const body: RecipeBody & {atlas: RecipeAtlas} = {packId, packVersion, purpose: r.purpose, profile: r.profile, atlas, provenance, sources, assets, characters, buildings};
+  return r.buildSchemaVersion === 1 ? {buildSchemaVersion: 1, ...body} : {buildSchemaVersion: 2, ...body, atlas: {...atlas, pixelsPerUnit: density}};
 }
 type Placement = {assetId: string; direction: Direction | null; sourceId: string; sourceRect: Rect; atlasRect: Rect; foot: Point; pixelSha256: string; alpha: {transparent: number; partial: number; opaque: number}};
 function overlap(a: Rect, b: Rect): boolean {return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;}
@@ -179,7 +186,7 @@ export function alphaCounts(pixels: Uint8Array): Placement['alpha'] {
   for (let i = 3; i < pixels.length; i += 4) {if (!pixels[i]) transparent++; else if (pixels[i] === 255) opaque++; else partial++;}
   return {transparent, partial, opaque};
 }
-/** Also useful for verifying an already assembled v1 bundle against actual local PNG bytes. */
+/** Also useful for verifying an already assembled v1 or v2 bundle against actual local PNG bytes. */
 export function validateStorybookAtlas(bytes: Uint8Array, manifestInput: unknown, animationInput: unknown, pin: StorybookPackPin): StorybookAnimationBundle {
   const bundle = parseStorybookAnimationBundle(manifestInput, animationInput, pin);
   if (sha256(bytes) !== bundle.manifest.atlas.sha256) fail('atlas_byte_hash');
@@ -239,15 +246,26 @@ export function assembleStorybookAssets(input: unknown, sourceBytes: ReadonlyMap
     for (let dy = 0; dy < r.height; dy++) pixels.set(cel.subarray(dy * r.width * 4, (dy + 1) * r.width * 4), ((r.y + dy) * width + r.x) * 4);
   }
   const png = encodeRgbaPng({width, height, pixels}), pin = {packId: recipe.packId, packVersion: recipe.packVersion}, digest = sha256(png);
-  const manifest = {schemaVersion: 1, ...pin, projection: {tileWidth: 32, tileHeight: 16}, atlas: {path: `assets/storybook/${recipe.packId}.png`, width, height, sha256: digest}, provenance: recipe.provenance, assets};
+  const density = recipe.buildSchemaVersion === 2 ? recipe.atlas.pixelsPerUnit : 1;
+  const densityFields = recipe.buildSchemaVersion === 2 ? {pixelsPerUnit: density} : {};
+  const manifest = {schemaVersion: recipe.buildSchemaVersion, ...pin, projection: {tileWidth: 32, tileHeight: 16}, atlas: {path: `assets/storybook/${recipe.packId}.png`, width, height, sha256: digest, ...densityFields}, provenance: recipe.provenance, assets};
+  // Coordinates and PNG cells remain source pixels. These report-only conversions
+  // make the intended logical geometry auditable without changing world footprints.
+  const logicalPoint = (p: Point): Point => ({x: p.x / density, y: p.y / density});
   const animation = recipe.characters.length ? {animationSchemaVersion: 1, atlas: {...pin, sha256: digest}, characters: recipe.characters, bindings: []} : null;
   const bundle = validateStorybookAtlas(png, manifest, animation, pin);
   const duplicatePixels = placements.filter((p, i) => placements.findIndex(q => q.pixelSha256 === p.pixelSha256 && q.atlasRect.width === p.atlasRect.width && q.atlasRect.height === p.atlasRect.height) !== i).map(p => ({assetId: p.assetId, direction: p.direction}));
   const report = {
-    buildReportVersion: 1, pipelineVersion: PIPELINE_VERSION, recipeSha256, ...pin, purpose: recipe.purpose, profile: recipe.profile,
+    buildReportVersion: recipe.buildSchemaVersion, pipelineVersion: recipe.buildSchemaVersion === 1 ? PIPELINE_VERSION : DENSITY_PIPELINE_VERSION, recipeSha256, ...pin, purpose: recipe.purpose, profile: recipe.profile,
     status: 'validated-candidate-only', visualApproval: false, productionInstalled: false,
-    atlas: {...manifest.atlas, byteLength: png.length}, directionMapping: Object.fromEntries(directions.map(d => [d, storybookFacing(d)])),
-    animationFrameCount: placements.filter(p => p.direction !== null).length, sources, placements, buildings: recipe.buildings,
+    atlas: {...manifest.atlas, byteLength: png.length, ...(recipe.buildSchemaVersion === 2 ? {logicalWidth: width / density, logicalHeight: height / density} : {})}, directionMapping: Object.fromEntries(directions.map(d => [d, storybookFacing(d)])),
+    animationFrameCount: placements.filter(p => p.direction !== null).length, sources,
+    placements: recipe.buildSchemaVersion === 1 ? placements : placements.map(p => ({...p,
+      logicalSize: {width: p.atlasRect.width / density, height: p.atlasRect.height / density}, logicalFoot: logicalPoint(p.foot)})),
+    buildings: recipe.buildings,
+    ...(recipe.buildSchemaVersion === 2 ? {logicalBuildings: recipe.buildings.map(b => ({...b, points: {
+      door: logicalPoint(b.points.door), operations: b.points.operations.map(op => ({id: op.id, ...logicalPoint(op)})),
+    }}))} : {}),
     duplicatePixels, warnings: ['License and authorization are declarations, not legal verification.', 'Source crops, alpha and anchors do not verify artwork, identity, anatomical direction or pixel-level foot stability.', 'No production installation, resident binding, visual acceptance or runtime acceptance.'],
   } as const;
   return {png, manifest: bundle.manifest, animation: bundle.animation, report};

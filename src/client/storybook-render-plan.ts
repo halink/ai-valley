@@ -3,7 +3,9 @@
 import type {Snapshot, Vec} from '../shared/types.js';
 import type {ObserverSelection} from './observer-map.js';
 import type {StorybookAsset, StorybookFrame, StorybookManifest} from './storybook-assets.js';
-import {orderStorybookObjects, pickStorybookTile, placeStorybookAsset, placeStorybookFrame, projectStorybook, screenToStorybook, storybookBuildingFootprint, storybookFacingFromOffset, type StorybookCamera, type StorybookFacing, type StorybookFootprint} from './storybook-geometry.js';
+import {storybookPixelsPerUnit} from './storybook-assets.js';
+import {orderStorybookObjects, pickStorybookTile, placeStorybookAsset, placeStorybookFrame, screenToStorybook, storybookBuildingFootprint, storybookFacingFromOffset, type StorybookCamera, type StorybookFacing, type StorybookFootprint} from './storybook-geometry.js';
+import {stableCoordinateFloor} from './isometric-projection.js';
 import {prepareIsometricResidents} from './isometric-residents.js';
 import {residentActivity} from './resident-status.js';
 import type {StorybookAnimationRecord} from './storybook-animation.js';
@@ -14,7 +16,7 @@ export const STORYBOOK_PROTOTYPE_LIMITS=Object.freeze({cells:32,objects:192,resi
 export interface StorybookPixelAtlas {manifest:StorybookManifest;width:number;height:number;pixels:Uint8ClampedArray;}
 export interface StorybookDraw {
  key:string; assetId:string; frame:StorybookFrame; facing:StorybookFacing|null;
- position:Vec; origin:Vec; topLeft:Vec; depth:number; layer:'ground'|'contact'|'body'|'roof'|'marker';
+ position:Vec; origin:Vec; topLeft:Vec; scale:number; size:{width:number;height:number}; depth:number; layer:'ground'|'contact'|'body'|'roof'|'marker';
  selection:ObserverSelection; label:string; fallback:string|null;
 }
 export interface StorybookPlan {
@@ -50,17 +52,18 @@ function buildPlan(snapshot:Snapshot,atlas:StorybookPixelAtlas,bounds:StorybookF
  if(roomId)throw new Error('绘本室内贴图尚未提供；请保留原视图，不把室内居民挪到门口。');
  if(!Array.isArray(w.buildings)||!Array.isArray(w.residents)||w.buildings.length>STORYBOOK_PROTOTYPE_LIMITS.records||w.residents.length>STORYBOOK_PROTOTYPE_LIMITS.residents)throw new Error('storybook_prototype_record_limit');
  const assets=new Map(atlas.manifest.assets.map(a=>[a.id,a])),draws:StorybookDraw[]=[],objects:ObjectRecord[]=[],notices=new Set<string>();
+ const pixelsPerUnit=storybookPixelsPerUnit(atlas.manifest);
  const unknownResidents:StorybookPlan['unknownResidents']=[];let omittedObjects=0;
  const make=(key:string,asset:StorybookAsset,footprint:StorybookFootprint,layer:StorybookDraw['layer'],selection:ObserverSelection,label:string,fallback:string|null=null,facing:StorybookFacing|null=null):StorybookDraw=>{
-  const p=placeStorybookAsset(footprint,asset,facing);
-  return {key,assetId:asset.id,frame:p.frame,facing,position:p.position,origin:p.origin,topLeft:p.topLeft,depth:0,layer,selection:selection?{...selection}:null,label,fallback};
+  const p=placeStorybookAsset(footprint,asset,facing,pixelsPerUnit);
+  return {key,assetId:asset.id,frame:p.frame,facing,position:p.position,origin:p.origin,topLeft:p.topLeft,scale:p.scale,size:p.size,depth:0,layer,selection:selection?{...selection}:null,label,fallback};
  };
  const marker=(key:string,footprint:StorybookFootprint,foot:Vec,selection:ObserverSelection,label:string,reason:string):StorybookDraw|null=>{
   notices.add(reason);const asset=assets.get('marker');
   if(!asset||asset.kind!=='static'){notices.add('缺少位置标记贴图；没有绘制该对象，请使用原视图。');return null;}
   // A diagnostic marker does not claim the size of the missing building/body artwork.
-  const p=placeStorybookFrame(footprint,{x:foot.x-footprint.x,y:foot.y-footprint.y},asset.frame);
-  return {key,assetId:asset.id,frame:asset.frame,facing:null,position:p.position,origin:p.origin,topLeft:p.topLeft,depth:0,layer:'marker',selection:selection?{...selection}:null,label,fallback:reason};
+  const p=placeStorybookFrame(footprint,{x:foot.x-footprint.x,y:foot.y-footprint.y},asset.frame,pixelsPerUnit);
+  return {key,assetId:asset.id,frame:asset.frame,facing:null,position:p.position,origin:p.origin,topLeft:p.topLeft,scale:p.scale,size:p.size,depth:0,layer:'marker',selection:selection?{...selection}:null,label,fallback:reason};
  };
  for(let y=bounds.y;y<bounds.y+bounds.height;y++)for(let x=bounds.x;x<bounds.x+bounds.width;x++){
   const tile=w.map.tiles[y*w.map.width+x],asset=assets.get('terrain-'+tile);
@@ -123,15 +126,23 @@ function buildPlan(snapshot:Snapshot,atlas:StorybookPixelAtlas,bounds:StorybookF
  return {worldId:w.id,revision:w.revision,minute:w.minute,paused:w.clock.paused,bounds:{...bounds},draws,notices:[...notices],unknownResidents,overlaps:ordered.overlaps,cycleBreaks:ordered.cycleBreaks,omittedObjects};
 }
 export interface StorybookPick {selection:ObserverSelection;tile:Vec|null;label:string;fallback:string|null;}
-/** Frontmost nontransparent source pixel wins; transparent roofs do not eat clicks. */
+/** Frontmost nontransparent source pixel wins, after undoing camera AND artwork density.
+ * Alpha is sampled from source pixels, not a filtered GPU readback or an enlarged hit box. */
 export function pickStorybookPlan(plan:StorybookPlan,atlas:StorybookPixelAtlas,screen:Vec,camera:StorybookCamera):StorybookPick|null {
- const at=screenToStorybook(screen,camera);if(!at)return null;
- const p=projectStorybook(at),tile=pickStorybookTile(screen,camera,plan.bounds);
+ if(!screenToStorybook(screen,camera))return null;
+ // Go straight to logical pixels: an extra isometric inverse/project roundtrip loses
+ // precision at source texel boundaries, especially with non-binary densities/zoom.
+ const p={x:(screen.x-camera.origin.x)/camera.zoom,y:(screen.y-camera.origin.y)/camera.zoom},tile=pickStorybookTile(screen,camera,plan.bounds);
  for(let i=plan.draws.length-1;i>=0;i--){
   const d=plan.draws[i];if(!d.selection)continue;
-  const x=Math.floor(p.x-d.topLeft.x),y=Math.floor(p.y-d.topLeft.y),r=d.frame.rect;
+  if(!Number.isFinite(d.scale)||d.scale<=0)continue;
+  const sourceX=(p.x-d.topLeft.x)/d.scale,sourceY=(p.y-d.topLeft.y)/d.scale;
+  const magnitudeX=((Math.abs(screen.x)+Math.abs(camera.origin.x))/camera.zoom+Math.abs(d.topLeft.x))/d.scale;
+  const magnitudeY=((Math.abs(screen.y)+Math.abs(camera.origin.y))/camera.zoom+Math.abs(d.topLeft.y))/d.scale;
+  if(![sourceX,sourceY,magnitudeX,magnitudeY].every(Number.isFinite))continue;
+  const x=stableCoordinateFloor(sourceX,magnitudeX),y=stableCoordinateFloor(sourceY,magnitudeY),r=d.frame.rect;
   if(x<0||y<0||x>=r.width||y>=r.height)continue;
-  if(atlas.pixels[((r.y+y)*atlas.width+r.x+x)*4+3]===0)continue;
+  if(!(atlas.pixels[((r.y+y)*atlas.width+r.x+x)*4+3]>0))continue;
   return {selection:{...d.selection},tile,label:d.label,fallback:d.fallback};
  }
  return tile?{selection:null,tile,label:`地图 (${tile.x},${tile.y})`,fallback:null}:null;

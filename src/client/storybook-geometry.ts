@@ -1,6 +1,7 @@
 /** Pure, opt-in geometry for untrimmed 2:1 storybook textures. No scene or world writes. */
 import type {Building,Vec} from '../shared/types.js';
 import type {StorybookAsset} from './storybook-assets.js';
+import {STORYBOOK_MAX_PIXELS_PER_UNIT} from './storybook-assets.js';
 import {stableCoordinateFloor} from './isometric-projection.js';
 
 export const STORYBOOK_TILE=Object.freeze({width:32,height:16} as const);
@@ -10,6 +11,12 @@ const facings:Readonly<Record<StorybookWorldDirection,StorybookFacing>>=Object.f
 export interface StorybookFootprint {x:number;y:number;width:number;height:number;}
 export interface StorybookCamera {origin:Vec;zoom:number;}
 export interface StorybookFrameGeometry {rect:{x:number;y:number;width:number;height:number};foot:Vec;}
+export interface StorybookFramePlacement {
+ worldFoot:Vec;position:Vec;origin:Vec;topLeft:Vec;
+ /** Logical units per source pixel, before viewport/camera zoom. */
+ scale:number;
+ size:{width:number;height:number};
+}
 
 function finite(point:Vec):boolean{return !!point&&Number.isFinite(point.x)&&Number.isFinite(point.y);}
 function checked(point:Vec):Vec {if(!finite(point))throw new Error('storybook_geometry_coordinate');return point;}
@@ -31,7 +38,7 @@ export function storybookFacingFromOffset(offset:Vec):StorybookFacing|null {
  if(offset.y===0&&offset.x!==0)return storybookFacing(offset.x<0?'west':'east');
  return null;
 }
-/** Coordinates are tile corners; elevation is a known pixel offset, not generated terrain. */
+/** Coordinates are tile corners; elevation is a known logical-unit offset, not source pixels. */
 export function projectStorybook(at:Vec,elevation=0):Vec {
  checked(at);if(!Number.isFinite(elevation))throw new Error('storybook_geometry_elevation');
  return checked({x:(at.x-at.y)*16,y:(at.x+at.y)*8-elevation});
@@ -65,22 +72,25 @@ export function storybookBuildingFootprint(building:Pick<Building,'at'|'width'|'
  if(!Object.values(result).every(Number.isSafeInteger))throw new Error('storybook_geometry_building_footprint');
  return result;
 }
-/** Frame foot is in untrimmed source pixels; groundAnchor is local to the true footprint. */
-export function placeStorybookFrame(footprint:StorybookFootprint,groundAnchor:Vec,frame:StorybookFrameGeometry):{worldFoot:Vec;position:Vec;origin:Vec;topLeft:Vec} {
+/** Frame rect/foot remain untrimmed source pixels. Position, topLeft and size use 32×16
+ * logical projection units. Density must not change groundAnchor or the true footprint. */
+export function placeStorybookFrame(footprint:StorybookFootprint,groundAnchor:Vec,frame:StorybookFrameGeometry,pixelsPerUnit=1):StorybookFramePlacement {
  checkFootprint(footprint);
+ if(!Number.isSafeInteger(pixelsPerUnit)||pixelsPerUnit<1||pixelsPerUnit>STORYBOOK_MAX_PIXELS_PER_UNIT)throw new Error('storybook_geometry_density');
  if(!contains({x:0,y:0,width:footprint.width,height:footprint.height},groundAnchor))throw new Error('storybook_geometry_ground_anchor');
  if(!frame||!frame.rect||![frame.rect.x,frame.rect.y,frame.rect.width,frame.rect.height].every(Number.isSafeInteger)||frame.rect.x<0||frame.rect.y<0||frame.rect.width<=0||frame.rect.height<=0||!contains({x:0,y:0,width:frame.rect.width,height:frame.rect.height},frame.foot))throw new Error('storybook_geometry_frame');
  const worldFoot=checked({x:footprint.x+groundAnchor.x,y:footprint.y+groundAnchor.y}),position=projectStorybook(worldFoot);
- return {worldFoot,position,origin:{x:frame.foot.x/frame.rect.width,y:frame.foot.y/frame.rect.height},topLeft:checked({x:position.x-frame.foot.x,y:position.y-frame.foot.y})};
+ const scale=1/pixelsPerUnit;
+ return {worldFoot,position,origin:{x:frame.foot.x/frame.rect.width,y:frame.foot.y/frame.rect.height},topLeft:checked({x:position.x-frame.foot.x*scale,y:position.y-frame.foot.y*scale}),scale,size:{width:frame.rect.width*scale,height:frame.rect.height*scale}};
 }
 /** Use parsed metadata only after comparing it with the recorded footprint. Never rescale a world
  * building to fit an atlas entry or silently mirror a missing direction. */
-export function placeStorybookAsset(footprint:StorybookFootprint,asset:StorybookAsset,facing:StorybookFacing|null=null):{frame:StorybookFrameGeometry;worldFoot:Vec;position:Vec;origin:Vec;topLeft:Vec} {
+export function placeStorybookAsset(footprint:StorybookFootprint,asset:StorybookAsset,facing:StorybookFacing|null=null,pixelsPerUnit=1):StorybookFramePlacement&{frame:StorybookFrameGeometry} {
  checkFootprint(footprint);
  if(asset.footprint.width!==footprint.width||asset.footprint.height!==footprint.height)throw new Error('storybook_geometry_asset_footprint');
  if(asset.kind==='directional'&&(!facing||!Object.hasOwn(asset.frames,facing)))throw new Error('storybook_geometry_asset_facing');
  const frame=asset.kind==='static'?asset.frame:asset.frames[facing!];
- return {frame,...placeStorybookFrame(footprint,asset.groundAnchor,frame)};
+ return {frame,...placeStorybookFrame(footprint,asset.groundAnchor,frame,pixelsPerUnit)};
 }
 
 export interface StorybookDepthItem {key:string;footprint:StorybookFootprint;worldFoot:Vec;}

@@ -1,12 +1,19 @@
 /** Optional, independently disposable observer. The ordinary client is the only transport owner. */
 import type {Vec} from '../shared/types.js';
 import type {ObserverMap} from './observer-map.js';
-import type {StorybookFootprint} from './storybook-geometry.js';
+import type {StorybookCamera,StorybookFootprint} from './storybook-geometry.js';
 import {buildStorybookPlan,pickStorybookPlan,storybookWindow,STORYBOOK_PROTOTYPE_NOTICE,type StorybookPixelAtlas,type StorybookPlan} from './storybook-render-plan.js';
+/** Original pointer and camera evidence, before inverse transforms lose cancellation precision. */
+export interface StorybookPointerEvidence {
+ readonly screen:Readonly<Vec>;
+ readonly camera:Readonly<{origin:Readonly<Vec>;zoom:number}>;
+}
+export type StorybookPickListener=(at:Vec,original?:StorybookPointerEvidence)=>void;
 export interface StorybookSurface {
  present(plan:StorybookPlan|null,notice:string):void;
- /** Input is in projected 32×16 pixels, after undoing the surface camera. */
- subscribePick(listener:(at:Vec)=>void):()=>void;
+ /** First argument stays in projected 32×16 logical units for existing surfaces.
+  * Transformed surfaces additionally supply immutable original screen/camera evidence. */
+ subscribePick(listener:StorybookPickListener):()=>void;
  dispose():void;
 }
 export interface StorybookObserverHandle {
@@ -45,9 +52,10 @@ export function createStorybookObserver(observer:ObserverMap,atlas:StorybookPixe
  };
  cleanup.push(()=>surface.dispose());
  try{
-  cleanup.push(surface.subscribePick(at=>{
+  cleanup.push(surface.subscribePick((at,original)=>{
    if(disposed||!active||!plan)return;
-   const hit=pickStorybookPlan(plan,atlas,at,{origin:{x:0,y:0},zoom:1});
+   const camera:StorybookCamera=original?.camera??{origin:{x:0,y:0},zoom:1};
+   const hit=pickStorybookPlan(plan,atlas,original?.screen??at,camera);
    if(hit?.selection)observer.select(hit.selection);
   }));
   cleanup.push(observer.subscribe((value,status)=>{

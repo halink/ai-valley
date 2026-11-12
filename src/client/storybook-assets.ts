@@ -3,6 +3,8 @@
  * Frames are untrimmed and unrotated. Foot/anchor coordinates use inclusive edges.
  */
 export const STORYBOOK_SCHEMA_VERSION = 1 as const;
+export const STORYBOOK_DENSITY_SCHEMA_VERSION = 2 as const;
+export const STORYBOOK_MAX_PIXELS_PER_UNIT = 8;
 export type StorybookDirection = 'northeast' | 'southeast' | 'southwest' | 'northwest';
 export type StorybookPoint = Readonly<{x: number; y: number}>;
 export type StorybookFootprint = Readonly<{width: number; height: number}>;
@@ -16,13 +18,19 @@ export type StorybookAsset = AssetBase & (
   Readonly<{kind: 'directional'; frames: Readonly<Record<StorybookDirection, StorybookFrame>>}>
 );
 export type StorybookPackPin = Readonly<{packId: string; packVersion: string}>;
+type StorybookAtlasMetadata = Readonly<{path: string; width: number; height: number; sha256: string}>;
 export type StorybookManifest = StorybookPackPin & Readonly<{
-  schemaVersion: typeof STORYBOOK_SCHEMA_VERSION;
   projection: Readonly<{tileWidth: 32; tileHeight: 16}>;
-  atlas: Readonly<{path: string; width: number; height: number; sha256: string}>;
   provenance: Readonly<{source: string; author: string; license: string}>;
   assets: readonly StorybookAsset[];
-}>;
+}> & (
+  Readonly<{schemaVersion: typeof STORYBOOK_SCHEMA_VERSION; atlas: StorybookAtlasMetadata}> |
+  Readonly<{schemaVersion: typeof STORYBOOK_DENSITY_SCHEMA_VERSION; atlas: StorybookAtlasMetadata & Readonly<{pixelsPerUnit: number}>}>
+);
+/** v1 remains an exact 1:1 contract. v2 density belongs to source artwork, not world tiles. */
+export function storybookPixelsPerUnit(manifest: StorybookManifest): number {
+  return manifest.schemaVersion === STORYBOOK_DENSITY_SCHEMA_VERSION ? manifest.atlas.pixelsPerUnit : 1;
+}
 const directions = ['northeast', 'southeast', 'southwest', 'northwest'] as const;
 function fail(path: string): never { throw new Error(`invalid_storybook_manifest: ${path}`); }
 function record(value: unknown, keys: readonly string[], path: string): Record<string, unknown> {
@@ -80,12 +88,14 @@ export function parseStorybookManifest(input: unknown, expected: StorybookPackPi
   const pin = record(expected, ['packId', 'packVersion'], 'pin');
   const expectedId = id(pin.packId, 'pin.packId'), expectedVersion = version(pin.packVersion, 'pin.packVersion');
   const m = record(input, ['schemaVersion', 'packId', 'packVersion', 'projection', 'atlas', 'provenance', 'assets'], 'manifest');
-  if (m.schemaVersion !== STORYBOOK_SCHEMA_VERSION) return fail('schemaVersion');
+  if (m.schemaVersion !== STORYBOOK_SCHEMA_VERSION && m.schemaVersion !== STORYBOOK_DENSITY_SCHEMA_VERSION) return fail('schemaVersion');
   const packId = id(m.packId, 'packId'), packVersion = version(m.packVersion, 'packVersion');
   if (packId !== expectedId || packVersion !== expectedVersion) return fail('pin.mismatch');
   const projection = record(m.projection, ['tileWidth', 'tileHeight'], 'projection');
   if (projection.tileWidth !== 32 || projection.tileHeight !== 16) return fail('projection');
-  const a = record(m.atlas, ['path', 'width', 'height', 'sha256'], 'atlas');
+  const a = record(m.atlas, ['path', 'width', 'height', 'sha256', ...(m.schemaVersion === STORYBOOK_DENSITY_SCHEMA_VERSION ? ['pixelsPerUnit'] : [])], 'atlas');
+  const pixelsPerUnit = m.schemaVersion === STORYBOOK_DENSITY_SCHEMA_VERSION ? integer(a.pixelsPerUnit, 1, 'atlas.pixelsPerUnit') : 1;
+  if (pixelsPerUnit > STORYBOOK_MAX_PIXELS_PER_UNIT) return fail('atlas.pixelsPerUnit');
   const path = string(a.path, 'atlas.path');
   if (!/^assets\/storybook\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_-]+\.png$/.test(path)) return fail('atlas.path');
   const width = integer(a.width, 1, 'atlas.width'), height = integer(a.height, 1, 'atlas.height');
@@ -120,5 +130,8 @@ export function parseStorybookManifest(input: unknown, expected: StorybookPackPi
       assets.push(Object.freeze({...base, kind, frames: Object.freeze(frames)}));
     }
   }
-  return Object.freeze({schemaVersion: STORYBOOK_SCHEMA_VERSION, packId, packVersion, projection: Object.freeze({tileWidth: 32, tileHeight: 16}), atlas: Object.freeze({path, width, height, sha256}), provenance, assets: Object.freeze(assets)});
+  const projectionUnits = Object.freeze({tileWidth: 32, tileHeight: 16} as const), frozenAssets = Object.freeze(assets);
+  return m.schemaVersion === STORYBOOK_DENSITY_SCHEMA_VERSION
+    ? Object.freeze({schemaVersion: STORYBOOK_DENSITY_SCHEMA_VERSION, packId, packVersion, projection: projectionUnits, atlas: Object.freeze({path, width, height, sha256, pixelsPerUnit}), provenance, assets: frozenAssets})
+    : Object.freeze({schemaVersion: STORYBOOK_SCHEMA_VERSION, packId, packVersion, projection: projectionUnits, atlas: Object.freeze({path, width, height, sha256}), provenance, assets: frozenAssets});
 }

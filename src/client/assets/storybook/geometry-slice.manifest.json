@@ -1,0 +1,143 @@
+{
+  "schemaVersion": 2,
+  "packId": "calibration-geometry",
+  "packVersion": "0.1.0",
+  "projection": {
+    "tileWidth": 32,
+    "tileHeight": 16
+  },
+  "atlas": {
+    "path": "assets/storybook/geometry-slice.png",
+    "width": 1728,
+    "height": 672,
+    "sha256": "08e6be7fba74ad1418d89db9eb02719156e5334a1ea463d9d72c07a1325faed7",
+    "pixelsPerUnit": 2
+  },
+  "provenance": {
+    "source": "Repository-created calibration geometry; NOT final art, resident identity, animation or world evidence",
+    "author": "ai-valley contributors",
+    "license": "MIT (repository)"
+  },
+  "assets": [
+    {
+      "id": "slice-contact",
+      "footprint": {
+        "width": 8,
+        "height": 6
+      },
+      "groundAnchor": {
+        "x": 4,
+        "y": 6
+      },
+      "kind": "static",
+      "frame": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "width": 576,
+          "height": 512
+        },
+        "foot": {
+          "x": 160,
+          "y": 384
+        }
+      }
+    },
+    {
+      "id": "slice-body",
+      "footprint": {
+        "width": 8,
+        "height": 6
+      },
+      "groundAnchor": {
+        "x": 4,
+        "y": 6
+      },
+      "kind": "static",
+      "frame": {
+        "rect": {
+          "x": 576,
+          "y": 0,
+          "width": 576,
+          "height": 512
+        },
+        "foot": {
+          "x": 160,
+          "y": 384
+        }
+      }
+    },
+    {
+      "id": "slice-roof",
+      "footprint": {
+        "width": 8,
+        "height": 6
+      },
+      "groundAnchor": {
+        "x": 4,
+        "y": 6
+      },
+      "kind": "static",
+      "frame": {
+        "rect": {
+          "x": 1152,
+          "y": 0,
+          "width": 576,
+          "height": 512
+        },
+        "foot": {
+          "x": 160,
+          "y": 384
+        }
+      }
+    },
+    {
+      "id": "slice-adult",
+      "footprint": {
+        "width": 1,
+        "height": 1
+      },
+      "groundAnchor": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "kind": "static",
+      "frame": {
+        "rect": {
+          "x": 0,
+          "y": 512,
+          "width": 96,
+          "height": 160
+        },
+        "foot": {
+          "x": 48,
+          "y": 144
+        }
+      }
+    },
+    {
+      "id": "slice-teen",
+      "footprint": {
+        "width": 1,
+        "height": 1
+      },
+      "groundAnchor": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "kind": "static",
+      "frame": {
+        "rect": {
+          "x": 96,
+          "y": 512,
+          "width": 96,
+          "height": 160
+        },
+        "foot": {
+          "x": 48,
+          "y": 144
+        }
+      }
+    }
+  ]
+}

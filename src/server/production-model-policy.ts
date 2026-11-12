@@ -6,6 +6,7 @@ export const PRODUCTION_MODEL_CANDIDATE=Object.freeze({provider:'siliconflow',mo
 export type ProductionModelPolicy=Readonly<{state:'no-model'|'blocked';reason:string;
  provider:typeof PRODUCTION_MODEL_CANDIDATE.provider;model:typeof DEEPSEEK_MODEL;
  liveExecutionEnabled:false;actualProviderCostCny:null}>;
+const disabledPolicies=new WeakSet<ProductionModelPolicy>();
 
 /** Deliberately reads only non-secret settings. A key, environment assertion of
  * zero pricing, or old probe approval cannot open a new production budget.
@@ -21,5 +22,15 @@ export function readProductionModelPolicy(env:Readonly<Record<string,string|unde
    :env.VALLEY_MODEL_ID!==DEEPSEEK_MODEL?'exact_candidate_model_required'
    :'production_live_authorization_and_free_status_unverified';
  }
- return Object.freeze({state,reason,provider:'siliconflow',model:DEEPSEEK_MODEL,liveExecutionEnabled:false,actualProviderCostCny:null});
+ const policy=Object.freeze({state,reason,provider:'siliconflow',model:DEEPSEEK_MODEL,liveExecutionEnabled:false,actualProviderCostCny:null} as const);
+ disabledPolicies.add(policy);return policy;
+}
+
+/** An immutable in-process configuration result, not evidence of permission or
+ * price. Serialized/spread objects cannot supply a replacement startup policy.
+ * This is an accidental-wiring boundary for trusted code, not an OS sandbox. */
+export function requireDisabledProductionModelPolicy(policy?:ProductionModelPolicy):ProductionModelPolicy{
+ if(policy===undefined)return readProductionModelPolicy({});
+ if(!disabledPolicies.has(policy))throw new Error('formal_model_policy_untrusted');
+ return policy;
 }

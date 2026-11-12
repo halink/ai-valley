@@ -50,8 +50,13 @@ export function advancePastures(w:World):void {
     continue;
    }
    if(yard.trough&&yard.trough.water>0&&n.thirst>15&&!interacting){
-    const route=findPath(w,current,yard.trough.at);
-    if(route&&route.every(t=>yard.tiles.some(p=>same(p,t)))){
+    // Search the route the animal can actually walk, rather than rejecting an
+    // unconstrained shortest path after it crosses the yard or an occupied tile.
+    // Drinking already happens at contact, so the trough itself need not be free.
+    const trough=yard.trough.at;
+    const route=yard.tiles.some(tile=>same(tile,trough))&&walkable(w,trough,current)
+     ?findPath(w,current,trough,true,Infinity,(_from,to)=>yard.tiles.some(tile=>same(tile,to))&&pastureTileFree(w,to,n.id)):null;
+    if(route){
      if(distance(current,yard.trough.at)<=1){
       const relief=industryDefinition(w,n.definition).rules.animalWaterRelief;
       const drank=Math.min(yard.trough.water,(n.thirst-6)/relief,dt*.03);

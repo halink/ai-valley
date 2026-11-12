@@ -15,6 +15,7 @@ import type {FormalOpportunity,Resident,World} from '../shared/types.js';
 import type {IndustryAction,AnimalKind,ToolKind,StationKind,Livestock} from '../shared/industry.js';
 import {toolKits} from '../shared/industry.js';
 import {industryTarget,animalNames} from '../world/industry.js';
+import {livestockBreedingPlaceMatcher} from '../world/livestock-life.js';
 import {stationNames} from '../world/industry-content.js';
 import {goods,itemLabels} from '../shared/items.js';
 import {availableCropKeys} from '../world/production.js';
@@ -101,7 +102,15 @@ export function industryOpportunities(w:World,r:Resident):FormalOpportunity[]{
    const at=yard.tiles.find(tile=>pastureTileFree(w,tile,n.id));
    if(at)add('pasture.'+n.id+'.'+yard.id,`亲自把自有${name}带去放牧。牧场草量${Math.floor(yard.forage)}/${yard.capacity}，仍需要清水。`,{type:'industry',operation:'moveAnimal',animalId:n.id,buildingId:yard.barnId,pastureId:yard.id,at:{...at}});
   }
-  for(const sire of w.industry.animals.filter(a=>a.id!==n.id&&a.barnId===n.barnId&&a.kind===n.kind&&a.ownerId===r.id&&a.sex==='male').slice(0,1))add('breed.'+n.id,`决定让本人同舍健康成年${animalNames[n.kind]}繁育，预留真实幼畜空位，持续照料`,{type:'industry',operation:'breedAnimal',animalId:n.id,partnerId:sire.id});
+  if(n.sex==='female'&&!n.pregnancy){
+   const samePlace=livestockBreedingPlaceMatcher(w,n);
+   for(const sire of w.industry.animals.filter(a=>a.id!==n.id&&a.status==='alive'&&a.barnId===n.barnId&&a.kind===n.kind&&a.ownerId===r.id&&a.sex==='male')){
+    if(!samePlace(sire))continue;
+    const before=result.length;
+    add('breed.'+n.id,`决定让本人实际同在畜舍或同一连通牧场的健康成年${animalNames[n.kind]}繁育，预留真实幼畜空位，持续照料`,{type:'industry',operation:'breedAnimal',animalId:n.id,partnerId:sire.id});
+    if(result.length>before)break;
+   }
+  }
  }
  const batch=w.industry.batches.find(batch=>batch.ownerId===r.id&&batch.status==='working');
  const observed=personalFoodProcessing(w,r).current;

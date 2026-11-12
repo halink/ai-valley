@@ -76,9 +76,9 @@ export function createStorybookAnimatedObserver(observer: ObserverMap, atlas: St
   };
   release.push(() => surface.dispose());
   try {
-    release.push(surface.subscribePick(at => {
+    release.push(surface.subscribePick((at, original) => {
       if (disposed || !active || !environment.visible() || !plan) return;
-      const hit = pickStorybookPlan(plan, atlas, at, {origin: {x: 0, y: 0}, zoom: 1});
+      const hit = pickStorybookPlan(plan, atlas, original?.screen ?? at, original?.camera ?? {origin: {x: 0, y: 0}, zoom: 1});
       if (hit?.selection) observer.select(hit.selection);
     }));
     release.push(observer.subscribe((value, status) => {

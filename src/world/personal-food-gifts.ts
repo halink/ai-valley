@@ -166,6 +166,29 @@ export function advancePersonalFoodGifts(w:World){
   c.eventIds??=[];c.eventIds.push(emitLedgerEvent(w,{kind:'trade',actors:[],place:point(c.location?.at)?{...c.location.at}:{...w.map.entrance},text:`个人赠粮${c.id}已结束，未交付任何食物；不向远方居民递送现场消息。`}).id);
  }
 }
+export const MAX_PERSONAL_FOOD_GIFT_NOTES=6;
+/** A personal reminder of witnessed terms, never a query of the other party.
+ * In particular, remote cancellation, inventory and activity do not change it. */
+export function personalFoodGiftNotes(w:World,r:Resident):string {
+ if(w.mode!=='formal'||!capable(w,r))return '';
+ const own=gifts(w).filter(c=>[c.giverId,c.recipientId].includes(r.id)&&statusKnown(c,r)&&w.minute<c.expiresAt&&valid(w,c)
+  &&(c.knownStatus[r.id]!=='accepted'||c.acceptedAt!==null))
+  .sort((a,b)=>Number(b.knownStatus[r.id]==='accepted')-Number(a.knownStatus[r.id]==='accepted')||a.expiresAt-b.expiresAt||a.id.localeCompare(b.id));
+ if(!own.length)return '';
+ // Identifiers are labels, not new action arguments. Bound legacy identifiers
+ // as well as record count; action choices retain their complete identities.
+ const label=(id:string)=>id.length>80?id.slice(0,80)+'…':id;
+ const rows=own.slice(0,MAX_PERSONAL_FOOD_GIFT_NOTES).map(c=>{
+  const recipient=r.id===c.recipientId,accepted=c.knownStatus[r.id]==='accepted';
+  const terms=`${label(c.id)}：本人为${recipient?'收方':'送方'}，${c.quantity}份${itemLabels[c.item]}；原截止第${c.expiresAt}游戏分钟（尚余${Math.max(0,Math.round((c.expiresAt-w.minute)*100)/100)}分钟）`;
+  if(!accepted)return terms+'；本人最后获知提议待收方当面独立接受，尚未约定交接地点。';
+  const place=c.location.inside?`房屋${label(c.location.inside)}门口(${c.location.at.x},${c.location.at.y})、室内原点(${c.location.roomAt!.x},${c.location.roomAt!.y})`:`室外原点(${c.location.at.x},${c.location.at.y})`;
+  return terms+`；本人最后获知已接受、尚未收货，约在${place}交接。`+(recipient?`本人此刻${atPlace(r,c.location)?'在':'不在'}原约点；离开原点会使实际交付无法完成，返回不保证对方仍在。`:'须本人另选交付并实际走到原约位置；收方须仍在原点。');
+ });
+ return '本人持久记得的个人赠粮交接（不是远程事实）：\n'+rows.join('\n')
+  +(own.length>MAX_PERSONAL_FOOD_GIFT_NOTES?`\n另有${own.length-MAX_PERSONAL_FOOD_GIFT_NOTES}份本人未到期记录未展开；接受记录优先，其次原期限先到者。`:'')
+  +'\n交接仍需送方另选行动、实际路程和1分钟近身办理；提议、接受都不等于已交付或进食。可从现有菜单自行选择短暂停留（时间由本人填写）、其他行动或撤回；停留期间身体照常消耗，不恢复睡眠体力，消息不会自动中断已选行动。对方是否正在前来、忙闲、库存和远方变化未知，不保证等候就能收到。';
+}
 export function personalFoodGiftOpportunities(w:World,r:Resident):FormalOpportunity[]{
  if(w.mode!=='formal'||!capable(w,r))return [];
  const out:FormalOpportunity[]=[],add=(id:string,label:string,action:PersonalFoodGiftAction)=>out.push({id:'personalFoodGift.'+id,label,action});

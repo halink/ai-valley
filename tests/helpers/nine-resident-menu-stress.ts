@@ -20,6 +20,7 @@ import type {Action,DecisionContext,Resident,World} from '../../src/shared/types
 import {fileURLToPath} from 'node:url';
 import {gzipSync} from 'node:zlib';
 import {isWaterSourceChoice} from '../../src/server/water-source-opportunities.js';
+import {createSurvivalEvaluator,SURVIVAL_CONTRACT,survivalSnapshot,survivalFood,type SurvivalRecord} from './nine-resident-survival.js';
 
 export const MENU_STRESS_POLICIES={v2:'visible-needs-and-farming-v2',v3:'visible-needs-farming-and-retreat-v3',v4:'visible-needs-gifts-and-feedback-v4',v5:'visible-gift-meeting-v5'} as const;
 type PolicyVersion=keyof typeof MENU_STRESS_POLICIES;
@@ -267,7 +268,7 @@ type Gift=NonNullable<World['personalFoodGifts']>['gifts'][number];
 type GiftDeliveryObservation={gift:Gift;fromMinute:number;throughMinute:number;giverBefore:ReturnType<typeof body>|null;giverAfter:ReturnType<typeof body>|null;
  recipientBefore:ReturnType<typeof body>|null;recipientAfter:ReturnType<typeof body>|null;deliveryReceiptPresent:boolean};
 
-export function runNineResidentMenuStress(options:{days:number;reload?:boolean;waitOnly?:boolean;maxDecisions?:number;policy?:PolicyVersion}) {
+export function runNineResidentMenuStress(options:{days:number;reload?:boolean;waitOnly?:boolean;maxDecisions?:number;policy?:PolicyVersion;survivalEvidence?:boolean}) {
  assert.ok(Number.isInteger(options.days)&&options.days>=1&&options.days<=35,'bounded synthetic days required');
  const directory=mkdtempSync(join(testTmpdir(),'nine-menu-stress-')),database=join(directory,'synthetic.sqlite');
  // Concatenated gzip members bound retained menu evidence without dropping rows.
@@ -284,6 +285,16 @@ export function runNineResidentMenuStress(options:{days:number;reload?:boolean;w
   node:process.version,realModelExecuted:false,modelAutonomyAcceptancePassed:null,technicalWaitMinutes:null};
  writeFileSync(join(directory,'manifest.json'),JSON.stringify(manifest,null,2));
  writeFileSync(join(directory,'controller-source.ts'),helperSource);
+ const survival=options.survivalEvidence?createSurvivalEvaluator():null,survivalLines:string[]=[];
+ const flushSurvival=()=>{if(survivalLines.length){appendFileSync(join(directory,'survival-evidence.jsonl.gz'),gzipSync(survivalLines.join('')));survivalLines.length=0;}};
+ const observeSurvival=(row:SurvivalRecord)=>{if(survival){survival.accept(row);survivalLines.push(JSON.stringify(row)+'\n');if(survivalLines.length>=256)flushSurvival();}};
+ if(survival){
+  writeFileSync(join(directory,'survival-evaluator-source.ts'),readFileSync(new URL('./nine-resident-survival.ts',import.meta.url)));
+  observeSurvival({type:'header',schema:1,executionKind:'offline-scripted-survival-observation',worldId:world.id,seed:5401,
+   fromMinute:from,endMinute:end,contract:SURVIVAL_CONTRACT,initialFingerprint,sourceFingerprint:source.sourceFingerprint,helperSha256:manifest.helperSha256,initial:survivalSnapshot(world)});
+ }
+ const observedStep=(minutes:number)=>{const observation=stepWorldWithFoodEvidence(world,minutes);
+  if(survival)observeSurvival({type:'step',snapshot:survivalSnapshot(world),food:survivalFood(observation)});return observation;};
  const memories=new Map(founderIds.map(id=>[id,memory()])),pending=new Map<string,Trace>();
  const lastInputs=new Map<string,{context:DecisionContext;choices:ActionChoice[]}>(),firstProblems=new Set<string>();
  const giftDeliveryObservations:GiftDeliveryObservation[]=[],observedGiftDeliveries=new Set<string>();
@@ -349,10 +360,10 @@ export function runNineResidentMenuStress(options:{days:number;reload?:boolean;w
    }
    let observation;
    if(!shareReload&&[...pending.values()].some(t=>t.action.type==='shareFoodSource')){
-    const first=stepWorldWithFoodEvidence(world,.25);
+    const first=observedStep(.25);
     for(const [id,entry]of pending){const active=world.residents.find(r=>r.id===id)?.activity;if(active?.planId===`menu-stress:${entry.sequence}`&&entry.startedAt===null)entry.startedAt=active.startedAt;}
     if(world.residents.some(r=>r.activity?.foodSourceShareWork)){shareReload=true;reload('in-flight-sharing');}
-    const second=stepWorldWithFoodEvidence(world,.75);
+    const second=observedStep(.75);
     assert.equal(first.toMinute,second.fromMinute);assert.equal(first.worldId,second.worldId);
     // The existing accounting helper requires consecutive one-minute envelopes.
     // Preserve every actual substep receipt and coverage marker, without rerunning
@@ -363,7 +374,7 @@ export function runNineResidentMenuStress(options:{days:number;reload?:boolean;w
      if(Array.isArray(left)){assert.ok(Array.isArray(right));Object.assign(observation,{[key]:[...left,...right]});}
      else if(!['fromMinute','toMinute'].includes(key))assert.deepEqual(left,right);
     }
-   }else observation=stepWorldWithFoodEvidence(world,dt);
+   }else observation=observedStep(dt);
    coverageMinutes+=observation.toMinute-observation.fromMinute;
    food.sample(stockBefore,snapshotNineFood(world,founderIds),observation);
    // Test-owned observations, after the real engine step. Never used by a policy.
@@ -485,5 +496,9 @@ export function runNineResidentMenuStress(options:{days:number;reload?:boolean;w
    learnedFailures:[...new Map(trace.filter(t=>t.support.lastExplorationFeedback).map(t=>{const f=t.support.lastExplorationFeedback!;return [hash(f),f];})).values()]}};
  writeFileSync(join(directory,'report.json'),JSON.stringify(report,null,2));
  writeFileSync(join(directory,'trace.json'),JSON.stringify(trace,null,2));
+ if(survival){
+  observeSurvival({type:'close',at:world.minute,exception,actionCoverage:gates,supportCoverage,reloaded:gates.reloaded});flushSurvival();
+  writeFileSync(join(directory,'survival-verdict.json'),JSON.stringify(survival.finish(),null,2));
+ }
  return report;
 }

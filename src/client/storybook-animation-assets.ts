@@ -1,4 +1,4 @@
-/** Optional animation companion for the unchanged v1 atlas. No art, loading or world writes.
+/** Optional animation companion for v1 or density-aware v2 atlases. No art, loading or world writes.
  * References describe separately authored cels, never mirroring, resizing or inferred identity.
  */
 import {parseStorybookManifest, type StorybookManifest, type StorybookPackPin, type StorybookFrame} from './storybook-assets.js';
@@ -53,7 +53,7 @@ function residentId(value: unknown, path: string): string {
   if (typeof value !== 'string' || !value || value.length > 200 || value.trim() !== value || /[\u0000-\u001f\u007f]/.test(value)) return fail(path);
   return value;
 }
-/** Parse the atlas with its original strict v1 parser. Null companion means static-only,
+/** Parse the atlas with its strict versioned parser. Null companion means static-only,
  * not an implicit animation. Hash equality pins metadata, not PNG bytes or visual quality.
  */
 export function parseStorybookAnimationBundle(atlasInput: unknown, animationInput: unknown, pin: StorybookPackPin): StorybookAnimationBundle {

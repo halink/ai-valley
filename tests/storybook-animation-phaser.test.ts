@@ -6,6 +6,8 @@ import type Phaser from 'phaser';
 import {mountStorybookAnimationPrototype, storybookBrowserAnimationEnvironment} from '../src/client/storybook-animation-phaser.js';
 import {mountStorybookPrototype} from '../src/client/storybook-phaser.js';
 import {animatedFixture} from './helpers/storybook-animated-fixture.js';
+import {densityAtlas} from './helpers/storybook-density-fixture.js';
+import {parseStorybookAnimationBundle} from '../src/client/storybook-animation-assets.js';
 class Display {
   children: Display[] = []; parent: Display | null = null; destroyed = false; depth = 0; x = 0; y = 0; scale = 1; origin = {x: 0, y: 0}; height = 52; frame = ''; text = ''; textureChanges = 0;
   setScrollFactor() {return this;} setDepth(v: number) {this.depth = v; return this;} setText(v: string) {this.text = v; return this;}
@@ -20,7 +22,7 @@ function sceneFixture() {
   const f = animatedFixture(), events = new EventEmitter(), input = new EventEmitter(), textures = new Set<string>(), objects: Display[] = [], frames: string[] = [];
   const camera = {x: 0, y: 0, scrollX: 0, scrollY: 0, zoomX: 1, zoomY: 1, rotation: 0};
   const scene = {cameras: {main: camera, cameras: [camera]}, input, events,
-    textures: {addCanvas(key: string) {textures.add(key); return {add(name: string) {frames.push(name); return {};}};}, remove(key: string) {textures.delete(key);}},
+    textures: {addCanvas(key: string) {textures.add(key); return {setFilter(mode: number) {assert.equal(mode, 0); return this;}, add(name: string) {frames.push(name); return {};}};}, remove(key: string) {textures.delete(key);}},
     add: {container() {const d = new Display(); objects.push(d); return d;}, text() {const d = new Display(); objects.push(d); return d;}, image(x: number, y: number, _key: string, frame: string) {const d = new Display(); d.x = x; d.y = y; d.frame = frame; objects.push(d); return d;}},
   } as unknown as Phaser.Scene;
   return {...f, scene, events, input, textures, objects, frames};
@@ -33,21 +35,26 @@ function browserFixture() {
   Object.defineProperty(globalThis, 'document', {configurable: true, value: doc}); Object.defineProperty(globalThis, 'window', {configurable: true, value: {matchMedia: (query: string) => {assert.equal(query, '(prefers-reduced-motion: reduce)'); return media;}}});
   return {doc, media, documentEvents, mediaEvents, restore() {for (const [name, old] of [['document', ds], ['window', ws]] as const) {if (old) Object.defineProperty(globalThis, name, old); else delete (globalThis as any)[name];}}};
 }
-for (const [width, height] of [[1440, 900], [1280, 720], [390, 844]]) {
-  test(`mocked ${width}x${height} adapter updates actual frames without allocating new ground/images each animation tick`, () => {
+for (const [width, height] of [[1440, 900], [1280, 720], [390, 844]]) for (const density of [1, 2]) {
+  test(`mocked ${width}x${height} ${density}x adapter updates actual frames without allocating new ground/images each animation tick`, () => {
     const browser = browserFixture(); try {
       const f = sceneFixture(), viewport = {x: 0, y: 0, width, height};
+      if (density !== 1) {
+        f.atlas = densityAtlas(f.atlas, density);
+        f.bundle = parseStorybookAnimationBundle(f.atlas.manifest, {...f.bundle.animation, atlas: {...f.bundle.animation!.atlas, sha256: f.atlas.manifest.atlas.sha256}}, {packId: f.atlas.manifest.packId, packVersion: f.atlas.manifest.packVersion});
+      }
       const h = mountStorybookAnimationPrototype(f.scene, f.observer, f.atlas, f.bundle, viewport, f.environment); assert.equal(h.plan, null); h.activate();
       assert.equal(mountStorybookAnimationPrototype(f.scene, f.observer, f.atlas, f.bundle, viewport, f.environment), h);
       assert.throws(() => mountStorybookPrototype(f.scene, f.observer, f.atlas, viewport), /already_owned/);
       const group = f.objects[0], count = f.objects.length, ground = group.children[0], person = group.children.at(-1)!;
+      assert.equal(person.scale, 1 / density);
       const first = {x: person.x, y: person.y, origin: {...person.origin}, scale: group.scale, gx: group.x, gy: group.y};
       f.flags.now = 50; f.events.emit('preupdate'); assert.equal(person.textureChanges, 0);
       f.flags.now = 100; f.events.emit('preupdate'); assert.equal(person.textureChanges, 1); assert.equal(person.frame, h.plan!.draws.at(-1)!.assetId + ':southeast');
       assert.equal(f.objects.length, count); assert.equal(group.children[0], ground); assert.deepEqual({x: person.x, y: person.y, origin: person.origin, scale: group.scale, gx: group.x, gy: group.y}, first);
       const d = h.plan!.draws.at(-1)!, r = d.frame.rect; let pixel = {x: 0, y: 0}; let found = false;
       for (let y = 0; y < r.height && !found; y++) for (let x = 0; x < r.width; x++) if (f.atlas.pixels[((r.y + y) * f.atlas.width + r.x + x) * 4 + 3]) {pixel = {x, y}; found = true; break;}
-      f.atlas.pixels.fill(0); f.input.emit('pointerup', {x: (d.topLeft.x + pixel.x + .5) * group.scale + group.x, y: (d.topLeft.y + pixel.y + .5) * group.scale + group.y}); assert.equal(f.selected[0]!.id, f.r.id);
+      f.atlas.pixels.fill(0); f.input.emit('pointerup', {x: (d.topLeft.x + (pixel.x + .5) * d.scale) * group.scale + group.x, y: (d.topLeft.y + (pixel.y + .5) * d.scale) * group.scale + group.y}); assert.equal(f.selected[0]!.id, f.r.id);
       f.r.residency = 'outside'; f.world.revision++; f.emit(); assert.ok(person.destroyed); assert.equal(group.children.length, h.plan!.draws.length);
       f.events.emit('shutdown'); assert.equal(f.events.listenerCount('preupdate') + f.events.listenerCount('shutdown') + f.events.listenerCount('destroy') + f.input.listenerCount('pointerup') + f.feeds.size + f.rooms.size + f.changes.size + f.textures.size, 0); assert.ok(f.objects.every(d => d.destroyed)); h.dispose();
     } finally {browser.restore();}

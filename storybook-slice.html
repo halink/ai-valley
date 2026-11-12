@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>栖谷 · 共屋比例校准</title></head>
+<body><main data-storybook-slice>
+  <header><div><p class="eyebrow">栖谷 / DEVELOPMENT STUDY 01</p><h1>先让人和屋站稳</h1></div><a class="return" href="/ai-town/">返回原观察界面</a></header>
+  <p class="intro">一座共屋、两个人体标尺。先校准地面轴线、入口和脚点，再把绘本材质画进可靠的结构里。</p>
+  <p class="warning"><strong>开发专用 · 几何样板，不是正式美术。</strong> 这里没有模拟世界，也未绑定真实居民。切换位置仅是测量样例，不代表行走、进屋或自主行动。</p>
+  <fieldset disabled><legend>校准视图</legend>
+    <label>样例 <select name="station"><option value="0">院落标尺</option><option value="1">门槛对齐</option><option value="2">屋后遮挡</option></select></label>
+    <label>成人画面高度 <select name="zoom"><option value="0.5">28 px · 概览</option><option value="1" selected>56 px · 默认</option><option value="1.5">84 px · 近景</option></select></label>
+    <label><input type="checkbox" name="roof" checked>屋顶层</label>
+    <label><input type="checkbox" name="guides" checked>脚点与标尺</label>
+    <label><input type="checkbox" name="reveal">屋后透视检查</label>
+  </fieldset>
+  <div class="stage" data-slice-viewport tabindex="0" role="region" aria-label="比例校准画面，小屏或近景时可横向滚动"><canvas width="640" height="380" role="img" aria-label="8乘6共屋与成人少年几何标尺。画面内容见下方测量说明。"></canvas></div>
+  <p class="status" data-slice-status role="status" aria-live="polite">正在校验本地图集。此页面只在开发服务器启用。</p>
+  <div class="metrics"><div class="metric"><strong>2∶1 / 8×6</strong><span>水平轴线斜率为 ±0.5。占地沿用共屋尺寸，画稿不会改动世界格数。</span></div><div class="metric"><strong>4.5 / 4.2 头身</strong><span>成人与少年为正面几何标尺，身高 56 / 47.6 逻辑单位。不是合格四向或年龄美术验收。</span></div><div class="metric"><strong>门高 1.25 倍</strong><span>门洞净高 70 单位，成人 56 单位；门槛与建筑锚点同为局部 (4,6)。</span></div></div>
+  <details><summary>已锁定的结构与尚未完成的部分</summary><ul>
+    <li>三层共屋共享画布与门槛锚点。图集使用每逻辑单位 2 源像素，运行前核验尺寸与 SHA-256。</li>
+    <li>青色轮廓标注真实尺寸的占地；红色十字是测量覆盖层，即使被遮挡也会显示。地面网格不是可行走地图。</li>
+    <li>屋后样例只验证此矩形共屋的一种前后关系。门槛样例是边界标尺，不声称一般遮挡排序、合法进屋、室内或点击验收。</li>
+    <li>待完成：绘本材质、实际居民外观、四向与动作、真实共屋室内、同一观察快照接线、状态与手机/性能运行验收。</li>
+    <li>早期失败画稿仍保留在项目 output/storybook-art-slice-v1。它们未载入本页，也未被改写或冒充已校准素材。</li>
+  </ul></details>
+  <noscript>请启用 JavaScript 查看校准画面。上面的说明仍可阅读。</noscript>
+</main><script type="module" src="/src/client/storybook-slice-entry.ts"></script></body></html>

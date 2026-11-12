@@ -201,7 +201,9 @@ test('moving a pregnant duck needs two places and excludes its own existing dest
 
 test('new domestic breeding cannot consume an incoming mother and offspring reservation',()=>{
  const f=tamingFixture(),template=f.w.industry!.animals[0];
- const mother={...template,id:'domestic-mother',ownerId:f.owner.id,at:undefined,barnId:f.barn.id,sex:'female' as const,bornAt:f.w.minute-YEAR,hunger:20,thirst:20,pregnancy:null};
+ // This capacity fixture is actually housed in the barn, not an outdoor
+ // animal whose registered pasture has lost its coordinate.
+ const mother={...template,id:'domestic-mother',ownerId:f.owner.id,at:undefined,pastureId:undefined,barnId:f.barn.id,sex:'female' as const,bornAt:f.w.minute-YEAR,hunger:20,thirst:20,pregnancy:null};
  const sire={...mother,id:'domestic-sire',sex:'male' as const};
  const incoming={...mother,id:'incoming-mother',barnId:'other-barn',destinationId:f.barn.id,pregnancy:{sireId:'known-sire',dueAt:f.w.minute+DAY}};
  f.w.industry!.animals=[mother,sire,incoming];

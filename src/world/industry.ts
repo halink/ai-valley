@@ -27,7 +27,7 @@ import {educationConflict} from './education.js';
 import {employmentConflict} from './employment.js';
 import {ageYears,calendar,DAY,YEAR} from './time.js';
 import {emitEvent} from './events.js';
-import {animalNames,animalProducts,recordLivestockDeath} from './livestock-life.js';
+import {animalNames,animalProducts,recordLivestockDeath,livestockShareBreedingPlace} from './livestock-life.js';
 import {recordLivestockNourishment} from './frontier-nutrients.js';
 
 const whole=(v:unknown,a=1,b=120):v is number=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=a&&v<=b;
@@ -125,6 +125,7 @@ export function industryTarget(w:World,r:Resident,a:IndustryAction,completed=fal
    if(a.operation==='breedAnimal'){
     const sire=w.industry.animals.find(n=>n.id===a.partnerId&&n.status==='alive'&&n.ownerId===r.id&&n.barnId===animal.barnId&&n.kind===animal.kind&&n.sex==='male');
     if(animal.sex!=='female'||animal.pregnancy||!sire||w.minute-animal.bornAt<rules.animalAdultDays*DAY||w.minute-sire.bornAt<industryDefinition(w,sire.definition).rules.animalAdultDays*DAY||animal.health<rules.animalMinimumBreedHealth||sire.health<industryDefinition(w,sire.definition).rules.animalMinimumBreedHealth||animal.hunger>rules.animalBreedThreshold||animal.thirst>rules.animalBreedThreshold||barnOccupancy(w,barn.id)>=barnCapacity(barn))return fail('繁育需要本人同舍健康成年雌雄、实际照料和预留幼畜空位');
+    if(!livestockShareBreedingPlace(w,animal,sire))return fail('繁育须双方实际同在原畜舍，或同一处场内相通的牧场；护送途中不能繁育');
    }
    if(a.operation==='moveAnimal'){
     const source=animal.at??building(w,animal.barnId)?.door;

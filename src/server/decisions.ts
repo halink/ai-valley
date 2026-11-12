@@ -20,7 +20,8 @@ import {visibleOwnPlots,cropObservation} from '../world/crop-observation.js';
 import {cropObservationNote} from './crop-observation.js';
 import {personalFoodFreshness} from '../world/personal-food-freshness.js';
 import {personalFoodFreshnessNote} from './personal-food-freshness.js';
-import {personalFoodGiftOpportunities} from '../world/personal-food-gifts.js';
+import {visibleBerryObservationNote} from './visible-berry-observation.js';
+import {personalFoodGiftNotes,personalFoodGiftOpportunities} from '../world/personal-food-gifts.js';
 import {adultPresenceOpportunities} from '../world/adult-presence.js';
 import {careWithdrawalOpportunities,careWithdrawalOnly} from '../world/care-withdrawal.js';
 import {lastWishOpportunities} from './last-wish-opportunities.js';
@@ -129,7 +130,7 @@ export function decisionContext(world:World,actor:Resident):DecisionContext{
  const foodCoverage=world.mode==='formal'?residentFoodCoverage(world,actor):undefined;
  const knownAge=knownAgeYears(actor.bornAt,world.minute);
  const context:DecisionContext={
-  ...(world.mode==='formal'?{formal:{socialAppointmentNotes:socialAppointmentNotes(world,actor),foodCoverage,personalFoodProcessing:personalFoodProcessing(world,actor),personalFoodFreshness:personalFoodFreshness(world,actor),careWithdrawalOnly:careWithdrawalOnly(world,actor),aboard:!!aboardFerry(world,actor.id),passenger:!!passenger(world,actor.id),expressiveEvacuationOnly:expressiveTransportControl(world,actor),familyTravelling:!!travellingFamily(world,actor.id)||!!familyPassenger(world,actor.id),frontier:world.scenario==='frontier',age:Math.floor(ageYears(actor.bornAt,world.minute)),knownAge:knownAge===null?null:Math.floor(knownAge),productiveFarming:Boolean(world.production),familyNotes,
+  ...(world.mode==='formal'?{formal:{personalFoodGiftNotes:personalFoodGiftNotes(world,actor),socialAppointmentNotes:socialAppointmentNotes(world,actor),foodCoverage,personalFoodProcessing:personalFoodProcessing(world,actor),personalFoodFreshness:personalFoodFreshness(world,actor),careWithdrawalOnly:careWithdrawalOnly(world,actor),aboard:!!aboardFerry(world,actor.id),passenger:!!passenger(world,actor.id),expressiveEvacuationOnly:expressiveTransportControl(world,actor),familyTravelling:!!travellingFamily(world,actor.id)||!!familyPassenger(world,actor.id),frontier:world.scenario==='frontier',age:Math.floor(ageYears(actor.bornAt,world.minute)),knownAge:knownAge===null?null:Math.floor(knownAge),productiveFarming:Boolean(world.production),familyNotes,
     unknownAgeSelfCare:unknownAgeSelfCare(world,actor),hasBed:actor.homeId===null?false:home?.observed?.ownBed,sleepRecoveryPerHour:60*bodyRules.sleepEnergy*sleepFactor,
     planSteps:world.clock.realMinutesPerDay<=FAST_DAY_MINUTES?3:1,
     opportunities:[...careWithdrawalOpportunities(world,actor),...frontierHazardOpportunities(world,actor),...ferryOpportunities(world,actor),...buildingMigrationOpportunities(world,actor),...promiseOpportunities(world,actor),...localPromiseChoices(world,actor,[...agencyOpportunities(world,actor),...adoptionOpportunities(world,actor),...familyRelocationOpportunities(world,actor),...debtOpportunities(world,actor),...householdOpportunities(world,actor),...socialOpportunities(world,actor),...cultureOpportunities(world,actor),...funeraryOpportunities(world,actor),...lastWishOpportunities(world,actor),...longCareOpportunities(world,actor),...healthOpportunities(world,actor),...formalOpportunities(world,actor,seen),...familyOpportunities(world,actor),...pregnancyOpportunities(world,actor),...emergencyCareOpportunities(world,actor),...adultPresenceOpportunities(world,actor),...personalFoodGiftOpportunities(world,actor),...socialAppointmentOpportunities(world,actor),...dutyOpportunities(world,actor),...commonsOpportunities(world,actor),...foodSourceOpportunities(world,actor),...foodSourceShareOpportunities(world,actor),...foodSourceClueOpportunities(world,actor),...waterSupplyOpportunities(world,actor),...outsideAidOpportunities(world,actor,foodCoverage?.lowFood??false),...economyOpportunities(world,actor),...businessRelocationOpportunities(world,actor),...premisesOpportunities(world,actor),...civicOpportunities(world,actor),...productionOpportunities(world,actor),...employmentOpportunities(world,actor),...foreignOpportunities(world,actor),...landRightsOpportunities(world,actor),...regionSurveyOpportunities(world,actor),...constructionOpportunities(world,actor),...educationOpportunities(world,actor),...industryOpportunities(world,actor),...designOpportunities(world,actor)])]}}:{}),
@@ -214,10 +215,12 @@ ${choices.map(c=>c.id+'. '+c.label).join('\n')}
  const sequence=steps>1?`若已有连贯安排，可以用 {"steps":[{"choice":"第一个编号"},{"choice":"第二个编号"}]} 按顺序选最多${steps}项。每一步自行填写该选项要求的字段。只确定第一步时，仍可只选一项。`:'';
  const recovery=choices.some(c=>c.action.type==='sleep'&&c.chooseDuration)&&context.formal?.sleepRecoveryPerHour!==undefined?`实际睡眠每小时约恢复${Math.round(context.formal.sleepRecoveryPerHour*10)/10}点体力，上限100。原地停留不会恢复睡眠体力。`:'';
  const interpretationEvidence=interpretationEvidenceNote(context,choices);
+ const foodGiftNotes=context.formal?.personalFoodGiftNotes??'';
+ const berryNotes=visibleBerryObservationNote(context,choices);
  const bodyObservations=context.people.filter(p=>p.bodyObservation?.atMinute===context.minute).map(p=>`${p.name}：${p.bodyObservation!.signs.map(s=>bodySignLabels[s]).join('；')}`).join('。');
  const remaining=`
 ${context.formal?.socialAppointmentNotes?'本人持久记得的日常约见（不是远程事实）：\n'+context.formal.socialAppointmentNotes:''}
-${personalFoodFreshnessNote(context,choices)}
+${foodGiftNotes?foodGiftNotes+'\n':''}${berryNotes?berryNotes+'\n':''}${personalFoodFreshnessNote(context,choices)}
 ${personalFoodProcessingNote(context)}
 ${cropObservationNote(context,choices)}
 ${relationshipMemoryNote(context,choices)}
@@ -234,11 +237,11 @@ ${choices.map(c=>`${c.id}. ${c.label}`).join('\n')}
  const render=(familyNotes:string):ModelMessage[]=>[{role:'user',content:`只输出一个 JSON 对象，直接选择实际列出的编号；没有要求的字段不填写。
 ${state}${familyNotes}${remaining}`}];
  let messages=render(notes);
- // Complete interpretation evidence outranks the already abbreviated general
- // notes. Budget serialized bytes (including JSON escapes), not characters;
+ // Interpretation evidence and personal handoff terms outrank abbreviated
+ // general notes. Budget serialized bytes (including JSON escapes), not characters;
  // never shorten the utterance or drop a numbered action to make it fit.
- if(interpretationEvidence&&notes&&Buffer.byteLength(JSON.stringify(messages),'utf8')>modelLimits[model].inputBytes){
-  const suffix='（家庭等综合记录已省略部分；本次理解依据未再裁剪）';
+ if((interpretationEvidence||foodGiftNotes||berryNotes)&&notes&&Buffer.byteLength(JSON.stringify(messages),'utf8')>modelLimits[model].inputBytes){
+  const suffix=interpretationEvidence?'（家庭等综合记录已省略部分；本次理解依据未再裁剪）':foodGiftNotes?'（家庭等综合记录已省略部分；本人赠粮交接记录未再裁剪）':'（家庭等综合记录已省略部分；现场浆果观察未再裁剪）';
   const excerpt=(limit:number)=>{let end=limit;if(/[\uD800-\uDBFF]/.test(notes[end-1]??''))end--;return notes.slice(0,end)+suffix;};
   let low=0,high=notes.length;
   while(low<high){const mid=Math.ceil((low+high)/2),candidate=render(excerpt(mid));if(Buffer.byteLength(JSON.stringify(candidate),'utf8')<=modelLimits[model].inputBytes)low=mid;else high=mid-1;}

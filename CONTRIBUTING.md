@@ -44,7 +44,9 @@ node --import tsx --test tests/dev-preview.test.ts tests/dev-preview-review.test
 
 [学校室内2.5D有限观察](docs/implementation/isometric-school.md)复用真实 `school` 布局与人物位置；默认种子没有学校，合成路线仅显式新增按真实定义的测试校舍并解除暂停。原人、物资、技能与钱不预改，实际引擎分开验证单方等待、双方共同学习和最后0.25分钟结算；不补造黑板、书本或教学手势，在场不表示学习完成。[独立审查](docs/reviews/isometric-school.md)与源码合成图不是浏览器验收，原2D仍为默认。
 
-[开发专用绘本诊断预览](docs/implementation/storybook-development-preview.md)复用已有 `dev-observer-web.mjs` 的精确 `?storybook=1` 开关及同一观察快照。仍需手动选择原居民 ID 并开启，只用自制合成箭头/线框；两张参考 PNG 未取得，非正式美术。原2D默认、世界及连接不变，失败/室内/销毁恢复原视图；[独立审查](docs/reviews/storybook-development-preview.md)与 Mock DOM/Phaser 不代表浏览器、美学或性能验收。
+[开发专用绘本诊断预览](docs/implementation/storybook-development-preview.md)复用已有 `dev-observer-web.mjs` 的精确 `?storybook=1` 开关及同一观察快照。仍需手动选择原居民 ID 并开启，只用自制合成箭头/线框；两张参考 PNG 现已恢复并查看，当前预览仍非正式美术。[高清素材密度契约](docs/implementation/storybook-density.md)另支持显式v2源像素到32×16逻辑单位换算，原v1默认不变。原2D默认、世界及连接不变，失败/室内/销毁恢复原视图；[独立审查](docs/reviews/storybook-development-preview.md)与 Mock DOM/Phaser 不代表浏览器、美学或性能验收。
+
+[共屋几何纵切片](docs/implementation/storybook-geometry-slice.md)提供独立开发页 `/ai-town/storybook-slice.html`，仅运行 `npm run dev:web` 即可打开，无需后端。它锁定 8×6、2∶1、门槛与匿名成人/少年比例，并复用 2x 图集校验；不接世界，不是正式美术、四向动画或浏览器验收。原失败画稿保留，[独立审查](docs/reviews/storybook-geometry-slice.md)明确待完成边界。
 
 [诊所室内2.5D有限观察](docs/implementation/isometric-clinic.md)复用真实 `clinic` 布局与人物位置，`care/bodyBay` 不画成设施；不新增医疗动作或改变原2D。使用原种子诊所与原居民，另立明确的测试药剂/伤病例夹具验证真实引擎进出、单方等待、双方结算及[独立审查](docs/reviews/isometric-clinic.md)。图像为标注合成的源码像素栅格，不是浏览器验收。
 
@@ -60,6 +62,10 @@ node --import tsx --test tests/dev-preview.test.ts tests/dev-preview-review.test
 运行 `node scripts/acceptance-long-run.mjs 3` 可在构建后验证隔离世界的多年生命周期。脚本使用本机内存中的测试数据库。
 
 [野生动物饮水的有限灾害安全](docs/implementation/wildlife-water-safety.md)只修复实际饮水与安全水路不一致：活动灾害中的泉/岸不供饮水，缓存水路逐边重验并实际绕行，仍到接触处才扣水。失败复现、独立审查与三种子七日完整步进对照分别记录；不改变食物预算、一般动物行为或启用搁置的野猪候选，不代表长期生态平衡或真实模型验收。
+
+[家畜有限饮水绕行](docs/implementation/livestock-water-routing.md)核对既有放牧、休息、躲避和身体驱动后，修复水路先选通用最短路、再被活畜占位或场界否决的问题。实际搜索本场可走接触位置，仍到场才扣有限槽水；修前失败、编号送水、五物种末份水与SQLite续行分别验证。未改饥渴或产物参数，另列尚未修复的繁育接触限制，不宣称生态完整。
+
+[家畜繁育实际同处](docs/implementation/livestock-breeding-location.md)另修复仅凭同barnId跨场、舍内外或在途中建立妊娠的问题，并避免首只无效公畜遮蔽后续合法伴侣。保留既有同场绑定工时抽象与旧妊娠，不冒充逐格接触繁殖；修前失败、编号实际护送、最后0.25分钟SQLite重开复验、旧回归及性能样本分别记录。
 
 [损坏桥码头的禁止重入寻路](docs/implementation/damaged-infrastructure-navigation.md)使 A* 和连通性扫描遵守实际逐边规则：原已在设施上的居民可以离开，但不能为走快路先离开再重入。保留修复前失败证据，核验真实编号食源访问、途中重载、另选采集与进食及[独立审查](docs/reviews/damaged-infrastructure-navigation.md)；不调整生理或食物参数，不把合成闭环当作默认村落长期生存或真实模型验收。
 
@@ -140,6 +146,10 @@ node --import tsx --test tests/dev-preview.test.ts tests/dev-preview-review.test
 [有界直接进食与烹饪菜单](docs/implementation/direct-food-choices.md)在基础32项截断前轮换最多4种本人食品，最终保留1项已知厨房烹饪；该阶段完全饱和普通菜单上限为59项，实时停止入口仍按原规则额外恢复。合成12/20食品、正常编号→实际进食与烹饪、权限/腐败/隐私、重载及独立审查见 `tests/direct-food-choices*.test.ts`，不会自动选择、进食或补充物资。
 
 [本人随身食品时效](docs/implementation/personal-food-freshness.md)把本人实际库存约束下的最早到期份数、游戏分钟与批次营养送入最终决策输入，明确过期、未知与未展开部分；最多8种并保留当前eat食品。合成反向时效、附近畜舍不补造批次、重载、上限与独立审查见 `tests/personal-food-freshness*.test.ts`；不会自动选食或改变腐败执行。
+
+[本人赠粮交接记录](docs/implementation/personal-food-gift-notes.md)把最多六份凭据完整的本人已知约定独立送入最终提示，保留原交接点、期限、另行交付及停留成本。远方事实不刷新，原菜单、决定和交付规则不变；同种子短交接、三模型提示、旧档与[独立审查](docs/reviews/personal-food-gift-notes.md)验证信息边界，不证明模型行为或长期生存改善。
+
+[现场浆果余量](docs/implementation/visible-berry-observation.md)将既有个人 context 中最多四处真正可见地点的当前数量送入最终提示，区分空、不足一份和采集上限以外的余量；不读远方或再生资料、不改菜单与采集。先红后绿、完整归档输入重放、新一日同轨迹核对及[独立审查](docs/reviews/visible-berry-observation.md)只证明信息投影与所测非干预，不声称长期生存改善。
 
 [雇佣加工批次守恒](docs/implementation/employment-conservation.md)隔离真实库存与签约配方，利用历史快照修复可证明的旧约要求，并在腐败或不完整批次上停止产出。真实开店、招聘、工作、后续轮次、内存 SQLite 恢复与独立反例见 `tests/employment-conservation*.test.ts`；不补造损失物资、不用当前版本改约。
 

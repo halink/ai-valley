@@ -23,7 +23,7 @@ test('storybook: parses pinned static and exactly four directional frames', () =
   assert.deepEqual(result, fixture());
 });
 const rejects: [string, (m: any) => void][] = [
-  ['unsupported schema', m => m.schemaVersion = 2],
+  ['unsupported schema', m => m.schemaVersion = 3],
   ['string schema', m => m.schemaVersion = '1'],
   ['pack mismatch', m => m.packId = 'other'],
   ['version mismatch', m => m.packVersion = '1.2.4'],
