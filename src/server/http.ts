@@ -18,7 +18,7 @@ const acceptsGzip=(value:string|undefined)=>value?.split(',').some(encoding=>{
  const [name,...parameters]=encoding.trim().toLowerCase().split(';');
  return name.trim()==='gzip'&&!parameters.some(p=>/^q\s*=\s*0(?:\.0+)?\s*$/.test(p.trim()));
 })??false;
-export function createObserverServer(runtime:ValleyRuntime,store:WorldStore,root:string,server:Server=createServer(),productionModelPolicy?:ProductionModelPolicy){
+export function createObserverServer(runtime:ValleyRuntime,store:WorldStore,root:string,server:Server=createServer(),productionModelPolicy?:ProductionModelPolicy,selfHostedStatus?:()=>{mode:'self-hosted';supervised:false;actualProviderCostCny:null;pricingVerified:false;unresolved:boolean;primary:string;backup:string|null}){
  const clients=new Map<ServerResponse,Snapshot>();
  let cache:{snapshot:Snapshot;body?:string;gzip?:Buffer;baseline?:string}|undefined;
  const currentSnapshot=()=>{
@@ -67,7 +67,7 @@ export function createObserverServer(runtime:ValleyRuntime,store:WorldStore,root
    return;
   }
   if(pathname==='/ai-town/api/health'){json({ok:true,version:VALLEY_VERSION,mode:runtime.world.mode,revision:runtime.world.revision,clockPaused:runtime.world.clock.paused,modelConfigured:runtime.world.metrics.configured,
-   ...(productionModelPolicy?{ready:false,modelExecution:productionModelPolicy}:{} )});return;}
+   ...(productionModelPolicy?{ready:false,modelExecution:productionModelPolicy}:{} ),...(selfHostedStatus?{selfHosted:selfHostedStatus()}:{} )});return;}
   if(pathname==='/ai-town/api/history/page'){
    try{json({...store.historyPage(runtime.world.id,parseHistoryQuery(url.searchParams)),observedRevision:runtime.world.revision});}catch(error){json({error:error instanceof HistoryQueryError?error.message:'history_unavailable'},error instanceof HistoryQueryError?400:500);}return;
   }

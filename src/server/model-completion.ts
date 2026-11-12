@@ -74,7 +74,7 @@ export async function completeModel(key:string,model:ModelName,messages:ModelMes
  const body=modelRequestPayload(model,messages,temperature),qwen=model===QWEN_MODEL;
  const endpoint=qwen?'https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1/chat/completions':SILICONFLOW_COMPLETIONS_ENDPOINT;
  const response=await fetch(endpoint,{
-  method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${key}`},
+  method:'POST',redirect:'error',headers:{'Content-Type':'application/json',Authorization:`Bearer ${key}`},
   body,signal:signal?AbortSignal.any([signal,AbortSignal.timeout(qwen?25_000:150_000)]):AbortSignal.timeout(qwen?25_000:150_000)
  });
  if(!response.ok)throw new Error(`model_http_${response.status}`);

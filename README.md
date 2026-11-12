@@ -62,6 +62,10 @@ npm run dev
 
 [正式九人十五日验收](docs/implementation/nine-resident-acceptance-preparation.md)已有离线准备、证据 writer、精确终点/停止控制及合成进程监督组件，默认不启用；真实 runner 和正式监督接线尚未完成，模型、费用及发送数据的范围仍需用户明确授权。浏览器视觉、真实模型前十五日和四季平衡均未验收，新天气灾害调度默认关闭，既有险情照常推进。
 
+## 自行配置主/备用模型
+
+正式默认入口仍禁用模型。希望自己进行长期验证，可使用独立的[用户自托管模型入口](docs/implementation/self-hosted-models.md)：在 `.env` 显式启用并配置主/备用，运行 `node --env-file=.env build/server/self-hosted-main.js`。它不等同受监督验收，也未验证实际费用或长期稳定性。
+
 ## 游戏设计
 
 开局、生态、世代、经济、建设和观察方式见[栖谷游戏设计](docs/design/README.md)。

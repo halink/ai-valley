@@ -1,3 +1,4 @@
+import {readSelfHostedCooldowns,cooldownDelay} from './self-hosted-cooldown.js';
 import {createHash} from 'node:crypto';
 import {nextDailyBoundary,checkedDailySnapshotConfig,type DailySnapshotConfig} from './acceptance-daily-snapshots.js';
 import {hasCareWithdrawal,careWithdrawalOnly} from '../world/care-withdrawal.js';
@@ -60,7 +61,7 @@ export type DecisionCommittedEvent=Readonly<{result:ModelResult;actorId:string;a
  * injected model is called. This is not a transport attempt or cost receipt. */
 export type DecisionAdmissionCancelledEvent=Readonly<ModelAdmissionCancellation&{model:ModelName}>;
 export type AcceptanceLifecycleObserver={stopping?:(status:AcceptanceStopStatus)=>unknown;stopped?:(status:AcceptanceStopStatus)=>unknown};
-type Provider = ModelConnection & {slots:number;maxSlots:number;blockedUntil:number;admitAfter:number;limitCount:number;successesSinceLimit:number;transientFailures:number;budget?:ModelBudget};
+type Provider = ModelConnection & {slots:number;maxSlots:number;blockedUntil:number;admitAfter:number;limitCount:number;successesSinceLimit:number;transientFailures:number;rateLimitedAt:number;budget?:ModelBudget};
 export const capabilities={
  active:['只读像素山谷与昼夜','逐人模型计划与实际寻路','采集、耕作、进食与休息','有限材料加工','现场会话、关系与双向物物交换','持久存档、事件记录与故障停表'],
  pending:['工程材料预留、分阶段施工与取消结算','完整孕育、照护与代际平衡验证','居民岗位、教育与服务排班','公共议事、产权与完整遗产清算','迁入机会、有限外贸与长期生态','全部建筑室内工位及四季美术验收']
@@ -95,6 +96,10 @@ export class ValleyRuntime {
  private readonly modelSlots:number;
  private readonly providers:Provider[];
  private fallbackPending=new Set<string>();
+ private readonly selfHostedSafety:boolean;
+ private selfHostedInterrupted=false;
+ private selfHostedLastWall=Date.now();
+ selfHostedUnresolved(){return this.selfHostedInterrupted;}
  private failures=new Map<string,string>();
  private replyFeedback=new Map<string,string>();
  private waitingSince=new Map<string,number>();
@@ -118,9 +123,10 @@ export class ValleyRuntime {
  private readonly acceptanceAdmission?:()=>unknown;
  private acceptanceDraining=false;
  private tickTimer?:ReturnType<typeof setInterval>;
- constructor(private store:WorldStore,credentials:string|null|readonly ModelConnection[],private model:Model=callModel,options:{dailySnapshots?:DailySnapshotConfig;dayMinutes?:number;mode?:World['mode'];modelSlots?:number;decisionWaitEvidence?:DecisionWaitEvidenceOptions;directEatingEvidence?:RuntimeFoodEvidenceOptions;acceptanceStop?:AcceptanceStopOptions;acceptanceEvidence?:{writer:AcceptanceEvidenceWriter;sourceFingerprintAfter:()=>string};decisionCommitted?:(event:DecisionCommittedEvent)=>unknown;decisionAdmissionCancelled?:(event:DecisionAdmissionCancelledEvent)=>unknown;acceptanceLifecycle?:AcceptanceLifecycleObserver;acceptanceAdmission?:()=>unknown}={}){
+ constructor(private store:WorldStore,credentials:string|null|readonly ModelConnection[],private model:Model=callModel,options:{selfHostedSafety?:boolean;dailySnapshots?:DailySnapshotConfig;dayMinutes?:number;mode?:World['mode'];modelSlots?:number;decisionWaitEvidence?:DecisionWaitEvidenceOptions;directEatingEvidence?:RuntimeFoodEvidenceOptions;acceptanceStop?:AcceptanceStopOptions;acceptanceEvidence?:{writer:AcceptanceEvidenceWriter;sourceFingerprintAfter:()=>string};decisionCommitted?:(event:DecisionCommittedEvent)=>unknown;decisionAdmissionCancelled?:(event:DecisionAdmissionCancelledEvent)=>unknown;acceptanceLifecycle?:AcceptanceLifecycleObserver;acceptanceAdmission?:()=>unknown}={}){
   if(options.dailySnapshots&&!options.acceptanceStop)throw new Error('daily_snapshots_require_acceptance_control');
   this.dailySnapshots=options.dailySnapshots?checkedDailySnapshotConfig(options.dailySnapshots):undefined;
+  this.selfHostedSafety=options.selfHostedSafety===true;
   if(options.decisionCommitted&&!options.acceptanceStop)throw new Error('decision_commit_observer_requires_control');
   if(options.acceptanceLifecycle&&!options.acceptanceStop)throw new Error('acceptance_lifecycle_requires_control');
   if(options.acceptanceAdmission&&!options.acceptanceStop)throw new Error('acceptance_admission_requires_control');
@@ -162,12 +168,13 @@ export class ValleyRuntime {
   const legacySlots=this.world.mode==='formal'?4:2;
   this.modelSlots=options.modelSlots??Math.max(legacySlots,...configured.map(c=>c.model===GLM_MODEL?legacySlots:modelLimits[c.model].maxSlots));
   if(!Number.isInteger(this.modelSlots)||this.modelSlots<1||this.modelSlots>modelLimits[QWEN_MODEL].maxSlots)throw new Error('Invalid resident model concurrency');
+  const cooldowns=this.selfHostedSafety?readSelfHostedCooldowns(this.world.metrics.selfHostedCooldowns,Date.now()):{};
   this.providers=configured.map(c=>{
    const limits=modelLimits[c.model];
    const maxSlots=Math.min(limits.maxSlots,this.modelSlots);
    const slots=c.model===GLM_MODEL?maxSlots:Math.min(limits.startSlots,maxSlots);
    const budget=limits.tpm===null&&limits.rpm===null?undefined:new ModelBudget(limits.rpm,limits.tpm,this.world.metrics.usageWindow?.[c.model]);
-   return {...c,slots,maxSlots,budget,blockedUntil:0,admitAfter:0,limitCount:0,successesSinceLimit:0,transientFailures:0};
+   return {...c,slots,maxSlots,budget,blockedUntil:cooldowns[c.model]?.blockedUntil??0,rateLimitedAt:cooldowns[c.model]?.observedAt??0,admitAfter:0,limitCount:cooldowns[c.model]?.limitCount??0,successesSinceLimit:0,transientFailures:0};
   });
   terrainRevision(this.world.map);
   if(this.world.mode==='formal'){
@@ -184,7 +191,7 @@ export class ValleyRuntime {
   }
   this.world.metrics.configured=this.providers.length>0;
   if(this.world.mode==='formal'&&Array.isArray(credentials)){
-   this.world.metrics.routing={primary:QWEN_MODEL,primaryConfigured:this.providers.some(p=>p.model===QWEN_MODEL),backup:DEEPSEEK_MODEL,backupConfigured:this.providers.some(p=>p.model===DEEPSEEK_MODEL)};
+   this.world.metrics.routing={primary:this.providers[0]?.model??QWEN_MODEL,primaryConfigured:!!this.providers[0],backup:this.providers[1]?.model??'',backupConfigured:!!this.providers[1]};
   }
   this.world.metrics.model=this.providers[0]?.model??this.world.metrics.routing?.primary??GLM_MODEL;
   const interrupted=this.world.metrics.inFlight.length;
@@ -254,6 +261,7 @@ export class ValleyRuntime {
   ],this.world.minute,initial);
  }
  start(){
+  if(this.selfHostedSafety&&this.started)throw new Error('self_hosted_runtime_is_single_use');
   if(this.acceptance&&(this.started||this.acceptance.status().phase==='stopped'))throw new Error('acceptance_runtime_is_single_use');
   if(this.started&&!this.stopped)return;
   this.started=true;this.stopped=false;this.generation++;
@@ -272,6 +280,7 @@ export class ValleyRuntime {
   if(this.acceptance&&this.acceptance.status().phase!=='stopped'){this.acceptance.stop('manual_stop');return;}
   this.stopped=true;this.generation++;if(this.tickTimer)clearInterval(this.tickTimer);
   const interrupted=this.unresolvedRequestIds().length;
+  if(this.selfHostedSafety&&interrupted)this.selfHostedInterrupted=true;
   const tokens=[...this.requestTokens.values()];this.requestTokens.clear();this.inFlight.clear();this.pendingChoices.clear();
   for(const token of tokens)token.controller.abort();
   // Revocation and cancellation precede any fallible storage/observer callback.
@@ -350,6 +359,7 @@ export class ValleyRuntime {
   try{this.tickOnce(now);}catch(error){if(!this.acceptance)throw error;this.acceptance.stop('runtime_failed');}
  }
  private tickOnce(now:number){
+  if(this.selfHostedSafety){const wall=Date.now();if(!Number.isSafeInteger(wall)||wall<this.selfHostedLastWall){this.selfHostedInterrupted=true;this.stop();return;}this.selfHostedLastWall=wall;}
   if(agencyReady(this.world))this.commit(w=>{for(const plan of advanceAgency(w))submitPlan(w,plan);});
   this.observeDecisionWaiters();
   const elapsed=Math.max(0,Math.min(2000,now-this.lastTick));this.lastTick=now;
@@ -437,7 +447,9 @@ export class ValleyRuntime {
   if(now<Math.max(provider.blockedUntil,provider.admitAfter)||[...this.inFlight.values()].filter(p=>p===provider).length>=provider.slots)return;
   return provider;
  }
- private saveUsage(w:World,provider:Provider){if(provider.budget)(w.metrics.usageWindow??={})[provider.model]=provider.budget.snapshot();}
+ private saveUsage(w:World,provider:Provider){
+  if(this.selfHostedSafety){const records=w.metrics.selfHostedCooldowns??={};if(provider.limitCount)records[provider.model]={observedAt:provider.rateLimitedAt,blockedUntil:provider.blockedUntil,limitCount:provider.limitCount};else delete records[provider.model];}
+  if(provider.budget)(w.metrics.usageWindow??={})[provider.model]=provider.budget.snapshot();}
  private priority(p:Resident,now:number){
   const local=p.residency!=='outside',bodyDecision=local||regionalDecisionWait(this.world,p);
   const fast=this.fastClock,rate=this.world.clock.realMinutesPerDay;
@@ -591,6 +603,7 @@ export class ValleyRuntime {
    const code=error instanceof Error?error.message:'model_failed';
    const safe=/^(model_http_\d{3}|model_incomplete|model_stream_error|model_context_limit|invalid_decision|unsupported_action|invalid_action)$/.test(code)?code:'model_timeout_or_invalid_response';
    this.decisionEvidence?.requestFinished(evidenceRequest,error instanceof Error&&error.name==='TimeoutError'?'timeout':'failed',safe,this.world.minute);
+   if(this.selfHostedSafety&&safe!=='model_http_429'){this.stop();this.commit(w=>{w.metrics.lastError=safe;w.clock.reason='模型请求未核实，世界已停表';});return;}
    const backup=provider===this.providers[0]?this.providers[1]:undefined;
    let retryDelay=30_000;
    if(!foreign&&!traveller&&error instanceof DecisionError&&error.feedback){
@@ -604,7 +617,8 @@ export class ValleyRuntime {
      provider.successesSinceLimit=0;
      provider.transientFailures=0;
      provider.limitCount=Math.min(6,provider.limitCount+1);
-     provider.blockedUntil=Date.now()+Math.min(900_000,30_000*2**(provider.limitCount-1));
+     provider.rateLimitedAt=Date.now();
+     provider.blockedUntil=provider.rateLimitedAt+cooldownDelay(provider.limitCount);
     }
     retryDelay=Math.max(5000,provider.blockedUntil-Date.now());
    }else if(backup&&started>=provider.blockedUntil&&/^(model_http_5\d{2}|model_timeout_or_invalid_response|model_stream_error)$/.test(safe)){
