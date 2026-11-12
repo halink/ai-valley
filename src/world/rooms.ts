@@ -23,13 +23,12 @@ function claim(w:World,r:Resident,key:string,group:string,id:string,start=w.minu
  if(prior&&prior.group!==group)return '这处实际工位正在被另一项劳动占用';
  if(prior){if(!prior.people.includes(r.id))prior.people.push(r.id);}else state.claims.push({buildingId:id,key,group,people:[r.id]});return null;
 }
-/** Commons/public-service visits and bounded escorts must not walk a stale interior
- * path through a newly blocked cell or invent an exit from missing coordinates. */
+/** Every interior step must remain physical, including ordinary sleep/work routes.
+ * Specialized journeys retain their existing failure descriptions. */
 function guardianRoomStepProblem(w:World,r:Resident,next:Vec):string|null {
  const a=r.activity?.action,unknownSelfCare=!!a&&isSelfCareAction(a)&&knownAgeYears(r.bornAt,w.minute)===null;
- if(!unknownSelfCare&&a?.type!=='commons'&&a?.type!=='publicDuty'&&(a?.type!=='health'||a.operation!=='rescue'||!a.evacuationDangerId))return null;
  const b=w.buildings.find(b=>b.id===r.inside),from=r.roomAt;
- if(!b||!from||(unknownSelfCare||a?.type==='commons'||a?.type==='publicDuty')&&!clearRoomPoint(roomLayout(w,b),from)||r.at.x!==b.door.x||r.at.y!==b.door.y||Math.abs(from.x-next.x)+Math.abs(from.y-next.y)!==1||roomPath(roomLayout(w,b),from,next)?.length!==1)return unknownSelfCare?'本人自理的实际室内路线已经阻断，须留在当前位置重新决定':a?.type==='commons'?'共屋实际室内路线已经阻断，须留在当前位置重新决定':a?.type==='publicDuty'?'公共服务实际室内路线已经阻断，须留在当前位置重新决定':'原房间的实际护送路线已经阻断，须留在当前位置重新决定';
+ if(!b||!from||!clearRoomPoint(roomLayout(w,b),from)||r.at.x!==b.door.x||r.at.y!==b.door.y||Math.abs(from.x-next.x)+Math.abs(from.y-next.y)!==1||roomPath(roomLayout(w,b),from,next)?.length!==1)return unknownSelfCare?'本人自理的实际室内路线已经阻断，须留在当前位置重新决定':a?.type==='commons'?'共屋实际室内路线已经阻断，须留在当前位置重新决定':a?.type==='publicDuty'?'公共服务实际室内路线已经阻断，须留在当前位置重新决定':a?.type==='health'&&a.operation==='rescue'&&a.evacuationDangerId?'原房间的实际护送路线已经阻断，须留在当前位置重新决定':'原房间的实际行走路线已经阻断，须留在当前位置重新决定';
  return null;
 }
 const exitUnavailable='原房间的实际出口或路线已失效，须留在当前位置重新决定';
