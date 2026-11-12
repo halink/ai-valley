@@ -10,6 +10,7 @@ import {clientMainHarness} from './helpers/client-main.js';
 import type {ObserverMap} from '../src/client/observer-map.js';
 import type {Snapshot} from '../src/shared/types.js';
 import * as preview from '../src/client/isometric-preview.js';
+import {paintIsometricGround} from '../src/client/isometric-ground.js';
 import {residentFollowText} from '../src/client/resident-follow.js';
 const route=isometricObserverRoute();
 const source=(path:string)=>readFileSync(new URL('../'+path,import.meta.url),'utf8');
@@ -100,7 +101,7 @@ function failedInstaller(){
  const adapter={currentSnapshot:()=>route.snapshots[0],currentRoom:()=>null,currentTile:()=>({x:415,y:230}),currentFollow:()=>null,stopFollowing(){},setFollowResolver(){},frame(){},select(){},isFullMapTarget:()=>false,cover:(value:boolean)=>covers.push(value),subscribe:(listener:(...args:any[])=>void)=>subscribe('snapshot',listener),subscribeRoom:(listener:(...args:any[])=>void)=>subscribe('room',listener),subscribeFollow:(listener:(...args:any[])=>void)=>subscribe('follow',listener)};
  Object.assign(document,{hidden:false,createElement:()=>new ObserverElement(),getElementById:(id:string)=>id==='app'?app:id==='observer-hud'?hud:base,querySelector:()=>hint});
  Object.assign(window,{setInterval:()=>{timers.add(++interval);return interval;}});
- const context:any={...preview,residentFollowText,document,window,Element:ObserverElement,performance:{now:()=>0},clearInterval:(id:number)=>timers.delete(id),console:{warn:(...args:unknown[])=>warnings.push(args)}};
+ const context:any={...preview,paintIsometricGround,residentFollowText,document,window,Element:ObserverElement,performance:{now:()=>0},clearInterval:(id:number)=>timers.delete(id),console:{warn:(...args:unknown[])=>warnings.push(args)}};
  const text=source('src/client/isometric-observer.ts').replace(/^import .*;\n/gm,'').replace(/^export /gm,'');
  runInNewContext(ts.transpileModule(text,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText+';this.mount=mountIsometricObserver;',context);
  return {app,hud,base,document,window,subscriptions,warnings,covers,timers,mount:()=>context.mount(adapter) as import('../src/client/isometric-observer.js').IsometricObserverHandle,allowFollow:()=>{failFollow=false;},failUnsubscribe:()=>{failUnsubscribe=true;}};

@@ -4,7 +4,7 @@
 import {createHash} from 'node:crypto';
 import {deflateSync, inflateSync} from 'node:zlib';
 
-export const PNG_LIMITS = Object.freeze({side: 4096, pixels: 16_777_216, bytes: 72_000_000});
+export const PNG_LIMITS = Object.freeze({side: 4096, pixels: 16_777_216, bytes: 72_000_000, contentCredentialsBytes: 8_000_000});
 const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 export type RgbaImage = {width: number; height: number; pixels: Uint8Array};
 export const sha256 = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
@@ -36,12 +36,23 @@ function paeth(a: number, b: number, c: number): number {
   return pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
 }
 /** Checks complete structure, every CRC, compressed-stream consumption and all five filters. */
-export function decodeRgbaPng(input: Uint8Array): RgbaImage {
+export type ContentCredentialsAudit = {
+  chunk: 'caBX'; byteLength: number; sha256: string;
+  validation: 'opaque-unverified'; derivativePolicy: 'retained-in-original-only';
+};
+/** Default decoder cannot silently discard content credentials. */
+export function decodeRgbaPng(input: Uint8Array): RgbaImage {return decode(input, false).image;}
+/** Explicit provenance-aware import. Caller must retain original bytes alongside derivatives.
+ * Only the PNG envelope is validated; opaque JUMBF payload is never executed or trusted.
+ */
+export function inspectRgbaPngSource(input: Uint8Array) {return decode(input, true);}
+function decode(input: Uint8Array, preserveProvenance: boolean): {image: RgbaImage; contentCredentials: ContentCredentialsAudit | null} {
   if (input.length > PNG_LIMITS.bytes || input.length < 57) fail('byte_length');
   const bytes = Buffer.from(input);
   if (!bytes.subarray(0, 8).equals(signature)) fail('signature');
   let offset = 8, width = 0, height = 0, ended = false, idat = false, idatEnded = false;
   const compressed: Buffer[] = [];
+  let contentCredentials: ContentCredentialsAudit | null = null;
   while (offset < bytes.length) {
     if (offset + 12 > bytes.length) fail('truncated_chunk');
     const length = bytes.readUInt32BE(offset), end = offset + 12 + length;
@@ -63,7 +74,12 @@ export function decodeRgbaPng(input: Uint8Array): RgbaImage {
       if (idat) idatEnded = true;
       // Whitelist metadata we may safely strip. APNG, palettes, color profiles and unknown
       // semantics need an explicit RGBA export, rather than silently changing appearance.
-      if (!['tEXt', 'zTXt', 'iTXt', 'pHYs', 'tIME'].includes(name)) fail(`unsupported_chunk_${name}`);
+      if (name === 'caBX' && preserveProvenance) {
+        if (contentCredentials) fail('duplicate_cabx');
+        if (length < 1 || length > PNG_LIMITS.contentCredentialsBytes) fail('cabx_length');
+        contentCredentials = {chunk: 'caBX', byteLength: length, sha256: sha256(body),
+          validation: 'opaque-unverified', derivativePolicy: 'retained-in-original-only'};
+      } else if (!['tEXt', 'zTXt', 'iTXt', 'pHYs', 'tIME'].includes(name)) fail(`unsupported_chunk_${name}`);
     }
     offset = end;
   }
@@ -85,5 +101,5 @@ export function decodeRgbaPng(input: Uint8Array): RgbaImage {
       pixels[at] = (raw[y * (stride + 1) + x + 1] + predict) & 255;
     }
   }
-  return {width, height, pixels};
+  return {image: {width, height, pixels}, contentCredentials};
 }

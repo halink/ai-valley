@@ -10,6 +10,7 @@ import * as preview from '../src/client/isometric-preview.js';
 import {VIEWPORT_LIMITS} from '../src/client/isometric-viewport.js';
 import {roomLayout} from '../src/shared/rooms.js';
 import {calendar,daylight,daylightLabels} from '../src/world/time.js';
+import {paintIsometricGround} from '../src/client/isometric-ground.js';
 import {residentFollowText} from '../src/client/resident-follow.js';
 import {personVisual} from '../src/client/person-pose.js';
 import {residentSceneHarness} from './helpers/resident-scene.js';
@@ -40,7 +41,7 @@ function integrated(){
  const document=Object.assign(doc,{hidden:false,createElement:()=>new ObserverElement(),getElementById:(id:string)=>id==='app'||id==='observer-hud'?app:base,querySelector:()=>hint});
  const window=Object.assign(win,{setInterval:(fn:()=>void)=>{timers.set(++nextTimer,fn);return nextTimer;}});
  const extension=readFileSync(new URL('../src/client/isometric-observer.ts',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace(/^export /gm,'');
- const extensionContext:any={...preview,observerMap,residentFollowText,document,window,Element:ObserverElement,console:{warn:(...args:unknown[])=>warnings.push(args)},performance:{now:()=>0},clearInterval:(id:number)=>timers.delete(id)};
+ const extensionContext:any={...preview,paintIsometricGround,observerMap,residentFollowText,document,window,Element:ObserverElement,console:{warn:(...args:unknown[])=>warnings.push(args)},performance:{now:()=>0},clearInterval:(id:number)=>timers.delete(id)};
  runInNewContext(ts.transpileModule(extension,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText+';this.observerHandle=mountIsometricObserver(observerMap);',extensionContext);dispose=()=>extensionContext.observerHandle.dispose();
  const canvas=app.children[0],tray=app.children[1];
  // Invoke the real handlers in DOM capture/original-bubble/after-bubble order.

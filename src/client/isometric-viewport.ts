@@ -3,6 +3,7 @@ import type {Snapshot,World,Vec,Season} from '../shared/types.js';
 import {calendar,daylight} from '../world/time.js';
 import {projectIsometric,unprojectIsometric,orderIsometricObjects,type IsometricCamera,type Footprint} from './isometric-projection.js';
 import {terrain,treeMarks,plotMarks,noise,recordMarkerMarks,type IsometricStudy,type StudyObject,type StudySubject} from './isometric-study.js';
+import {planIsometricGround,type GroundPlan} from './isometric-ground.js';
 import type {PixelMark} from './work-art.js';
 import {beastMarks,beastLabel,beastArtSupported,livestockMarks,livestockLabel,livestockArtSupported,fishMarks,fishLabel,fishComposition,graveMarks,graveLabel,LIVING_MARK_LIMIT} from './isometric-living.js';
 import {estatePiles} from './estate-custody.js';
@@ -40,7 +41,7 @@ interface RecordEntry {key:string;subject:StudySubject;footprint:Footprint;make:
 type ResidentReason={kind:'fallback';reason:string}|{kind:'hidden';reason:string;hiddenReason:IsometricResidentHiddenReason};
 interface Chunk {bounds:Footprint;signature:string;marks:PixelMark[];}
 export interface ViewportStats {acceptedSnapshots:number;bucketBuilds:number;poseBuilds:number;cachedChunks:number;cachedMarks:number;chunkBuilds:number;chunkHits:number;chunkInvalidations:number;visibleCandidates:number;objectChecks:number;omittedObjects:number;unsupportedObjects:number;renderedMarks:number;animationUpdates:number;renderedMarkerCount:number;unknownLocationCount:number;}
-export interface IsometricViewportScene extends IsometricStudy {displayCamera:IsometricCamera;snapshotRevision:number;omittedObjects:number;unsupportedObjects:number;omitted:number;renderedMarkerCount:number;unknownLocationCount:number;uncheckedObjects?:number;}
+export interface IsometricViewportScene extends IsometricStudy {groundPlan?:GroundPlan;groundDarkness?:number;displayCamera:IsometricCamera;snapshotRevision:number;omittedObjects:number;unsupportedObjects:number;omitted:number;renderedMarkerCount:number;unknownLocationCount:number;uncheckedObjects?:number;}
 const intersects=(a:Footprint,b:Footprint)=>a.x<b.x+b.width&&a.x+a.width>b.x&&a.y<b.y+b.height&&a.y+a.height>b.y;
 function markBounds(marks:PixelMark[]):Footprint{
  let x=Infinity,y=Infinity,right=-Infinity,bottom=-Infinity;for(const m of marks){x=Math.min(x,m.x);y=Math.min(y,m.y);right=Math.max(right,m.x+m.width);bottom=Math.max(bottom,m.y+m.height);}return {x,y,width:right-x,height:bottom-y};
@@ -228,7 +229,7 @@ export class IsometricViewport {
   }
   const sorted=[...orderIsometricObjects(objects.filter(o=>o.subject.kind==='plot')),...orderIsometricObjects(objects.filter(o=>o.subject.kind!=='plot'))];
   ground=shade(ground,darkness);
-  const scene:IsometricViewportScene={width:sourceWidth,height:sourceHeight,camera:{origin,zoom:1},displayCamera,bounds,terrain:ground,objects:sorted,snapshotRevision:this.revision,omittedObjects:omitted,unsupportedObjects:this.counters.unsupportedObjects,omitted,renderedMarkerCount:objects.filter(o=>!!o.subject.placeholder).length,unknownLocationCount:this.counters.unknownLocationCount,budgetMarkerCount:budgetMarkers,uncheckedObjects:unchecked};
+  const scene:IsometricViewportScene={width:sourceWidth,height:sourceHeight,camera:{origin,zoom:1},displayCamera,bounds,terrain:ground,groundPlan:planIsometricGround(w,bounds,calendar(w.minute).season),groundDarkness:darkness,objects:sorted,snapshotRevision:this.revision,omittedObjects:omitted,unsupportedObjects:this.counters.unsupportedObjects,omitted,renderedMarkerCount:objects.filter(o=>!!o.subject.placeholder).length,unknownLocationCount:this.counters.unknownLocationCount,budgetMarkerCount:budgetMarkers,uncheckedObjects:unchecked};
   this.sceneEntries.set(scene,entries);this.counters={...this.counters,visibleCandidates:candidates.length,objectChecks:checks,omittedObjects:omitted,renderedMarkerCount:scene.renderedMarkerCount,renderedMarks:ground.length+objects.reduce((n,o)=>n+o.marks.length,0)};return scene;
  }
  animate(scene:IsometricViewportScene,elapsed:number):IsometricViewportScene{

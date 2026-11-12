@@ -2,6 +2,7 @@
 import {readFileSync} from 'node:fs';
 import ts from 'typescript';
 import {runInNewContext} from 'node:vm';
+import {paintIsometricGround} from '../../src/client/isometric-ground.js';
 import * as preview from '../../src/client/isometric-preview.js';
 import {ResidentFollow,residentFollowText,type ResidentFollowState,type ResidentFollowResolver} from '../../src/client/resident-follow.js';
 import type {Snapshot,Vec} from '../../src/shared/types.js';
@@ -11,7 +12,7 @@ export class ObserverElement {
  rect={left:0,top:0,width:390,height:844};children:ObserverElement[]=[];queries=new Map<string,ObserverElement>();captures=new Set<number>();classes=new Set<string>();listeners=new Map<string,Set<(e:any)=>void>>();
  drawCalls:Array<{kind:string;args:unknown[]}>=[];fills=0;integerFills=true;
  classList={toggle:(key:string,on:boolean)=>{if(on)this.classes.add(key);else this.classes.delete(key);}};
- context={fillStyle:'',imageSmoothingEnabled:true,fillRect:(...args:number[])=>{this.fills++;this.integerFills&&=args.every(Number.isInteger);},clearRect:(...args:number[])=>this.drawCalls.push({kind:'clear',args}),setTransform:(...args:number[])=>this.drawCalls.push({kind:'transform',args}),drawImage:(...args:unknown[])=>this.drawCalls.push({kind:'image',args})};
+ context={beginPath:()=>this.drawCalls.push({kind:'beginPath',args:[]}),moveTo:(...args:number[])=>this.drawCalls.push({kind:'moveTo',args}),lineTo:(...args:number[])=>this.drawCalls.push({kind:'lineTo',args}),closePath:()=>this.drawCalls.push({kind:'closePath',args:[]}),fill:()=>this.drawCalls.push({kind:'fill',args:[]}),fillStyle:'',imageSmoothingEnabled:true,fillRect:(...args:number[])=>{this.fills++;this.integerFills&&=args.every(Number.isInteger);},clearRect:(...args:number[])=>this.drawCalls.push({kind:'clear',args}),setTransform:(...args:number[])=>this.drawCalls.push({kind:'transform',args}),drawImage:(...args:unknown[])=>this.drawCalls.push({kind:'image',args})};
  setAttribute(k:string,v:string){this.attrs.set(k,v);}hasAttribute(k:string){return this.attrs.has(k);}append(e:ObserverElement){this.children.push(e);}prepend(e:ObserverElement){this.children.unshift(e);}remove(){this.removed=true;}focus(){}
  querySelector(selector:string){let e=this.queries.get(selector);if(!e){e=new ObserverElement();if(selector.includes('data-view'))e.dataset.view=selector.includes('iso')?'iso':'2d';this.queries.set(selector,e);}return e;}
  querySelectorAll(){return [this.querySelector('[data-view="2d"]'),this.querySelector('[data-view="iso"]')];}
@@ -31,7 +32,7 @@ export function observerPreviewHarness(initialTile:Vec={x:415,y:230},actualScene
  const warnings:unknown[][]=[];const created:ObserverElement[]=[];const document=Object.assign(doc,{hidden:false,createElement:()=>{const e=new ObserverElement();if(!canvasAvailable)e.getContext=()=>null as any;created.push(e);return e;},getElementById:(id:string)=>id==='app'||id==='observer-hud'?app:base,querySelector:()=>hint});
  const window=Object.assign(win,{setInterval:(fn:()=>void)=>{intervals.set(++next,fn);return next;}});
  let source=readFileSync(new URL('../../src/client/isometric-observer.ts',import.meta.url),'utf8');source=source.replace(/^import .*;\n/gm,'').replace(/^export /gm,'');
- const context:Record<string,unknown>={...preview,residentFollowText,observerMap,document,window,console:{warn:(...args:unknown[])=>warnings.push(args)},Element:ObserverElement,performance:{now:()=>0},clearInterval:(id:number)=>intervals.delete(id),__hot:{dispose:(fn:()=>void)=>{dispose=fn;}}};
+ const context:Record<string,unknown>={...preview,paintIsometricGround,residentFollowText,observerMap,document,window,console:{warn:(...args:unknown[])=>warnings.push(args)},Element:ObserverElement,performance:{now:()=>0},clearInterval:(id:number)=>intervals.delete(id),__hot:{dispose:(fn:()=>void)=>{dispose=fn;}}};
  runInNewContext(ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText+';this.observerHandle=mountIsometricObserver(observerMap);this.previewModel=this.observerHandle.model;this.remount=()=>mountIsometricObserver(observerMap);',context);
  const handle=context.observerHandle as import('../../src/client/isometric-observer.js').IsometricObserverHandle;dispose=()=>handle.dispose();
  const canvas=app.children[0],tray=app.children[1];

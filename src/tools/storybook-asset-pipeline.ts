@@ -4,7 +4,7 @@
 import {parseStorybookAnimationBundle, type StorybookAnimationBundle} from '../client/storybook-animation-assets.js';
 import {storybookFacing} from '../client/storybook-geometry.js';
 import {STORYBOOK_MAX_PIXELS_PER_UNIT, type StorybookAsset, type StorybookFrame, type StorybookPackPin} from '../client/storybook-assets.js';
-import {decodeRgbaPng, encodeRgbaPng, sha256, type RgbaImage} from './storybook-png.js';
+import {inspectRgbaPngSource, decodeRgbaPng, encodeRgbaPng, sha256, type RgbaImage} from './storybook-png.js';
 
 export const PIPELINE_VERSION = '1.0.0';
 export const DENSITY_PIPELINE_VERSION = '1.1.0';
@@ -207,16 +207,20 @@ export function assembleStorybookAssets(input: unknown, sourceBytes: ReadonlyMap
   const recipe = parseStorybookBuildRecipe(input);
   if (!/^[a-f0-9]{64}$/.test(recipeSha256)) fail('recipe_hash');
   if (sourceBytes.size !== recipe.sources.length || [...sourceBytes.keys()].some(k => !recipe.sources.some(s => s.id === k))) fail('source_bytes_coverage');
+  const retainedSources = new Map<string, Uint8Array>();
   const images = new Map<string, RgbaImage>(); let totalBytes = 0, totalPixels = 0;
   const sources = recipe.sources.map(source => {
     const bytes = sourceBytes.get(source.id)!;
     totalBytes += bytes.length; totalPixels += source.width * source.height;
     if (totalBytes > BUILD_LIMITS.sourceBytes || totalPixels > BUILD_LIMITS.sourcePixels) fail('source_budget');
     if (sha256(bytes) !== source.sha256) fail(`source_hash.${source.id}`);
-    const image = decodeRgbaPng(bytes);
+    const {image, contentCredentials} = inspectRgbaPngSource(bytes);
+    const retainedOriginal = contentCredentials ? `source-${source.sha256}.png` : null;
+    if (retainedOriginal) retainedSources.set(retainedOriginal, Uint8Array.from(bytes));
     if (image.width !== source.width || image.height !== source.height) fail(`source_dimensions.${source.id}`);
     images.set(source.id, image);
-    return {...source, byteLength: bytes.length, alpha: alphaCounts(image.pixels)};
+    return {...source, byteLength: bytes.length, alpha: alphaCounts(image.pixels),
+      ...(contentCredentials ? {contentCredentials: {...contentCredentials, retainedOriginal}} : {})};
   });
   const {width, maxHeight, padding} = recipe.atlas;
   let x = padding, y = padding, row = 0;
@@ -268,10 +272,10 @@ export function assembleStorybookAssets(input: unknown, sourceBytes: ReadonlyMap
     }}))} : {}),
     duplicatePixels, warnings: ['License and authorization are declarations, not legal verification.', 'Source crops, alpha and anchors do not verify artwork, identity, anatomical direction or pixel-level foot stability.', 'No production installation, resident binding, visual acceptance or runtime acceptance.'],
   } as const;
-  return {png, manifest: bundle.manifest, animation: bundle.animation, report};
+  return {png, manifest: bundle.manifest, animation: bundle.animation, report, retainedSources};
 }
 /** Stable JSON and filenames; manifest path is the future runtime path, not an install action. */
 export function storybookBuildFiles(result: StorybookBuildResult): ReadonlyMap<string, Uint8Array> {
   const json = (value: unknown) => Buffer.from(JSON.stringify(value, null, 2) + '\n');
-  return new Map([['atlas.png', result.png], ['atlas.manifest.json', json(result.manifest)], ['atlas.animation.json', json(result.animation)], ['asset-build.json', json(result.report)]]);
+  return new Map([['atlas.png', result.png], ['atlas.manifest.json', json(result.manifest)], ['atlas.animation.json', json(result.animation)], ...result.retainedSources, ['asset-build.json', json(result.report)]]);
 }

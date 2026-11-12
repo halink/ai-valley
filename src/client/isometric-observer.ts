@@ -1,4 +1,5 @@
 /** Optional client renderer. Receives the existing observer feed; owns no transport or world state. */
+import {paintIsometricGround} from './isometric-ground.js';
 import type {ObserverMap} from './observer-map.js';
 import {IsometricPreview,PREVIEW_FRAME_MS,PREVIEW_LIMITATIONS,previewSelection,previewHitLabel,previewHome} from './isometric-preview.js';
 import {residentFollowText} from './resident-follow.js';
@@ -43,14 +44,14 @@ function paint(){
  const s=model.scene,c=model.camera,key=[s.width,s.height,s.camera.origin.x,s.camera.origin.y].join(',');
  if(staticKey!==s.terrain||key!==geometry){
   staticKey=s.terrain;geometry=key;staticCanvas.width=s.width;staticCanvas.height=s.height;frameCanvas.width=s.width;frameCanvas.height=s.height;
-  const terrain=staticCanvas.getContext('2d')!;terrain.setTransform(1,0,0,1,s.camera.origin.x,s.camera.origin.y);draw(terrain,s.terrain);
+  const terrain=staticCanvas.getContext('2d')!;terrain.setTransform(1,0,0,1,s.camera.origin.x,s.camera.origin.y);if(!s.groundPlan)draw(terrain,s.terrain);
  }
- const frame=frameCanvas.getContext('2d')!;frame.setTransform(1,0,0,1,0,0);frame.clearRect(0,0,s.width,s.height);frame.drawImage(staticCanvas,0,0);frame.setTransform(1,0,0,1,s.camera.origin.x,s.camera.origin.y);
+ const frame=frameCanvas.getContext('2d')!;frame.setTransform(1,0,0,1,0,0);frame.clearRect(0,0,s.width,s.height);if(!s.groundPlan)frame.drawImage(staticCanvas,0,0);frame.setTransform(1,0,0,1,s.camera.origin.x,s.camera.origin.y);
  for(const object of s.objects)draw(frame,object.marks);
  context.setTransform(1,0,0,1,0,0);context.fillStyle='#f0d9ac';context.fillRect(0,0,canvas.width,canvas.height);context.imageSmoothingEnabled=false;
- context.setTransform(c.zoom,0,0,c.zoom,c.origin.x,c.origin.y);context.drawImage(frameCanvas,-s.camera.origin.x,-s.camera.origin.y);context.setTransform(1,0,0,1,0,0);
+ context.setTransform(c.zoom,0,0,c.zoom,c.origin.x,c.origin.y);if(s.groundPlan)paintIsometricGround(context,s.groundPlan,s.groundDarkness??0);context.drawImage(frameCanvas,-s.camera.origin.x,-s.camera.origin.y);context.setTransform(1,0,0,1,0,0);
  const synthetic=model.snapshot?.version==='synthetic-observer-preview';
- tray.querySelector('.preview-scope')!.textContent=(synthetic?'隔离合成开局 · 暂停 · 非自主模型演示 · ':'')+model.summary+` · 当前问号 ${s.renderedMarkerCount} · ${model.roomId?'本房间':'全世界'}仅记录 ${s.unsupportedObjects}（其中位置未知 ${s.unknownLocationCount}）`;
+ tray.querySelector('.preview-scope')!.textContent=(synthetic?'隔离合成开局 · 暂停 · 非自主模型演示 · ':'')+model.summary+(!model.roomId?' · 绘本地表试作（程序化过渡美术）':'')+` · 当前问号 ${s.renderedMarkerCount} · ${model.roomId?'本房间':'全世界'}仅记录 ${s.unsupportedObjects}（其中位置未知 ${s.unknownLocationCount}）`;
  const follow=observerMap.currentFollow();if(follow)hitText.textContent=residentFollowText(follow);
 }
 function resize(){

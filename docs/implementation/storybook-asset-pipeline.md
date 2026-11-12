@@ -155,3 +155,22 @@ node --import tsx scripts/storybook-assets.mjs verify INPUT.json output/storyboo
 命令行生成→check→build→verify 实跑成功。合成 recipe 位于 `output/test-tmp/storybook-assets-synthetic-H1yO0I/recipe.json`，候选位于 `output/storybook-assets/synthetic-pipeline-verification/`。诊断图集 256×134，84 个图块中 80 个是编号方向箭头，另 4 个是注册层标记，**不是 80 张人物动画画稿**。PNG SHA256 为 `5a142387bb1a172067403ce3e4936ebfadf0fb81add7d56de1a4c4c3d73b1435`。
 
 独立审查说明见 [资产管线审查](../reviews/storybook-asset-pipeline.md)。
+
+## Content Credentials 原图保留导入
+
+`caBX` 是 [C2PA 2.3 规范 A.3.2](https://spec.c2pa.org/specifications/specifications/2.3/specs/_attachments/C2PA_Specification.pdf)
+规定的 PNG ancillary/private/not-safe-to-copy 来源清单块；不是颜色或渲染指令。
+存在此块**不证明**图像来自特定厂商，也不证明作者、许可、签名或内容真实。
+
+离线源素材导入使用 `inspectRgbaPngSource`：维持 RGBA8 非交错、尺寸/总字节预算、完整 PNG 结构、所有 CRC、连续 IDAT、解压上限及尾部检查，只额外识别大小为 1–8,000,000 字节的单个 `caBX`。
+块可在 IDAT 前或后，但不能打断 IDAT 序列。重复块、空块、超限块、坏 CRC、未知块、色彩配置和 APNG 块仍拒绝。
+载荷作为 opaque 数据保留，不解析 JUMBF 内层、不执行、不联网、不验证签名或信任链；`opaque-unverified` 不能当作 C2PA 合规证明。
+普通 `decodeRgbaPng` 仍拒绝 `caBX`，避免调用方不知情地丢弃来源。
+
+含此块的构建输出额外包含 `source-<完整原图SHA256>.png`，逐字节保留原始 PNG；报告 `sources[].contentCredentials` 记录块大小/哈希、`retainedOriginal` 和 `retained-in-original-only` 策略，原有 source 路径/授权声明/完整哈希不变。
+CLI `build` 写入原图后最后写报告；`verify` 同样逐字节验证原图。调用底层 inspection API 的工具也必须自行保留原文件。
+衍生 atlas 的像素复制与以往一致，但不会把原图签名错误移植到改变了像素/布局的 atlas；原始来源可在伴随原图中审计。这不是静默删除或重新签名。
+无 `caBX` 的旧构建输出保持不变。
+
+该能力只解除**文件格式导入**阻塞，不改变授权、素材比例、透明边缘、方向/动作、视觉验收或生产安装门槛。未通过视觉审核的候选仍不能上线。
+回归测试：`node --import tsx --test tests/storybook-provenance*.test.ts tests/storybook-asset-pipeline*.test.ts tests/storybook-density*.test.ts`。
