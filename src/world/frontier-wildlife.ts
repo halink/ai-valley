@@ -342,7 +342,8 @@ function initiatePredation(w:World,state:FrontierHazardState,beast:WildBeast,rul
 
 function stepWildBeast(w:World,state:FrontierHazardState,beast:WildBeast,minutes:number,threats:Threats){
  const now=w.minute,rules=animalRules[beast.species];
- const resting=beast.activity?.kind==='rest';
+ // Older saves can still label an unfinished den journey as rest.
+ const resting=beast.activity?.kind==='rest'&&(!beast.activity.target||distance(beast.at,beast.activity.target)<=2);
  beast.hunger=bound(beast.hunger+minutes/rules.hungerMinutes*(resting ? .66 : 1));
  beast.thirst=bound((beast.thirst??20)+minutes/(w.weather==='rain'?117:82));
  beast.energy=bound((beast.energy??85)+minutes*(resting ? .12 : beast.activity?.kind==='hunt'||beast.activity?.kind==='flee' ? -.071 : -.03));
@@ -405,7 +406,9 @@ function stepWildBeast(w:World,state:FrontierHazardState,beast:WildBeast,minutes
   return;
  }
  if(beast.hunger<80&&(!active||beast.energy<25||resting&&beast.energy<61)){
-  if(distance(beast.at,beast.den)>2&&moveToward(w,beast,beast.den,72))activity(beast,'rest','回到藏身处休息',beast.den);
+  // Walking home is not rest: the next needs tick must charge movement,
+  // not award sleep recovery before the animal actually stops.
+  if(distance(beast.at,beast.den)>2&&moveToward(w,beast,beast.den,72))activity(beast,'roam','前往藏身处休息',beast.den);
   else activity(beast,'rest',beast.energy<61?'补充体力':'按昼夜作息休息',beast.at);
   return;
  }

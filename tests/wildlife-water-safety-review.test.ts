@@ -58,7 +58,8 @@ test('review: disappeared source abandons stale drinking cache without inventing
 
 test('review: non-thirsty return-to-den movement keeps original hazard semantics',()=>{
  const f=fixture();f.b.thirst=20;f.b.den={x:10,y:5};f.s.disasters=[storm(6,5)];tick(f);
- assert.equal(f.b.activity?.kind,'rest');assert.deepEqual(f.b.at,{x:6,y:5});assert.equal(f.spring.amount,2);
+ // Return travel retains its original path, but is no longer labelled sleep.
+ assert.equal(f.b.activity?.kind,'roam');assert.deepEqual(f.b.at,{x:6,y:5});assert.equal(f.spring.amount,2);
 });
 
 test('review: SQLite restored stale path revalidates both fence and disaster',()=>{
