@@ -4,7 +4,7 @@ import {activeRelocation,travellingFamily} from '../shared/family-relocation.js'
 import {leasedBed} from '../shared/commons.js';
 import {roomLayout,roomPath,residentBed} from '../shared/rooms.js';
 import {knownAgeYears,DAY} from './time.js';
-import {prepareRoomExit} from './rooms.js';
+import {prepareRoomExit,roomExitReason} from './rooms.js';
 import {socialSpace} from './relationships.js';
 import {coLocated} from './proximity.js';
 import {distance,findPath,same,walkable} from './navigation.js';
@@ -230,7 +230,8 @@ export function completeFamilyRelocation(w:World,r:Resident,a:FamilyRelocationAc
   }
   if(!coLocated(w,r,p,0))return '须实际走到孩子所在的位置再接出';
   const target=a.operation==='returnChild'?w.buildings.find(b=>b.id===p.homeId)!.door:c.assembly,path=findPath(w,r.at,target);if(path===null)return '孩子所在处没有可达的集合路线';
-  m.escorting=true;a.phase='delivery';r.activity.path=path;r.activity.target={...target};r.activity.remaining=1;r.activity.travelProgress=0;prepareRoomExit(w,r);
+  if(r.inside&&(a.operation==='escort'||r.inside!==p.homeId||path.length)){const exitError=roomExitReason(w,r);if(exitError)return exitError;}
+  m.escorting=true;a.phase='delivery';r.activity.path=path;r.activity.target={...target};r.activity.remaining=1;r.activity.travelProgress=0;const exitError=prepareRoomExit(w,r);if(exitError)return exitError;
   fact(w,c,r,`${r.name}在${p.name}实际所在的位置接出孩子，${a.operation==='returnChild'?'按当前监护职责返回仍保留的原住所':'按分别确认的迁居安排走向户外集合点'}；未把孩子或自己瞬移到门外。`);return null;
  }
  if(a.operation==='depart'||a.operation==='resume'){

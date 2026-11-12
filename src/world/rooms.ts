@@ -32,19 +32,42 @@ function guardianRoomStepProblem(w:World,r:Resident,next:Vec):string|null {
  if(!b||!from||(unknownSelfCare||a?.type==='commons'||a?.type==='publicDuty')&&!clearRoomPoint(roomLayout(w,b),from)||r.at.x!==b.door.x||r.at.y!==b.door.y||Math.abs(from.x-next.x)+Math.abs(from.y-next.y)!==1||roomPath(roomLayout(w,b),from,next)?.length!==1)return unknownSelfCare?'本人自理的实际室内路线已经阻断，须留在当前位置重新决定':a?.type==='commons'?'共屋实际室内路线已经阻断，须留在当前位置重新决定':a?.type==='publicDuty'?'公共服务实际室内路线已经阻断，须留在当前位置重新决定':'原房间的实际护送路线已经阻断，须留在当前位置重新决定';
  return null;
 }
+const exitUnavailable='原房间的实际出口或路线已失效，须留在当前位置重新决定';
+type ExitPlan={error:string}|{buildingId:string;entry:Vec;path:Vec[]};
+/** Physical exit planning only. It grants no entry/ownership rights and mutates nothing. */
+function roomExitPlan(w:World,r:Resident):ExitPlan {
+ const b=w.buildings.find(b=>b.id===r.inside),from=r.roomAt;
+ if(!b||!from||r.at.x!==b.door.x||r.at.y!==b.door.y)return {error:exitUnavailable};
+ const layout=roomLayout(w,b);
+ if(!clearRoomPoint(layout,from)||!clearRoomPoint(layout,layout.entry))return {error:exitUnavailable};
+ const path=roomPath(layout,from,layout.entry);
+ return path===null?{error:exitUnavailable}:{buildingId:b.id,entry:{...layout.entry},path};
+}
+/** Phase-changing pickups call this before spending or moving either participant. */
+export function roomExitReason(w:World,r:Resident):string|null {
+ if(!w.rooms||!r.inside)return null;const plan=roomExitPlan(w,r);return 'error' in plan?plan.error:null;
+}
+function exitJourneyProblem(w:World,r:Resident,journey:NonNullable<Resident['activity']>['room']):string|null {
+ const b=w.buildings.find(b=>b.id===r.inside),from=r.roomAt;
+ if(!journey||!b||!from||journey.buildingId!==b.id||!journey.target||!Array.isArray(journey.path)||!Number.isFinite(journey.progress)||journey.progress<0||r.at.x!==b.door.x||r.at.y!==b.door.y)return exitUnavailable;
+ const layout=roomLayout(w,b),entry=layout.entry,next=journey.path[0];
+ if(journey.target.x!==entry.x||journey.target.y!==entry.y||!clearRoomPoint(layout,from)||!clearRoomPoint(layout,entry))return exitUnavailable;
+ if(next){const prior=guardianRoomStepProblem(w,r,next);if(prior)return prior;if(!clearRoomPoint(layout,next)||Math.abs(from.x-next.x)+Math.abs(from.y-next.y)!==1||roomPath(layout,from,next)?.length!==1)return exitUnavailable;}
+ else if(from.x!==entry.x||from.y!==entry.y)return exitUnavailable;
+ return null;
+}
 /** Room movement consumes the same world minutes as outdoor walking. Work starts at the actual slot. */
 export function moveInRoom(w:World,r:Resident,dt:number):{moving:boolean;error?:string}{
  if(!w.rooms||!r.activity)return {moving:false};const a=r.activity;
+ // Older saved activities may lack an exit journey. Reconstruct a real one
+ // instead of letting the outdoor path erase the resident's indoor position.
+ if(r.inside&&(!a.room||a.room.mode!=='exit'&&a.path.length)){const error=prepareRoomExit(w,r);if(error)return {moving:false,error};}
  if(a.action.type==='publicDuty'&&(a.action.operation==='receive'||a.action.operation==='inspect')){const error=dutyReason(w,r,a.action);if(error)return {moving:false,error};}
  if(a.room?.mode==='exit'){
-  const journey=a.room;journey.progress+=dt*movementRate(w,r);while(journey.progress>=1&&journey.path.length){const error=guardianRoomStepProblem(w,r,journey.path[0]);if(error)return {moving:false,error};r.roomAt=journey.path.shift()!;journey.progress--;}
-  if(!journey.path.length){
-   if(a.action.type==='publicDuty'||a.action.type==='health'&&a.action.operation==='rescue'&&a.action.evacuationDangerId||isSelfCareAction(a.action)&&knownAgeYears(r.bornAt,w.minute)===null){
-    const b=w.buildings.find(b=>b.id===r.inside),entry=b&&roomLayout(w,b).entry;
-    if(!b||!entry||journey.buildingId!==b.id||journey.target.x!==entry.x||journey.target.y!==entry.y||r.at.x!==b.door.x||r.at.y!==b.door.y||r.roomAt?.x!==entry.x||r.roomAt?.y!==entry.y)return {moving:false,error:'尚未沿真实室内路线抵达原房间出口，不能凭空走到门外'};
-   }
-   r.inside=null;r.roomAt=null;delete a.room;
-  }return {moving:true};
+  const journey=a.room,problem=exitJourneyProblem(w,r,journey);if(problem)return {moving:false,error:problem};
+  journey.progress+=dt*movementRate(w,r);while(journey.progress>=1&&journey.path.length){const error=exitJourneyProblem(w,r,journey);if(error)return {moving:false,error};r.roomAt=journey.path.shift()!;journey.progress--;}
+  if(!journey.path.length){const error=exitJourneyProblem(w,r,journey);if(error)return {moving:false,error};r.inside=null;r.roomAt=null;delete a.room;}
+  return {moving:true};
  }
  if(a.path.length)return {moving:false};
  if(a.action.type==='production'&&a.action.operation==='custodyInspect'){const error=custodyInspectionEntryProblem(w,r,a.action);if(error){noteCustodyInspectionFailure(w,r,a.action);return {moving:false,error};}}
@@ -65,29 +88,31 @@ export function moveInRoom(w:World,r:Resident,dt:number):{moving:boolean;error?:
  if(!error&&a.action.type==='publicDuty'&&a.action.operation==='receive'&&key==='kitchen')error=claim(w,r,'table',group,b.id,w.minute-dt,w.minute);
  return error?{moving:false,error}:{moving:false};
 }
-export function prepareRoomExit(w:World,r:Resident){
- if(!w.rooms||!r.activity||!r.inside)return;const work=actionRoom(w,r,r.activity);
- if(work?.building.id===r.inside&&r.activity.path.length===0)return;
- if(r.activity.path.length===0&&['longCare','health','education','publicDuty','employment','civic','economy'].includes(r.activity.action.type)&&!work&&!(r.activity.action.type==='health'&&r.activity.action.phase==='delivery'&&r.activity.action.evacuationDestination==='safe-ground'))return;
- if(r.activity.action.type==='socialAppointment'&&r.activity.action.operation!=='attend'&&r.activity.path.length===0)return;
- if(r.activity.action.type==='pregnancyPreparation'&&r.activity.action.operation!=='attend'&&r.activity.path.length===0)return;
- if(isWaterSupportAction(r.activity.action)&&r.activity.path.length===0)return;
- if(r.activity.action.type==='waterSupply'&&['load','drink','decant','serveChild'].includes(r.activity.action.operation)&&r.activity.path.length===0)return;
- if(r.activity.action.type==='production'&&['custodyOffer','custodyAccept','custodyReview','custodyObject','custodyEnd'].includes(r.activity.action.operation)&&r.activity.path.length===0)return;
- if(r.activity.action.type==='culture'&&r.activity.action.operation==='invite'&&r.activity.path.length===0)return;
- if(r.activity.action.type==='social'&&['interpret','leave'].includes(r.activity.action.operation)&&r.activity.path.length===0)return;
- if(r.activity.action.type==='household'&&r.activity.action.operation==='notifyGift'&&r.activity.path.length===0)return;
- if(r.activity.action.type==='funerary'&&r.activity.action.operation==='notify'&&r.activity.path.length===0)return;
- if(r.activity.action.type==='familyRelocation'&&r.activity.action.operation!=='escort'&&r.activity.action.operation!=='returnChild'&&r.activity.path.length===0)return;
+export function prepareRoomExit(w:World,r:Resident,checkOnly=false):string|null{
+ if(!w.rooms||!r.activity||!r.inside)return null;const work=actionRoom(w,r,r.activity);
+ if(work?.building.id===r.inside&&r.activity.path.length===0)return null;
+ if(r.activity.path.length===0&&['longCare','health','education','publicDuty','employment','civic','economy'].includes(r.activity.action.type)&&!work&&!(r.activity.action.type==='health'&&r.activity.action.phase==='delivery'&&r.activity.action.evacuationDestination==='safe-ground'))return null;
+ if(r.activity.action.type==='socialAppointment'&&r.activity.action.operation!=='attend'&&r.activity.path.length===0)return null;
+ if(r.activity.action.type==='pregnancyPreparation'&&r.activity.action.operation!=='attend'&&r.activity.path.length===0)return null;
+ if(isWaterSupportAction(r.activity.action)&&r.activity.path.length===0)return null;
+ if(r.activity.action.type==='waterSupply'&&['load','drink','decant','serveChild'].includes(r.activity.action.operation)&&r.activity.path.length===0)return null;
+ if(r.activity.action.type==='production'&&['custodyOffer','custodyAccept','custodyReview','custodyObject','custodyEnd'].includes(r.activity.action.operation)&&r.activity.path.length===0)return null;
+ if(r.activity.action.type==='culture'&&r.activity.action.operation==='invite'&&r.activity.path.length===0)return null;
+ if(r.activity.action.type==='social'&&['interpret','leave'].includes(r.activity.action.operation)&&r.activity.path.length===0)return null;
+ if(r.activity.action.type==='household'&&r.activity.action.operation==='notifyGift'&&r.activity.path.length===0)return null;
+ if(r.activity.action.type==='funerary'&&r.activity.action.operation==='notify'&&r.activity.path.length===0)return null;
+ if(r.activity.action.type==='familyRelocation'&&r.activity.action.operation!=='escort'&&r.activity.action.operation!=='returnChild'&&r.activity.path.length===0)return null;
  if(r.activity.action.type==='emergencyCare'&&r.activity.path.length===0){
   const action=r.activity.action;
   const boardWithdrawal=action.operation==='withdrawHelp'&&w.emergencyCare?.helpNotices?.some(n=>n.id===action.noticeId&&n.postedAt!==null);
-  if(!['inspect','visitHelp','postHelp','sendHelp','readHelp'].includes(action.operation)&&!boardWithdrawal)return;
+  if(!['inspect','visitHelp','postHelp','sendHelp','readHelp'].includes(action.operation)&&!boardWithdrawal)return null;
  }
- if(r.activity.action.type==='adoption'&&r.activity.action.operation!=='register'&&r.activity.path.length===0)return;
- if(r.activity.action.type==='design'&&r.activity.action.operation==='equip'&&r.activity.path.length===0)return;
- if(r.activity.action.type==='personalFoodGift'&&r.activity.path.length===0&&(r.activity.action.operation!=='deliver'||w.personalFoodGifts?.gifts.find(c=>c.id===(r.activity!.action as Extract<import('../shared/types.js').Action,{giftId:string}>).giftId)?.location.inside===r.inside))return;
- if(['shareFoodSource','adultPresence','agency','wait','eat','talk','propose','respond','separate','familyConsent','tendChild','care'].includes(r.activity.action.type)&&r.activity.path.length===0)return;
- const b=w.buildings.find(b=>b.id===r.inside);if(!b){r.inside=null;r.roomAt=null;return;}
- const layout=roomLayout(w,b),path=roomPath(layout,r.roomAt??layout.entry,layout.entry);if(path?.length)r.activity.room={buildingId:b.id,mode:'exit',target:layout.entry,path,progress:0};else{r.inside=null;r.roomAt=null;}
+ if(r.activity.action.type==='adoption'&&r.activity.action.operation!=='register'&&r.activity.path.length===0)return null;
+ if(r.activity.action.type==='design'&&r.activity.action.operation==='equip'&&r.activity.path.length===0)return null;
+ if(r.activity.action.type==='personalFoodGift'&&r.activity.path.length===0&&(!['deliver','return'].includes(r.activity.action.operation)||w.personalFoodGifts?.gifts.find(c=>c.id===(r.activity!.action as Extract<import('../shared/types.js').Action,{giftId:string}>).giftId)?.location.inside===r.inside))return null;
+ if(['shareFoodSource','adultPresence','agency','wait','eat','talk','propose','respond','separate','familyConsent','tendChild','care'].includes(r.activity.action.type)&&r.activity.path.length===0)return null;
+ const plan=roomExitPlan(w,r);if('error' in plan)return plan.error;if(checkOnly)return null;
+ if(plan.path.length)r.activity.room={buildingId:plan.buildingId,mode:'exit',target:plan.entry,path:plan.path,progress:0};
+ else {r.inside=null;r.roomAt=null;delete r.activity.room;}
+ return null;
 }

@@ -139,7 +139,7 @@ node --import tsx --test tests/dev-preview.test.ts tests/dev-preview-review.test
 
 [已知泉水与现场水量](docs/implementation/spring-visibility.md)区分历史地址和真实可见库存，统一徒手采水、装桶与清淤的视野边界，并保留遮挡时主动走访核验的路径。合成最终菜单→prompt→引擎、并发与重载回归见 `tests/spring-visibility*.test.ts`；不改变取水菜单的议程轮转时机。
 
-当前常规在谷菜单的各组预算理论合计为 **84 项**：基础议程 56 + 最多 2 水源 + 1 烹饪 + 1 播种 + 1 已知自有田址 + 9 社交语气 + 10 本人理解 + 2 浆果分享/听闻核实 + 2 日常约见。这不是统一截断器；实时 `care.stop` / `personalFoodGift.stop` 及通过过滤的 `health.cancelRescue` / `health.declineRescue` 仍另外恢复。日常约见的拒绝/撤回计入其两项组内；镇外、途中、乘船和护送走各自菜单路径，能力/年龄过滤不变。以下 58/59/60/68/78/80/82 是各次增量交付时的阶段预算，不是并存的当前上限。[当前菜单规则](docs/design/simulation.md#一次行动从哪里来)
+当前常规在谷菜单的各组预算理论合计为 **85 项**：基础议程 56 + 最多 2 水源 + 1 烹饪 + 1 播种 + 1 已知自有田址 + 9 社交语气 + 10 本人理解 + 2 浆果分享/听闻核实 + 2 日常约见 + 1 本人赠粮原点返回。这不是统一截断器；实时 `care.stop` / `personalFoodGift.stop` 及通过过滤的 `health.cancelRescue` / `health.declineRescue` 仍另外恢复。日常约见的拒绝/撤回计入其两项组内；镇外、途中、乘船和护送走各自菜单路径，能力/年龄过滤不变。以下 58/59/60/68/78/80/82/84 是各次增量交付时的阶段预算，不是并存的当前上限。[当前菜单规则](docs/design/simulation.md#一次行动从哪里来)
 
 [有界已知水源菜单](docs/implementation/water-source-choices.md)为最近水源和公平轮换的已知替代水源保留最多两项，绕过二次议程裁剪；该阶段完全饱和时普通菜单上限为58项，保留原有危急、拒绝与停止入口。正常编号菜单→引擎、九人seed5401零水干田、并发、视野、重载与独立审查见 `tests/water-source-choices*.test.ts`，不会自动取水或浇水。
 
@@ -148,6 +148,8 @@ node --import tsx --test tests/dev-preview.test.ts tests/dev-preview-review.test
 [本人随身食品时效](docs/implementation/personal-food-freshness.md)把本人实际库存约束下的最早到期份数、游戏分钟与批次营养送入最终决策输入，明确过期、未知与未展开部分；最多8种并保留当前eat食品。合成反向时效、附近畜舍不补造批次、重载、上限与独立审查见 `tests/personal-food-freshness*.test.ts`；不会自动选食或改变腐败执行。
 
 [本人赠粮交接记录](docs/implementation/personal-food-gift-notes.md)把最多六份凭据完整的本人已知约定独立送入最终提示，保留原交接点、期限、另行交付及停留成本。远方事实不刷新，原菜单、决定和交付规则不变；同种子短交接、三模型提示、旧档与[独立审查](docs/reviews/personal-food-gift-notes.md)验证信息边界，不证明模型行为或长期生存改善。
+
+[本人赠粮原点返回](docs/implementation/personal-food-gift-return.md)为已独立接受的收方增加最多一项精确回到原交接点的选择，保留原期限、真实道路和房间权限；不自动等待、交付或进食，不读远方送方事实。正式seed5401编号步进、同钟对照、SQLite及[独立审查](docs/reviews/personal-food-gift-return.md)验证行动可用性，不声称历史饥饿或真实模型生存改善。 提交复核发现的[共享出口不可达边界](docs/implementation/room-exit-boundaries.md)另行修正，保留原室内位置、搬运前物资与当事人状态，旧活动必须实际出门；原6385项通过不替代新增边界验收。
 
 [现场浆果余量](docs/implementation/visible-berry-observation.md)将既有个人 context 中最多四处真正可见地点的当前数量送入最终提示，区分空、不足一份和采集上限以外的余量；不读远方或再生资料、不改菜单与采集。先红后绿、完整归档输入重放、新一日同轨迹核对及[独立审查](docs/reviews/visible-berry-observation.md)只证明信息投影与所测非干预，不声称长期生存改善。
 

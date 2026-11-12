@@ -28,7 +28,7 @@ export function ageAllowsChoice(age:number, action:Action):boolean {
  // verify whose offer or journey the decision concerns.
  if(age<6)return action.type==='health'&&['declineRescue','cancelRescue'].includes(action.operation);
  switch(action.type){
-  case 'personalFoodGift': return ['accept','decline'].includes(action.operation)||age>=13;
+  case 'personalFoodGift': return ['accept','decline','return'].includes(action.operation)||age>=13;
   case 'regionSurvey': return ['read','object'].includes(action.operation);
   case 'waterSupply': return ['fillSpring','load','drink','drinkPublic','acceptVessel','declineVessel'].includes(action.operation);
   case 'frontierHazard': return action.operation==='shelter'||action.operation==='retreat';

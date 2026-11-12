@@ -161,6 +161,10 @@ function decisionChoicesFrom(context:DecisionContext,all:ActionChoice[]):ActionC
  let choices=restoreFoodSourceSharingChoices(all,restoreInterpretationChoices(all,restoreSocialToneChoices(context,compactForeignChoices(context,focusedChoices(context,all)))));
  // Preserve one complete, bounded appointment group after all ordinary budgets.
  for(const choice of all.filter(c=>c.action.type==='socialAppointment'))if(!choices.some(c=>c.id===choice.id))choices.push(choice);
+ // One exact, personally accepted return destination. Keep it outside the
+ // ordinary agenda so adding it never displaces food, safety or refusals.
+ const giftReturns=all.filter(c=>c.action.type==='personalFoodGift'&&c.action.operation==='return').sort((a,b)=>a.id.localeCompare(b.id));
+ if(giftReturns.length)choices.push(giftReturns[Math.floor(context.minute/30)%giftReturns.length]);
  // A live care stop cannot disappear behind a focus, a transport filter, or an agenda budget.
  for(const stop of context.formal?.opportunities.filter(c=>c.id.startsWith('care.stop.')||c.id.startsWith('personalFoodGift.stop.'))??[])if(!choices.some(c=>c.id===stop.id))choices.push(stop);
  // Restore only decisions that survived capacity and journey filters.

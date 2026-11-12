@@ -6,7 +6,7 @@ export interface PersonalFoodGiftAgeTerms {
 /** A finite gift of personal carried food. Never a care, feeding or public-stock mandate. */
 export type PersonalFoodGiftAction=
  | {type:'personalFoodGift';operation:'offer';recipientId:string;item:Item;quantity:number;receiptId:string;ageTerms?:PersonalFoodGiftAgeTerms}
- | {type:'personalFoodGift';operation:'accept'|'deliver'|'cancel'|'decline';giftId:string};
+ | {type:'personalFoodGift';operation:'accept'|'deliver'|'return'|'cancel'|'decline';giftId:string};
 export type PersonalFoodGiftStatus='offered'|'accepted'|'delivered'|'cancelled'|'declined'|'expired'|'invalid';
 export interface PersonalFoodGift {
  id:string;giverId:string;recipientId:string;item:Item;quantity:number;receiptId:string;

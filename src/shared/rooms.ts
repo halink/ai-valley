@@ -34,7 +34,7 @@ export function actionRoom(w:World,r:Resident,a:Activity):{building:Building;key
  // Unilateral decisions stay where the actor is; they do not approach a partner or chase oneself.
  if(action.type==='separate'||action.type==='respond'&&!action.accept&&w.proposals.find(p=>p.id===action.proposalId)?.actorId===r.id||action.type==='respond'&&!action.accept&&w.proposals.some(p=>p.id===action.proposalId&&p.kind==='care'&&p.targetId===r.id))return null;
  if(action.type==='personalFoodGift'){
-  if(action.operation!=='deliver')return null;const c=w.personalFoodGifts?.gifts.find(c=>c.id===action.giftId);if(!c?.location.inside||!c.location.roomAt)return null;id=c.location.inside;target={...c.location.roomAt};key='personal-food-gift:'+c.id;
+  if(action.operation!=='deliver'&&action.operation!=='return')return null;const c=w.personalFoodGifts?.gifts.find(c=>c.id===action.giftId);if(!c?.location.inside||!c.location.roomAt)return null;id=c.location.inside;target={...c.location.roomAt};key='personal-food-gift:'+c.id;
  }else if(action.type==='pregnancyPreparation'&&action.operation==='attend'){
   const c=w.pregnancyPreparation?.arrangements.find(c=>c.id===action.arrangementId);if(!c)return null;id=c.buildingId;key='pregnancy-care:'+c.id;const b=w.buildings.find(b=>b.id===id);if(!b)return null;const bed=roomLayout(w,b).slots.find(s=>s.key==='bed:'+c.bed);if(!bed)return null;target={x:bed.at.x+1,y:bed.at.y};
  }else if(action.type==='familyRelocation'&&(action.operation==='escort'||action.operation==='returnChild')&&action.phase!=='delivery'){

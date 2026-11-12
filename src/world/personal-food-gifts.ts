@@ -42,7 +42,7 @@ function partyEligible(w:World,c:PersonalFoodGift,p:Resident|undefined,giver:boo
 }
 function shape(a:PersonalFoodGiftAction){
  const fields=a.operation==='offer'?['type','operation','recipientId','item','quantity','receiptId']:['type','operation','giftId'];
- return ['offer','accept','deliver','cancel','decline'].includes(a.operation)&&Object.keys(a).every(k=>fields.includes(k)||a.operation==='offer'&&k==='ageTerms')&&fields.every(k=>k==='quantity'?quantity((a as Extract<PersonalFoodGiftAction,{operation:'offer'}>).quantity):typeof (a as unknown as Record<string,unknown>)[k]==='string'&&(a as unknown as Record<string,string>)[k].length>0)&&(a.operation!=='offer'||edible(a.item));
+ return ['offer','accept','deliver','return','cancel','decline'].includes(a.operation)&&Object.keys(a).every(k=>fields.includes(k)||a.operation==='offer'&&k==='ageTerms')&&fields.every(k=>k==='quantity'?quantity((a as Extract<PersonalFoodGiftAction,{operation:'offer'}>).quantity):typeof (a as unknown as Record<string,unknown>)[k]==='string'&&(a as unknown as Record<string,string>)[k].length>0)&&(a.operation!=='offer'||edible(a.item));
 }
 function access(w:World,p:Resident,id:string){const b=w.buildings.find(b=>b.id===id);return !!b&&b.condition>0&&(b.ownerId==='commons'||b.ownerId===p.id||b.residents.includes(p.id)||!!commonsStay(w,p,b.id)||!!residentialStay(w,p.id,b.id));}
 function physical(w:World,p:Resident){
@@ -92,6 +92,13 @@ export function personalFoodGiftReason(w:World,r:Resident,a:PersonalFoodGiftActi
  if(w.minute>=c.expiresAt||!statusKnown(c,r))return '本人已知的原赠粮已结束或到期';
  if(isPersonalFoodGiftStop(a))return a.operation==='cancel'&&r.id!==c.giverId||a.operation==='decline'&&r.id!==c.recipientId?'只能撤回或拒绝本人参加的这份赠粮':null;
  if(carried(w,r)||!physical(w,r))return unavailable;
+ if(a.operation==='return'){
+  // Returning to one's witnessed fixed address is not a remote status query.
+  // A donor's unwitnessed withdrawal, death, inventory or movement is irrelevant.
+  if(r.id!==c.recipientId||c.knownStatus[r.id]!=='accepted'||c.acceptedAt===null)return unavailable;
+  if(c.location.inside&&!access(w,r,c.location.inside))return '本人已无原约房间使用权，不能因赠粮进入';
+  return atSite&&!atPlace(r,c.location)?unavailable:null;
+ }
  const giver=person(w,c.giverId),recipient=person(w,c.recipientId);
  if(a.operation==='accept'){
   if(r.id!==c.recipientId||c.status!=='offered'||c.acceptedAt!==null||!partyEligible(w,c,giver,true)||!near(w,r,giver))return unavailable;
@@ -109,17 +116,17 @@ export function personalFoodGiftReason(w:World,r:Resident,a:PersonalFoodGiftActi
 }
 export function personalFoodGiftTarget(w:World,r:Resident,a:PersonalFoodGiftAction){
  const error=personalFoodGiftReason(w,r,a);if(error)return {target:r.at,duration:0,error};
- const c=a.operation==='deliver'?gifts(w).find(c=>c.id===a.giftId):undefined;
- return {target:c?{...c.location.at}:{...r.at},adjacent:c?!c.location.inside:false,duration:1};
+ const c=a.operation==='deliver'||a.operation==='return'?gifts(w).find(c=>c.id===a.giftId):undefined;
+ return {target:c?{...c.location.at}:{...r.at},adjacent:c&&a.operation==='deliver'?!c.location.inside:false,duration:1};
 }
 /** Check every actual room step, including exit paths. No missing coordinates become a doorway. */
 export function personalFoodGiftTravelReason(w:World,r:Resident,a:PersonalFoodGiftAction):string|null {
  const error=personalFoodGiftReason(w,r,a);if(error)return error;
  const activity=r.activity;if(!activity)return unavailable;
- if(a.operation!=='deliver'&&(activity.path.length||activity.room))return unavailable;
+ if(a.operation!=='deliver'&&a.operation!=='return'&&(activity.path.length||activity.room))return unavailable;
  if(activity.path.length&&distance(r.at,activity.path[0])!==1)return '原赠粮路线不是连续实际步行';
  if(activity.room){const b=w.buildings.find(b=>b.id===r.inside),from=r.roomAt,next=activity.room.path[0];if(!b||!from||!access(w,r,b.id)||!same(r.at,b.door)||next&&(distance(from,next)!==1||roomPath(roomLayout(w,b),from,next)?.length!==1))return '原赠粮房间路线已失效';}
- if(a.operation==='deliver'){
+ if(a.operation==='deliver'||a.operation==='return'){
   const c=gifts(w).find(c=>c.id===a.giftId)!;
   if(!same(activity.target,c.location.at))return unavailable;
   if(c.location.inside){const b=w.buildings.find(b=>b.id===c.location.inside);if(!b||!same(b.door,c.location.at)||!access(w,r,b.id)||!c.location.roomAt||roomPath(roomLayout(w,b),r.inside===b.id?r.roomAt!:roomLayout(w,b).entry,c.location.roomAt)===null)return '原赠粮房间通路或使用权已失效';}
@@ -152,6 +159,11 @@ export function completePersonalFoodGift(w:World,r:Resident,a:PersonalFoodGiftAc
   state.gifts.push(c);w.processed.push(sourceReceipt(a.receiptId));localEvent(w,c,r,`${r.name}向${p.name}提出赠送${a.quantity}份自有${itemLabels[a.item]}，固定截止${c.expiresAt}分钟；不扣货、不预留，对方须独立接受，之后送出者另选亲自交付。`,`personal-food-gift/offer@${proofVersion(c)}`);return null;
  }
  const c=gifts(w).find(c=>c.id===a.giftId)!;
+ if(a.operation==='return'){
+  // Only an actor-local record: localEvent would reveal the actual gift status
+  // and wake the donor. Neither is justified by returning to an old address.
+  emitEvent(w,{kind:'action',actors:[r.id],place:{...r.at},witnesses:[r.id],text:`${r.name}自行返回本人已接受赠粮${c.id}的原交接点；未收货、不自动等待或进食，原截止${c.expiresAt}不变，送方情况仍须现场另行了解。`});return null;
+ }
  if(a.operation==='accept'){
   c.status='accepted';c.acceptedAt=w.minute;c.location=loc(w,r);localEvent(w,c,r,`${r.name}独立接受${c.quantity}份${itemLabels[c.item]}原赠粮，原截止不变；约在本人当前实际位置交付，不自动进食。`,`personal-food-gift/accept@${proofVersion(c)}`);return null;
  }
@@ -199,6 +211,11 @@ export function personalFoodGiftOpportunities(w:World,r:Resident):FormalOpportun
   if(giver&&c.knownStatus[r.id]==='accepted'&&!carried(w,r))add('deliver.'+c.id,`本人带${c.quantity}份自有${itemLabels[c.item]}走到已约位置(${c.location.at.x},${c.location.at.y})尝试近身交付；原截止${c.expiresAt}，远方情况未知，不追踪、不自动喂食`,{type:'personalFoodGift',operation:'deliver',giftId:c.id});
   const accept:PersonalFoodGiftAction={type:'personalFoodGift',operation:'accept',giftId:c.id};
   if(recipient&&!personalFoodGiftReason(w,r,accept))add('accept.'+c.id,`本人独立接受原${c.quantity}份${itemLabels[c.item]}赠粮，截止${c.expiresAt}不变；尚未收货，不自动进食`,accept);
+  const back:PersonalFoodGiftAction={type:'personalFoodGift',operation:'return',giftId:c.id};
+  // As with the donor's delivery attempt, an unseen destination must not
+  // disappear from personal knowledge when its building or access changes.
+  // Actual destination rights and geometry are checked when executing.
+  if(recipient&&c.knownStatus[r.id]==='accepted'&&c.acceptedAt!==null&&!atPlace(r,c.location)&&!carried(w,r)&&physical(w,r))add('return.'+c.id,`本人沿实际路线尝试返回已接受赠粮的原交接点(${c.location.at.x},${c.location.at.y})${c.location.inside?`、房屋${c.location.inside}室内(${c.location.roomAt!.x},${c.location.roomAt!.y})`:''}；通路和房间使用权须核验，原截止${c.expiresAt}不变，不追踪送方、不自动等待、收货或进食`,back);
  }
  for(const p of w.residents){
   if(p.id===r.id||!capable(w,r,13)||!capable(w,p)||!near(w,r,p))continue;

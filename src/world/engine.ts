@@ -336,9 +336,10 @@ function begin(world:World,r:Resident,elapsed=0){
  const outdoors=['move','gather','plant','water','harvest','build','construction','landRights','regionSurvey','industry','leave','settle','lodge'].includes(action.type);
  if((path.length||outdoors)&&!world.rooms){r.inside=null;r.roomAt=null;}
  r.activity={planId:plan.id,action,startedAt:world.minute,remaining:route.duration,path,target:{...route.target},definition,travelProgress:0,...(route.cargo?{cargo:route.cargo}:{})};
+ const exitError=prepareRoomExit(world,r,true);if(exitError){failure(world,r,exitError);return;}
  const bodyError=reserveBody(world,r,r.activity);if(bodyError){failure(world,r,bodyError);return;}
  if(action.type==='socialAppointment')r.activity.appointmentStartedAt=world.minute-elapsed;
- prepareRoomExit(world,r);
+ const preparedExit=prepareRoomExit(world,r);if(preparedExit){failure(world,r,preparedExit);return;}
 }
 export function buildAllowed(world:World,r:Resident,a:Extract<Action,{type:'build'}>,definition:string):{ok:boolean;error?:string;building?:Building} {
  const def=world.definitions[definition];if(!def||def.kind!=='building')return {ok:false,error:'未知建筑定义'};

@@ -13,7 +13,7 @@ import {advancePastures,pastureTileFree} from './pasture.js';
 import {initializeFixtureRemoval,advanceFixtureRemoval,publicRemovalError,fixtureMandate,workFixtureRemoval,finishFixtureRemoval} from './fixture-removal.js';
 import {estateStock,estateBuildingLocation,atEstateLocation} from './estate-custody.js';
 import {addHealthCase} from './health.js';
-import {prepareRoomExit} from './rooms.js';
+import {prepareRoomExit,roomExitReason} from './rooms.js';
 import {foodTransaction,initializeFood} from './food.js';
 import {recordFoodFlow,recordNaturalFoodFlow,finishFoodFlowAction,craftFoodFlowInputs} from './food-consumption-evidence.js';
 import type {Building,Inventory,Item,Resident,Vec,World} from '../shared/types.js';
@@ -258,9 +258,10 @@ function completeIndustryAtomic(w:World,r:Resident,a:IndustryAction):string|null
    if(n!.inside&&r.inside!==n!.inside)return '须进入动物所在室内亲自接出';
    if(n!.roomAt&&r.roomAt&&distance(n!.roomAt,r.roomAt)>1)return '须亲自走到动物身边';
    const path=findPath(w,r.at,destination);if(path===null)return '护送路线已阻断';
+   if(r.inside&&(a.pastureId||r.inside!==b!.id||path.length)){const exitError=roomExitReason(w,r);if(exitError)return exitError;}
    n!.carrierId=r.id;n!.at={...r.at};n!.inside=r.inside;n!.roomAt=r.roomAt?{...r.roomAt}:null;n!.destinationId=b!.id;
    delete n!.pastureId;
-   a.phase='delivery';r.activity.path=path;r.activity.target={...destination};r.activity.remaining=15;r.activity.travelProgress=0;prepareRoomExit(w,r);
+   a.phase='delivery';r.activity.path=path;r.activity.target={...destination};r.activity.remaining=15;r.activity.travelProgress=0;const exitError=prepareRoomExit(w,r);if(exitError)return exitError;
    fact(w,r,`${r.name}实际接出自有${animalNames[n!.kind]}，开始护送到${label}。`,r.at,[n!.id]);return null;
   }
   if(n!.carrierId!==r.id||r.inside!==(a.pastureId?null:b!.id))return '没有本人实际护送并送入指定地点的动物';

@@ -9,7 +9,7 @@ import {canInspectBuilding} from './building-knowledge.js';
 import {isRescueDecision} from '../shared/health.js';
 import {aboardFerry,dockedFerryContact,sameFerryContact,releaseRescuedFerryPassenger} from './ferry.js';
 import {leasedBed} from '../shared/commons.js';
-import type {Action,Resident,Vec,World} from '../shared/types.js';import type {HealthAction,MedicalTransport} from '../shared/health.js';import {activeCases,initializeHealth} from './health.js';import {coLocated} from './proximity.js';import {ageYears,knownAgeYears,DAY} from './time.js';import {findPath,distance,same} from './navigation.js';import {roomLayout,residentBed} from '../shared/rooms.js';import {prepareRoomExit} from './rooms.js';import {emitEvent} from './events.js';
+import type {Action,Resident,Vec,World} from '../shared/types.js';import type {HealthAction,MedicalTransport} from '../shared/health.js';import {activeCases,initializeHealth} from './health.js';import {coLocated} from './proximity.js';import {ageYears,knownAgeYears,DAY} from './time.js';import {findPath,distance,same} from './navigation.js';import {roomLayout,residentBed} from '../shared/rooms.js';import {prepareRoomExit,roomExitReason} from './rooms.js';import {emitEvent} from './events.js';
 export const isTransportAction=(a:HealthAction)=>['rescueOffer','acceptRescue','declineRescue','cancelRescue','rescue','stabilize'].includes(a.operation);
 const person=(w:World,id?:string)=>w.residents.find(r=>r.id===id),place=(w:World,id?:string|null)=>w.buildings.find(b=>b.id===id);
 const capable=(r:Resident|undefined):r is Resident=>!!r&&r.status==='alive'&&r.residency!=='outside'&&r.canDecide&&r.canExpress;
@@ -170,9 +170,10 @@ export function completeTransport(w:World,r:Resident,a:HealthAction):string|null
   p.at={...r.at};p.inside=b.id;p.roomAt={...slot.at};p.decisionDue=Math.min(p.decisionDue,w.minute);p.revision++;t.phase='delivered';t.endedAt=w.minute;t.reason='实际送入接收床位';if(t.offerId){const o=w.health!.transportOffers.find(o=>o.id===t.offerId);if(o)o.status='expired';}t.arrivalEventId=fact(w,r,p,`${r.name}沿实际路线把${p.name}送入${b.name}的第${t.bed+1}张床位；到达不等于已有人接班或已经治愈。`,presenceArrivalAudit(w,r,p,t)).id;return null;
  }
  const authority=rescueAuthority(w,r,p,b.id);if(!authority)return '实际接出时已无有效权限';const knownAddress=a.evacuationDestination==='known-address',bed=knownAddress?null:medicalBed(w,b.id,p.id),path=knownAddress?guardianKnownAddressPath(w,r,b.door):findPath(w,r.at,b.door,false,Infinity,a.evacuationDangerId?frontierRetreatStepAllowed(w,r):undefined);if(!knownAddress&&bed===null||path===null)return '接收床位或真实通路已经变化';
+ if(r.inside&&(r.inside!==b.id||path.length)){const exitError=roomExitReason(w,r);if(exitError)return exitError;}
  if(a.ferryContact){const error=releaseRescuedFerryPassenger(w,p,a.ferryContact);if(error)return error;fact(w,r,p,`${r.name}在原靠泊点将${p.name}从${a.ferryContact.boatId}跨相邻一格接到码头；原船位已释放，未完成船程费用原路退回。`);}
  r.inventory.cloth!--;r.inventory.water!--;const id=`medical-transport:${w.id}:${w.health!.nextSerial++}`,offer=consent(w,r,p,b.id);w.health!.transports.push({id,carrierId:r.id,patientId:p.id,buildingId:b.id,bed,basis:authority.basis,offerId:offer?.id??null,...(a.evacuationDangerId?{evacuationDangerId:a.evacuationDangerId}:{}),...(a.evacuationDestination?{evacuationDestination:a.evacuationDestination}:{}),phase:'carrying',startedAt:w.minute,endedAt:null,reason:null});p.plan=null;p.activity=null;p.at={...r.at};p.inside=r.inside;p.roomAt=r.roomAt?{...r.roomAt}:null;p.revision++;p.decisionDue=w.minute;
- a.phase='delivery';a.transportId=id;r.activity.path=path;r.activity.target={...b.door};r.activity.remaining=15;r.activity.travelProgress=0;prepareRoomExit(w,r);
+ a.phase='delivery';a.transportId=id;r.activity.path=path;r.activity.target={...b.door};r.activity.remaining=15;r.activity.travelProgress=0;const preparedExit=prepareRoomExit(w,r);if(preparedExit)return preparedExit;
  fact(w,r,p,`${r.name}实际用自己的布料和水接出${p.name}，开始护送到${b.name}，${knownAddress?'仅按已知地址尝试，床位尚未核验或保留':'接收床位已保留'}。`,{rule:'health/transport@1',authority:authority.basis,evidence:authority.evidence,scope:['transport-to:'+b.id],resources:{cloth:1,water:1},providerId:r.id,termination:'送达、当事人停止、能力恢复或及时代理出现即重新核验'});return null;
 }
 function completeGroundTransport(w:World,r:Resident,p:Resident,a:HealthAction):string|null {
@@ -186,11 +187,12 @@ function completeGroundTransport(w:World,r:Resident,p:Resident,a:HealthAction):s
  const adult=a.evacuationAuthority==='incapacitated-adult',authority=adult?(!adultEvacuationReason(w,r,p,a.evacuationDangerId!)?{basis:'emergency' as const,evidence:`observed:${a.evacuationDangerId}:${p.id}:${w.minute}:cannot-decide`}:null):rescueAuthority(w,r,p);if(!authority||!adult&&authority.basis!=='guardian')return '实际接出时已无当前有限撤险权限';
  const route=r.inside?null:guardianGroundRoute(w,r,r.at,a.evacuationGround);
  if(!r.inside&&!route)return '实际接出时原干地或八步内真实通路已经变化';
+ const exitError=roomExitReason(w,r);if(exitError)return exitError;
  const origin={...r.at},id=`medical-transport:${w.id}:${w.health!.nextSerial++}`;
  r.inventory.cloth!--;r.inventory.water!--;
  w.health!.transports.push({id,carrierId:r.id,patientId:p.id,buildingId:null,bed:null,basis:authority.basis,offerId:null,...(adult?{evacuationAuthority:'incapacitated-adult' as const}:{}),evacuationDangerId:a.evacuationDangerId,evacuationDestination:'safe-ground',evacuationOrigin:origin,evacuationSteps:0,...(a.evacuationExitId?{evacuationExitId:a.evacuationExitId}:{}),...(a.evacuationGround?{evacuationGround:{...a.evacuationGround}}:{}),phase:'carrying',startedAt:w.minute,endedAt:null,reason:null});
  p.plan=null;p.activity=null;p.at={...r.at};p.inside=r.inside;p.roomAt=r.roomAt?{...r.roomAt}:null;p.revision++;p.decisionDue=w.minute;
- a.phase='delivery';a.transportId=id;r.activity!.path=route?.path??[];r.activity!.target=route?.to??origin;r.activity!.remaining=1;r.activity!.travelProgress=0;prepareRoomExit(w,r);
+ a.phase='delivery';a.transportId=id;r.activity!.path=route?.path??[];r.activity!.target=route?.to??origin;r.activity!.remaining=1;r.activity!.travelProgress=0;const preparedExit=prepareRoomExit(w,r);if(preparedExit)return preparedExit;
  fact(w,r,p,`${r.name}实际用本人1布料、1清水接出${p.name}，${a.evacuationExitId?'先逐格走出房间，出门后现场寻找八步内干地':'开始逐格前往已经选定的附近干地'}；未预占床位或安排医疗。`,{rule:adult?'health/adult-emergency-ground@1':'health/guardian-ground@1',authority:authority.basis,evidence:authority.evidence,scope:['temporary-ground-evacuation'],resources:{cloth:1,water:1},providerId:r.id,termination:adult?'本人恢复决定能力、异议、危险解除、实际落脚或通路失效即结束；不授予药物、财产、住房或长期照护':'实际落脚、本人停止、拒绝或监护及通路失效即结束；不附带后续照护'});return null;
 }
 export function syncMedicalTransport(w:World){for(const o of w.health?.transportOffers??[]){
