@@ -143,7 +143,8 @@ static func world_summary(world: Dictionary) -> String:
 		if source.kind == "bush":
 			berries += amount
 			bush_count += 1
-			if amount >= 1: stocked_bushes += 1
+			# Match scene nonempty-source coloring; not a harvestability claim.
+			if amount > 0: stocked_bushes += 1
 		else:
 			water += amount
 	return clock_text + "\n环境浆果 %s · 有果果丛 %d/%d\n泉水余量 %s（不含居民库存）" % [number_label(berries), stocked_bushes, bush_count, number_label(water)]
