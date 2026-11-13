@@ -118,6 +118,36 @@ static func number_label(value: Variant) -> String:
 		return ("%.1f" % value).trim_suffix(".0")
 	return "未知"
 
+# Simulation time comes only from the latest snapshot, never the device clock.
+static func world_summary(world: Dictionary) -> String:
+	var minute = world.get("minute")
+	var clock_text := "世界时间未知"
+	if (minute is int or minute is float) and is_finite(minute) and minute >= 0 and minute <= 9007199254740991:
+		var whole := int(floor(minute))
+		var day := int(whole / 1440) + 1
+		var within_day := whole % 1440
+		clock_text = "第 %d 天 · %02d:%02d（世界时间）" % [day, int(within_day / 60), within_day % 60]
+	var resources = world.get("resources")
+	if not resources is Array:
+		return clock_text + "\n环境资源：未知"
+	var berries := 0.0
+	var water := 0.0
+	var stocked_bushes := 0
+	var bush_count := 0
+	for source in resources:
+		if not source is Dictionary or source.get("kind") not in ["bush", "spring"]:
+			continue
+		var amount = source.get("amount")
+		if not (amount is int or amount is float) or not is_finite(amount) or amount < 0:
+			return clock_text + "\n环境资源：未知"
+		if source.kind == "bush":
+			berries += amount
+			bush_count += 1
+			if amount >= 1: stocked_bushes += 1
+		else:
+			water += amount
+	return clock_text + "\n环境浆果 %s · 有果果丛 %d/%d\n泉水余量 %s（不含居民库存）" % [number_label(berries), stocked_bushes, bush_count, number_label(water)]
+
 static func inventory_label(person: Dictionary) -> String:
 	var inventory = person.get("inventory")
 	if not inventory is Dictionary:

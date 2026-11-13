@@ -11,6 +11,7 @@ var dragging := false
 var active_endpoint := ""
 var endpoint: LineEdit
 var status: Label
+var world_summary_label: Label
 var detail: Label
 var events_label: Label
 var mode_label: Label
@@ -135,6 +136,10 @@ func _ready() -> void:
 	status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	status.text = "中键拖动 · 滚轮缩放 · 左键选择"
 	box.add_child(status)
+	world_summary_label = Label.new()
+	world_summary_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	world_summary_label.text = "世界时间与环境资源：等待快照"
+	box.add_child(world_summary_label)
 	detail = Label.new()
 	detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	detail.text = "尚未选择居民。室内／地图外居民不会被放到室外显示。"
@@ -334,6 +339,7 @@ func _recenter() -> void:
 	valley.center(world)
 
 func _update_detail() -> void:
+	world_summary_label.text = Snapshot.world_summary(world) if connected else "世界时间与环境资源：未连接／数据过期"
 	detail.text = "尚未选择居民。室内／地图外居民不会被放到室外显示。"
 	for person in world.get("residents", []):
 		if person.id == selected:
