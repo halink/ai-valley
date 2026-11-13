@@ -1,6 +1,5 @@
 import {test} from 'node:test';
-import {outsideAidPanel} from '../src/client/outside-aid.js';
-import {foreignPanel} from '../src/client/commerce.js';
+
 import {observerFrame} from '../src/server/observer-feed.js';
 import {applyObserverUpdate} from '../src/shared/observer.js';
 import type {Snapshot} from '../src/shared/types.js';
@@ -122,16 +121,14 @@ test('old-save initialization preserves existing people, property, stocks, time,
  const retained=workingEvents(w);assert.ok(ids.every(id=>retained.some(e=>e.id===id)));const store=new WorldStore(':memory:');store.commit(w,null);const restored=store.load(true)!;store.close();assert.deepEqual(restored.outsideAid,w.outsideAid);
 });
 
-
-test('public aid records are escaped and read-only, and observer updates preserve the actual stages',()=>{
+test('observer updates preserve actual public aid stages',()=>{
  const f=fixture(),{w}=f;f.child.name='<img src=x onerror=alert(1)>';const d=accepted(f);
  const snapshot=(world:World):Snapshot=>({world,mapRevision:'test',version:'test',serverTime:'test',capabilities:{active:[],pending:[]}});
- const previous=snapshot(structuredClone(w)),before=JSON.stringify(w),html=outsideAidPanel(w);assert.match(html,/原库预留/);assert.match(html,/&lt;img/);assert.doesNotMatch(html,/<img|<button|<input|<form/);assert.equal(JSON.stringify(w),before);assert.match(foreignPanel(w),/驿路食品求助/);
+ const previous=snapshot(structuredClone(w)),before=JSON.stringify(w);assert.equal(JSON.stringify(w),before);
  act(w,f.m.person,'dispatch',{deliveryId:d.id});const current=snapshot(structuredClone(w)),frame=observerFrame(current,previous),merged=applyObserverUpdate(previous,frame)!;
- assert.equal(merged.world.outsideAid!.deliveries[0].status,'travelling');assert.match(outsideAidPanel(merged.world),/驿路运输途中/);
- w.minute=d.arrivesAt!;advanceOutsideAid(w);act(w,f.child,'collect',{deliveryId:d.id});assert.match(outsideAidPanel(w),/实际领取 2 份/);assert.equal(d.collectedQuantity,2);
+ assert.equal(merged.world.outsideAid!.deliveries[0].status,'travelling');
+ w.minute=d.arrivesAt!;advanceOutsideAid(w);act(w,f.child,'collect',{deliveryId:d.id});assert.equal(d.collectedQuantity,2);
 });
-
 
 test('food-shortfall guidance avoids unrelated distant requests and delivered food remains selectable under menu pressure',()=>{
  const f=fixture(),{w,child,m}=f;w.foreignTrade!.knownStationIds.push(child.id);child.at={x:15,y:6};child.inventory.turnip=20;initializeFood(w);

@@ -10,7 +10,7 @@ import {decisionContext,decisionChoices,prompt} from '../src/server/decisions.js
 import {parseChoice} from '../src/server/affordances.js';
 import {stepWorld,submitPlan} from '../src/world/engine.js';
 import {WorldStore} from '../src/server/store.js';
-import {healthPanel,healthProfile} from '../src/client/health.js';
+
 import {personalObservations} from '../src/server/personal-observations.js';
 import {observerFrame} from '../src/server/observer-feed.js';
 import {applyObserverUpdate} from '../src/shared/observer.js';
@@ -44,13 +44,13 @@ test('care observation: actual evacuation leaves the hungry incapacitated adult 
  assert.equal(view.atMinute,f.w.minute);assert.ok(view.signs.includes('choice-support'));assert.ok(view.signs.includes('expression-support'));assert.ok(view.signs.includes('hunger'));
  const text=prompt(context).map(m=>m.content).join('\n');assert.match(text,/待接续成人：自主应对受限/);assert.match(text,/明显饥饿迹象/);assert.match(text,/救援送达不等于恢复、进食或后续照护已完成/);
  assert.equal(transport.bed,null);assert.equal(f.patient.homeId,null);assert.deepEqual(f.patient.guardianIds,[]);assert.equal(f.actor.inventory.medicine,2);assert.equal(f.w.frontierHazards!.weather!.enabled,false);
- const html=healthPanel(f.w);assert.match(html,/目前没有登记的持续伤病；这不表示/);assert.match(html,/当前决定能力受限/);assert.match(html,/待核实不等于无人照护/);assert.doesNotMatch(html,/已送入实际床位/);
+
 });
 
-test('care observation: views are read-only and never grant care, food, water or general decision authority',()=>{
+test('care observation: observation data never grants care, food, water or general decision authority',()=>{
  const f=fixture();evacuate(f);decisionContext(f.w,f.actor);const before=structuredClone(f.w);
  const context=decisionContext(f.w,f.actor),without=structuredClone(context);for(const p of without.people)delete p.bodyObservation;
- assert.deepEqual(decisionChoices(context),decisionChoices(without));prompt(context);healthPanel(f.w);healthProfile(f.w,f.patient);assert.deepEqual(f.w,before);
+ assert.deepEqual(decisionChoices(context),decisionChoices(without));prompt(context);assert.deepEqual(f.w,before);
  assert.ok(healthReason(f.w,f.actor,{type:'health',operation:'stabilize',targetId:f.patient.id}));
  const unauthorized=submitPlan(f.w,{id:'incapable-self-feeding',actorId:f.patient.id,actorRevision:f.patient.revision,createdAt:f.w.minute,definition:f.w.activeDefinitions['action/routine'],intention:'观察不授予自主行动能力',actions:[{type:'eat',item:'meal'}]});assert.equal(unauthorized.ok,false);
  assert.deepEqual(f.patient.guardianIds,[]);assert.equal(f.w.health!.appointments.length,0);assert.equal(f.w.longCare?.agreements.length??0,0);
@@ -70,8 +70,8 @@ test('care observation: expression limits do not claim lack of decision, and rec
  const f=fixture();evacuate(f);f.patient.canDecide=true;f.patient.hunger=0;
  assert.deepEqual(observeBody(f.w,f.actor,f.patient)!.signs,['expression-support']);
  assert.match(prompt(decisionContext(f.w,f.actor),[])[0].content,/不能据此认定没有决定能力或已经同意/);
- f.patient.canExpress=true;assert.equal(observeBody(f.w,f.actor,f.patient),undefined);assert.equal(healthProfile(f.w,f.patient),'');
- assert.match(healthPanel(f.w),/已临时落脚在干地/,'completed transport remains historical, not deleted when the warning clears');
+ f.patient.canExpress=true;assert.equal(observeBody(f.w,f.actor,f.patient),undefined);
+
 });
 
 test('care observation: guardian notes use the same close, coarse boundary instead of precise private body values',()=>{
@@ -99,9 +99,9 @@ test('care observation: in-memory reload preserves old rescue facts and recomput
 });
 
 test('care observation: observer baseline, delta and reconnect clear current support while retaining the old arrival',()=>{
- const f=fixture();evacuate(f);const first=snapshot(f.w);assert.match(healthProfile(first.world,first.world.residents[1]),/待核实的接续照护/);
+ const f=fixture();evacuate(f);const first=snapshot(f.w);
  f.patient.canDecide=f.patient.canExpress=true;f.patient.hunger=0;f.w.revision++;const next=snapshot(f.w),combined=applyObserverUpdate(first,observerFrame(next,first))!;
- assert.deepEqual(combined.world,next.world);assert.equal(healthProfile(combined.world,combined.world.residents[1]),'');assert.match(healthPanel(combined.world),/已临时落脚在干地/);
+ assert.deepEqual(combined.world,next.world);
  assert.deepEqual(applyObserverUpdate(first,observerFrame(next)),next);
- f.patient.status='dead';f.w.revision++;const departed=applyObserverUpdate(next,observerFrame(snapshot(f.w),next))!;assert.equal(healthProfile(departed.world,departed.world.residents[1]),'');assert.match(healthPanel(departed.world),/已临时落脚在干地/);
+ f.patient.status='dead';f.w.revision++;const departed=applyObserverUpdate(next,observerFrame(snapshot(f.w),next))!;
 });

@@ -12,7 +12,7 @@ import {completePasture,pastureAdmissionError,pastureTarget,workPasture} from '.
 import {stepWorld,submitPlan} from '../src/world/engine.js';
 import {decisionChoices,decisionContext} from '../src/server/decisions.js';
 import {parseChoice} from '../src/server/affordances.js';
-import {wildernessPanel} from '../src/client/wilderness.js';
+
 import {DAY,YEAR} from '../src/world/time.js';
 
 function fixture(condition=60){
@@ -120,7 +120,7 @@ test('a change of facility owner interrupts ongoing labour before any further pr
 
 test('completed batch identity cannot be replayed and partial work stays in observable accounting',()=>{
  const {w,owner,p}=fixture();run(w,owner,action(p));const id=p.fence!.repair!.id;
- assert.match(wildernessPanel(w),/当前修护 30\.0\/60 分钟，已投入 4 木/);
+
  const stale={...action(p),fenceRepairId:id};run(w,owner,stale);p.fence!.condition=60;const stock=owner.inventory.wood!;
  assert.match(pastureTarget(w,owner,stale).error!,/批次已结束/);assert.equal(owner.inventory.wood,stock);assert.equal(p.fence!.repairs,1);
  owner.at={x:40,y:35};assert.ok(!decisionChoices(decisionContext(w,owner)).some(c=>c.action.type==='industry'&&c.action.operation==='repairFence'));

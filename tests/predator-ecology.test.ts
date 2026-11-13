@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {animalInspector} from '../src/client/animal-observation.js';
-import {ecologyPanel} from '../src/client/ecology.js';
+
 import {createFrontierWorld} from '../src/world/formal-seed.js';
 import {advanceFrontierHazards,initializeFrontierHazards,woundWildBeast} from '../src/world/frontier-hazards.js';
 import {createWildBeast} from '../src/world/frontier-wildlife.js';
@@ -186,13 +185,6 @@ test('metadata upgrade preserves legacy identity, alert, pregnancy, depleted foo
  initializePredatorEcology(f.w,f.s,createWildBeast);initializePredatorEcology(f.w,f.s,createWildBeast);
  assert.equal(f.s.beasts.length,1);assert.equal(f.s.beasts[0].sex,'female');assert.equal(f.s.foodPatches[0].amount,0);
  for(const key of ['at','id','alert','pregnancy'] as const)assert.deepEqual(f.mother[key],before[key]);
-});
-
-test('animal and ecology observations expose real parentage, registration boundaries, pregnancy and disease',()=>{
- const f=fixture('fox');review(f);f.mother.disease={since:f.w.minute,severity:40,cause:'stress'};
- const detail=animalInspector(f.w,{kind:'beast',id:f.mother.id});
- for(const text of ['孕育中','野生动物疾病','未记录，不推断旧档亲代','栖地账目','旧档经历不追溯推断'])assert.ok(detail.includes(text));
- const panel=ecologyPanel(f.w);assert.ok(panel.includes('全部死亡后不会自动补种'));assert.ok(panel.includes('data-animal-detail'));
 });
 
 test('natural ten-day wildlife progression produces finite offspring and migrations while needs keep running',()=>{

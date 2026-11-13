@@ -11,7 +11,7 @@ import {completeEconomy} from '../src/world/economy.js';
 import {completePremises} from '../src/world/premises.js';
 import {roomLayout} from '../src/shared/rooms.js';
 import {WorldStore} from '../src/server/store.js';
-import {constructionPanel} from '../src/client/construction.js';
+
 import {estateParcels} from '../src/world/estate-custody.js';
 import {recordDeath} from '../src/world/life.js';
 import {DAY,YEAR} from '../src/world/time.js';
@@ -52,7 +52,7 @@ test('death seals only actual unused contributor materials at the original site'
 
 test('no remote discovery of a new proposal and no unauthorized participant or offsite acceptance',()=>{const f=fixture();f.other.homeId=f.b.id;const m=propose(f);f.other.at={...f.w.map.entrance};assert.ok(!buildingMigrationOpportunities(f.w,f.other).some(c=>c.action.type==='buildingMigration'&&c.action.migrationId===m.id));assert.ok(buildingMigrationReason(f.w,f.worker,action('review',m.id)));assert.ok(completeBuildingMigration(f.w,f.other,action('accept',m.id)));f.other.at={...f.b.door};run(f.w,f.other,action('review',m.id));f.other.at={...f.w.map.entrance};assert.ok(buildingMigrationOpportunities(f.w,f.other).some(c=>c.action.type==='buildingMigration'&&c.action.operation==='accept'));assert.deepEqual(buildingMigrationTarget(f.w,f.other,action('accept',m.id)).target,f.b.door);});
 
-test('read-only panel exposes exact proposal party decisions, materials and completed boundary without controls',()=>{const f=fixture(),m=propose(f);const html=constructionPanel(f.w);assert.match(html,/屋面|兼容改版/);assert.match(html,/木|石/);assert.ok(!html.includes('data-upgrade'));assert.equal(m.worked,0);});
+test('new upgrade proposals have no invented completed work',()=>{const f=fixture(),m=propose(f);assert.equal(m.worked,0);});
 
 test('moved or removed building does not teleport or strand unused materials and original contributor can recover them',()=>{for(const removed of [false,true]){const f=fixture(),m=propose(f);begin(f,m);run(f.w,f.owner,action('work',m.id,30));const original={...m.residentProposal!.stockAt},unused=m.stock.wood!,stock=f.owner.inventory.wood!;if(removed)f.w.buildings=f.w.buildings.filter(b=>b.id!==f.b.id);else{f.b.at.x+=8;f.b.door.x+=8;}advanceBuildingMigrations(f.w);assert.equal(m.status,'cancelled');assert.deepEqual(buildingMigrationTarget(f.w,f.owner,action('collect',m.id)).target,original);assert.ok(buildingMigrationOpportunities(f.w,f.owner).some(c=>c.action.type==='buildingMigration'&&c.action.operation==='collect'));run(f.w,f.owner,action('collect',m.id));assert.equal(f.owner.inventory.wood,stock+unused);assert.deepEqual(f.owner.at,original);}});
 

@@ -13,7 +13,7 @@ import {stepWorld,submitPlan} from '../src/world/engine.js';
 import {roomLayout,residentBed} from '../src/shared/rooms.js';
 import {initializeLongCare,completeLongCare,longCareReason,advanceLongCare} from '../src/world/long-care.js';
 import {accountBalance,totalCoins} from '../src/world/economy.js';
-import {longCarePanel} from '../src/client/long-care.js';
+
 import {WorldStore} from '../src/server/store.js';
 import type {Action,Resident,World} from '../src/shared/types.js';
 import type {LongCareAction} from '../src/shared/long-care.js';
@@ -54,7 +54,7 @@ test('candidate physiology rejects excessive recovery loss and preserves mortali
  for(const data of [{laterLifeSleepLoss:.26},{laterLifeSleepLoss:-.1},{laterLifeSleepYears:0},{laterLifeSleepLoss:NaN}])assert.ok(activeDefinitionError(w,{...d,data:{...d.data,...data}}));
 });
 
-test('actual bed sleep and displayed recovery agree; rest does not teleport or create energy, pauses freeze recovery',()=>{
+test('actual bed sleep matches model-context recovery; rest and pauses preserve energy rules',()=>{
  const {w,from:r}=fixture();r.bornAt=w.minute-75*YEAR;candidate(w,r);r.energy=20;
  const home=w.buildings.find(b=>b.id===r.homeId)!,bed=residentBed(w,r,home)!;r.inside=home.id;r.at={...home.door};r.roomAt={...roomLayout(w,home).slots.find(s=>s.key===`bed:${bed}`)!.at};
  const shown=decisionContext(w,r).formal!.sleepRecoveryPerHour!;assert.ok(Math.abs(shown-11.55)<1e-8);const before=r.energy;
@@ -98,7 +98,7 @@ test('a pending old save gains no implied handoff consent and restores approvals
  assert.notEqual(saved.longCare!.handoffs[0].approvals![0].acceptedAt,null);const rev=saved.revision;act(saved,saved.residents.find(r=>r.id===to.id)!,{operation:'receiveHandoff',replacementId:h.id});const total=totalCoins(saved);saved.revision++;store.commit(saved,rev);saved=store.load()!;initializeLongCare(saved);advanceLongCare(saved);assert.equal(totalCoins(saved),total);assert.equal(saved.longCare!.agreements.find(c=>c.id===old.id)!.refunded,4);assert.equal(saved.longCare!.totals.handoffs,1);store.close();
 });
 
-test('pending handoffs are bounded per original contract, expire without ending it, and show escaped independent consent in the observer',()=>{
+test('pending handoffs are bounded per original contract and expire without ending it',()=>{
  const {w,from,p,old,next,h}=handoff();assert.ok(completeLongCare(w,from,{type:'longCare',operation:'handoff',agreementId:old.id,replacementId:next.id}));p.name='<script>unsafe</script>';h.reason='<b>reason</b>';
- const before=JSON.stringify(w),html=longCarePanel(w);assert.equal(JSON.stringify(w),before);assert.match(html,/受照护者本人/);assert.match(html,/尚未同意/);assert.ok(!html.includes('<script>'));assert.ok(html.includes('&lt;b&gt;reason&lt;/b&gt;'));w.minute=h.expiresAt;advanceLongCare(w);assert.equal(h.status,'expired');assert.equal(old.status,'active');assert.equal(old.refunded,0);assert.match(longCarePanel(w),/尚未确认便到期/);
+ const before=JSON.stringify(w);assert.equal(JSON.stringify(w),before);w.minute=h.expiresAt;advanceLongCare(w);assert.equal(h.status,'expired');assert.equal(old.status,'active');assert.equal(old.refunded,0);
 });

@@ -10,7 +10,6 @@ import {initializeProduction} from '../src/world/production.js';
 import {initializeCivic} from '../src/world/civic.js';
 import {advanceMigration,outsideCandidate,applyOutsideDecision} from '../src/world/migration.js';
 import {decisionContext,decisionChoices,prompt} from '../src/server/decisions.js';
-import {financePanel,marketPanel} from '../src/client/livelihood.js';
 
 test('upgrading a populated save creates empty institutions, preserves original assets and holds without a model',()=>{
  const w=createFormalWorld();w.minute=900;const before=totalCoins(w),original=structuredClone(w.residents);
@@ -59,13 +58,4 @@ test('a collapsed residence cannot give free sleep until an owner actually repai
  home.condition=0;r.at={...home.door};r.inside=null;r.energy=50;
  const selected=submitPlan(w,{id:'sleep-broken',actorId:r.id,actorRevision:r.revision,createdAt:w.minute,definition:w.activeDefinitions['action/routine'],intention:'回家睡觉',actions:[{type:'sleep',minutes:30}]});
  assert.ok(selected.ok);stepWorld(w,1);assert.ok(r.lastFailure);assert.ok(r.energy<50);assert.equal(r.inside,null);
-});
-
-test('observer economy pages have no spending controls and escape resident-authored business names',()=>{
- const w=createFormalWorld();initializeEconomy(w);initializeCivic(w);
- const owner=w.residents[0];w.economy!.businesses.push({id:'shop-fixture',ownerId:owner.id,buildingId:owner.homeId!,name:'<img src=x onerror=alert(1)>',openedAt:w.minute,closedAt:null,coins:0,inventory:{},sales:0,revenue:0});
- const html=marketPanel(w)+financePanel(w);
- assert.ok(html.includes('&lt;img'));assert.ok(!html.includes('<img src=x'));
- assert.ok(!/<form|<input|<select|data-action=/.test(html));
- assert.ok(html.includes('公共账本'));assert.ok(html.includes('金库可用钱款'));
 });

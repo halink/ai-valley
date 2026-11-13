@@ -1,3 +1,5 @@
+import {mvpObservation} from './mvp-observation.js';
+import {forkCompletedMovement} from '../world/completed-movement.js';
 import {readSelfHostedCooldowns,cooldownDelay} from './self-hosted-cooldown.js';
 import {createHash} from 'node:crypto';
 import {nextDailyBoundary,checkedDailySnapshotConfig,type DailySnapshotConfig} from './acceptance-daily-snapshots.js';
@@ -212,6 +214,7 @@ export class ValleyRuntime {
   }
   }catch(error){this.acceptanceEvidence?.writer.abort();throw error;}
  }
+ mvpObservation(){return mvpObservation(this.world,this.unresolvedRequestIds(),this.providers.map(p=>p.blockedUntil),this.selfHostedUnresolved());}
  snapshot():Snapshot{
   const {usageWindow:_usageWindow,...metrics}=this.world.metrics;
   const publicWorld={...this.world,metrics,events:this.world.events.slice(-180),processed:[]};
@@ -232,6 +235,7 @@ export class ValleyRuntime {
   const draft={...structuredClone(dynamic),map,events:formal?events.slice():structuredClone(events),
    processed:processed.slice()};
   inheritReceiptHistory(current,draft);
+  forkCompletedMovement(current,draft);
   mutate(draft);
   draft.revision=Math.max(draft.revision,current.revision+1);
   try{this.store.commit(draft,current.revision,formal?{
@@ -284,9 +288,11 @@ export class ValleyRuntime {
   const tokens=[...this.requestTokens.values()];this.requestTokens.clear();this.inFlight.clear();this.pendingChoices.clear();
   for(const token of tokens)token.controller.abort();
   // Revocation and cancellation precede any fallible storage/observer callback.
-  if(interrupted||this.acceptance)this.commit(w=>{w.clock.paused=true;w.clock.reason=this.acceptance?'隔离验收已停止，世界时间已停表':'服务正在重新连接，世界时间已停表';
-   w.metrics.failures+=interrupted;w.metrics.unmeteredFailures=(w.metrics.unmeteredFailures??0)+interrupted;
-   if(interrupted)w.metrics.lastError='服务重启前的未完成请求，用量未知';w.metrics.inFlight=[];});
+  // A quiet stop must also persist the stopped clock for snapshots and restart.
+  // Already-paused ordinary worlds retain their existing diagnostic reason.
+  if(interrupted||this.acceptance||!this.world.clock.paused)this.commit(w=>{w.clock.paused=true;w.clock.reason=this.acceptance?'隔离验收已停止，世界时间已停表':interrupted?'服务正在重新连接，世界时间已停表':'服务已停止，世界时间已停表';
+   if(interrupted){w.metrics.failures+=interrupted;w.metrics.unmeteredFailures=(w.metrics.unmeteredFailures??0)+interrupted;
+    w.metrics.lastError='服务重启前的未完成请求，用量未知';}w.metrics.inFlight=[];});
   // Failed persistence must leave evidence open/unknown, never synthesize a clean close.
   this.decisionEvidence?.stop(this.world.minute);this.foodEvidence?.stop(this.world.id,this.world.minute);
   if(this.acceptance&&(this.decisionEvidence?.status().phase==='failed'||this.foodEvidence?.status().phase==='failed'))throw new Error('acceptance_evidence_close_failed');

@@ -11,7 +11,7 @@ import {initializeEconomy,totalCoins} from '../src/world/economy.js';
 import {initializeLastWishes,completeLastWish,lastWishReason,advanceLastWishes,giftBlocker} from '../src/world/last-wishes.js';
 import {decisionChoices,decisionContext} from '../src/server/decisions.js';
 import {parseChoice} from '../src/server/affordances.js';
-import {lastWishesPanel} from '../src/client/last-wishes.js';
+
 import {WorldStore,workingEvents} from '../src/server/store.js';
 import {emitLedgerEvent} from '../src/world/events.js';
 import type {Action,Resident,World} from '../src/shared/types.js';
@@ -88,7 +88,7 @@ test('an exact grave is not reserved while alive and occupancy blocks execution 
  const f=fixture(),{w,owner,witness,lodge}=f;const g=w.graves[0];g.at={x:lodge.door.x+5,y:lodge.door.y};const c=will(f,0,g.id);assert.equal(g.reservedBy??null,null);assert.equal(g.personId,null);recordDeath(w,owner);act(w,witness,{operation:'read',wishId:c.id});g.personId='earlier-person';
  const a:Action={type:'bury',targetId:owner.id,wishId:c.id};assert.equal(submitPlan(w,{id:'occupied-wish',actorId:witness.id,actorRevision:witness.revision,createdAt:w.minute,definition:w.activeDefinitions['action/routine'],intention:'自愿尝试',actions:[a]}).ok,true);stepWorld(w,1);assert.match(witness.lastFailure!,/空墓位/);assert.equal(g.personId,'earlier-person');assert.equal(c.burial,undefined);
 });
-test('ordinary burial remains a separate choice and observer report never invents knowledge or obedience',()=>{
+test('ordinary burial remains separate from last-wish knowledge or obedience',()=>{
  const f=fixture(),{w,owner,witness}=f,c=will(f,0);recordDeath(w,owner);run(w,witness,{type:'bury',targetId:owner.id});assert.equal(c.burial?.followed,false);assert.equal(Object.hasOwn(c.readers,witness.id),false);assert.equal(w.graves.find(g=>g.personId===owner.id)!.epitaph,undefined);
 });
 test('all signatures, refusal, partial cash outcomes and evidence survive save/reload and event trimming',()=>{
@@ -96,9 +96,7 @@ test('all signatures, refusal, partial cash outcomes and evidence survive save/r
  for(let i=0;i<300;i++){w.minute++;emitLedgerEvent(w,{kind:'action',actors:[],place:{x:1,y:1},text:'isolated padding'});}for(const id of c.eventIds)assert.ok(workingEvents(w).some(e=>e.id===id));
  const store=new WorldStore(':memory:');store.commit(w,null);const restored=store.load(true)!;store.close();assert.deepEqual(restored.lastWishes,expected);assert.ok(completeLastWish(restored,restored.residents.find(p=>p.id===recipient.id)!,{type:'lastWish',operation:'acceptGift',wishId:c.id}));assert.equal(totalCoins(restored),totalCoins(w));
 });
-test('read-only observer panel escapes wishes and names, and labels pending and partial execution honestly',()=>{
- const f=fixture(),{w,owner,recipient}=f,c=will(f);died(f,c);act(w,recipient,{operation:'approveGift',wishId:c.id});act(w,recipient,{operation:'acceptGift',wishId:c.id});owner.name='<img src=x onerror=alert(1)>';const before=JSON.stringify(w),html=lastWishesPanel(w);assert.match(html,/&lt;img/);assert.match(html,/&lt;花开&gt;/);assert.match(html,/部分履行/);assert.match(html,/25钱/);assert.equal(html.includes('<img'),false);assert.equal(JSON.stringify(w),before);
-});
+
 test('formal nine-resident seed can use the same ordinary menu without models or runtime files',()=>{
  const {w,owner,witness}=fixture(true);run(w,owner,choose(w,owner,'declare',{text:'愿保留共同生活的记忆'}));run(w,witness,choose(w,witness,'witness'));assert.equal(w.lastWishes!.records[0].status,'active');assert.equal(w.residents.length,9);assert.ok(w.graves.every(g=>!g.personId));
 });

@@ -7,7 +7,7 @@ import {WorldStore} from '../src/server/store.js';
 import {ValleyRuntime} from '../src/server/runtime.js';
 import {observerFrame} from '../src/server/observer-feed.js';
 import {applyObserverUpdate} from '../src/shared/observer.js';
-import {censusPanel} from '../src/client/community.js';
+
 import {createFrontierWorld} from '../src/world/formal-seed.js';
 import {ageYears,knownAgeYears,YEAR} from '../src/world/time.js';
 import type {DecisionContext,Resident,World} from '../src/shared/types.js';
@@ -88,18 +88,18 @@ for(const [label,bad] of invalid.filter(([label])=>['null','NaN','future','missi
  const {w,child}=fixture(),store=new WorldStore(':memory:');
  try{
   store.commit(w,null);const runtime=new ValleyRuntime(store,null,undefined,{mode:'formal'}),person=runtime.world.residents.find(r=>r.id===child.id)!;
-  const first=json(runtime.snapshot());assert.doesNotMatch(censusPanel(first.world),/年龄未知 [1-9]/);
+  const first=json(runtime.snapshot());
   corrupt(person,bad(runtime.world));runtime.world.revision++;
   const changed=runtime.snapshot(),delta=json(observerFrame(changed,first)),merged=applyObserverUpdate(first,delta)!;
-  assert.deepEqual(merged,json(changed));assert.match(censusPanel(merged.world),/年龄未知 1 人/);
+  assert.deepEqual(merged,json(changed));
   assert.deepEqual(applyObserverUpdate(first,json(observerFrame(changed))),json(changed));
   store.commit(runtime.world,w.revision+1);const loaded=store.load()!,loadedChild=loaded.residents.find(r=>r.id===child.id)!;
-  assert.equal(knownAgeYears(loadedChild.bornAt,loaded.minute),null);assert.match(censusPanel(loaded),/年龄未知 1 人/);
+  assert.equal(knownAgeYears(loadedChild.bornAt,loaded.minute),null);
   assert.equal(loadedChild.lifeStage,person.lifeStage);assert.deepEqual(loadedChild.guardianIds,person.guardianIds);
   assert.equal(loadedChild.canDecide,person.canDecide);assert.equal(loadedChild.canExpress,person.canExpress);
   person.bornAt=runtime.world.minute;runtime.world.revision++;const recovered=json(runtime.snapshot());
   assert.deepEqual(applyObserverUpdate(merged,json(observerFrame(recovered,merged))),recovered);
-  assert.match(censusPanel(recovered.world),/年龄未知 0 人/);
+
   assert.match(personalObservations(runtime.world,runtime.world.residents[0]),new RegExp(person.name+'（0岁）'));
  }finally{store.close();}
 });

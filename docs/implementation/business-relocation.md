@@ -24,7 +24,7 @@
 - [数据结构](../../src/shared/business-relocation.ts)：提议、聘约快照与各人答复。
 - [世界规则](../../src/world/business-relocation.ts)：验证、阶段转换、现场完成和中止。
 - [正常菜单](../../src/server/business-relocation-opportunities.ts)：有限轮换新址、现场阅读与各人独立选择。
-- [只读观察](../../src/client/business-relocation.ts)：市集显示原址、新址、状态、原聘约条款及员工答复，没有操作居民的按钮；动态文字转义。
+- 只读观察（旧实现已退役，历史版本可追溯）：市集显示原址、新址、状态、原聘约条款及员工答复，没有操作居民的按钮；动态文字转义。
 
 ## 验证边界与后续
 

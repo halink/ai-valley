@@ -6,7 +6,7 @@ import {createWorld} from '../src/world/seed.js';
 import {createFormalWorld,createFrontierWorld} from '../src/world/formal-seed.js';
 import {initializeRooms} from '../src/world/rooms.js';
 import {roomLayout} from '../src/shared/rooms.js';
-import {initializeFood,advanceFood} from '../src/world/food.js';
+import {initializeFood} from '../src/world/food.js';
 import {initializePregnancyPreparation,pregnancyReceiptId,pregnancyOpportunities,pregnancyReason,pregnancyPlace,completePregnancyPreparation} from '../src/world/pregnancy-preparation.js';
 import {submitPlan,stepWorld} from '../src/world/engine.js';
 import {addHealthCase} from '../src/world/health.js';
@@ -16,7 +16,7 @@ import type {Snapshot} from '../src/shared/types.js';
 import {advanceLife,recordDeath} from '../src/world/life.js';
 import {decisionChoices,decisionContext} from '../src/server/decisions.js';
 import {parseChoice} from '../src/server/affordances.js';
-import {pregnancyPreparationProfile} from '../src/client/pregnancy-preparation.js';
+
 import {WorldStore} from '../src/server/store.js';
 import {DAY,YEAR} from '../src/world/time.js';
 
@@ -56,7 +56,7 @@ test('normal menus require separate proposal and provider acceptance, then two r
 test('solo preparation reuses actual ordinary sleep, records only bed minutes and grants no extra recovery',()=>{
  const f=fixture(),{w,mother}=f,c=prepare(f,true);mother.energy=50;const baseline=structuredClone(w);delete baseline.pregnancyPreparation;
  run(w,mother,{type:'sleep',minutes:60});run(baseline,baseline.residents[0],{type:'sleep',minutes:60});assert.equal(c.restMinutes,60);assert.equal(mother.energy,baseline.residents[0].energy);assert.equal(mother.health,baseline.residents[0].health);assert.equal(c.attendanceMinutes,0);
- assert.match(pregnancyPreparationProfile(w,mother),/实际床旁陪伴 0 分钟/);
+
 });
 
 test('refusal does not create participation, reverse prior gifts or block independent sleep and re-planning',()=>{
@@ -123,7 +123,6 @@ test('save reload preserves evidence, spent portions, food age, pending navigati
  const store=new WorldStore(':memory:');try{store.commit(w,null);const loaded=store.load(true)!;const p=loaded.residents.find(r=>r.id===provider.id)!;assert.equal(completePregnancyPreparation(loaded,p,a),null);assert.equal(loaded.residents[0].inventory.meal,before);assert.equal(loaded.food!.lots['person:'+mother.id].meal![0].expiresAt,expiry);finish(loaded,p);assert.equal(p.lastFailure,null);const saved=loaded.pregnancyPreparation!.arrangements[0];assert.equal(saved.deliveredMeals,1);assert.equal(saved.attendanceMinutes,60);assert.ok(c.eventIds.every(id=>loaded.events.some(e=>e.id===id)));}finally{store.close();}
 });
 
-
 test('critical illness between the work tick and birth invalidates reported attendance without changing the birth',()=>{
  const f=fixture(),{w,mother,provider}=f;mother.pregnancy!.dueAt=w.minute+62;const c=accept(f);queue(w,provider,choose(w,provider,'attend'));stepWorld(w,59);
  addHealthCase(w,mother,'illness',86,'isolated birth-tick regression');assert.equal(mother.canDecide,true);stepWorld(w,1);assert.equal(c.attendanceMinutes,60);assert.equal(mother.canDecide,false);assert.equal(mother.canExpress,false);assert.equal(c.birth?.providerPresent,false);assert.equal(mother.pregnancy,null);assert.equal(w.residents.at(-1)!.parents[0],mother.id);
@@ -149,8 +148,8 @@ test('fresh nine-resident world supports a real solo preparation and ordinary re
 });
 function ageYearsForTest(r:Resident,w:World){return (w.minute-r.bornAt)/YEAR;}
 
-test('read-only observer escapes names and streamed state includes preparation minutes and terminal facts',()=>{
+test('streamed state includes preparation minutes and terminal facts',()=>{
  const f=fixture(),{w,mother,provider,b}=f;mother.name='<script>unsafe</script>';b.name='<img src=x>';const c=accept(f);
  const snapshot=(world:World):Snapshot=>({world:structuredClone(world),version:'test',serverTime:'isolated',mapRevision:'test-map',capabilities:{active:[],pending:[]}} as Snapshot);
- const before=snapshot(w);run(w,provider,choose(w,provider,'deliverMeal'));const after=snapshot(w),patch=observerFrame(after,before);assert.deepEqual(applyObserverUpdate(before,patch),after);const html=pregnancyPreparationProfile(w,mother);assert.ok(!html.includes('<script>'));assert.ok(!html.includes('<img'));assert.match(html,/&lt;script&gt;/);assert.match(html,/餐食已交付 1\/2/);assert.equal(c.deliveredMeals,1);
+ const before=snapshot(w);run(w,provider,choose(w,provider,'deliverMeal'));const after=snapshot(w),patch=observerFrame(after,before);assert.deepEqual(applyObserverUpdate(before,patch),after);assert.equal(c.deliveredMeals,1);
 });

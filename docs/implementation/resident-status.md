@@ -47,4 +47,4 @@ node --import tsx --test tests/resident-status.test.ts tests/history-reader.test
 
 本轮已完成类型检查和构建。浏览器视觉验收仍待补：自建九人内存场景已准备，但本执行环境启动 Chromium 时因 `socket() failed: Operation not permitted` 退出；批准提权后仍有相同限制。另试提供的云浏览器，无法连接本地隔离预览端口，返回 `net::ERR_CONNECTION_REFUSED`。因此不把桌面/手机截图、实际布局、关闭重开及页面交互冒充为已通过。下一轮应以同类隔离场景核对 1440×1000 和 390×844 视口、长文本换行、名册与档案重开、停表后的余时保持，以及保护结束后的年表记录。
 
-实现入口：[resident-status.ts](../../src/client/resident-status.ts) · [定向测试](../../tests/resident-status.test.ts) · [设计](../design/observation.md#活动与危机状态) · [实施批次](roadmap.md#批次-1-紧急生存与可观察性)
+实现入口：resident-status.ts（旧实现已退役，历史版本可追溯） · [定向测试](../../tests/resident-status.test.ts) · [设计](../design/observation.md#活动与危机状态) · [实施批次](roadmap.md#批次-1-紧急生存与可观察性)

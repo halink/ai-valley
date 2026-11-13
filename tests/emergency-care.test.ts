@@ -15,7 +15,7 @@ import {familyOpportunities} from '../src/world/family.js';
 import {initializeRooms} from '../src/world/rooms.js';
 import {roomLayout} from '../src/shared/rooms.js';
 import {WorldStore} from '../src/server/store.js';
-import {emergencyCareProfile} from '../src/client/emergency-care.js';
+
 import {DAY,YEAR} from '../src/world/time.js';
 import type {EmergencyCareAction} from '../src/shared/emergency-care.js';
 import type {World,Resident,Action} from '../src/shared/types.js';
@@ -46,7 +46,7 @@ test('ordinary menus separately offer, review and physically feed an unguarded i
  const action=choice(w,provider,'feed'),time=w.minute,plan=run(w,provider,action);assert.ok(w.minute-time>=20);assert.equal(c.meals,1);assert.equal(c.receipts.length,1);assert.equal(stock(w,'meal'),meals-1);assert.equal(stock(w,'water'),water-1);assert.ok(child.hunger<40);
  assert.equal(JSON.stringify([child.parents,child.guardianIds,child.homeId,w.buildings,w.plots]),rights);assert.equal(totalCoins(w),coins);assert.equal(w.proposals.length,0);
  const saved=JSON.stringify(w);assert.ok(submitPlan(w,plan).ok);assert.equal(JSON.stringify(w),saved);assert.ok(completeEmergencyCare(w,provider,action));assert.equal(c.meals,1);
- assert.match(emergencyCareProfile(w,child),/实际喂养 1\/4/);assert.equal(c.evidence.length,2);assert.equal(c.evidence[1].personId,reviewer.id);
+ assert.equal(c.evidence.length,2);assert.equal(c.evidence[1].personId,reviewer.id);
 });
 test('capable child independently assents and can refuse pending or active care',()=>{
  const f=setup(9),{w,provider,reviewer,child}=f;run(w,provider,choice(w,provider,'offer'));const c=w.emergencyCare!.agreements[0];run(w,reviewer,choice(w,reviewer,'review'));assert.equal(c.status,'offered');assert.ok(emergencyCareReason(w,provider,{type:'emergencyCare',operation:'feed',agreementId:c.id,step:0}));
@@ -108,7 +108,6 @@ test('model cannot inject signatures, cash, duration or another child into a sel
 test('remote invalidation preserves remembered inspection and withdrawal instead of announcing unseen state',()=>{
  const f=setup(),{w,provider,child}=f,c=activate(f);provider.at.x+=30;const before=emergencyCareOpportunities(w,provider);child.refusesCare=true;advanceEmergencyCare(w);assert.equal(c.status,'invalid');assert.deepEqual(emergencyCareOpportunities(w,provider),before);
 });
-
 
 test('review independence follows biological and adoptive ancestry, not just optional relation labels',()=>{
  for(const cause of ['siblings','adoptive','ancestor'] as const){const {w,provider,reviewer,child}=setup();

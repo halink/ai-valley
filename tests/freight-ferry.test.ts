@@ -12,8 +12,7 @@ import {recordDeath} from '../src/world/life.js';
 import {WorldStore} from '../src/server/store.js';
 import {decisionChoices,decisionContext} from '../src/server/decisions.js';
 import {parseChoice} from '../src/server/affordances.js';
-import {ferryPanel} from '../src/client/ferry.js';
-import {foreignPanel} from '../src/client/commerce.js';
+
 import {waterRoute} from '../src/world/water-route.js';
 import {YEAR} from '../src/world/time.js';
 import type {Action,Resident,Tile,World} from '../src/shared/types.js';
@@ -59,7 +58,7 @@ test('normal menus perform explicit owner/captain handoff, shared capacity, real
  stepWorld(w,60);assert.equal(trip.phase,'docked');assert.equal(boat.dockId,docks[1].id);assert.equal(captain.coins,107,'passenger fare only at docking');assert.equal(accountBalance(w,c.account),14,'freight waits for real unload');
  run(w,captain,choose(w,captain,'unloadCargo'));assert.equal(c.paid,14);assert.equal(captain.coins,121);assert.deepEqual(shipment.route!.at,c.destinationAt);stepWorld(w,20);assert.deepEqual(shipment.route!.at,c.destinationAt);assert.equal(shipment.status,'inTransit');
  assert.ok(ferryReason(w,captain,{type:'ferry',operation:'releaseCargo',tripId:trip.id,cargoId:c.id}));run(w,captain,choose(w,captain,'disembark'));run(w,captain,choose(w,captain,'releaseCargo'));stepWorld(w,60);assert.equal(shipment.status,'completed');assert.equal(shipment.goods,0);assert.equal(owner.coins,119);assert.equal(totalCoins(w),coins);assert.equal(goods(f),stock);assert.deepEqual({price:shipment.price,gross:shipment.gross,taxRate:shipment.taxRate,stationAt:shipment.stationAt},terms);
- assert.ok(completeFerry(w,captain,{type:'ferry',operation:'releaseCargo',tripId:trip.id,cargoId:c.id}));stepWorld(w,10);assert.equal(totalCoins(w),coins);assert.equal(c.paid,14);assert.match(ferryPanel(w),/客货共用|共用容量/);assert.match(ferryPanel(w),/已付 14/);assert.match(foreignPanel(w),/交付完成/);
+ assert.ok(completeFerry(w,captain,{type:'ferry',operation:'releaseCargo',tripId:trip.id,cargoId:c.id}));stepWorld(w,10);assert.equal(totalCoins(w),coins);assert.equal(c.paid,14);
 });
 
 test('capacity is granted only by captain acceptance; refusal, late loading and cancellation refund without moving or duplicating goods',()=>{

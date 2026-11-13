@@ -12,7 +12,7 @@ import {waterSupplyOpportunities} from '../src/server/water-supply-opportunities
 import {decisionContext,decisionChoices} from '../src/server/decisions.js';
 import {parseChoice} from '../src/server/affordances.js';
 import {planStartError,stepWorld,submitPlan} from '../src/world/engine.js';
-import {waterSupplyPanel} from '../src/client/water-supply.js';
+
 import {WorldStore} from '../src/server/store.js';
 import {DAY,YEAR} from '../src/world/time.js';
 
@@ -128,7 +128,7 @@ test('donated vessels serve visitors at real tables, conserve stock and never un
  const a=action(w,other,{operation:'drinkPublic',vesselId:v.id,buildingId:hall.id});assert.match(completeWaterSupply(w,other,a)!,/桌台/);run(w,other,a);assert.equal(v.amount,5);assert.equal(waterDrunkToday(w,other.id),1);assert.equal(w.civic!.stores[hall.id].water,50);assert.equal(w.economy!.treasuryStock.water,50);
  assert.equal(completeWaterSupply(w,other,action(w,other,{operation:'drinkPublic',vesselId:v.id,buildingId:hall.id})),null);assert.match(completeWaterSupply(w,other,action(w,other,{operation:'drinkPublic',vesselId:v.id,buildingId:hall.id}))!,/24小时/);assert.equal(v.amount,4);
  assert.match(waterSupplyReason(w,other,action(w,other,{operation:'donate',vesselId:v.id,buildingId:hall.id}))!,/成年人/);
- assert.match(waterSupplyPanel(w),/第一阶段/);assert.match(waterSupplyPanel(w),/林禾/);
+
 });
 
 test('public allowance spans vessels and lodges across persistence and expires without refill',()=>{
@@ -195,7 +195,6 @@ test('water steps separated by another action retain sequence, and interrupted s
   assert.equal(w.waterSupply!.receipts.length,2);assert.equal(waterDrunkToday(w,r.id),2);
  }
 });
-
 
 test('a guardian on shore cannot serve an onboard or medically carried child from matching map coordinates',()=>{
  const f=fixture(),{w,r,other,child,hall}=f,v=bucket(f,r,2);child.at={...r.at};const a=action(w,r,{operation:'serveChild',vesselId:v.id,targetId:child.id});

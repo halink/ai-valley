@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {animalInspector} from '../src/client/animal-observation.js';
+
 import {advanceFishing,fishSchoolView,fishingKey,fishingStockAt,initializeFishing,shoalWithinReach,waterAtShore,wildFishAt} from '../src/world/fishing.js';
 import {createFrontierWorld} from '../src/world/formal-seed.js';
 import {distance} from '../src/world/navigation.js';
@@ -21,7 +21,7 @@ test('frontier fish are visible near the fishing shore and a wild catch uses the
  assert.equal(opening.activity,'feeding');
  assert.equal(wildFishAt(w,shore),'carp');
  assert.equal(fishSchoolView(w,key)?.amount,opening.amount-1);
- assert.match(animalInspector(w,{kind:'fish',id:key}),new RegExp(`${opening.amount-1} / ${opening.capacity}`));
+
  pool.amount=0;
  assert.equal(wildFishAt(w,shore),false);
  assert.equal(fishSchoolView(w,key)?.amount,0);
@@ -41,7 +41,7 @@ test('an actual flood moves the shoal and interrupts a reachable cast without ch
  assert.equal(pool.amount,amount);
  assert.equal(shoalWithinReach(w,shore),false);
  assert.equal(wildFishAt(w,shore),false);
- assert.match(animalInspector(w,{kind:'fish',id:key}),/躲避洪流/);
+
 });
 
 test('an older save gains positions without refilling exhausted pools and keeps position across restart',()=>{

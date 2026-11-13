@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import type {Action,Snapshot} from '../src/shared/types.js';
+import type {Snapshot} from '../src/shared/types.js';
 import {createWorld} from '../src/world/seed.js';
 import {stepWorld,submitPlan} from '../src/world/engine.js';
 import {adultPresenceReason,completeAdultPresence} from '../src/world/adult-presence.js';
@@ -8,7 +8,7 @@ import {WorldStore} from '../src/server/store.js';
 import {ValleyRuntime} from '../src/server/runtime.js';
 import {parseChoice} from '../src/server/affordances.js';
 import {decisionChoices,decisionContext,prompt} from '../src/server/decisions.js';
-import {healthProfile,healthPanel} from '../src/client/health.js';
+
 import {observerFrame} from '../src/server/observer-feed.js';
 import {applyObserverUpdate} from '../src/shared/observer.js';
 import {presenceFixture,evacuatePresence,verifyPresence,choosePresence,presenceMenu,runPresence,submitPresence,reloadPresence} from './helpers/adult-presence.js';
@@ -25,7 +25,7 @@ test('adult presence: real menu, arrival, verification, finite voluntary stay le
 });
 
 test('adult presence: all read paths are non-mutating and distant bystanders receive no new live choice',()=>{
- const f=presenceFixture();evacuatePresence(f);const before=structuredClone(f.w);presenceMenu(f.w,f.actor);presenceMenu(f.w,f.remote);prompt(decisionContext(f.w,f.actor));healthPanel(f.w);assert.deepEqual(f.w,before);assert.ok(noPresence(f,f.remote));
+ const f=presenceFixture();evacuatePresence(f);const before=structuredClone(f.w);presenceMenu(f.w,f.actor);presenceMenu(f.w,f.remote);prompt(decisionContext(f.w,f.actor));assert.deepEqual(f.w,before);assert.ok(noPresence(f,f.remote));
  f.remote.at={...f.patient.at};assert.ok(noPresence(f,f.remote),'arriving later does not become a witness of the original arrival');
  f.actor.at={x:f.patient.at.x+3,y:f.patient.at.y};assert.ok(noPresence(f));
 });
@@ -87,9 +87,9 @@ test('adult presence: a distant participant stop does not tell others a remote l
 test('adult presence: observer baseline, delta and reconnect expose finite facts and unresolved outcome',()=>{
  const f=presenceFixture(),c=verifyPresence(f);
  const snapshot=():Snapshot=>({world:structuredClone(f.w),mapRevision:'presence-test',version:'test',serverTime:'test',capabilities:{active:[],pending:[]}});
- const first=snapshot();assert.match(healthProfile(f.w,f.patient),/已现场核实，尚未开始在场工作/);assert.match(healthPanel(f.w),/固定截止/);
- submitPresence(f.w,f.actor,choosePresence(f.w,f.actor,'stay'));stepWorld(f.w,1);const next=snapshot(),combined=applyObserverUpdate(first,observerFrame(next,first))!;assert.equal(combined.world.adultPresence!.records[0].minutes,1);assert.match(healthPanel(combined.world),/本回合在场中/);
- f.patient.canExpress=true;submitPresence(f.w,f.patient,choosePresence(f.w,f.patient,'stop'));const ended=snapshot(),reconnected=applyObserverUpdate(next,observerFrame(ended))!;assert.equal(reconnected.world.adultPresence!.records[0].status,'ended');assert.match(healthPanel(reconnected.world),/后续照护仍未解决/);assert.equal(c.minutes,1);
+ const first=snapshot();
+ submitPresence(f.w,f.actor,choosePresence(f.w,f.actor,'stay'));stepWorld(f.w,1);const next=snapshot(),combined=applyObserverUpdate(first,observerFrame(next,first))!;assert.equal(combined.world.adultPresence!.records[0].minutes,1);
+ f.patient.canExpress=true;submitPresence(f.w,f.patient,choosePresence(f.w,f.patient,'stop'));const ended=snapshot(),reconnected=applyObserverUpdate(next,observerFrame(ended))!;assert.equal(reconnected.world.adultPresence!.records[0].status,'ended');assert.equal(c.minutes,1);
 });
 
 test('adult presence: crowded focused menu keeps bounded verification, stay and immediate stop beside self-care',()=>{

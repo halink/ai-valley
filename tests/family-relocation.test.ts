@@ -7,8 +7,7 @@ import {leasedBed,commonsLeaseCount} from '../src/shared/commons.js';
 import {residentBed} from '../src/shared/rooms.js';
 import {stepWorld,submitPlan} from '../src/world/engine.js';
 import {completeAgency,advanceAgency} from '../src/world/agency.js';
-import {residentActivity} from '../src/client/resident-status.js';
-import {familyRelocationProfile} from '../src/client/family-relocation.js';
+
 import {DAY,YEAR} from '../src/world/time.js';
 import {WorldStore,workingEvents} from '../src/server/store.js';
 import {decisionContext} from '../src/server/decisions.js';
@@ -158,13 +157,12 @@ test('remote destination damage is found at arrival, while signed terms remain e
  sign(f,c);depart(f,c);f.home.condition=0;destination(f,c);assert.ok(completeFamilyRelocation(f.w,f.parent,{type:'familyRelocation',operation:'arrive',relocationId:c.id,personId:f.parent.id}));assert.equal(f.parent.homeId,f.old.id);
 });
 
-
-test('family travel preserves armed routine uses, and observer profiles distinguish actual escort and arrival',()=>{
+test('family travel preserves armed routine uses and physical escort',()=>{
  const f=setup(),c=depart(f);assert.equal(completeAgency(f.w,f.parent,{type:'agency',operation:'arm',routineAction:{type:'eat',item:'berry'},threshold:1,days:1,uses:3,cooldown:60}),null);
  f.parent.hunger=50;const routine=f.parent.agency!.routines[0];assert.deepEqual(advanceAgency(f.w),[]);assert.equal(routine.remaining,3);assert.equal(routine.attempted,0);assert.equal(routine.pendingPlanId,null);
- assert.equal(residentActivity(f.w,f.parent).label,'家庭同行途中');assert.ok(familyRelocationProfile(f.w,f.child).includes('保留原住宿'));
+
  act(f.w,f.parent,{type:'familyRelocation',operation:'withdraw',relocationId:c.id});assert.equal(advanceAgency(f.w).length,1);assert.equal(routine.remaining,2);
- const baby=setup(2);baby.child.at.x++;const trip=sign(baby);assert.ok(submitPlan(baby.w,{id:'status-escort',actorId:baby.parent.id,actorRevision:baby.parent.revision,createdAt:baby.w.minute,definition:baby.w.activeDefinitions['action/routine'],intention:'接送孩子',actions:[{type:'familyRelocation',operation:'escort',relocationId:trip.id,personId:baby.child.id}]}).ok);stepWorld(baby.w,2);assert.equal(residentActivity(baby.w,baby.child).label,'家人接送途中');
+ const baby=setup(2);baby.child.at.x++;const trip=sign(baby);assert.ok(submitPlan(baby.w,{id:'status-escort',actorId:baby.parent.id,actorRevision:baby.parent.revision,createdAt:baby.w.minute,definition:baby.w.activeDefinitions['action/routine'],intention:'接送孩子',actions:[{type:'familyRelocation',operation:'escort',relocationId:trip.id,personId:baby.child.id}]}).ok);stepWorld(baby.w,2);
 });
 
 test('two infants need two independently agreeing guardians, each carrying their own assigned supply',()=>{
@@ -172,7 +170,6 @@ test('two infants need two independently agreeing guardians, each carrying their
  assert.ok(completeFamilyRelocation(f.w,f.parent,{type:'familyRelocation',operation:'propose',buildingId:f.home.id,memberIds:[f.parent.id,f.child.id,second.id],departAfter:f.w.minute+5,departBefore:f.w.minute+240}));
  const c=propose(f,[f.parent.id,f.owner.id,f.child.id,second.id]);assert.equal(c.members.find(m=>m.personId===f.child.id)!.caregiverId,f.parent.id);assert.equal(c.members.find(m=>m.personId===second.id)!.caregiverId,f.owner.id);sign(f,c);const first=f.parent.inventory.meal!,other=f.owner.inventory.meal!;depart(f,c);assert.equal(f.parent.inventory.meal,first-2);assert.equal(f.owner.inventory.meal,other-2);
 });
-
 
 test('a model-selected proposal tolerates an elapsed earliest-departure time while the fixed window is still open',()=>{
  const f=setup(),choice=familyRelocationOpportunities(f.w,f.parent).find(o=>o.action.type==='familyRelocation'&&o.action.operation==='propose')!;assert.ok(choice);
@@ -269,7 +266,6 @@ test('fractional proposal and departure actions recheck their fixed deadlines at
  assert.equal(g.parent.lastFailure,'尚未到约定出发时段或集合点');assert.equal(c.status,'accepted');assert.equal(c.startedAt,null);assert.deepEqual(g.parent.inventory,stock);assert.deepEqual(g.parent.at,at);
 });
 
-
 test('a revoked owners silent or incapacitated proximity does not invent delivery of their notice',()=>{
  const f=setup(),c=depart(f);f.owner.at={x:22,y:16};act(f.w,f.owner,{type:'familyRelocation',operation:'withdraw',relocationId:c.id});f.owner.at={...f.parent.at};f.owner.canExpress=false;stepWorld(f.w,1);assert.equal(c.status,'travelling');
  f.owner.canExpress=true;f.owner.at={...f.parent.at};act(f.w,f.owner,{type:'familyRelocation',operation:'withdraw',relocationId:c.id});assert.equal(c.status,'cancelled');
@@ -279,13 +275,11 @@ test('a child who loses the ability to participate stops the journey instead of 
  const f=setup(),c=depart(f),at={...f.child.at};f.child.canDecide=f.child.canExpress=false;stepWorld(f.w,1);assert.equal(c.status,'paused');assert.deepEqual(f.child.at,at);assert.equal(f.child.homeId,f.old.id);
 });
 
-
 test('returning an infant rechecks the real retained bed after room entry before claiming success',()=>{
  const f=setup(2),c=depart(f);stepWorld(f.w,2);act(f.w,f.parent,{type:'familyRelocation',operation:'withdraw',relocationId:c.id});
  assert.ok(submitPlan(f.w,{id:'return-bed-race',actorId:f.parent.id,actorRevision:f.parent.revision,createdAt:f.w.minute,definition:f.w.activeDefinitions['action/routine'],intention:'送回原床',actions:[{type:'familyRelocation',operation:'returnChild',relocationId:c.id,personId:f.child.id}]}).ok);
  for(let n=0;f.parent.inside!==f.old.id&&n<80;n++)stepWorld(f.w,1);assert.equal(f.parent.inside,f.old.id);assert.ok(f.parent.activity?.room?.path.length);const at={...f.parent.roomAt!};f.old.capacity=0;stepWorld(f.w,1);assert.ok(f.parent.lastFailure);assert.deepEqual(f.parent.roomAt,at);assert.ok(!f.w.events.some(e=>e.text.includes('送回仍保留的原住所实际床位')));assert.equal(f.child.homeId,f.old.id);
 });
-
 
 test('walking does not invalidate a participant still deciding whether to stop the accepted journey',()=>{
  const f=setup(),c=depart(f),revision=f.child.revision;stepWorld(f.w,3);

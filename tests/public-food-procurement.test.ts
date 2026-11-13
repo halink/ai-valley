@@ -17,10 +17,10 @@ import {submitPlan,stepWorld} from '../src/world/engine.js';
 import {decisionContext,decisionChoices} from '../src/server/decisions.js';
 import {parseChoice} from '../src/server/affordances.js';
 import {foreignOpportunities} from '../src/server/foreign-opportunities.js';
-import {financePanel} from '../src/client/livelihood.js';
+
 import {WorldStore} from '../src/server/store.js';
 import {recordDeath} from '../src/world/life.js';
-import {DAY,YEAR} from '../src/world/time.js';
+import {YEAR} from '../src/world/time.js';
 
 function fixture(outside=true){
  const w=createFormalWorld();w.minute=600;w.clock.paused=false;
@@ -102,10 +102,6 @@ test('carried grain expires in its original shipment container and never restore
 
 test('public records and original batches survive SQLite reload and private-history pruning',()=>{
  const f=fixture(),{w,r,p}=f,s=arrived(f);collect(f,s);for(let i=0;i<180;i++)w.foreignTrade!.shipments.push({...structuredClone(s),id:'old-private:'+i,publicReserveId:undefined,publicCarrier:undefined,goods:0,status:'completed'});advanceForeignTrade(w);assert.ok(w.foreignTrade!.shipments.some(x=>x.id===s.id));const store=new WorldStore(':memory:');store.commit(w,null);const restored=store.load(true)!;store.close();assert.deepEqual(restored.civic!.reserves,w.civic!.reserves);const restoredShipment=restored.foreignTrade!.shipments.find(x=>x.id===s.id)!;assert.deepEqual(restoredShipment,JSON.parse(JSON.stringify(s)));assert.deepEqual(restored.food!.lots['shipment:'+s.id],w.food!.lots['shipment:'+s.id]);assert.equal(reserveCommitted(restored,restored.civic!.reserves![0]),3);assert.equal(restored.residents.find(x=>x.id===r.id)!.coins,r.coins);assert.equal(p.stocked,0);
-});
-
-test('observations label public custody, finite commitments and original food batches without mutation',()=>{
- const f=fixture(),s=arrived(f);collect(f,s);f.r.name='<script>bad</script>';const before=JSON.stringify(f.w),html=financePanel(f.w);assert.equal(JSON.stringify(f.w),before);assert.match(html,/镇外经办/);assert.match(html,/随经办携运/);assert.match(html,/原批次/);assert.match(html,/已购 3 份 · 已送原址 0 份/);assert.match(html,/本地收购 0 · 镇外实际交付 0/);assert.doesNotMatch(html,/<script>/);
 });
 
 test('unchanged default nine-person world completes the public procurement chain through numbered menus',()=>{

@@ -21,7 +21,7 @@ test('default persistent MVP sends no model calls and preserves identity and wor
  const next=await startPersistentMvp({...options,model:async()=>{calls++;return wait;}});
  assert.equal(next.runtime.world.id,w.id);assert.equal(next.runtime.world.minute,w.minute);
  assert.deepEqual(next.runtime.world.residents,w.residents);assert.deepEqual(next.runtime.world.resources,w.resources);
- assert.equal(calls,0);await next.close();
+ assert.equal(calls,0);assert.deepEqual(next.snapshot().observation.model,{configured:false,requestActorIds:[],requestCount:0,cooldownProviders:0,cooldownRemainingMs:0,lastFailure:null});await next.close();
 });
 test('explicit fake model chooses real gather action; accepted plan survives a clean restart',async t=>{
  const options=fixture(t);let calls=0;
@@ -45,7 +45,7 @@ test('429 can select only explicit backup and its cooldown survives restart',asy
 test('unknown response blocks restart without another dispatch',async t=>{
  const options=fixture(t);let calls=0;
  const run=await startPersistentMvp({...options,env,model:async()=>{calls++;throw Error('fake-private-token');}});
- await flush();assert.equal(run.runtime.world.clock.paused,true);assert.ok(!JSON.stringify(run.snapshot()).includes('fake-private-token'));
+ await flush();assert.equal(run.runtime.world.clock.paused,true);assert.ok(!JSON.stringify(run.snapshot()).includes('fake-private-token'));assert.equal(run.snapshot().observation.model.lastFailure,'unresolved_request');
  await run.close();assert.equal(existsSync(options.database+'.self-hosted-session'),true);
  await assert.rejects(startPersistentMvp(options),/godot_mvp_unresolved_session/);assert.equal(calls,1);
 });
@@ -148,11 +148,47 @@ test('started movement retains path and remaining work across clean restart',asy
  const options=fixture(t);let now=Date.now();t.mock.method(Date,'now',()=>now);
  const run=await startPersistentMvp({...options,env,model:async()=>({...wait,decision:{intention:'synthetic gather',actions:[{type:'gather',resourceId:'mvp-berry-0',quantity:2}]}})});
  await flush();await flush();now+=1000;run.runtime.tick();await flush();
+ const movement=run.snapshot().movement!;assert.ok(movement);assert.ok(movement.steps.length>0);
  const before=structuredClone(run.runtime.world);
  assert.ok(before.residents.some(r=>r.activity&&r.activity.path.length>0&&r.activity.remaining>0));
  await run.close();
  const next=await startPersistentMvp(options);
  assert.deepEqual(next.runtime.world.residents,before.residents);
  assert.deepEqual(next.runtime.world.resources,before.resources);
- assert.equal(next.runtime.world.minute,before.minute);await next.close();
+ assert.equal(next.runtime.world.minute,before.minute);
+ assert.notEqual(next.snapshot().movement!.epoch,movement.epoch);assert.equal(next.snapshot().movement!.lastSeq,0);await next.close();
+});
+
+test('failed durable movement transaction never publishes draft-only steps',async t=>{
+ const {stepWorld,submitPlan}=await import('../src/world/engine.js');
+ const run=await startPersistentMvp(fixture(t));
+ try{
+  const rt=run.runtime as unknown as {store:WorldStore;commit:(fn:(w:typeof run.runtime.world)=>void)=>void};
+  const before=structuredClone(run.snapshot().movement),position=structuredClone(run.runtime.world.residents[0].at);
+  const mutate=(w:typeof run.runtime.world)=>{
+   w.clock.paused=false;const r=w.residents[0];
+   assert.equal(submitPlan(w,{id:'rollback-walk',actorId:r.id,actorRevision:r.revision,createdAt:w.minute,definition:w.activeDefinitions['action/routine'],intention:'synthetic rollback',actions:[{type:'move',to:{x:10,y:14}}]}).ok,true);
+   stepWorld(w,1);
+  };
+  const mock=t.mock.method(rt.store,'commit',()=>{throw Error('synthetic durable failure');});
+  assert.throws(()=>rt.commit(mutate),/synthetic durable failure/);
+  assert.deepEqual(run.snapshot().movement,before);assert.deepEqual(run.runtime.world.residents[0].at,position);
+  mock.mock.restore();rt.commit(mutate);
+  assert.ok(run.snapshot().movement!.steps.length>0);
+ }finally{await run.close();}
+});
+
+test('read-only HTTP status observes pending request and 429 cooldown without private error/config',async t=>{
+ const options=fixture(t);let reject!:(error:Error)=>void;
+ const run=await startPersistentMvp({...options,env:{...env,VALLEY_BACKUP_PROVIDER:'',VALLEY_BACKUP_MODEL:''},model:()=>new Promise((_resolve,r)=>reject=r)});
+ try{await flush();
+ const address=run.server.address();assert.ok(address&&typeof address!=='string');
+ const get=async()=>{const response=await fetch(`http://127.0.0.1:${address.port}/ai-town/api/world`);assert.equal(response.status,200);return await response.json() as ReturnType<typeof run.snapshot>;};
+ const pending=(await get()).observation;
+ assert.equal(pending.model.requestCount,1);assert.equal(pending.model.requestActorIds.length,1);
+ reject(Error('model_http_429'));await flush();await flush();
+ const cooldown=(await get()).observation;
+ assert.equal(cooldown.model.requestCount,0);assert.equal(cooldown.model.cooldownProviders,1);assert.ok(cooldown.model.cooldownRemainingMs>0);
+ assert.equal(cooldown.model.lastFailure,'http_429');assert.ok(!JSON.stringify(cooldown).includes('fake-only'));
+ }finally{await run.close();}
 });

@@ -10,8 +10,7 @@ import {WorldStore} from '../src/server/store.js';
 import {decisionChoices,decisionContext} from '../src/server/decisions.js';
 import {stepWorld,submitPlan} from '../src/world/engine.js';
 import {advanceIndustry,barnCapacity,industryTarget} from '../src/world/industry.js';
-import {animalInspector} from '../src/client/animal-observation.js';
-import {ecologyPanel} from '../src/client/ecology.js';
+
 import {wildFlowFixture,prepareHunt,flowMenuAction,queueWildFlow,finishWildFlows} from './helpers/food-flow-wild.js';
 
 function fixture(kind:LocalWildSpecies='deer'){
@@ -230,10 +229,4 @@ test('a full synthetic year retains finite counts through ordinary needs, births
   }
   assert.ok(f.stock.born>0,`${kind} can reproduce while actual needs continue`);assert.ok(f.w.resources[0].amount<10000);conserved(f);
  }
-});
-
-test('population observation states the registration boundary and does not mutate ecology',()=>{
- const f=fixture();review(f);const before=JSON.stringify(f.w),detail=animalInspector(f.w,{kind:'beast',id:f.mother.id}),panel=ecologyPanel(f.w);
- assert.ok(detail.includes('孕育中'));assert.ok(detail.includes('旧档亲代'));assert.ok(detail.includes('种群账目'));
- assert.ok(panel.includes('驯化转出'));assert.ok(panel.includes('不自动补种'));assert.equal(JSON.stringify(f.w),before);
 });

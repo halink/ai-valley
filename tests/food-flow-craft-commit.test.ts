@@ -171,7 +171,8 @@ for(const failure of ['sqlite','revision'] as const)test(`real ${failure} reject
  if(failure==='sqlite')db.exec('DROP TRIGGER reject_craft');
  else{
   // A stale runtime must reload the winning revision, never overwrite it by retrying blindly.
-  runtime.stop();
+  assert.throws(()=>runtime.stop(),/stale_world_revision/);
+  assert.deepEqual(store.loadForRuntime(),saved);
   recovered=new ValleyRuntime(store,credentials,model,{mode:'formal',directEatingEvidence:{observe:e=>{recoveredEvents.push(e);}}});
   t.after(()=>recovered.stop());recovered.start();
  }

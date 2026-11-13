@@ -17,9 +17,9 @@ import {roomLayout} from '../src/shared/rooms.js';
 import {WorldStore,workingEvents} from '../src/server/store.js';
 import {emitLedgerEvent} from '../src/world/events.js';
 import {recordDeath} from '../src/world/life.js';
-import {childHelpProfile,emergencyCareProfile} from '../src/client/emergency-care.js';
+
 import {finishChosenVisit} from './helpers/visitor-journeys.js';
-import {DAY,YEAR} from '../src/world/time.js';
+import {YEAR} from '../src/world/time.js';
 
 function fixture(){
  const w=createWorld();w.mode='formal';w.clock.paused=false;w.minute=600;
@@ -54,7 +54,7 @@ test('ordinary final menus connect a real arriving visitor to an infant and sepa
  run(w,reporter,'visitHelp');const start={...visitor.at},at=w.minute;run(w,visitor,'visitHelp');assert.notDeepEqual(visitor.at,start);assert.ok(w.minute-at>=20);assert.equal(n.expiresAt,deadline);assert.equal(w.emergencyCare!.agreements.length,0);assert.equal(stock(w),food);
  run(w,visitor,'offer');const care=w.emergencyCare!.agreements[0];assert.equal(care.providerId,identity);assert.equal(care.reviewerId,reporter.id);assert.equal(care.status,'offered');run(w,reporter,'review');run(w,visitor,'feed');
  assert.equal(care.meals,1);assert.equal(stock(w),food-1);assert.equal(w.residents.length,population);assert.equal(w.residents.filter(r=>r.id===identity).length,1);assert.equal(totalCoins(w),coins);assert.equal(JSON.stringify([child.guardianIds,child.homeId,w.buildings,w.plots]),rights);assert.equal(visitor.residency,'visitor');
- assert.match(emergencyCareProfile(w,child),/儿童照护求助记录/);assert.match(emergencyCareProfile(w,child),/实际喂养 1\/4/);
+
 });
 
 test('a report requires lawful witnessed guardian evidence, but no food or second adult; older children speak for themselves',()=>{
@@ -130,8 +130,8 @@ test('restarts preserve fixed deadlines, completed receipts and evidence under h
  restored.minute=deadline;assert.ok(completeChildHelp(restored,restored.residents.find(r=>r.id===reporter.id)!,action('postHelp',n.id)));assert.equal(saved.expiresAt,deadline);assert.equal(saved.readers.filter(k=>k.visitAt!==null).length,1);
 });
 
-test('read-only opportunities and profiles are pure, escape text and cannot inject another child or permissions',()=>{
- const f=fixture(),{w,reporter,child}=f;child.name='<script>child</script>';const n=post(f),before=JSON.stringify(w);childHelpOpportunities(w,reporter);childHelpProfile(w,child);decisionContext(w,reporter);assert.equal(JSON.stringify(w),before);assert.match(childHelpProfile(w,child),/&lt;script&gt;/);assert.ok(!childHelpProfile(w,child).includes('<script>'));
+test('read-only opportunities and decision context cannot inject another child or permissions',()=>{
+ const f=fixture(),{w,reporter,child}=f;child.name='<script>child</script>';const n=post(f),before=JSON.stringify(w);childHelpOpportunities(w,reporter);decisionContext(w,reporter);assert.equal(JSON.stringify(w),before);
  assert.ok(completeChildHelp(w,reporter,{...action('visitHelp',n.id),childId:f.other.id}));assert.ok(emergencyCareReason(w,reporter,{...action('visitHelp',n.id),agreementId:'forged'}));
  const {row,choices}=menu(w,reporter,'visitHelp');for(const extra of [{days:30},{guardianId:reporter.id},{childId:f.other.id}])assert.throws(()=>parseChoice(JSON.stringify({choice:row.id,...extra}),choices));const a=row.action as Action & EmergencyCareAction;childHelpTarget(w,reporter,a);a.observedTarget!.at.x=39;assert.notEqual(n.location.at.x,39);assert.ok(completeEmergencyCare(w,reporter,{type:'emergencyCare',operation:'feed',noticeId:n.id}));
 });

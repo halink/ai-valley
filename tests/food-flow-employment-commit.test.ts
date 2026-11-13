@@ -32,7 +32,7 @@ for(const failure of ['sqlite','revision'] as const)test(`employment actual ${fa
  assert.throws(()=>runtime.tick(now+=1000),failure==='sqlite'?/synthetic_employment_sql_failure/:/stale_world_revision/);assert.equal(drafts,1);inspect.mock.restore();
  assert.deepEqual(runtime.world,before);assert.deepEqual(store.loadForRuntime(),saved);assert.deepEqual(snapshot(),sqlBefore);assert.deepEqual(runtime.directEatingEvidenceStatus(),status);assert.equal(events.length,count);assert.deepEqual(receipts(events),[]);
  let recovered=runtime;const recoveredEvents:RuntimeFoodEvent[]=failure==='sqlite'?events:[];
- if(failure==='sqlite')db.exec('DROP TRIGGER reject_employment');else{runtime.stop();recovered=new ValleyRuntime(store,credentials,model,{mode:'formal',directEatingEvidence:{observe:e=>{recoveredEvents.push(e);}}});t.after(()=>recovered.stop());recovered.start();}
+ if(failure==='sqlite')db.exec('DROP TRIGGER reject_employment');else{assert.throws(()=>runtime.stop(),/stale_world_revision/);assert.deepEqual(store.loadForRuntime(),saved);recovered=new ValleyRuntime(store,credentials,model,{mode:'formal',directEatingEvidence:{observe:e=>{recoveredEvents.push(e);}}});t.after(()=>recovered.stop());recovered.start();}
  recovered.tick(now+=1000);for(let i=0;i<4;i++)recovered.tick(now+=1000);recovered.stop();
  const flows=receipts(recoveredEvents);assert.equal(flows.length,1);assert.equal(flows[0].contractId,c.id);assert.equal(flows[0].batchNumber,1);assert.equal(flows[0].businessId,b.id);assert.equal(flows[0].residentId,worker.id);assert.equal(flows[0].outputs[0].quantity,1);
  assert.equal(store.loadForRuntime()!.employment!.totals.produced,1);assert.equal(store.loadForRuntime()!.economy!.businesses.find(x=>x.id===b.id)!.inventory.meal,1);

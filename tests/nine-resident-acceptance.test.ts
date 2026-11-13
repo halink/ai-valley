@@ -80,9 +80,9 @@ test('missing observation is unknown while a fully observed zero-advance paused 
 test('store commit failure cannot publish draft-only eating',t=>{
  const f=fixture(t);for(let i=0;i<4;i++)f.advance();
  const before=structuredClone(f.runtime.world),length=f.events.length;
- t.mock.method(f.store,'commit',()=>{throw new Error('Offline injected storage failure');});
+ const failedCommit=t.mock.method(f.store,'commit',()=>{throw new Error('Offline injected storage failure');});
  assert.throws(()=>f.advance(),/storage failure/);assert.deepEqual(f.runtime.world,before);assert.equal(f.events.length,length);
- f.runtime.stop();assert.equal(auditRuntimeFoodEvidence(f.events,f.runtime.directEatingEvidenceStatus()).totals!.completedActions,0);
+ failedCommit.mock.restore();f.runtime.stop();assert.equal(auditRuntimeFoodEvidence(f.events,f.runtime.directEatingEvidenceStatus()).totals!.completedActions,0);
 });
 
 test('committed receipts precede subscriber errors and remain exactly once',t=>{

@@ -5,8 +5,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createWorld} from '../src/world/seed.js';
 import {stepWorld,submitPlan} from '../src/world/engine.js';
-import {WorkFeedback} from '../src/client/work-feedback.js';
-import type {Action,WorldEvent} from '../src/shared/types.js';
+import type {Action,World} from '../src/shared/types.js';
 function fixture(){
  const w=createWorld();w.clock.paused=false;
  const r=w.residents[0];w.residents=[r];w.resources=[];w.buildings=[];w.events=[];
@@ -17,74 +16,51 @@ function fixture(){
  const finish=()=>{for(let i=0;i<120&&(r.plan||r.activity);i++)stepWorld(w,1);};
  return {w,r,p,start,finish};
 }
-test('actual engine planting, watering and harvest successes attach identity only to existing facts',()=>{
- const {w,r,p,start,finish}=fixture(),feedback=new WorkFeedback();assert.deepEqual(feedback.inspect(w),[]);
+// Inspect authoritative engine facts directly; no retired display tracker.
+const completed=(w:World,after:number)=>w.events.slice(after).filter(e=>e.workCompleted);
+test('actual planting, watering and harvest produce one authoritative completion event with matching memory',()=>{
+ const {w,r,p,start,finish}=fixture();
  for(const action of ['plant','water','harvest'] as const){
   if(action==='harvest')w.plots[0].crop!.growth=999;
-  start({type:action,plotId:p.id});finish();assert.equal(r.lastFailure,null);
-  const receipts=feedback.inspect(w);assert.equal(receipts.length,1);assert.equal(receipts[0].workCompleted.action,action);assert.equal(receipts[0].workCompleted.residentId,r.id);assert.deepEqual(receipts[0].place,r.at);
-  assert.deepEqual(feedback.inspect(structuredClone(w)),[]);
-  assert.equal(r.memories.find(m=>m.eventId===receipts[0].id)?.text,w.events.find(e=>e.id===receipts[0].id)?.text);
+  const before=w.events.length;start({type:action,plotId:p.id});finish();assert.equal(r.lastFailure,null);
+  const rows=completed(w,before);assert.equal(rows.length,1);const event=rows[0];
+  assert.equal(event.workCompleted!.action,action);assert.equal(event.workCompleted!.residentId,r.id);assert.deepEqual(event.place,r.at);
+  assert.ok(event.workCompleted!.planId);assert.ok(Number.isFinite(event.workCompleted!.startedAt));
+  assert.equal(r.memories.find(m=>m.eventId===event.id)?.text,event.text);
+  const saved=structuredClone(w);stepWorld(w,1);assert.deepEqual(completed(w,before),completed(saved,before));
  }
 });
-test('remaining work, paused world and changed resources never generate success feedback',()=>{
- const {w,r,p,start,finish}=fixture(),feedback=new WorkFeedback();feedback.inspect(w);
- start({type:'plant',plotId:p.id});stepWorld(w,1);assert.ok(r.activity);assert.deepEqual(feedback.inspect(w),[]);
- w.clock.paused=true;const before=structuredClone(w);stepWorld(w,100);assert.deepEqual(w,before);assert.deepEqual(feedback.inspect(w),[]);
- w.clock.paused=false;r.inventory.seed=0;finish();assert.ok(r.lastFailure);assert.deepEqual(feedback.inspect(w),[]);assert.equal(w.events.some(e=>e.workCompleted),false);
+test('unfinished, paused and invalidated work never produces an authoritative success event',()=>{
+ const {w,r,p,start,finish}=fixture();start({type:'plant',plotId:p.id});stepWorld(w,1);assert.ok(r.activity);assert.deepEqual(completed(w,0),[]);
+ w.clock.paused=true;const before=structuredClone(w);stepWorld(w,100);assert.deepEqual(w,before);
+ w.clock.paused=false;r.inventory.seed=0;finish();assert.ok(r.lastFailure);assert.deepEqual(completed(w,0),[]);
 });
-test('success followed by failed work only reports actual success, not textual failure events',()=>{
- const {w,r,p,start,finish}=fixture(),feedback=new WorkFeedback();feedback.inspect(w);
- start({type:'plant',plotId:p.id});finish();assert.equal(feedback.inspect(w).length,1);
- start({type:'water',plotId:p.id});stepWorld(w,1);r.inventory.water=0;finish();assert.ok(r.lastFailure);assert.deepEqual(feedback.inspect(w),[]);
+test('a success followed by failed work retains only the actual success receipt',()=>{
+ const {w,r,p,start,finish}=fixture();start({type:'plant',plotId:p.id});finish();assert.equal(completed(w,0).length,1);
+ const before=w.events.length;start({type:'water',plotId:p.id});stepWorld(w,1);r.inventory.water=0;finish();assert.ok(r.lastFailure);assert.deepEqual(completed(w,before),[]);assert.equal(completed(w,0).length,1);
 });
-function event(id:string,at:number):WorldEvent{return {id,at,kind:'action',actors:['r'],witnesses:[],place:{x:2,y:3},text:'arbitrary text',workCompleted:{residentId:'r',planId:'p',startedAt:1,action:'water'}};}
-test('tracker suppresses baseline/reconnect, stale/repeated snapshots, old history, invalid/future/unstructured facts',()=>{
- const tracker=new WorkFeedback(),w={id:'test',minute:10,revision:1,events:[event('initial',10)]};
- assert.deepEqual(tracker.inspect(w),[]);w.minute=11;w.revision++;
- w.events.push(event('fresh',11));const original=structuredClone(w);const result=tracker.inspect(w);assert.equal(result.length,1);assert.deepEqual(w,original);
- result[0].place.x=100;assert.equal(w.events[1].place.x,2);
- assert.deepEqual(tracker.inspect({...w,minute:10,revision:1}),[]);assert.deepEqual(tracker.inspect(w),[]);
- const plain=event('plain',11);delete plain.workCompleted;
- w.events.push(event('historical',9),event('future',99),plain,{...event('invalid',11),workCompleted:{...event('x',1).workCompleted!,startedAt:NaN}});w.revision++;
- assert.deepEqual(tracker.inspect(w),[]);
- tracker.reset();w.events.push(event('reconnected',11));assert.deepEqual(tracker.inspect(w),[]);
- assert.deepEqual(tracker.inspect({...w,id:'other-world'}),[]);
+test('gather completion and competing depletion have distinct authoritative outcomes',()=>{
+ const {w,r,start,finish}=fixture();w.resources=[{id:'rock',kind:'rock',at:{...r.at},amount:2,max:2,regrowthDays:0,lastHarvest:0}];r.knownResources=['rock'];
+ start({type:'gather',resourceId:'rock',quantity:1});finish();assert.equal(r.lastFailure,null);assert.equal(completed(w,0)[0].workCompleted!.action,'gather');
+ const before=w.events.length;start({type:'gather',resourceId:'rock',quantity:1});stepWorld(w,1);w.resources[0].amount=0;finish();assert.ok(r.lastFailure);assert.deepEqual(completed(w,before),[]);
 });
-test('receipt retains original event room rather than the resident current position',()=>{
- const tracker=new WorkFeedback(),w={id:'test',minute:10,revision:1,events:[] as WorldEvent[]};tracker.inspect(w);
- w.events.push({...event('room',11),roomId:'workshop',roomAt:{x:3,y:4}});w.minute=11;w.revision++;
- assert.deepEqual(tracker.inspect(w)[0].roomAt,{x:3,y:4});
+test('orchard operations and production planting produce authoritative action and operation identities',()=>{
+ const {w,r,p,start,finish}=fixture();w.mode='formal';initializeIndustry(w);initializeProduction(w);r.bornAt=w.minute-25*YEAR;r.inventory.sapling=1;
+ const run=(a:Action)=>{const before=w.events.length;start(a);finish();assert.equal(r.lastFailure,null);const rows=completed(w,before);assert.equal(rows.length,1);assert.equal(rows[0].workCompleted!.action,a.type);return rows[0].workCompleted!;};
+ assert.equal(run({type:'industry',operation:'plantTree',plotId:p.id}).operation,'plantTree');const tree=w.industry!.trees[0];
+ assert.equal(run({type:'industry',operation:'tendTree',treeId:tree.id}).operation,'tendTree');tree.status='mature';tree.fruit=2;
+ assert.equal(run({type:'industry',operation:'harvestFruit',treeId:tree.id}).operation,'harvestFruit');
+ assert.equal(run({type:'industry',operation:'cutTree',treeId:tree.id}).operation,'cutTree');
+ assert.equal(run({type:'production',operation:'plantCrop',plotId:p.id,cropId:'crop/turnip@2'}).operation,'plantCrop');
 });
-
-test('gather success and a competing depletion report only completed gathering',()=>{
- const {w,r,start,finish}=fixture(),feedback=new WorkFeedback();
- w.resources=[{id:'rock',kind:'rock',at:{...r.at},amount:2,max:2,regrowthDays:0,lastHarvest:0}];r.knownResources=['rock'];feedback.inspect(w);
- start({type:'gather',resourceId:'rock',quantity:1});finish();assert.equal(r.lastFailure,null);assert.equal(feedback.inspect(w)[0].workCompleted.action,'gather');
- start({type:'gather',resourceId:'rock',quantity:1});stepWorld(w,1);w.resources[0].amount=0;finish();assert.ok(r.lastFailure);assert.deepEqual(feedback.inspect(w),[]);
-});
-test('industry orchard operations and production planting yield supported authoritative receipts',()=>{
- const {w,r,p,start,finish}=fixture();w.mode="formal";initializeIndustry(w);initializeProduction(w);r.bornAt=w.minute-25*YEAR;r.inventory.sapling=1;
- const feedback=new WorkFeedback();feedback.inspect(w);
- const run=(a:Action)=>{start(a);finish();assert.equal(r.lastFailure,null);const receipt=feedback.inspect(w);assert.equal(receipt.length,1);assert.equal(receipt[0].workCompleted.action,a.type);return receipt[0];};
- assert.equal(run({type:'industry',operation:'plantTree',plotId:p.id}).workCompleted.operation,'plantTree');
- const tree=w.industry!.trees[0];
- assert.equal(run({type:'industry',operation:'tendTree',treeId:tree.id}).workCompleted.operation,'tendTree');
- tree.status='mature';tree.fruit=2;
- assert.equal(run({type:'industry',operation:'harvestFruit',treeId:tree.id}).workCompleted.operation,'harvestFruit');
- assert.equal(run({type:'industry',operation:'cutTree',treeId:tree.id}).workCompleted.operation,'cutTree');
- assert.equal(run({type:'production',operation:'plantCrop',plotId:p.id,cropId:'crop/turnip@2'}).workCompleted.operation,'plantCrop');
-});
-test('fishing completion and stock depletion failure are distinct',()=>{
+test('fishing completion records success but depleted stocks do not',()=>{
  const {w,r,start,finish}=fixture();w.mode='formal';r.bornAt=w.minute-25*YEAR;
- w.map={width:40,height:36,tiles:Array(40*36).fill('grass'),entrance:{x:1,y:1},name:'fishing feedback fixture'};r.at={x:29,y:10};
- for(let y=5;y<20;y++)w.map.tiles[y*40+30]='water';
- initializeIndustry(w);r.inventory.rodKit=1;
+ w.map={width:40,height:36,tiles:Array(40*36).fill('grass'),entrance:{x:1,y:1},name:'fishing receipt fixture'};r.at={x:29,y:10};
+ for(let y=5;y<20;y++)w.map.tiles[y*40+30]='water';initializeIndustry(w);r.inventory.rodKit=1;
  start({type:'industry',operation:'equip',tool:'rod'});finish();assert.equal(r.lastFailure,null);
- const tracker=new WorkFeedback();tracker.inspect(w);
- start({type:'industry',operation:'fish',at:{...r.at},fishSpecies:'perch'});finish();assert.equal(r.lastFailure,null);
- assert.equal(tracker.inspect(w)[0].workCompleted.operation,'fish');
- start({type:'industry',operation:'fish',at:{...r.at},fishSpecies:'perch'});stepWorld(w,1);
+ let before=w.events.length;start({type:'industry',operation:'fish',at:{...r.at},fishSpecies:'perch'});finish();assert.equal(r.lastFailure,null);
+ const rows=completed(w,before);assert.equal(rows.length,1);assert.equal(rows[0].workCompleted!.operation,'fish');
+ before=w.events.length;start({type:'industry',operation:'fish',at:{...r.at},fishSpecies:'perch'});stepWorld(w,1);
  for(const pool of Object.values(w.industry!.fishing)){pool.amount=0;for(const stock of Object.values(pool.species??{}))if(stock){stock.amount=0;stock.progress=0;}}
- finish();assert.ok(r.lastFailure);assert.deepEqual(tracker.inspect(w),[]);
+ finish();assert.ok(r.lastFailure);assert.deepEqual(completed(w,before),[]);
 });

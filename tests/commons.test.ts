@@ -14,7 +14,7 @@ import {initializeRooms} from '../src/world/rooms.js';
 import {stepWorld,submitPlan,hasTimelySelfRescue} from '../src/world/engine.js';
 import {parseChoice} from '../src/server/affordances.js';
 import {decisionContext,decisionChoices} from '../src/server/decisions.js';
-import {residentActivity} from '../src/client/resident-status.js';
+
 import {residentFoodCoverage,settlementFoodCoverage} from '../src/world/food-coverage.js';
 import {medicalBed} from '../src/world/medical-transport.js';
 import {WorldStore} from '../src/server/store.js';
@@ -83,8 +83,8 @@ test('an adult donates actual food at the table preserving its original expiry, 
 
 test('temporary bed borrowing consumes a real free slot and sleep only restores energy after actual arrival',()=>{
  const f=fixture(),{w,b,r}=f;r.energy=15;const home=r.homeId,residency=r.residency;queue(w,r,action(w,r,b.id,'borrowBed'));finish(w,r);const stay=commonsStay(w,r)!;assert.ok(stay);assert.equal(stay.expiresAt-stay.startedAt,DAY);assert.equal(r.homeId,home);assert.equal(r.residency,residency);assert.equal(b.residents.length,0);
- const menu=decisionChoices(decisionContext(w,r)),choice=menu.find(c=>c.action.type==='sleep'&&c.action.buildingId===b.id)!;assert.ok(choice.chooseDuration);const sleep=parseChoice(JSON.stringify({choice:choice.id,minutes:30}),menu).actions[0];queue(w,r,sleep);const energy=r.energy;stepWorld(w,1);assert.ok(r.energy<energy);assert.equal(residentActivity(w,r).kind,'travelling');
- while(r.activity?.room?.path.length)stepWorld(w,1);stepWorld(w,1);assert.equal(residentActivity(w,r).kind,'sleeping');assert.ok(r.energy>energy);finish(w,r);assert.equal(r.lastFailure,null);assert.equal(r.homeId,home);
+ const menu=decisionChoices(decisionContext(w,r)),choice=menu.find(c=>c.action.type==='sleep'&&c.action.buildingId===b.id)!;assert.ok(choice.chooseDuration);const sleep=parseChoice(JSON.stringify({choice:choice.id,minutes:30}),menu).actions[0];queue(w,r,sleep);const energy=r.energy;stepWorld(w,1);assert.ok(r.energy<energy);
+ while(r.activity?.room?.path.length)stepWorld(w,1);stepWorld(w,1);assert.ok(r.energy>energy);finish(w,r);assert.equal(r.lastFailure,null);assert.equal(r.homeId,home);
 });
 
 test('bed limits include sleeping assignments, medical reservations and other leases; no new bed is fabricated',()=>{
@@ -129,25 +129,21 @@ test('two simultaneous borrowers cannot receive the same final bed, including af
  const f=fixture(),{w,b,r,other}=f;b.capacity=1;queue(w,r,action(w,r,b.id,'borrowBed'));queue(w,other,action(w,other,b.id,'borrowBed'));finish(w,r);finish(w,other);assert.equal(w.commons!.stays.length,1);assert.ok([r,other].some(p=>p.lastFailure));assert.equal(b.capacity,1);assert.equal(b.residents.length,0);
 });
 
-
 test('timely independent commons food precedes the minors limited estate fallback without transferring either stock during preview',()=>{
  const f=fixture(),{w,r,b,other}=f;r.parents=[other.id];other.inventory={berry:6};initializeProduction(w);initializeFood(w);recordDeath(w,other);
  const before=JSON.stringify(w);assert.equal(hasTimelyCommonsFood(w,r),true);assert.equal(emergencyEstateOptions(w,r).length,0);assert.equal(JSON.stringify(w),before);
  w.civic!.stores[b.id].turnip=0;assert.ok(emergencyEstateOptions(w,r).length);
 });
 
-
 test('a borrowed bed remains selectable through the final minutes of its lease with a resident chosen duration',()=>{
  const f=fixture(),{w,r,b}=f;atTable(f);completeCommons(w,r,action(w,r,b.id,'borrowBed'));const stay=commonsStay(w,r)!;stay.expiresAt=w.minute+30;r.roomAt={...roomLayout(w,b).slots.find(s=>s.key==='bed:'+stay.bed)!.at};r.energy=3;
  const menu=decisionChoices(decisionContext(w,r)),choice=menu.find(c=>c.action.type==='sleep'&&c.action.buildingId===b.id)!;assert.ok(choice?.chooseDuration);const selected=parseChoice(JSON.stringify({choice:choice.id,minutes:15}),menu).actions[0];queue(w,r,selected);finish(w,r);assert.equal(r.lastFailure,null);assert.ok(r.energy>3);assert.ok(commonsStay(w,r));
 });
 
-
 test('release and reborrow retain the original finite deadline rather than refreshing it',()=>{
  const f=fixture(),{w,b,r}=f;atTable(f);assert.equal(completeCommons(w,r,action(w,r,b.id,'borrowBed')),null);const original=commonsStay(w,r)!.expiresAt;w.minute+=10;assert.equal(completeCommons(w,r,action(w,r,b.id,'releaseBed')),null);assert.equal(completeCommons(w,r,action(w,r,b.id,'borrowBed')),null);assert.equal(commonsStay(w,r)!.expiresAt,original);
  const saved=JSON.parse(JSON.stringify(w)) as World,p=saved.residents[0];initializeCommons(saved);saved.minute+=10;completeCommons(saved,p,action(saved,p,b.id,'releaseBed'));completeCommons(saved,p,action(saved,p,b.id,'borrowBed'));assert.equal(commonsStay(saved,p)!.expiresAt,original);
 });
-
 
 test('a bed still occupied by a body is not free merely because the lease holder died',()=>{
  const f=fixture(),{w,b,r,other}=f;b.capacity=1;other.inside=b.id;other.roomAt={...roomLayout(w,b).slots.find(s=>s.key==='bed:0')!.at};recordDeath(w,other);assert.equal(freeCommonsBed(w,r,b),null);assert.match(commonsReason(w,r,action(w,r,b.id,'borrowBed'))!,/空床/);
@@ -158,7 +154,6 @@ test('a registered home bed with a physically blocked indoor target is not consi
  const f=fixture(),{w,b,r,other}=f;const home={...b,id:'home-with-blocked-bed',kind:'home' as const,ownerId:r.id,residents:[r.id],door:{x:6,y:10},at:{x:4,y:6},capacity:1};w.buildings.push(home);r.homeId=home.id;w.rooms!.beds[home.id]={[r.id]:0};assert.match(commonsReason(w,r,action(w,r,b.id,'borrowBed'))!,/自家床/);
  other.status='dead';other.inside=home.id;other.roomAt={...roomLayout(w,home).slots.find(s=>s.key==='bed:0')!.at};other.body={reservedBy:null,carriedBy:null,storedAt:home.id};assert.equal(commonsReason(w,r,action(w,r,b.id,'borrowBed')),null);
 });
-
 
 test('an expired temporary lease does not revoke an independently valid home bed',()=>{
  const f=fixture(),{w,b,r}=f;atTable(f);assert.equal(completeCommons(w,r,action(w,r,b.id,'borrowBed')),null);const stay=commonsStay(w,r)!;

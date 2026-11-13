@@ -5,7 +5,7 @@ import type {VisitorJourneyAction} from '../src/shared/visitor-journey.js';
 import {ordinaryVisitorJourney} from '../src/shared/visitor-journey.js';
 import {createWorld} from '../src/world/seed.js';
 import {initializeMigration,applyOutsideDecision,outsideCandidate,outsideDecisionContext,advanceMigration} from '../src/world/migration.js';
-import {initializeFood,advanceFood,foodContainers} from '../src/world/food.js';
+import {initializeFood} from '../src/world/food.js';
 import {addHealthCase,movementRate} from '../src/world/health.js';
 import {hasTimelyVisitorJourneyRescue,visitorJourneyFood} from '../src/world/visitor-journey.js';
 import {stepWorld,submitPlan} from '../src/world/engine.js';
@@ -15,8 +15,7 @@ import {decisionChoices,type ModelResult} from '../src/server/decisions.js';
 import {emitLedgerEvent} from '../src/world/events.js';
 import {physiology} from '../src/world/physiology.js';
 import {parseChoice} from '../src/server/affordances.js';
-import {residentActivity} from '../src/client/resident-status.js';
-import {censusPanel} from '../src/client/community.js';
+
 import {atEstateLocation} from '../src/world/estate-custody.js';
 
 function fixture(){
@@ -98,17 +97,12 @@ test('legacy timer journeys retain their old shape rather than inventing past st
  const f=fixture(),{w,c,r}=f;delete c.journey!.staged;delete r.regionalLocation;r.at={...w.map.entrance};c.journey!.nextCheckAt=c.journey!.arriveAt;const before=JSON.stringify(c.journey);w.minute=c.journey!.arriveAt-1;advanceMigration(w);assert.equal(JSON.stringify(c.journey),before);w.minute++;advanceMigration(w);assert.equal(r.residency,'visitor');assert.equal(c.journey,null);
 });
 
-test('observation distinguishes chosen stages, rest and decision waits, escapes origins and promises no arrival time',()=>{
- const f=fixture(),{w,r,j,c}=f;j.origin=c.origin='<svg onload=bad>';waitAtStage(f);const before=JSON.stringify(w);assert.equal(residentActivity(w,r).kind,'decision-wait');let html=censusPanel(w);assert.match(html,/等待本人另选/);assert.match(html,/&lt;svg/);assert.doesNotMatch(html,/<svg|预计.*抵达/);assert.equal(JSON.stringify(w),before);choose(w,r,'rest');assert.equal(residentActivity(w,r).kind,'voluntary-wait');html=censusPanel(w);assert.match(html,/原地休息/);
-});
-
 const flush=()=>new Promise<void>(resolve=>setImmediate(resolve));
 test('only a first-time regional waiter participates in runtime outage protection and its successful choice is counted',async t=>{
  let now=Date.now();t.mock.method(Date,'now',()=>now);const f=fixture();waitAtStage(f);Object.assign(f.r,{hunger:98,energy:80,health:1});f.w.clock.realMinutesPerDay=20;const store=new WorldStore(':memory:');store.commit(f.w,null);let finish!:(r:ModelResult)=>void;
  const runtime=new ValleyRuntime(store,'offline-test-key',async(_key,context)=>context.actor.id===f.r.id?new Promise<ModelResult>(resolve=>{finish=resolve;}):new Promise<ModelResult>(()=>{}));
  try{runtime.start();await flush();for(let i=0;i<160;i++)runtime.tick(now+=1000);const r=runtime.world.migration!.contacts[0].person!,j=ordinaryVisitorJourney(runtime.world,r)!;assert.equal(runtime.world.clock.paused,true);assert.equal(r.health,1);assert.equal(j.progress,f.j.progress);assert.equal(runtime.world.residents.some(p=>p.id===r.id),false);finish({decision:{intention:'本人选择现物进食',actions:[{type:'visitorJourney',operation:'eat',journeyId:j.id,item:'meal'}]},inputTokens:1,outputTokens:1,latencyMs:1});await flush();assert.equal(runtime.world.metrics.regionalDecisions,1);for(let i=0;i<6;i++)runtime.tick(now+=1000);const after=runtime.world.migration!.contacts[0].person!;assert.equal(runtime.world.clock.paused,false);assert.ok(after.hunger<95);assert.ok(after.decisionProtection!.recoveredAt);}finally{runtime.stop();store.close();}
 });
-
 
 test('injury slows actual route distance without extending the independently chosen stage time',()=>{
  const f=fixture(),{w,r,j}=f;addHealthCase(w,r,'injury',60,'实际旧伤');assert.equal(movementRate(w,r),.5);const initial=j.stageRemaining;stepWorld(w,1);assert.equal(j.duration-j.progress,.5);assert.equal(j.stageRemaining,initial-1);stepWorld(w,initial-1);assert.equal(j.status,'waiting');assert.equal(j.progress,j.duration-initial*.5);const progress=j.progress;stepWorld(w,20);assert.equal(j.progress,progress);
@@ -123,12 +117,10 @@ test('first visitor memories and active route evidence remain after the working 
  const f=fixture();waitAtStage(f);const ids=[...f.j.eventIds],memories=f.r.memories.map(m=>m.eventId);f.w.minute+=60;for(let i=0;i<220;i++)emitLedgerEvent(f.w,{kind:'system',actors:[],place:{x:0,y:0},text:'其他观察事实'+i});const events=workingEvents(f.w);assert.ok(ids.every(id=>events.some(e=>e.id===id)));assert.ok(memories.every(id=>events.some(e=>e.id===id)));
 });
 
-
 test('a slow reply cannot lengthen the exact walking time chosen before a natural mobility threshold crossing',()=>{
  const f=fixture(),{w,r,j}=f;waitAtStage(f);j.progress=6;r.regionalLocation!.progress=6;r.hunger=85;addHealthCase(w,r,'injury',49.999,'实际伤病恶化');assert.equal(movementRate(w,r),.75);const action=outsideDecisionContext(w,r).outside!.choices.find(c=>c.action.type==='visitorJourney'&&c.action.operation==='continue')!.action;assert.equal(action.type,'visitorJourney');assert.equal((action as VisitorJourneyAction).minutes,8);const revision=r.revision;stepWorld(w,3);assert.equal(movementRate(w,r),.5);assert.equal(r.revision,revision);assert.ok(applyOutsideDecision(w,r.id,revision,{intention:'本人仅选原先的八分钟',actions:[action]}).ok);assert.equal(j.stageRemaining,8);stepWorld(w,8);assert.equal(j.status,'waiting');assert.equal(j.progress,2);
  for(const minutes of [undefined,0,-1,13,NaN,Infinity]){const before=JSON.stringify(w);assert.equal(applyOutsideDecision(w,r.id,r.revision,{intention:'无效时长',actions:[{type:'visitorJourney',operation:'continue',journeyId:j.id,minutes}]}).ok,false);assert.equal(JSON.stringify(w),before);}
 });
-
 
 test('fractional real-time steps normalize a blocked endpoint and cannot shorten the chosen 30-minute retry',()=>{
  const f=fixture(),{w,r,c,j}=f;w.map.tiles[w.map.entrance.y*w.map.width]='water';let limit=300;while(!c.journey!.blocked){assert.ok(limit--);if(j.status==='waiting')choose(w,r,'continue');stepWorld(w,.3);}assert.equal(j.progress,0);assert.equal(r.regionalLocation!.progress,0);const choice=outsideDecisionContext(w,r).outside!.choices.find(c=>c.action.type==='visitorJourney'&&c.action.operation==='continue')!.action as VisitorJourneyAction;assert.equal(choice.minutes,30);choose(w,r,'continue');w.map.tiles[w.map.entrance.y*w.map.width]='grass';stepWorld(w,29.9);assert.equal(r.residency,'outside');stepWorld(w,.1);assert.equal(r.residency,'visitor');

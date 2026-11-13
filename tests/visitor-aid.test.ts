@@ -1,7 +1,6 @@
 import {finishChosenVisit} from './helpers/visitor-journeys.js';
 import {test} from 'node:test';
-import {outsideAidPanel} from '../src/client/outside-aid.js';
-import {residentActivity} from '../src/client/resident-status.js';
+
 import assert from 'node:assert/strict';
 import type {Action,Resident,World} from '../src/shared/types.js';
 import type {OutsideAidAction} from '../src/shared/outside-aid.js';
@@ -18,9 +17,7 @@ import {ValleyRuntime} from '../src/server/runtime.js';
 import {DecisionError,type ModelResult} from '../src/server/decisions.js';
 import {WorldStore,workingEvents} from '../src/server/store.js';
 import {emitLedgerEvent} from '../src/world/events.js';
-import {bodyProfile} from '../src/client/funerary.js';
-import {estateProfile,estatePiles} from '../src/client/estate-custody.js';
-import {industryPanel} from '../src/client/industry.js';
+
 import {initializeIndustry,industryTarget} from '../src/world/industry.js';
 import {industryOpportunities} from '../src/server/industry-opportunities.js';
 import {productionTarget,emergencyEstateOptions} from '../src/world/production.js';
@@ -99,13 +96,11 @@ test('only the same carrier can revise their route; late decisions cannot undo p
  const ids=[...j.eventIds,...f.n.eventIds];w.minute+=100;for(let i=0;i<220;i++)emitLedgerEvent(w,{kind:'system',actors:[],place:w.map.entrance,text:'unrelated '+i});assert.ok(ids.every(id=>workingEvents(w).some(e=>e.id===id)));
 });
 
-
-test('visitor mail observation is read-only, escaped, and distinguishes a pause from outside life',()=>{
+test('visitor mail return pauses at a blocked entrance',()=>{
  const f=fixture();f.traveller.name='<img src=x onerror=alert(1)>';const j=carry(f),before=JSON.stringify(f.w);
- assert.equal(residentActivity(f.w,f.traveller).kind,'travelling');assert.match(outsideAidPanel(f.w),/实际访客/);assert.match(outsideAidPanel(f.w),/&lt;img/);assert.doesNotMatch(outsideAidPanel(f.w),/<img|<button|<form/);assert.equal(JSON.stringify(f.w),before);
- advance(f,6);outside(f,'returnMail');f.w.map.tiles[f.w.map.entrance.y*f.w.map.width+f.w.map.entrance.x]='water';advance(f,6);assert.equal(j.status,'waiting');assert.equal(residentActivity(f.w,f.traveller).kind,'fulfillment-wait');assert.match(outsideAidPanel(f.w),/入口实际受阻/);
+ assert.equal(JSON.stringify(f.w),before);
+ advance(f,6);outside(f,'returnMail');f.w.map.tiles[f.w.map.entrance.y*f.w.map.width+f.w.map.entrance.x]='water';advance(f,6);assert.equal(j.status,'waiting');
 });
-
 
 test('a return requires a traversable entrance, not an isolated walkable gate tile',()=>{
  const f=fixture(),j=carry(f);advance(f,5);outside(f,'returnMail');const gate=f.w.map.entrance;
@@ -121,9 +116,9 @@ test('regional health and death never create gate witnesses, a local body, acces
  const illness=addHealthCase(w,traveller,'injury',.001,'镇外真实损伤')!;w.minute++;advanceHealth(w,1);assert.equal(illness.stage,'resolved');assert.equal(JSON.stringify(child.memories),seen);
  const memory=JSON.stringify(traveller.memories);recordDeath(w,traveller);advance(f,1);assert.equal(j.status,'interrupted');assert.equal(JSON.stringify(traveller.memories),memory);assert.equal(JSON.stringify(child.memories),seen);
  const death=w.events.find(e=>e.kind==='death'&&e.actors[0]===traveller.id)!;assert.equal(death.observerOnly,true);assert.deepEqual(death.witnesses,[]);assert.equal(death.bodyLocation,undefined);assert.deepEqual(death.regionalLocation,body);
- const estate=w.estates.find(e=>e.personId===traveller.id)!;assert.deepEqual(estate.location!.regional,body);assert.equal(atEstateLocation(child,estate.location!),false);assert.equal(estatePiles(w).length,0);assert.match(bodyProfile(w,traveller),/镇外.*7\/24/);assert.doesNotMatch(estateProfile(w,traveller),/data-tile/);
+ const estate=w.estates.find(e=>e.personId===traveller.id)!;assert.deepEqual(estate.location!.regional,body);assert.equal(atEstateLocation(child,estate.location!),false);
  child.bornAt=w.minute-20*YEAR;const shares=foodTransaction(w,()=>splitEstateParcels(w,traveller.id,[child.id],['regional-share']));acceptEstateParcels(w,shares[0],child.id);const parcel=estate.parcels!.find(p=>p.id===shares[0][0])!;assert.deepEqual(parcel.location.regional,body);assert.match(productionTarget(w,child,{type:'production',operation:'collectEstate',parcelId:parcel.id}).error!,/镇外/);assert.equal(emergencyEstateOptions(w,child).length,0);
- const tool=w.industry!.tools[0];tool.ownerId=child.id;assert.deepEqual(tool.location!.regional,body);assert.match(industryTarget(w,child,{type:'industry',operation:'collectTool',toolId:tool.id}).error!,/镇外/);assert.ok(!industryOpportunities(w,child).some(o=>o.action.type==='industry'&&o.action.operation==='collectTool'));assert.doesNotMatch(industryPanel(w),/data-tile="-1,-1"/);assert.match(industryPanel(w),/镇外西岭驿/);
+ const tool=w.industry!.tools[0];tool.ownerId=child.id;assert.deepEqual(tool.location!.regional,body);assert.match(industryTarget(w,child,{type:'industry',operation:'collectTool',toolId:tool.id}).error!,/镇外/);assert.ok(!industryOpportunities(w,child).some(o=>o.action.type==='industry'&&o.action.operation==='collectTool'));
  const store=new WorldStore(':memory:');store.commit(w,null);const restored=store.load(true)!;store.close();assert.deepEqual(restored.estates[0].parcels![0].location.regional,body);assert.deepEqual(restored.industry!.tools[0].location!.regional,body);
 });
 
@@ -137,7 +132,7 @@ test('regional eating and sitting rest require their own choice, elapsed work an
  const f=fixture(),j=carry(f),r=f.traveller;r.hunger=90;r.energy=1;const original=r.inventory.meal!;
  const eat=outsideDecisionContext(f.w,r).outside!.choices.find(c=>c.action.type==='outsideAid'&&c.action.operation==='eatMail'&&c.action.item==='meal')!;assert.ok(eat);assert.equal(applyOutsideDecision(f.w,r.id,r.revision,{intention:'本人停步吃饭',actions:[eat.action]}).ok,true);
  stepWorld(f.w,4);assert.equal(r.inventory.meal,original);assert.equal(j.progress,0);assert.equal(outsideCandidate(f.w).includes(r),false);stepWorld(f.w,1);assert.equal(r.inventory.meal,original-1);assert.ok(r.hunger<60);assert.equal(j.status,'waiting');assert.equal(j.pause,undefined);assert.equal(j.progress,0);assert.equal(outsideCandidate(f.w).includes(r),true);
- const rest=outsideDecisionContext(f.w,r).outside!.choices.find(c=>c.action.type==='outsideAid'&&c.action.operation==='restMail')!;assert.equal(applyOutsideDecision(f.w,r.id,r.revision,{intention:'本人停步休息',actions:[rest.action]}).ok,true);const energy=r.energy,hunger=r.hunger;assert.equal(residentActivity(f.w,r).kind,'voluntary-wait');stepWorld(f.w,30);assert.ok(r.energy>energy);assert.ok(r.hunger>hunger);assert.equal(j.progress,0);assert.equal(r.homeId,null);assert.equal(j.pause,undefined);outside(f,'continueMail');stepWorld(f.w,1);assert.equal(j.progress,1);
+ const rest=outsideDecisionContext(f.w,r).outside!.choices.find(c=>c.action.type==='outsideAid'&&c.action.operation==='restMail')!;assert.equal(applyOutsideDecision(f.w,r.id,r.revision,{intention:'本人停步休息',actions:[rest.action]}).ok,true);const energy=r.energy,hunger=r.hunger;stepWorld(f.w,30);assert.ok(r.energy>energy);assert.ok(r.hunger>hunger);assert.equal(j.progress,0);assert.equal(r.homeId,null);assert.equal(j.pause,undefined);outside(f,'continueMail');stepWorld(f.w,1);assert.equal(j.progress,1);
 });
 
 test('food expiring during a chosen regional meal is not replaced or consumed, and pause work survives reload',()=>{
@@ -145,14 +140,12 @@ test('food expiring during a chosen regional meal is not replaced or consumed, a
  stepWorld(f.w,2);assert.equal(j.pause!.remaining,3);const store=new WorldStore(':memory:');store.commit(f.w,null);const w=store.load(true)!;store.close();const p=w.residents.find(p=>p.id===r.id)!;stepWorld(w,3);assert.equal(p.inventory.berry??0,0);assert.ok(p.hunger>70);assert.equal(w.outsideAid!.visitorJourneys![0].progress,0);assert.match(w.outsideAid!.visitorJourneys![0].reason!,/腐败/);assert.equal(w.outsideAid!.notices[0].mail!.receivedAt,null);
 });
 
-
 test('global pause freezes a regional rest, while incapacity interrupts it without writing an unconscious self memory',()=>{
  const f=fixture(),j=carry(f),r=f.traveller;assert.equal(applyOutsideDecision(f.w,r.id,r.revision,{intention:'本人停步休息',actions:[{type:'outsideAid',operation:'restMail',journeyId:j.id}]}).ok,true);stepWorld(f.w,3);
  f.w.clock.paused=true;const before=JSON.stringify(f.w);stepWorld(f.w,60);advanceMigration(f.w);assert.equal(JSON.stringify(f.w),before);f.w.clock.paused=false;
  const memory=JSON.stringify(r.memories),energy=r.energy;r.canDecide=false;stepWorld(f.w,2);assert.equal(j.pause,undefined);assert.equal(j.status,'waiting');assert.equal(JSON.stringify(r.memories),memory);assert.ok(r.energy<energy);assert.equal(j.progress,0);
  r.canDecide=true;stepWorld(f.w,5);assert.equal(j.status,'waiting');assert.equal(j.progress,0);outside(f,'continueMail');stepWorld(f.w,1);assert.equal(j.progress,1);
 });
-
 
 const protectedRegionalStep=(w:World,n:number)=>stepWorld(w,n,{decisionChoices:()=>[]});
 function waitingFixture(){const f=fixture(),j=carry(f);f.w.clock.realMinutesPerDay=20;assert.equal(applyOutsideDecision(f.w,f.traveller.id,f.traveller.revision,{intention:'自行先停步休息',actions:[{type:'outsideAid',operation:'restMail',journeyId:j.id}]}).ok,true);stepWorld(f.w,30);Object.assign(f.traveller,{hunger:98,energy:80,health:1});f.child.decisionDue=Number.MAX_SAFE_INTEGER;f.child.lastDecisionAt=f.w.minute;return {...f,j};}
@@ -184,7 +177,6 @@ test('an outage with only a regional waiter pauses before the original deadline 
  }finally{runtime.stop();store.close();}
 });
 
-
 test('another real resident decision keeps the clock moving without extending the regional personal deadline',async t=>{
  let now=Date.now();t.mock.method(Date,'now',()=>now);const f=waitingFixture();f.child.decisionDue=f.w.minute;const store=new WorldStore(':memory:');store.commit(f.w,null);
  const runtime=new ValleyRuntime(store,'test-key',async(_key,context)=>context.actor.id===f.child.id?{decision:{intention:'本人短暂停留',actions:[{type:'wait',minutes:20}]},inputTokens:1,outputTokens:1,latencyMs:1}:new Promise<ModelResult>(()=>{}));
@@ -197,7 +189,6 @@ test('regional protection ends when its actual food expires, without giving a re
  const f=waitingFixture();protectedRegionalStep(f.w,1);const deadline=f.traveller.decisionProtection!.expiresAt;for(const lots of Object.values(f.w.food!.lots['person:'+f.traveller.id]))for(const lot of lots??[])lot.expiresAt=f.w.minute+1;protectedRegionalStep(f.w,1);
  assert.equal(f.traveller.decisionProtection!.reason,'unavailable');assert.equal(f.traveller.decisionProtection!.expiresAt,deadline);assert.ok(f.traveller.health<1);assert.equal(f.traveller.inventory.meal??0,0);assert.equal(f.traveller.inventory.berry??0,0);assert.equal(f.j.progress,0);
 });
-
 
 test('zero health cannot finish a regional meal or create a posthumous memory',()=>{
  const f=waitingFixture(),r=f.traveller;assert.equal(applyOutsideDecision(f.w,r.id,r.revision,{intention:'本人停步吃饭',actions:[{type:'outsideAid',operation:'eatMail',journeyId:f.j.id,item:'meal'}]}).ok,true);stepWorld(f.w,4);const inventory={...r.inventory},memory=JSON.stringify(r.memories),hunger=r.hunger;r.health=0;stepWorld(f.w,1);assert.equal(r.status,'dead');assert.equal(f.j.status,'interrupted');assert.equal(f.j.pause,undefined);assert.deepEqual(f.w.estates.find(e=>e.personId===r.id)!.inventory,inventory);assert.equal(r.hunger,hunger);assert.equal(JSON.stringify(r.memories),memory);

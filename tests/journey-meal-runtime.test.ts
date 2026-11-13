@@ -16,11 +16,11 @@ for(const mail of [false,true])for(const failure of ['sqlite','competing-revisio
  f.r.lastDecisionAt=f.w.minute;f.r.decisionDue=f.w.minute+1000;
  for(const merchant of f.w.foreignTrade?.merchants??[])merchant.person.decisionDue=f.w.minute+1000;
  for(const contact of f.w.migration?.contacts??[])contact.futureAt=f.w.minute+1000;
- const stock=f.r.inventory.meal!,store=new WorldStore(':memory:');store.commit(f.w,null);t.after(()=>store.close());
+ const stock=f.r.inventory.meal!,store=new WorldStore(':memory:');store.commit(f.w,null);const runtimes:ValleyRuntime[]=[];t.after(()=>{try{for(const runtime of [...runtimes].reverse())runtime.stop();}finally{store.close();}});
  // Restart can schedule the now-waiting traveler; this injected stub never calls a model or network.
  const model=async()=>{throw new Error('Offline injected decision stub');};
  const makeRuntime=(events:RuntimeFoodEvent[])=>new ValleyRuntime(store,[{model:QWEN_MODEL,key:'OFFLINE_DUMMY'}],model,{mode:'formal',directEatingEvidence:{observe:e=>{events.push(e);}}});
- const events:RuntimeFoodEvent[]=[],runtime=makeRuntime(events);t.after(()=>runtime.stop());runtime.start();
+ const events:RuntimeFoodEvent[]=[],runtime=makeRuntime(events);runtimes.push(runtime);runtime.start();
  const db=(store as unknown as {db:DatabaseSync}).db;
  const tables=['worlds','terrain','resource_bases','events','receipts','event_people','event_animals','archive_meta'];
  const snapshot=()=>tables.map(table=>db.prepare('SELECT * FROM '+table+' ORDER BY rowid').all());
@@ -37,10 +37,10 @@ for(const mail of [false,true])for(const failure of ['sqlite','competing-revisio
  const receipts=(events:RuntimeFoodEvent[])=>events.flatMap(e=>e.type==='food_step_committed'?e.journeyMeals??[]:[]);
  assert.deepEqual(receipts(events),[]);assert.equal(journeyPerson(store.loadForRuntime()!,f.r.id).inventory.meal,stock);
  let recovered=runtime;const recoveredEvents:RuntimeFoodEvent[]=failure==='sqlite'?events:[];
- if(failure==='sqlite')db.exec('DROP TRIGGER reject_journey');else{runtime.stop();recovered=makeRuntime(recoveredEvents);t.after(()=>recovered.stop());recovered.start();}
+ if(failure==='sqlite')db.exec('DROP TRIGGER reject_journey');else{runtime.stop();recovered=makeRuntime(recoveredEvents);runtimes.push(recovered);recovered.start();}
  recovered.tick(now+=1000);recovered.stop();
  const rows=receipts(recoveredEvents);assert.equal(rows.length,1);assert.equal(rows[0].providerId,f.r.id);assert.equal(rows[0].journeyId,f.j.id);assert.equal(journeyPerson(store.loadForRuntime()!,f.r.id).inventory.meal,stock-1);
- const restartedEvents:RuntimeFoodEvent[]=[],restarted=makeRuntime(restartedEvents);t.after(()=>restarted.stop());restarted.start();restarted.tick(now+=1000);restarted.stop();
+ const restartedEvents:RuntimeFoodEvent[]=[],restarted=makeRuntime(restartedEvents);runtimes.push(restarted);restarted.start();restarted.tick(now+=1000);restarted.stop();
  assert.deepEqual(receipts(restartedEvents),[]);assert.equal(journeyPerson(store.loadForRuntime()!,f.r.id).inventory.meal,stock-1);assert.equal(network,0);
 });
 
@@ -56,10 +56,10 @@ for(const asynchronous of [false,true])test(`journey runtime: ${asynchronous?'as
  t.mock.timers.enable({apis:['setInterval']});let now=1_700_000_000_000;t.mock.method(Date,'now',()=>now);
  const f=journeyMealFixture(true);chooseJourneyMeal(f.w,f.r,true);stepWorld(f.w,4);const stock=f.r.inventory.meal!;
  for(const r of f.w.residents){r.lastDecisionAt=f.w.minute;r.decisionDue=f.w.minute+1000;}
- const store=new WorldStore(':memory:');store.commit(f.w,null);t.after(()=>store.close());let observations=0;
+ const store=new WorldStore(':memory:');store.commit(f.w,null);const runtimes:ValleyRuntime[]=[];t.after(()=>{try{for(const runtime of [...runtimes].reverse())runtime.stop();}finally{store.close();}});let observations=0;
  const runtime=new ValleyRuntime(store,[{model:QWEN_MODEL,key:'OFFLINE_DUMMY'}],async()=>{throw new Error('Offline injected stub');},{mode:'formal',directEatingEvidence:{observe:e=>{
   if(e.type==='food_step_committed'&&e.journeyMeals?.length){observations++;if(asynchronous)return Promise.reject(new Error('Offline observer'));throw new Error('Offline observer');}
- }}});t.after(()=>runtime.stop());runtime.start();for(let i=0;i<20&&!observations;i++)runtime.tick(now+=1000);
+ }}});runtimes.push(runtime);runtime.start();for(let i=0;i<20&&!observations;i++)runtime.tick(now+=1000);
  assert.equal(observations,1);assert.equal(runtime.directEatingEvidenceStatus()!.failure,asynchronous?'async_observer':'observer_threw');
  assert.equal(journeyPerson(runtime.world,f.r.id).inventory.meal,stock-1);assert.equal(journeyPerson(store.loadForRuntime()!,f.r.id).inventory.meal,stock-1);
 });

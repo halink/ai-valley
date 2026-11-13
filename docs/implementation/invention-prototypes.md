@@ -36,4 +36,4 @@ node node_modules/typescript/bin/tsc --noEmit
 node --import tsx --test tests/invention-prototypes.test.ts tests/resident-designs.test.ts tests/food.test.ts tests/rooms.test.ts
 ```
 
-实现：[有限图纸与实物结构](../../src/shared/prototypes.ts) · [现场投入与实测结算](../../src/world/prototypes.ts) · [正常选项](../../src/server/design-opportunities.ts) · [只读记录](../../src/client/prototypes.ts)
+实现：[有限图纸与实物结构](../../src/shared/prototypes.ts) · [现场投入与实测结算](../../src/world/prototypes.ts) · [正常选项](../../src/server/design-opportunities.ts) · 只读记录（旧实现已退役，历史版本可追溯）

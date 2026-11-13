@@ -70,6 +70,7 @@ type DomainAction =
  | {type:'wait';minutes:number}
  | {type:'gather';resourceId:string;quantity:number}
  | {type:'plant'|'water'|'harvest';plotId:string}
+ | {type:'mvpDrink'}
  | {type:'eat';item:Item}
  | {type:'sleep';minutes:number;buildingId?:string}
  | {type:'cook';quantity:number;buildingId?:string}
@@ -87,7 +88,7 @@ type DomainAction =
  | {type:'lodge';buildingId:string}
  | {type:'settle';buildingId:string};
 export interface Plan {id:string;actorId:string;actorRevision:number;createdAt:number;definition:string;intention:string;actions:Action[];}
-export interface Activity {appointmentStartedAt?:number;appointmentWork?:{from:number;through:number;minutes:number};foodSourceShareWork?:{from:number;through:number;minutes:number};foodGiftWork?:{from:number;through:number;minutes:number};presenceWork?:{from:number;through:number;minutes:number;provider:PersonObservation;person:PersonObservation};room?:import('./rooms.js').RoomJourney;planId:string;action:Action;startedAt:number;remaining:number;path:Vec[];target:Vec;definition:string;cargo?:{bodyId:string;graveId?:string;storageId?:string;storageSlot?:number;pickedUp:boolean;pickupRemaining?:number};travelProgress?:number;}
+export interface Activity {mvpBed?:{buildingId:string;index:number};appointmentStartedAt?:number;appointmentWork?:{from:number;through:number;minutes:number};foodSourceShareWork?:{from:number;through:number;minutes:number};foodGiftWork?:{from:number;through:number;minutes:number};presenceWork?:{from:number;through:number;minutes:number;provider:PersonObservation;person:PersonObservation};room?:import('./rooms.js').RoomJourney;planId:string;action:Action;startedAt:number;remaining:number;path:Vec[];target:Vec;definition:string;cargo?:{bodyId:string;graveId?:string;storageId?:string;storageSlot?:number;pickedUp:boolean;pickupRemaining?:number};travelProgress?:number;}
 export type CompletedAction = {type:Action['type'];at:number;minutes?:number;energy?:number};
 export interface Resident {foodSourceKnowledge?:import('./food-source-sharing.js').FoodSourceKnowledge;regionalLocation?:RegionalLocation;knownDocks?:string[];physiologyDefinition?:string;
  decisionProtection?:import('./decision-protection.js').DecisionProtection;
@@ -124,7 +125,7 @@ export interface ModelCharge {startedAt:number;input:number;output:number;finish
 export interface ModelAdmissionCancellation {actorId:string;model:string;requestNumber:number;revision:number;atMs:number;monotonicNs:string;
  count:number;baselineRequests:number;baselineCancellations:number;previousReceiptHash:string|null;}
 export interface ModelMetrics {selfHostedCooldowns?:Record<string,{observedAt:number;blockedUntil:number;limitCount:number}>;admissionCancellation?:ModelAdmissionCancellation;regionalDecisions?:number;localDecisions?:number;requests:number;successes:number;failures:number;inputTokens:number;outputTokens:number;lastLatencyMs:number;unmeteredFailures?:number;lastError:string|null;inFlight:string[];model:string;configured:boolean;lastAttemptModel?:string;usageWindow?:Record<string,ModelCharge[]>;routing?:{primary:string;primaryConfigured:boolean;backup:string;backupConfigured:boolean};}
-export interface World {ferries?:import('./ferry.js').FerryState;buildingMigrations?:import('./building-migration.js').BuildingUpgrade[];regions?:Array<{id:string;name:string;openedAt:number;width:number;height:number;access:Vec;sourceIds:string[];fishKeys:string[]}>;
+export interface World {mvpRooms?:{version:1;adoptedAt:number};mvpDrinking?:import('./mvp-drinking.js').MvpDrinking;ferries?:import('./ferry.js').FerryState;buildingMigrations?:import('./building-migration.js').BuildingUpgrade[];regions?:Array<{id:string;name:string;openedAt:number;width:number;height:number;access:Vec;sourceIds:string[];fishKeys:string[]}>;
  pregnancyPreparation?:import('./pregnancy-preparation.js').PregnancyPreparationState;
  regionSurveys?:import('./region-survey.js').RegionSurveyState;
  waterSupply?:import('./water-supply.js').WaterSupplyState;
@@ -172,6 +173,7 @@ export interface World {ferries?:import('./ferry.js').FerryState;buildingMigrati
 export interface ContentDefinition {id:string;version:number;kind:'building'|'recipe'|'action'|'life';dependencies:string[];cost?:Inventory;minutes?:number;data:Record<string,unknown>;}
 export interface FormalOpportunity {id:string;label:string;action:Action;chooseDuration?:boolean;}
 export interface DecisionContext {
+ mvpDrinking?:{thirst:number;canDrink:boolean};
  relationshipMemories?:import('./relationship-memory.js').RelationshipMemories;
  foreign?:{origin:string;notice:string;choices:FormalOpportunity[]};
  outside?:{origin:string;notice:string;choices:FormalOpportunity[]};

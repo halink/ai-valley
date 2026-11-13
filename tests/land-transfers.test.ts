@@ -6,7 +6,7 @@ import {createWorld} from '../src/world/seed.js';
 import {createFormalWorld} from '../src/world/formal-seed.js';
 import {DAY,YEAR} from '../src/world/time.js';
 import {initializeLandRights,advanceLandRights,completeLandRights,landRightsTarget} from '../src/world/land-rights.js';
-import {landTransferOpportunities,landTransferReason,privateParcelError} from '../src/world/land-transfers.js';
+import {landTransferOpportunities,privateParcelError} from '../src/world/land-transfers.js';
 import {initializeProduction,productionParcels,completeProduction} from '../src/world/production.js';
 import {initializeConstruction,completeConstruction,constructionReason,constructionTarget} from '../src/world/construction.js';
 import {initializeEconomy,totalCoins} from '../src/world/economy.js';
@@ -17,7 +17,7 @@ import {parseChoice} from '../src/server/affordances.js';
 import {submitPlan,stepWorld} from '../src/world/engine.js';
 import {WorldStore,workingEvents} from '../src/server/store.js';
 import {emitLedgerEvent} from '../src/world/events.js';
-import {landRightsPanel} from '../src/client/land-rights.js';
+
 import {recordDeath} from '../src/world/life.js';
 
 function fixture(){
@@ -54,7 +54,7 @@ test('normal final choices reach owner offer and independent buyer acceptance, t
  assert.equal(JSON.stringify(w.definitions['land/start@1']),defs);assert.deepEqual(w.map,map);assert.deepEqual(w.residents.map(r=>r.inventory),inventory);assert.equal(w.buildings.length,1);
  const build={type:'construction' as const,operation:'propose' as const,kind:'home' as const,scope:'private' as const,at:{x:parcel.x,y:parcel.y},wagePerHour:0,prices:{wood:2,stone:2}};
  buyer.at={...constructionTarget(w,buyer,build).target};seller.at={...buyer.at};assert.ok(constructionReason(w,seller,build));assert.equal(completeConstruction(w,buyer,build),null);assert.equal(w.construction!.projects[0].ownerId,buyer.id);
- assert.match(landRightsPanel(w),/已当面交款转移/);assert.match(landRightsPanel(w),/73/);
+
 });
 
 test('offering and acceptance require actual outdoor presence, independent adults, and the named buyer',()=>{
@@ -153,10 +153,10 @@ test('in-flight acceptance survives SQLite working reload and rechecks seller pr
  }
 });
 
-test('sale audit evidence outlives the working event window and the panel escapes resident names',()=>{
+test('sale audit evidence outlives the working event window',()=>{
  const f=fixture(),s=offer(f);assert.equal(completeLandRights(f.w,f.buyer,action('buyParcel',s.id)),null);f.w.minute+=30*DAY;for(let n=0;n<1800;n++)emitLedgerEvent(f.w,{kind:'system',actors:[],place:{x:1,y:1},text:'isolated archive filler '+n});for(const r of f.w.residents)r.memories=[];
  assert.ok(s.eventIds.every(id=>workingEvents(f.w).some(e=>e.id===id)));const store=new WorldStore(':memory:');store.commit(f.w,null);const w=store.load(true)!;store.close();assert.ok(s.eventIds.every(id=>w.events.some(e=>e.id===id)));
- f.seller.name='<script>alert(1)</script>';const html=landRightsPanel(f.w);assert.ok(!html.includes('<script>'));assert.match(html,/&lt;script&gt;/);assert.match(html,/私人空地当面转移/);
+ f.seller.name='<script>alert(1)</script>';
 });
 
 test('formal nine-resident world exposes a genuine empty founding parcel without any new land',()=>{

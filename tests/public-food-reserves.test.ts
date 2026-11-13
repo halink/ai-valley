@@ -19,7 +19,7 @@ import {parseChoice} from '../src/server/affordances.js';
 import {civicOpportunities} from '../src/server/civic-opportunities.js';
 import {commonsOpportunities} from '../src/server/commons-opportunities.js';
 import {residentFoodCoverage,settlementFoodCoverage} from '../src/world/food-coverage.js';
-import {financePanel} from '../src/client/livelihood.js';
+
 import {WorldStore} from '../src/server/store.js';
 import {DAY,YEAR} from '../src/world/time.js';
 
@@ -147,10 +147,9 @@ test('child supply, forged policy fields and tampered menu prices cannot acquire
  const seller=f.adults[2],supplyMenu=civicOpportunities(w,seller),supply=supplyMenu.find(o=>o.action.type==='civic'&&o.action.operation==='supplyReserve')!;assert.ok(supply);assert.throws(()=>parseChoice(JSON.stringify({choice:supply.id,unitPrice:100}),supplyMenu));
 });
 
-test('observer ledger is read-only, escapes names and separates reserve holdings from public stock',()=>{
- const f=ready(),{w,adults,hall,reserve:p}=f;table(f,adults[2]);civic(f,adults[2],delivery(p));hall.name='<img src=x onerror=alert(1)>';adults[2].name='<script>bad()</script>';const before=JSON.stringify(w),html=financePanel(w);assert.equal(JSON.stringify(w),before);assert.match(html,/公共储备粮/);assert.match(html,/累计入库 3 \/ 12/);assert.match(html,/尚余预留款 27/);assert.match(html,/&lt;img/);assert.doesNotMatch(html,/<script>|<img src=x/);assert.equal(publicBalance(w),3);
+test('delivery keeps reserve holdings separate from public stock',()=>{
+ const f=ready(),{w,adults,hall,reserve:p}=f;table(f,adults[2]);civic(f,adults[2],delivery(p));hall.name='<img src=x onerror=alert(1)>';adults[2].name='<script>bad()</script>';const before=JSON.stringify(w);assert.equal(JSON.stringify(w),before);assert.equal(publicBalance(w),3);
 });
-
 
 test('unchanged formal nine-person founding world can vote, deliver and receive a real reserve through normal actions',()=>{
  const w=createFrontierWorld();w.clock.paused=false;initializeCivic(w);initializeCommons(w);initializeRooms(w);initializeForeignTrade(w);advancePublicDuties(w);initializeFood(w);
@@ -172,7 +171,6 @@ test('visitor collection grants no residency, infant feeding, property or unexpr
  const f=ready(),{w,adults,child,hall,reserve:p}=f;table(f,adults[2]);civic(f,adults[2],delivery(p));child.residency='visitor';table(f,child);assert.equal(completeCommons(w,child,take(f,p)),null);assert.equal(child.residency,'visitor');assert.equal(child.homeId,null);assert.deepEqual(child.guardianIds,[]);assert.equal(hall.ownerId,'commons');
  child.canExpress=false;assert.match(commonsReason(w,child,take(f,p))!,/不能独立/);child.canExpress=true;child.bornAt=w.minute-5*YEAR;assert.match(commonsReason(w,child,take(f,p))!,/不能独立/);assert.equal(p.withdrawn,1);child.bornAt=w.minute-6*YEAR;const atSix=take(f,p);child.canDecide=false;assert.match(completeCommons(w,child,atSix)!,/不能独立/);assert.equal(p.withdrawn,1);child.canDecide=true;assert.equal(completeCommons(w,child,atSix),null);assert.equal(p.withdrawn,2);
 });
-
 
 test('reserve to charter and unequal voted allowances subtract all earlier withdrawals rather than adding caps',()=>{
  const f=ready({dailyNutrition:60}),{w,adults,child,hall,reserve:p}=f;table(f,adults[2]);civic(f,adults[2],delivery(p,6));w.civic!.stores[hall.id]={turnip:2};w.economy!.treasuryStock.turnip!+=2;initializeFood(w);table(f,child);

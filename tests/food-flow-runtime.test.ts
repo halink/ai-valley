@@ -82,8 +82,9 @@ test('runtime optional switch and failed durable commits cannot publish flow obs
  const committed=events.filter(e=>e.type==='food_step_committed');assert.ok(committed.length>0);
  for(const step of committed){assert.deepEqual(step.foodFlows,[]);assert.ok(Object.isFrozen(step.foodFlows));}
  const before=structuredClone(runtime.world),count=events.length;
- t.mock.method(store,'commit',()=>{throw new Error('Synthetic durable failure');});
+ const failedCommit=t.mock.method(store,'commit',()=>{throw new Error('Synthetic durable failure');});
  assert.throws(()=>runtime.tick(now+=1000),/durable failure/);assert.equal(events.length,count);assert.deepEqual(runtime.world,before);
+ failedCommit.mock.restore();runtime.stop();
 });
 
 test('flow validation rejects array accessors and preserves unknown batch metadata',()=>{

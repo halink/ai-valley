@@ -1,4 +1,4 @@
-; Native read-only observer. World authority remains the TypeScript service.
+; Browser-first read-only observer. World authority remains the TypeScript service.
 config_version=5
 [application]
 config/name="AI Valley · Godot M1"

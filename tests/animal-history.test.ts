@@ -5,9 +5,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {testTmpdir} from '../scripts/repository-temporary.mjs';
 import {join} from 'node:path';
-import {animalHistoryButton,animalHistoryId,animalHistoryOverview} from '../src/client/animal-history.js';
-import {animalInspector} from '../src/client/animal-observation.js';
-import {HistoryReader,archiveControls,archiveTimeline} from '../src/client/history.js';
+
 import {decisionChoices,decisionContext} from '../src/server/decisions.js';
 import {HistoryQueryError,historyKey,normalizeHistory,parseHistoryQuery} from '../src/server/history-query.js';
 import {WorldStore} from '../src/server/store.js';
@@ -103,7 +101,7 @@ test('actual wild duck taming and death stay in one archive after restart and lo
   definition:w.activeDefinitions['action/routine'],intention:'用饲料驯养近处的野鸭',actions:[choice.action]}).ok,true);stepWorld(w,27);
  const animal=w.industry!.animals.find(n=>n.id===duck.id)!;assert.ok(animal);
  const tame=w.events.find(e=>e.animalIds?.includes(duck.id)&&e.text.includes('驯养'))!;assert.ok(tame);
- assert.match(animalInspector(w,{kind:'beast',id:duck.id}),new RegExp('data-animal-history="'+duck.id+'"'));
+
  recordLivestockDeath(w,animal,'合成测试中的已记录死亡');const death=w.events.at(-1)!;
  const dir=mkdtempSync(join(testTmpdir(),'animal-history-restart-')),path=join(dir,'synthetic.sqlite');let store=new WorldStore(path);
  try{store.commit(w,null);const previous=w.revision;w.minute+=1000;
@@ -114,53 +112,7 @@ test('actual wild duck taming and death stay in one archive after restart and lo
   const before=JSON.stringify(restored),memory=JSON.stringify(restored.residents.map(r=>r.memories));
   const history=store.historyPage(w.id,{animalId:duck.id}).events;
   for(const e of [wild,tame,death])assert.deepEqual(history.find(x=>x.id===e.id),e);
-  const html=animalHistoryOverview(restored,duck.id)+archiveTimeline(history,restored);
-  assert.match(html,/当前没有个体状态记录/);assert.ok(!html.includes('data-animal-detail='));
+
   assert.equal(JSON.stringify(restored),before);assert.equal(JSON.stringify(restored.residents.map(r=>r.memories)),memory);
  }finally{store.close();rmSync(dir,{recursive:true,force:true});}
-});
-
-test('animal archive presentation distinguishes water-area records and interpretations, and escapes raw identities',()=>{
- const w=fixture(),id='duck"><script>alert(1)</script>';
- assert.equal(animalHistoryId({kind:'fish',id:'1,2'}),'shoal:1,2');
- assert.equal(animalHistoryId({kind:'animal',id:'duck'}),animalHistoryId({kind:'beast',id:'duck'}));
- const f=fact(w,'understanding',{animalIds:[id,id],text:'<img onerror=alert(1)>',interpretation:{observerId:'a',targetId:'b',sourceEventId:'source',source:'heard'}});
- const html=animalHistoryButton(id)+animalHistoryOverview(w,id)+archiveTimeline([f],w);
- assert.ok(!html.includes('<script>'));assert.ok(!html.includes('<img'));assert.match(html,/人物自己的理解/);
- assert.equal((archiveTimeline([f],w).match(/data-animal-history=/g)??[]).length,1);
- assert.match(animalHistoryOverview(w,'shoal:1,2'),/不是某一条鱼的生平/);
- assert.match(animalHistoryOverview(w,id),/不补推断/);
-});
-
-function deferredFetch(){const requests:Array<{url:URL;reply:(page:HistoryPage,status?:number)=>void}>=[];
- const fetcher=((input:URL)=>new Promise<Response>(resolve=>requests.push({url:new URL(input),reply:(page,status=200)=>resolve(new Response(JSON.stringify(page),{status}))}))) as typeof fetch;
- return {requests,fetcher};
-}
-const page=(w:World,id:string,nextCursor:string|null=null):HistoryPage=>({worldId:w.id,events:[fact(w,id)],hasMore:!!nextCursor,nextCursor,observedRevision:w.revision});
-
-test('animal reader ignores stale selections, retains its scope on filters and only announces new matching animal events',async()=>{
- const w=fixture(),f=deferredFetch(),reader=new HistoryReader('http://localhost/api/',()=>{},f.fetcher);
- try{const first=reader.configure(w.id,{animalId:'duck'}),second=reader.configure(w.id,{animalId:'wolf'});
-  assert.equal(f.requests[1].url.searchParams.get('animal'),'wolf');f.requests[1].reply(page(w,'wolf-head','wolf-older'));await second;
-  f.requests[0].reply(page(w,'stale-duck'));await first;assert.equal(reader.page!.events[0].id,'wolf-head');
-  const older=reader.older();f.requests[2].reply(page(w,'wolf-old'));await older;
-  emitLedgerEvent(w,{kind:'hazard',actors:[],animalIds:['wolf-other'],place:{x:0,y:0},text:'wolf 的原文提及不是该个体记录'});reader.observe(w,true);assert.equal(reader.news,false);
-  emitLedgerEvent(w,{kind:'hazard',actors:[],animalIds:['wolf'],place:{x:0,y:0},text:'已登记同一只狼的新事件'});reader.observe(w,true);
-  assert.equal(reader.news,true);assert.equal(reader.index,1);assert.equal(reader.page!.events[0].id,'wolf-old');
-  const filtered=reader.setFilters({kind:'hazard',q:'发生'});assert.equal(reader.page,undefined);
-  assert.equal(f.requests[3].url.searchParams.get('animal'),'wolf');assert.equal(f.requests[3].url.searchParams.get('kind'),'hazard');
-  f.requests[3].reply(page(w,'filtered'));await filtered;
-  assert.ok(!archiveControls('animalHistory',reader,w).includes('name="water"'));
- }finally{reader.destroy();}
-});
-
-test('animal reader retries failed pages without leaving the animal scope and deactivation stops background refresh',async()=>{
- const w=fixture(),f=deferredFetch(),reader=new HistoryReader('http://localhost/api/',()=>{},f.fetcher);
- try{const initial=reader.configure(w.id,{animalId:'shoal:1,2'});f.requests[0].reply(page(w,'head','old-fish'));await initial;
-  const older=reader.older();f.requests[1].reply(page(w,'bad'),503);await older;assert.ok(reader.error);
-  const retry=reader.retry();assert.equal(f.requests[2].url.searchParams.get('animal'),'shoal:1,2');assert.equal(f.requests[2].url.searchParams.get('cursor'),'old-fish');
-  f.requests[2].reply(page(w,'real-old'));await retry;assert.equal(reader.error,null);reader.deactivate();
-  emitLedgerEvent(w,{kind:'hazard',actors:[],animalIds:['shoal:1,2'],place:{x:0,y:0},text:'新的鱼群记录'});reader.observe(w,false);
-  assert.equal(reader.news,false);assert.equal(f.requests.length,3);
- }finally{reader.destroy();}
 });

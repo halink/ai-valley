@@ -62,6 +62,7 @@ export function buildChoices(c:DecisionContext):ActionChoice[]{
   if(home&&home.observed?.ownBed!==false){const label=home.observed?'回自己的床睡':'按登记住处尝试回自己的床睡（屋况和床位尚待核实）';add(rest,'sleep.120',label+'2小时',{type:'sleep',minutes:120});add(rest,'sleep.360',label+'6小时',{type:'sleep',minutes:360});}
  }
  const food=group();
+ if(c.mvpDrinking?.canDrink)add(food,'mvp.drink','自行饮用1份随身清水（5分钟），实际扣水并缓解50口渴，不改变饥饿或健康',{type:'mvpDrink'});
  // Cap and rotate the COMPLETE own-food list before category compaction.
  // With at most four eat rows, the following cook row fits within the basic
  // 32 slots even when every other basic category is full (31 preceding rows).

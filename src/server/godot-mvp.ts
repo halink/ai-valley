@@ -1,3 +1,9 @@
+import {serveGodotWeb} from './godot-web.js';
+import {roomObservation} from './room-observation.js';
+import {adoptMvpRooms} from '../world/mvp-rooms.js';
+import {adoptMvpDrinking,mvpThirst} from '../world/mvp-drinking.js';
+import {mvpObservation} from './mvp-observation.js';
+import {enableCompletedMovement,completedMovementSnapshot} from '../world/completed-movement.js';
 /** Small, disposable engineering MVP. Rules choose actions; the existing world
  * engine owns pathfinding, needs, elapsed work and resource/food settlement.
  * This is NOT LLM autonomy, a formal save, or a longevity acceptance run. */
@@ -11,12 +17,12 @@ import type {Action,Resident,Snapshot,Tile,World} from '../shared/types.js';
 
 export const GODOT_MVP_PORT=3414;
 export const GODOT_MVP_NOTICE='隔离核心循环：本地规则驱动，非真实模型；内存世界，退出后重置';
-export type MvpPhase='deciding'|'travelling'|'gathering'|'eating'|'resting'|'waiting'|'stopped';
+export type MvpPhase='deciding'|'travelling'|'gathering'|'eating'|'resting'|'waiting'|'stopped'|'drinking';
 export function mvpPhase(r:Resident):MvpPhase {
  if(r.status!=='alive')return 'stopped';
  if(!r.activity)return 'deciding';
  if(r.activity.path.length||r.activity.room?.path.length)return 'travelling';
- return ({gather:'gathering',eat:'eating',sleep:'resting',wait:'waiting'} as const)[r.activity.action.type as 'gather'|'eat'|'sleep'|'wait']??'waiting';
+ return ({mvpDrink:'drinking',gather:'gathering',eat:'eating',sleep:'resting',wait:'waiting'} as const)[r.activity.action.type as 'gather'|'eat'|'sleep'|'wait']??'waiting';
 }
 export function createMvpWorld():World {
  const world=createWorld(3414);
@@ -44,6 +50,8 @@ export function createMvpWorld():World {
   r.intention='本地规则：观察当前需要';
  }
  world.clock={paused:false,reason:null,realMinutesPerDay:12};
+ adoptMvpDrinking(world);
+ adoptMvpRooms(world);
  return world;
 }
 /** No global information is claimed to be a resident's model knowledge. This
@@ -54,15 +62,21 @@ export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string
   const source=w.resources.filter(s=>s.kind==='bush'&&s.amount>=1&&r.knownResources.includes(s.id)).sort((a,b)=>distance(r.at,a.at)-distance(r.at,b.at))[0];
   if(source)return {action:{type:'gather',resourceId:source.id,quantity:Math.min(3,source.amount)},reason:'前往已知果丛，采集有限食物'};
  }
+ if((mvpThirst(w,r)??0)>=50-1e-9){
+  if((r.inventory.water??0)>=1)return {action:{type:'mvpDrink'},reason:'口渴，选择饮用一份随身清水'};
+  const source=w.resources.find(s=>s.kind==='spring'&&s.amount>=1&&r.knownResources.includes(s.id));
+  if(source)return {action:{type:'gather',resourceId:source.id,quantity:1},reason:'口渴且没有清水，前往泉水取一份'};
+ }
  if(r.energy<70)return {action:{type:'sleep',minutes:120},reason:'返回共屋休息，恢复精力'};
  return {action:{type:'wait',minutes:30},reason:'暂时没有紧迫需要，停留观察'};
 }
 export function createMvpSession(){
  const world=createMvpWorld();
+ enableCompletedMovement(world);
  let serial=0,fault:string|null=null;
  const decisions:Record<string,number>={};
- const snapshot=():Snapshot&{mvp:{driver:'local-rules';notice:string;ephemeral:true;fault:string|null;phases:Record<string,MvpPhase>;decisions:Record<string,number>}}=>({
-  world:structuredClone(world),serverTime:new Date().toISOString(),version:VALLEY_VERSION,mapRevision:'godot-mvp-map-1',
+ const snapshot=():Snapshot&{roomViews:ReturnType<typeof roomObservation>}&{observation:ReturnType<typeof mvpObservation>}&{movement:ReturnType<typeof completedMovementSnapshot>}&{mvp:{driver:'local-rules';notice:string;ephemeral:true;fault:string|null;phases:Record<string,MvpPhase>;decisions:Record<string,number>}}=>({
+  roomViews:roomObservation(world),observation:mvpObservation(world,[],[]),movement:completedMovementSnapshot(world),world:structuredClone(world),serverTime:new Date().toISOString(),version:VALLEY_VERSION,mapRevision:'godot-mvp-map-1',
   capabilities:{active:['小地图只读观察','本地规则采集/进食/休息闭环'],pending:['真实模型决策验收','持久存档','最终绘本素材']},
   mvp:{driver:'local-rules',notice:GODOT_MVP_NOTICE,ephemeral:true,fault,phases:Object.fromEntries(world.residents.map(r=>[r.id,mvpPhase(r)])),decisions:{...decisions}},
  });
@@ -86,9 +100,10 @@ export function createMvpSession(){
  };
  return {world,snapshot,advance};
 }
-export function createMvpServer(session:ReturnType<typeof createMvpSession>):Server {
+export function createMvpServer(session:ReturnType<typeof createMvpSession>,options:{webRoot?:string}={}):Server {
  return createServer((req,res)=>{
   res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');
+  if(options.webRoot&&serveGodotWeb(req,res,options.webRoot))return;
   if(req.method!=='GET'){res.writeHead(405,{'Allow':'GET'});res.end('Read-only MVP');return;}
   if(req.url!=='/ai-town/api/world'){res.writeHead(404);res.end('Not found');return;}
   res.writeHead(200,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(session.snapshot()));

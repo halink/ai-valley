@@ -6,7 +6,7 @@ import {createWorld} from '../src/world/seed.js';
 import {createFormalWorld} from '../src/world/formal-seed.js';
 import {DAY,YEAR} from '../src/world/time.js';
 import {initializeLandRights,advanceLandRights,landRightsReason,landRightsTarget,completeLandRights,landRightsOpportunities,landSiteError} from '../src/world/land-rights.js';
-import {initializeConstruction,constructionReason,completeConstruction,advanceConstruction,constructionWorkError} from '../src/world/construction.js';
+import {initializeConstruction,constructionReason,completeConstruction,advanceConstruction} from '../src/world/construction.js';
 import {constructionLand} from '../src/world/construction-sites.js';
 import {initializeProduction,productionParcels} from '../src/world/production.js';
 import {initializeForeignTrade} from '../src/world/foreign-trade.js';
@@ -15,7 +15,7 @@ import {decisionContext,decisionChoices} from '../src/server/decisions.js';
 import {parseChoice} from '../src/server/affordances.js';
 import {submitPlan,stepWorld} from '../src/world/engine.js';
 import {WorldStore} from '../src/server/store.js';
-import {landRightsPanel} from '../src/client/land-rights.js';
+
 import {walkable} from '../src/world/navigation.js';
 
 function fixture(){
@@ -48,7 +48,7 @@ test('normal final menu and physical actions reach a finite right then genuine c
  owner.at={...hall.door};run(w,owner,choose(w,owner,a=>a.type==='landRights'&&a.operation==='register'));
  assert.equal(p.status,'registered');assert.equal(p.expiresAt,p.registeredAt!+2*DAY);assert.equal(walkable(w,p.at),true);assert.equal(constructionLand(w,p.at),true);assert.equal(totalCoins(w),coins);assert.equal(owner.inventory.wood,inventory.wood);assert.equal(owner.inventory.stone,inventory.stone);
  const a=choose(w,owner,a=>a.type==='construction'&&a.operation==='propose'&&a.kind==='home');run(w,owner,a);assert.equal(w.construction!.projects[0].landRightId,p.id);assert.equal(w.construction!.projects[0].reserved,true);assert.equal(walkable(w,p.at),false);assert.equal(w.buildings.length,1);
- assert.match(landRightsPanel(w),/有限建设权生效/);
+
 });
 
 test('public notice is at least a game day, distinct voters cannot be forged or replayed, and survey has no reservation',()=>{

@@ -8,21 +8,21 @@ import assert from 'node:assert/strict';
 import type {Action,Resident,World} from '../src/shared/types.js';
 import type {CivicAction,CivicMeasure} from '../src/shared/civic.js';
 import type {ForeignAction,ForeignShipment} from '../src/shared/foreign-trade.js';
-import {createFormalWorld,createFrontierWorld} from '../src/world/formal-seed.js';
-import {initializeCivic,completeCivic,advanceCivic,civicReason} from '../src/world/civic.js';
-import {initializeForeignTrade,advanceForeignTrade,completeForeignTrade,foreignReason,foreignDecisionContext,merchantChoices,applyForeignDecision,hasForeignAssets} from '../src/world/foreign-trade.js';
+import {createFormalWorld} from '../src/world/formal-seed.js';
+import {initializeCivic,completeCivic,advanceCivic} from '../src/world/civic.js';
+import {initializeForeignTrade,advanceForeignTrade,completeForeignTrade} from '../src/world/foreign-trade.js';
 import {reserveCommitted} from '../src/world/public-food-procurement.js';
 import {reserveReceiptId} from '../src/world/public-food-reserves.js';
 import {initializeFood,advanceFood,foodContainers} from '../src/world/food.js';
 import {initializeCommons} from '../src/world/commons.js';
 import {initializeRooms} from '../src/world/rooms.js';
 import {roomLayout} from '../src/shared/rooms.js';
-import {totalCoins,accountBalance} from '../src/world/economy.js';
+import {accountBalance} from '../src/world/economy.js';
 import {submitPlan,stepWorld} from '../src/world/engine.js';
 import {decisionContext,decisionChoices} from '../src/server/decisions.js';
 import {parseChoice} from '../src/server/affordances.js';
 import {foreignOpportunities} from '../src/server/foreign-opportunities.js';
-import {financePanel} from '../src/client/livelihood.js';
+
 import {WorldStore} from '../src/server/store.js';
 import {recordDeath} from '../src/world/life.js';
 import {DAY,YEAR} from '../src/world/time.js';
@@ -109,12 +109,10 @@ test('review: the last quarter-minute does not extend purchase authority past it
  w.minute=p.expiresAt;advanceForeignTrade(w);assert.equal(s.status,'returning');assert.equal(s.actualTax,null);assert.equal(m.person.coins,cash);assert.equal(accountBalance(w,s.escrowAccount),9);
 });
 
-
 test('review: carrying public grain blocks departure until actual delivery, but uncollected grain does not',()=>{
  const f=fixture(),s=arrived(f);assert.equal(canDepart(f.w,f.r),null);collect(f,s);assert.ok(canDepart(f.w,f.r));assert.equal(executeSocialAction(f.w,f.r,{type:'leave'}).ok,false);assert.equal(f.r.residency,'resident');
  f.w.minute=f.p.expiresAt;advanceCivic(f.w);assert.ok(canDepart(f.w,f.r));table(f);assert.equal(completeCivic(f.w,f.r,delivery(f,s)),null);assert.equal(canDepart(f.w,f.r),null);
 });
-
 
 test('review: saturated public import exposure preserves old choices and rotates all three merchants',()=>{
  const f=fixture(),context=decisionContext(f.w,f.r);

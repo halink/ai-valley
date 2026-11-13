@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import {createWorld} from '../src/world/seed.js';
 import {DAY,YEAR} from '../src/world/time.js';
 import {advanceEconomy,completeEconomy,economyReason,totalCoins,accountBalance} from '../src/world/economy.js';
-import {advancePremises,completePremises,premisesReason,premisesTarget} from '../src/world/premises.js';
+import {advancePremises,completePremises,premisesReason} from '../src/world/premises.js';
 import {currentPremisesLease,premisesWorkReason} from '../src/shared/premises.js';
 import type {PremisesAction,PremisesTerms} from '../src/shared/premises.js';
 import type {Action,Resident,World} from '../src/shared/types.js';
@@ -15,12 +15,12 @@ import {atWorkstation} from './helpers/workspaces.js';
 import {premisesOpportunities,parsePremisesChoice} from '../src/server/premises-opportunities.js';
 import {employmentOpportunities} from '../src/server/employment-opportunities.js';
 import {economyOpportunities} from '../src/server/economy-opportunities.js';
-import {buildChoices,parseChoice} from '../src/server/affordances.js';
+import {parseChoice} from '../src/server/affordances.js';
 import {decisionContext,decisionChoices} from '../src/server/decisions.js';
 import {stepWorld,submitPlan} from '../src/world/engine.js';
 import {beginRoomTick,moveInRoom} from '../src/world/rooms.js';
 import {roomLayout} from '../src/shared/rooms.js';
-import {premisesPanel} from '../src/client/premises.js';
+
 import {recordDeath} from '../src/world/life.js';
 
 const terms:PremisesTerms={days:4,rentPerDay:12,deposit:7,station:'bench',startMinute:540,durationMinutes:360};
@@ -121,10 +121,6 @@ test('normal model menu can sign lease, open tenant shop, and preserves locked i
 
 test('building damage ends lease, refunds only remaining escrow and never invents repair/damages deductions',()=>{
  const f=fixture(),l=lease(f),total=totalCoins(f.w);f.w.minute+=DAY;f.site.condition=0;advancePremises(f.w);assert.equal(l.status,'ended');assert.equal(l.paid,12);assert.equal(l.refunded,43);assert.equal(totalCoins(f.w),total);
-});
-
-test('observer shows finite rent and escrow read-only with escaped labels',()=>{
- const f=fixture();lease(f);f.site.name='<img onerror=alert(1)>';const before=JSON.stringify(f.w),html=premisesPanel(f.w);assert.match(html,/押金7钱/);assert.match(html,/&lt;img/);assert.doesNotMatch(html,/<img/);assert.equal(JSON.stringify(f.w),before);
 });
 
 test('normal engine finishes repair at window end and denies later work',()=>{

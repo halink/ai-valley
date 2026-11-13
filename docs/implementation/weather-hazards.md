@@ -36,7 +36,7 @@
 
 ## 离线验证与剩余范围
 
-[观察回归](../../tests/weather-hazards-panel.test.ts)覆盖缺失状态不初始化、不启用风险、重复读取不改变世界、文字转义、旧记录不补造天气证据、记录洪区和泉水清理不补水的呈现。规则验证见[天气灾害回归](../../tests/weather-hazards.test.ts)与[原灾害回归](../../tests/frontier-hazards.test.ts)。运行时使用已有本地依赖：
+观察回归（旧实现已退役，历史版本可追溯）覆盖缺失状态不初始化、不启用风险、重复读取不改变世界、文字转义、旧记录不补造天气证据、记录洪区和泉水清理不补水的呈现。规则验证见[天气灾害回归](../../tests/weather-hazards.test.ts)与[原灾害回归](../../tests/frontier-hazards.test.ts)。运行时使用已有本地依赖：
 
 ```sh
 node --import tsx --test tests/weather-hazards-panel.test.ts tests/weather-hazards.test.ts tests/frontier-hazards.test.ts

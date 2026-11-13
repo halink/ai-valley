@@ -5,18 +5,15 @@ import {DatabaseSync} from 'node:sqlite';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {join} from 'node:path';
 import {testTmpdir} from '../scripts/repository-temporary.mjs';
-import {disasterEventDetails,disasterHistoryButton,disasterHistoryOverview,disasterPhaseNames} from '../src/client/disaster-history.js';
-import {HistoryReader,archiveControls,archiveTimeline} from '../src/client/history.js';
-import {weatherHazardsPanel} from '../src/client/weather-hazards.js';
+
 import {HistoryQueryError,historyKey,normalizeHistory,parseHistoryQuery} from '../src/server/history-query.js';
 import {createObserverServer} from '../src/server/http.js';
 import type {ValleyRuntime} from '../src/server/runtime.js';
 import {WorldStore} from '../src/server/store.js';
 import type {HistoryPage} from '../src/shared/history.js';
-import type {Snapshot,World,WorldEvent} from '../src/shared/types.js';
+import type {World,WorldEvent} from '../src/shared/types.js';
 import {emitLedgerEvent} from '../src/world/events.js';
 import {createWorld} from '../src/world/seed.js';
-import {clientMainHarness} from './helpers/client-main.js';
 
 function fixture(){const w=createWorld();w.mode='formal';w.events=[];return w;}
 function fact(w:World,id:string,extra:Partial<WorldEvent>={}):WorldEvent{
@@ -40,7 +37,8 @@ test('disaster pages match only the explicit exact identity, across event kinds 
 
 test('persistent disaster pages outlive the 180-event window and current disaster state, with stable insertion-order pagination',()=>{
  const dir=mkdtempSync(join(testTmpdir(),'disaster-history-')),path=join(dir,'synthetic.sqlite'),w=fixture();let store=new WorldStore(path);
- const phases=Object.keys(disasterPhaseNames) as Array<NonNullable<WorldEvent['hazardFact']>['phase']>;
+
+ const phases: Array<NonNullable<WorldEvent['hazardFact']>['phase']>=['warning','active','ended','damage','injury','retreat','shelter','repair'];
  const linked=Array.from({length:137},(_,i)=>fact(w,'chain:'+i,{at:i%3,hazardFact:{disasterId:'flood:one',phase:phases[i%phases.length]}}));
  try{w.events=linked.slice();store.commit(w,null);const before=w.revision;w.minute+=10000;
   for(const r of w.residents)r.memories=[];
@@ -53,7 +51,7 @@ test('persistent disaster pages outlive the 180-event window and current disaste
   while(cursor){const page=store.historyPage(w.id,{disasterId:'flood:one',limit:17,cursor});read.push(...page.events);cursor=page.nextCursor;}
   assert.deepEqual(read,[...linked].reverse());assert.equal(new Set(read.map(e=>e.id)).size,137);
   assert.equal(store.historyPage(w.id,{disasterId:'flood:one'}).events[0].id,'new-after-head');
-  assert.match(disasterHistoryOverview(restored,'flood:one'),/当前状态未知/);
+
  }finally{store.close();rmSync(dir,{recursive:true,force:true});}
 });
 
@@ -94,28 +92,4 @@ test('disaster HTTP route uses current-world stored history and remains GET/HEAD
   for(const method of ['POST','PUT','PATCH','DELETE'])assert.equal(request('/ai-town/api/history/page?disaster=flood%3Aone',method).status,405);
   assert.equal(JSON.stringify(w),before);
  }finally{server.emit('close');store.close();}
-});
-
-test('disaster presentation retains unknowns, phases and literal IDs without creating controls or causal links from plain text',()=>{
- const w=fixture(),id='flood"><script>bad</script>',event=fact(w,'partial',{text:'<img src=x>',hazardFact:{disasterId:id,phase:'repair',targetId:'<target>',before:0}}),before=JSON.stringify(w);
- const html=disasterHistoryButton(id)+disasterHistoryOverview(w,id)+archiveTimeline([event],w);
- assert.doesNotMatch(html,/<script>|<img|data-command|data-action=/);assert.match(html,/&lt;target&gt;/);assert.match(html,/0 → 未知（未记录）/);assert.match(html,/实际修护/);assert.match(html,/缺失的阶段/);
- assert.equal(disasterEventDetails({...event,hazardFact:undefined}),'');assert.equal(JSON.stringify(w),before);
- w.events=[event];assert.match(weatherHazardsPanel(w),/data-disaster-history="flood/);
- const reader=new HistoryReader('http://synthetic.invalid/api/',()=>{},async()=>new Response(JSON.stringify({worldId:w.id,events:[],hasMore:false,nextCursor:null})));
- return reader.configure(w.id,{disasterId:id}).then(()=>{assert.ok(!archiveControls('disasterHistory',reader,w).includes('name="water"'));reader.destroy();});
-});
-
-test('real client disaster entry keeps older pages and return position through observer updates until explicit latest',async()=>{
- const w=fixture(),snapshot:Snapshot={world:w,mapRevision:'synthetic',version:'synthetic',serverTime:'synthetic',capabilities:{active:[],pending:[]}},requests:URL[]=[];
- let head='head';const page=(id:string,cursor:string|null):HistoryPage=>({worldId:w.id,events:[fact(w,id)],nextCursor:cursor,hasMore:!!cursor,observedRevision:w.revision});
- const app=await clientMainHarness(snapshot,async()=>({wildernessPanel:weatherHazardsPanel}),(async input=>{const url=new URL(String(input));requests.push(url);return new Response(JSON.stringify(page(url.searchParams.has('cursor')?'older':head,url.searchParams.has('cursor')?null:'older-cursor')));}) as typeof fetch);
- const settle=()=>new Promise<void>(resolve=>setImmediate(resolve));
- app.click({disasterHistory:'flood:one'});await settle();assert.equal(requests[0].searchParams.get('disaster'),'flood:one');assert.equal(requests[0].searchParams.has('kind'),false);
- app.click({history:'disasterHistory',historyAction:'older'});await settle();app.scroll(210);assert.match(app.el('panel-body').innerHTML,/留存灾害原文 older/);
- const next=structuredClone(snapshot);emitLedgerEvent(next.world,{kind:'care',actors:[],place:{x:1,y:1},text:'实际撤离新事件',hazardFact:{disasterId:'flood:one',phase:'retreat'}});app.update(next);await settle();
- assert.equal(requests.length,2);assert.match(app.el('panel-body').innerHTML,/有新记录/);assert.equal(app.el('panel-body').scrollTop,210);
- app.click({panel:'places'});app.click({disasterHistory:'flood:one'});await settle();assert.equal(requests.length,2);assert.equal(app.el('panel-body').scrollTop,210);
- head='new-head';app.click({history:'disasterHistory',historyAction:'latest'});await settle();assert.equal(requests.length,3);assert.equal(app.el('panel-body').scrollTop,0);assert.match(app.el('panel-body').innerHTML,/留存灾害原文 new-head/);
- app.escape();assert.ok(app.el('panel').classList.contains('hidden'));
 });

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {createWorld} from '../src/world/seed.js';
 import {initializeHealth} from '../src/world/health.js';
 import {initializeRooms} from '../src/world/rooms.js';
-import {healthPanel,healthProfile} from '../src/client/health.js';
+
 import {decisionContext,prompt,decisionChoices} from '../src/server/decisions.js';
 import {observeBody} from '../src/world/body-observation.js';
 import type {MedicalTransport} from '../src/shared/health.js';
@@ -20,28 +20,12 @@ function delivered(f:ReturnType<typeof setup>,overrides:Partial<MedicalTransport
  f.w.health!.transports.push(t);return t;
 }
 
-test('independent review: observation and observer rendering have no side effects or executable controls',()=>{
+test('independent review: body observation has no world or authority side effects',()=>{
  const f=setup();delivered(f);f.patient.canDecide=false;f.patient.canExpress=false;f.patient.hunger=96;
  const before=structuredClone(f.w);
  observeBody(f.w,f.actor,f.patient);
- const html=healthPanel(f.w)+healthProfile(f.w,f.patient);
- assert.doesNotMatch(html,/data-command|data-action|<input|<form/);
+
  assert.deepEqual(f.w,before,'read-only display must not claim beds, register care, change knowledge, or modify consent');
-});
-
-test('independent review: a delivered patient without a health case is visible to the observer without claiming a bed',()=>{
- const f=setup();delivered(f);f.patient.canDecide=false;f.patient.canExpress=false;
- const html=healthPanel(f.w);
- assert.doesNotMatch(html,/目前需要照护的人/);
- assert.match(html,/救援后|接续/);
- assert.match(html,/独立审查对象/);
- assert.doesNotMatch(html,/已送入实际床位/);
-});
-
-test('independent review: health display escapes patient names and transport reasons',()=>{
- const f=setup();f.patient.name='<script>review-name</script>';delivered(f,{reason:'<img src=x onerror=review()>'});f.patient.canDecide=false;
- const html=healthPanel(f.w)+healthProfile(f.w,f.patient);
- assert.match(html,/&lt;script&gt;/);assert.match(html,/&lt;img/);assert.doesNotMatch(html,/<script>|<img/);
 });
 
 const observed=(f:ReturnType<typeof setup>)=>decisionContext(f.w,f.actor).people.find(p=>p.id===f.patient.id)?.bodyObservation;
@@ -108,22 +92,6 @@ test('independent review: expression limitation is not described as lost decisio
  assert.deepEqual(observeBody(f.w,f.actor,f.patient)?.signs,['expression-support']);
  const text=JSON.stringify(prompt(decisionContext(f.w,f.actor),[]));
  assert.match(text,/表达受限/);assert.match(text,/不能据此认定没有决定能力或已经同意/);assert.doesNotMatch(text,/自主应对受限/);
-});
-
-test('independent review: old unknown-bed deliveries stay unknown and do not rewrite historical records',()=>{
- const f=setup();delivered(f,{buildingId:f.w.buildings[0].id,bed:null,evacuationDestination:'known-address'});f.patient.canDecide=false;
- const before=structuredClone(f.w);let html=healthPanel(f.w);
- assert.match(html,/接收床位未登记/);assert.doesNotMatch(html,/已送入实际床位/);assert.deepEqual(f.w,before);
- delete (f.w.health!.transports[0] as Partial<MedicalTransport>).bed;html=healthPanel(f.w);assert.match(html,/接收床位未登记/);assert.doesNotMatch(html,/已送入实际床位/);
- for(const bed of [-1,NaN,Infinity,1.5,Number.MAX_SAFE_INTEGER+1]){f.w.health!.transports[0].bed=bed;html=healthPanel(f.w)+healthProfile(f.w,f.patient);assert.match(html,/接收床位未登记/);assert.doesNotMatch(html,/已送入实际床位|NaN|Infinity/);}
- for(const endedAt of [undefined,NaN,Infinity]){const t=f.w.health!.transports[0];t.bed=null;if(endedAt===undefined)delete (t as Partial<MedicalTransport>).endedAt;else t.endedAt=endedAt;const before=structuredClone(f.w);html=healthPanel(f.w)+healthProfile(f.w,f.patient);assert.match(html,/接收床位未登记/);assert.doesNotMatch(html,/已送入实际床位|NaN|Infinity/);assert.deepEqual(f.w,before);}
-});
-
-test('independent review: recovery removes the continuation item, not the rescue record; death and departure are not current needs',()=>{
- const f=setup();delivered(f);f.patient.canDecide=false;assert.match(healthProfile(f.w,f.patient),/当前能力与待核实/);
- f.patient.canDecide=true;assert.doesNotMatch(healthProfile(f.w,f.patient),/当前能力与待核实/);assert.match(healthPanel(f.w),/已临时落脚在干地/);
- f.patient.canDecide=false;f.patient.status='dead';assert.doesNotMatch(healthProfile(f.w,f.patient),/当前能力与待核实/);
- f.patient.status='alive';f.patient.residency='outside';assert.doesNotMatch(healthProfile(f.w,f.patient),/当前能力与待核实/);
 });
 
 test('independent review: a two-tile line blocked by terrain is not close physical contact',()=>{

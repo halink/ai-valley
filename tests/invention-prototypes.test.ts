@@ -12,7 +12,7 @@ import {decisionChoices,decisionContext} from '../src/server/decisions.js';
 import {buildChoices,parseChoice} from '../src/server/affordances.js';
 import {designOpportunities} from '../src/server/design-opportunities.js';
 import {WorldStore} from '../src/server/store.js';
-import {designsPanel} from '../src/client/designs.js';
+
 import {DAY} from '../src/world/time.js';
 
 const drawing:PrototypeDrawing={kind:'prototype',name:'晴日挂鱼架',purpose:'用自己组合的架子晾干鲜鱼',frame:'wood',mesh:'fiber',cover:'none',processes:['hang','airDry'],batchSize:2,trialMinutes:180};
@@ -71,7 +71,7 @@ test('normal resident menus: design, physical assembly, measured trial, publish,
  // A second physical attempt can fail after daylight ends. Knowledge guarantees the process, not its outcome.
  run(w,reader,testAction(w,reader,true));assert.equal(w.designs!.trials!.length,2);
  run(w,r,select(w,r,a=>a.type==='eat'&&a.item==='driedFish'));assert.equal(r.inventory.driedFish,0);
- const panel=designsPanel(w);assert.match(panel,/组合原型/);assert.match(panel,/实际试用及失败记录/);assert.match(panel,/输入批次/);
+
  assert.ok(w.events.filter(e=>e.designId===d.id).length>=10);
 });
 
@@ -142,7 +142,6 @@ test('unskilled, foreign-owner and fabricated-result requests fail, and persiste
  const old={nextSerial:5,records:[]};w.designs=old;initializeFood(w);assert.deepEqual(w.designs,old);
 });
 
-
 test('unfinished older prototypes stay actionable and older assets rotate instead of disappearing',()=>{
  const {w,r}=fixture(),d=draw(w,r);start(w,r,select(w,r,a=>a.type==='design'&&a.operation==='assemble'));
  while(!w.designs!.prototypes?.length)stepWorld(w,1);
@@ -189,7 +188,6 @@ test('actual covered mixed-weather trial produces only reduced yield, with every
  const t=w.designs!.trials![0];assert.equal(t.rainMinutes,60);assert.equal(t.sunMinutes,120);assert.equal(t.status,'succeeded');assert.deepEqual(t.input,{carp:2});assert.deepEqual(t.output,{driedFish:1});assert.equal(r.inventory.carp,0);
 });
 
-
 test('loss of original workspace does not trap all future assembly: unilateral abandonment preserves original material in place',()=>{
  const {w,r}=fixture();const d=draw(w,r);start(w,r,select(w,r,a=>a.type==='design'&&a.operation==='assemble'));
  while(!w.designs!.prototypes?.length)stepWorld(w,1);
@@ -202,7 +200,6 @@ test('loss of original workspace does not trap all future assembly: unilateral a
  assert.equal(p.status,'discarded');assert.equal(p.buildingId,original);assert.deepEqual(p.materials,materials);assert.deepEqual(r.inventory,stock);assert.equal(site.condition,0);
  assert.ok(buildChoices(decisionContext(w,r)).some(c=>c.action.type==='design'&&c.action.operation==='assemble'&&c.action.designId===d.id&&!c.action.prototypeId));
 });
-
 
 test('revoked intact trial site permits only its owner to abandon continuation, preserving original-site attribution',()=>{
  const {w,r,reader}=fixture();const d=draw(w,r);const p=assemble(w,r);start(w,r,testAction(w,r));while(!w.designs!.trials?.length)stepWorld(w,1);

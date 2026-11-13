@@ -11,8 +11,7 @@ import {DAY,YEAR} from '../src/world/time.js';
 import {decisionChoices} from '../src/server/decisions.js';
 import {parseChoice} from '../src/server/affordances.js';
 import {WorldStore,workingEvents} from '../src/server/store.js';
-import {residentActivity} from '../src/client/resident-status.js';
-import {censusPanel} from '../src/client/community.js';
+
 import {regionalDecisionWait} from '../src/shared/outside-aid.js';
 import {hasTimelyVisitorJourneyRescue} from '../src/world/visitor-journey.js';
 
@@ -60,7 +59,7 @@ test('expired food cannot be shared, refreshed or eaten by a pending old choice'
 });
 
 test('incapacity stops both at their actual common location, and recovery needs two new decisions',()=>{
- const f=fixture(),{w,a,b,ca,cb}=f;stepWorld(w,2);const at=ca.journey!.staged!.progress;a.canDecide=false;stepWorld(w,4);assert.equal(ca.journey!.staged!.progress,at);assert.equal(cb.journey!.staged!.progress,at);assert.equal(cb.journey!.staged!.status,'waiting');assert.equal(residentActivity(w,a).kind,'incapable');assert.equal(residentActivity(w,b).kind,'decision-wait');assert.match(censusPanel(w),/失能停步，尚无实际照护接班/);assert.equal(outsideDecisionContext(w,b).outside!.choices.some(c=>c.action.type==='visitorJourney'&&c.action.operation==='continue'),false);a.canDecide=true;stepWorld(w,10);assert.equal(ca.journey!.staged!.progress,at);choose(w,a,'continue');assert.equal(cb.journey!.staged!.status,'waiting');choose(w,b,'continue');stepWorld(w,1);assert.equal(ca.journey!.staged!.progress,at-1);assert.equal(cb.journey!.staged!.progress,at-1);
+ const f=fixture(),{w,a,b,ca,cb}=f;stepWorld(w,2);const at=ca.journey!.staged!.progress;a.canDecide=false;stepWorld(w,4);assert.equal(ca.journey!.staged!.progress,at);assert.equal(cb.journey!.staged!.progress,at);assert.equal(cb.journey!.staged!.status,'waiting');assert.equal(outsideDecisionContext(w,b).outside!.choices.some(c=>c.action.type==='visitorJourney'&&c.action.operation==='continue'),false);a.canDecide=true;stepWorld(w,10);assert.equal(ca.journey!.staged!.progress,at);choose(w,a,'continue');assert.equal(cb.journey!.staged!.status,'waiting');choose(w,b,'continue');stepWorld(w,1);assert.equal(ca.journey!.staged!.progress,at-1);assert.equal(cb.journey!.staged!.progress,at-1);
 });
 
 test('an adult can explicitly leave an incapacitated companion in place without inventing a care handoff',()=>{
@@ -91,8 +90,8 @@ test('stale and malformed replies cannot split a party, add a third adult or cha
  const f=fixture();wait(f);const {w,a,ca}=f,j=ca.journey!.staged!;for(const minutes of [undefined,0,-1,13,NaN,Infinity]){const before=JSON.stringify(w);assert.equal(applyOutsideDecision(w,a.id,a.revision,{intention:'非法离队',actions:[{type:'visitorJourney',operation:'continueAlone',journeyId:j.id,minutes}]}).ok,false);assert.equal(JSON.stringify(w),before);}const revision=a.revision;choose(w,a,'rest');const before=JSON.stringify(w);assert.equal(applyOutsideDecision(w,a.id,revision,{intention:'旧回复不能带走亲属',actions:[{type:'visitorJourney',operation:'turnBack',journeyId:j.id}]}).ok,false);assert.equal(JSON.stringify(w),before);
 });
 
-test('observer and normal menus are read-only, show joint consent separately, and expose no distant lodging',()=>{
- const f=fixture();wait(f);const {w,a,b}=f;choose(w,a,'continue');b.name=f.cb.name='<svg onload=bad>';const before=JSON.stringify(w),context=outsideDecisionContext(w,b),html=censusPanel(w);assert.deepEqual(context.buildings,[]);assert.deepEqual(context.people,[]);assert.match(context.outside!.notice,/已同意下一段/);assert.match(html,/成人亲属同行/);assert.match(html,/等待亲属确认/);assert.match(html,/&lt;svg/);assert.doesNotMatch(html,/<svg|预计.*抵达/);assert.equal(residentActivity(w,a).kind,'voluntary-wait');assert.equal(JSON.stringify(w),before);
+test('normal menus preserve joint consent and expose no distant lodging',()=>{
+ const f=fixture();wait(f);const {w,a,b}=f;choose(w,a,'continue');b.name=f.cb.name='<svg onload=bad>';const before=JSON.stringify(w),context=outsideDecisionContext(w,b);assert.deepEqual(context.buildings,[]);assert.deepEqual(context.people,[]);assert.match(context.outside!.notice,/已同意下一段/);assert.equal(JSON.stringify(w),before);
 });
 
 test('a stopped family member retains actual timely self rescue, but consenting to wait is not technical protection',()=>{

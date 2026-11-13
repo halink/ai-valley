@@ -2,8 +2,7 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import type {Action,Building,Resident,Tile,World} from '../src/shared/types.js';
 import type {FrontierDisaster} from '../src/shared/frontier-hazards.js';
-import {healthPanel} from '../src/client/health.js';
-import {residentActivity} from '../src/client/resident-status.js';
+
 import {ValleyRuntime} from '../src/server/runtime.js';
 import type {HealthAction} from '../src/shared/health.js';
 import {createWorld} from '../src/world/seed.js';
@@ -116,10 +115,9 @@ test('safe ground: offline runtime gives expressive child the bounded refusal ch
  const runtime=new ValleyRuntime(store,'synthetic-test-credential',async(_key,context)=>{requested.push(context.actor.id);const choices=decisionChoices(context),stop=choices.find(c=>c.action.type==='health'&&c.action.operation==='cancelRescue');if(context.actor.id===f.p.id)assert.ok(stop);return {decision:stop?parseChoice(JSON.stringify({choice:stop.id}),choices):{intention:'停止护送后稍等',actions:[{type:'wait' as const,minutes:10}]},inputTokens:1,outputTokens:1,latencyMs:1};});
  try{runtime.start();await new Promise<void>(resolve=>setImmediate(resolve));await new Promise<void>(resolve=>setImmediate(resolve));assert.equal(requested[0],f.p.id);assert.equal(requested.filter(id=>id===f.p.id).length,1);assert.equal(runtime.world.health!.transports.find(x=>x.id===t.id)!.phase,'interrupted');assert.equal(runtime.world.residents.find(r=>r.id===f.p.id)!.canDecide,false);}finally{runtime.stop();store.close();}
 });
-test('safe ground: public observation describes temporary ground instead of phantom receiving beds',()=>{
- const f=fixture(),t=pickup(f);assert.match(healthPanel(f.w),/只临时撤险/);assert.doesNotMatch(healthPanel(f.w),/接收床位已保留/);assert.match(residentActivity(f.w,f.p).detail,/干地/);finish(f.w,f.g);assert.equal(t.phase,'delivered');assert.match(healthPanel(f.w),/已临时落脚在干地/);assert.doesNotMatch(healthPanel(f.w),/已送入实际床位/);
+test('safe ground: a ground-only evacuation completes delivery',()=>{
+ const f=fixture(),t=pickup(f);finish(f.w,f.g);assert.equal(t.phase,'delivered');
 });
-
 
 test('safe ground: actual eight-edge boundary is inclusive and nine-edge detour is not a visible shortcut',()=>{
  const f=fixture();f.w.map={name:'bounded ground route',width:12,height:12,tiles:Array<Tile>(144).fill('cliff'),entrance:{x:2,y:2},settlement:{x:2,y:2}};

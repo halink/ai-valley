@@ -6,14 +6,14 @@ import {createWorld} from '../src/world/seed.js';
 import {initializeHealth,healthReason,addHealthCase} from '../src/world/health.js';
 import {initializeFrontierHazards} from '../src/world/frontier-hazards.js';
 import {initializeRooms} from '../src/world/rooms.js';
-import {passenger,syncMedicalTransport} from '../src/world/medical-transport.js';
+import {passenger} from '../src/world/medical-transport.js';
 import {decisionContext,decisionChoices} from '../src/server/decisions.js';
 import {healthOpportunities} from '../src/server/health-opportunities.js';
 import {parseChoice} from '../src/server/affordances.js';
 import {stepWorld,submitPlan} from '../src/world/engine.js';
 import {WorldStore} from '../src/server/store.js';
 import {ValleyRuntime} from '../src/server/runtime.js';
-import {healthPanel} from '../src/client/health.js';
+
 import {YEAR} from '../src/world/time.js';
 
 function fixture(indoor=false){
@@ -44,7 +44,7 @@ for(const indoor of [false,true])test(`adult ground: actual no-bed evacuation co
  assert.equal(t.basis,'emergency');assert.equal(t.evacuationAuthority,'incapacitated-adult');assert.equal(t.buildingId,null);assert.equal(t.bed,null);assert.equal(t.offerId,null);
  finish(f.w,f.g);assert.equal(t.phase,'delivered',t.reason??f.g.lastFailure??'');assert.equal(f.p.inside,null);assert.deepEqual(f.p.at,t.evacuationGround);assert.ok(t.evacuationSteps!<=8);assert.equal(f.g.inventory.cloth,2);assert.equal(f.g.inventory.water,8);assert.equal(f.g.inventory.medicine,2);
  assert.deepEqual({home:f.p.homeId,parents:f.p.parents,guardians:f.p.guardianIds,coins:f.p.coins,inventory:f.p.inventory},rights);assert.equal(f.p.canDecide,false);assert.equal(f.p.canExpress,false);assert.equal(f.w.frontierHazards!.weather!.enabled,false);
- assert.match(healthPanel(f.w),/已临时落脚在干地/);assert.doesNotMatch(healthPanel(f.w),/已送入实际床位/);
+
 });
 for(const phase of ['pickup','room','door','route','complete'] as const)test(`adult ground: SQLite ${phase} preserves mode, position and once-only expenditure`,()=>{
  const f=fixture(phase!=='route');if(phase==='pickup'){queue(f.w,f.g,selected(f).a);stepWorld(f.w,1);}else{pickup(f);if(phase==='door')until(f.w,()=>f.g.inside===null);if(phase==='route')stepWorld(f.w,.25);if(phase==='complete')finish(f.w,f.g);}

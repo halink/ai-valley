@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import type {Action,Resident,World} from '../src/shared/types.js';
-import type {RegionSurvey,RegionSurveyAction} from '../src/shared/region-survey.js';
+import type {RegionSurveyAction} from '../src/shared/region-survey.js';
 import {createWorld} from '../src/world/seed.js';
 import {initializeIndustry} from '../src/world/industry.js';
 import {initializeFood} from '../src/world/food.js';
@@ -11,7 +11,7 @@ import {parseChoice} from '../src/server/affordances.js';
 import {stepWorld,submitPlan} from '../src/world/engine.js';
 import {DAY,YEAR} from '../src/world/time.js';
 import {WorldStore,workingEvents} from '../src/server/store.js';
-import {regionSurveyPanel} from '../src/client/region-survey.js';
+
 import {productionParcels} from '../src/world/production.js';
 import {constructionLand} from '../src/world/construction-sites.js';
 import {totalCoins} from '../src/world/economy.js';
@@ -41,7 +41,7 @@ test('normal menu, physical survey, public votes and return open empty geography
  assert.deepEqual(r.inventory,stock);assert.equal(totalCoins(w),money);assert.deepEqual(w.resources,resources);assert.deepEqual(productionParcels(w),parcels);assert.equal(constructionLand(w,s.access),false);
  for(let y=0;y<32;y++)assert.deepEqual(w.map.tiles.slice(y*40,y*40+32),oldMap.tiles.slice(y*32,y*32+32));
  assert.equal(w.map.tiles[s.access.y*40+s.access.x],'grass');assert.equal(w.map.tiles[39],'cliff');assert.deepEqual(w.regions![0].sourceIds,[]);assert.deepEqual(w.regions![0].fishKeys,[]);
- assert.match(regionSurveyPanel(w),/已接入/);assert.match(regionSurveyPanel(w),/无新增资源/);
+
  run(w,r,{type:'move',to:s.access});assert.deepEqual(r.at,s.access);
 });
 

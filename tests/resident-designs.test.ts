@@ -15,6 +15,9 @@ function fixture(){
  const store=new WorldStore(':memory:');
  store.commit(createFrontierWorld(),null);
  const runtime=new ValleyRuntime(store,null,undefined,{mode:'formal'});
+ // This fixture drives stepWorld directly, not the managed runtime. Stop its
+ // lifecycle before taking ownership so teardown cannot persist a stale revision.
+ runtime.stop();
  runtime.world.clock.paused=false;
  return {world:runtime.world,store,runtime};
 }

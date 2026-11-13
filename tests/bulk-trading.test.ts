@@ -13,7 +13,6 @@ import {parseChoice} from '../src/server/affordances.js';
 import {stepWorld,submitPlan} from '../src/world/engine.js';
 import {WorldStore} from '../src/server/store.js';
 import {initializeForeignTrade} from '../src/world/foreign-trade.js';
-import {marketPanel} from '../src/client/livelihood.js';
 
 function fixture(frontier=false){
  const w=frontier?createFrontierWorld():createWorld();w.mode='formal';w.clock.paused=false;
@@ -66,7 +65,7 @@ for(const frontier of [false,true])test(`normal menu executes bulk buy and suppl
  assert.equal(submitPlan(w,{id:'real-bulk-supply',actorId:buyer.id,actorRevision:buyer.revision,createdAt:w.minute,definition:w.activeDefinitions['action/routine'],...supplyDecision}).ok,true);
  for(let i=0;i<12&&(buyer.plan||buyer.activity);i++)stepWorld(w,1);
  assert.equal(buyer.lastFailure,null);assert.equal(buyer.coins,beforeSupply+15);assert.equal(shop.inventory.stone,3);assert.equal(totalCoins(w),coins);
- assert.match(marketPanel(w),/最近实际成交/);assert.match(marketPanel(w),/最低到手 15/);assert.match(marketPanel(w),/实付 17/);
+
 });
 
 test('parser requires explicit bounds, defaults to exact quantity and cannot retarget a listing',()=>{
@@ -84,7 +83,7 @@ test('competing buyers only permit an explicit minimum fill, never silently chan
  const unchanged=state(f);assert.match(completeEconomy(f.w,f.buyer,planned)!,/最低数量/);assert.deepEqual(state(f),unchanged);
  assert.match(completeEconomy(f.w,f.buyer,{...planned,minimumQuantity:4})!,/最低数量/);
  assert.equal(completeEconomy(f.w,f.buyer,{...planned,minimumQuantity:2}),null);assert.equal(l.quantity,0);assert.equal(l.status,'sold');assert.equal(f.w.economy!.trades!.at(-1)!.quantity,3);assert.equal(stock(f.w,'wood'),before);assert.equal(totalCoins(f.w),coins);
- assert.match(marketPanel(f.w),/原拟 5 份 · 最低接受 2 份 · 按事前同意部分成交/);
+
 });
 
 test('supplier partial consent never scales down the absolute proceeds floor',()=>{

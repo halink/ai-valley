@@ -1,3 +1,4 @@
+import {mvpThirst,mvpDrinkReason} from '../world/mvp-drinking.js';
 import {harvestMealEvidence,harvestMealRelevant} from './harvest-food-choices.js';
 import {socialAppointmentOpportunities,socialAppointmentNotes} from '../world/social-appointments.js';
 import {foodSourceShareOpportunities} from '../world/food-source-sharing.js';
@@ -130,6 +131,7 @@ export function decisionContext(world:World,actor:Resident):DecisionContext{
  const foodCoverage=world.mode==='formal'?residentFoodCoverage(world,actor):undefined;
  const knownAge=knownAgeYears(actor.bornAt,world.minute);
  const context:DecisionContext={
+  ...(mvpThirst(world,actor)!==undefined?{mvpDrinking:{thirst:mvpThirst(world,actor)!,canDrink:mvpDrinkReason(world,actor)===null}}:{}),
   ...(world.mode==='formal'?{formal:{personalFoodGiftNotes:personalFoodGiftNotes(world,actor),socialAppointmentNotes:socialAppointmentNotes(world,actor),foodCoverage,personalFoodProcessing:personalFoodProcessing(world,actor),personalFoodFreshness:personalFoodFreshness(world,actor),careWithdrawalOnly:careWithdrawalOnly(world,actor),aboard:!!aboardFerry(world,actor.id),passenger:!!passenger(world,actor.id),expressiveEvacuationOnly:expressiveTransportControl(world,actor),familyTravelling:!!travellingFamily(world,actor.id)||!!familyPassenger(world,actor.id),frontier:world.scenario==='frontier',age:Math.floor(ageYears(actor.bornAt,world.minute)),knownAge:knownAge===null?null:Math.floor(knownAge),productiveFarming:Boolean(world.production),familyNotes,
     unknownAgeSelfCare:unknownAgeSelfCare(world,actor),hasBed:actor.homeId===null?false:home?.observed?.ownBed,sleepRecoveryPerHour:60*bodyRules.sleepEnergy*sleepFactor,
     planSteps:world.clock.realMinutesPerDay<=FAST_DAY_MINUTES?3:1,
@@ -223,6 +225,7 @@ ${choices.map(c=>c.id+'. '+c.label).join('\n')}
  const berryNotes=visibleBerryObservationNote(context,choices);
  const bodyObservations=context.people.filter(p=>p.bodyObservation?.atMinute===context.minute).map(p=>`${p.name}：${p.bodyObservation!.signs.map(s=>bodySignLabels[s]).join('；')}`).join('。');
  const remaining=`
+${context.mvpDrinking?`本人MVP口渴：${context.mvpDrinking.thirst.toFixed(2)}/100；常温每720分钟增加50，饮用一份清水缓解50。尚无缺水伤害。取水不等于饮水，饮用须自行选择。`:""}
 ${context.formal?.socialAppointmentNotes?'本人持久记得的日常约见（不是远程事实）：\n'+context.formal.socialAppointmentNotes:''}
 ${foodGiftNotes?foodGiftNotes+'\n':''}${berryNotes?berryNotes+'\n':''}${personalFoodFreshnessNote(context,choices)}
 ${personalFoodProcessingNote(context)}

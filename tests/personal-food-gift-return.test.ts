@@ -4,7 +4,7 @@ import {createFrontierWorld} from '../src/world/formal-seed.js';
 import {decisionContext,decisionChoices,prompt} from '../src/server/decisions.js';
 import {parseChoice} from '../src/server/affordances.js';
 import {stepWorld,stepWorldWithFoodEvidence,submitPlan} from '../src/world/engine.js';
-import {actionLabel} from '../src/client/resident-status.js';
+
 import {walkable} from '../src/world/navigation.js';
 import {WorldStore} from '../src/server/store.js';
 import type {Action,Resident,World} from '../src/shared/types.js';
@@ -39,7 +39,7 @@ test('return gap: accepted recipient has a precise voluntary return choice after
  assert.match(decisionContext(w,recipient).formal!.personalFoodGiftNotes!,/本人此刻不在原约点/);
  assert.ok(!rows.some(c=>c.action.type==='move'&&c.action.to.x===gift.location.at.x&&c.action.to.y===gift.location.at.y),'ordinary movement does not name this two-cell-offset original point');
  const action=choose(w,recipient,operation('return'));assert.deepEqual(w,before,'context and menu are read-only');
- assert.equal(actionLabel(action),'自主返回赠粮交接点');
+
  const row=rows.find(c=>operation('return')(c.action))!;
  assert.throws(()=>parseChoice(JSON.stringify({choice:row.id,to:{x:1,y:1}}),rows));
  const stock=structuredClone(physical(w)),terms=structuredClone(gift);queue(w,recipient,action);stepWorld(w,.25);

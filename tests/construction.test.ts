@@ -1,4 +1,4 @@
-import {estateGoods,estateParcels,ownedEstateParcels} from '../src/world/estate-custody.js';
+import {estateGoods} from '../src/world/estate-custody.js';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import type {Resident,World} from '../src/shared/types.js';
@@ -19,7 +19,7 @@ import {stepWorld,submitPlan} from '../src/world/engine.js';
 import {findPath,walkable} from '../src/world/navigation.js';
 import {WorldStore} from '../src/server/store.js';
 import {DAY,YEAR} from '../src/world/time.js';
-import {constructionPanel} from '../src/client/construction.js';
+
 import {observerFrame} from '../src/server/observer-feed.js';
 import {ValleyRuntime} from '../src/server/runtime.js';
 
@@ -230,10 +230,10 @@ test('new content regions never alter a reserved projects frozen permission and 
  initializeConstruction(w);assert.equal(p.ruleVersion,1);assert.equal(w.activeDefinitions['construction/rules'],'construction/rules@2');assert.equal(constructionSiteError(w,p,true),null);
 });
 
-test('observer project pages escape model names, expose no world controls, and propagate construction changes',()=>{
+test('observer snapshots propagate construction changes',()=>{
  const f=fixture(),{w,owner}=f,p=project(f,{name:'<img src=x onerror=x>'});const store=new WorldStore(':memory:');store.commit(w,null);const runtime=new ValleyRuntime(store,null,undefined,{mode:'formal'});
  try{
-  const before=structuredClone(runtime.snapshot());const html=constructionPanel(before.world);assert.ok(html.includes('&lt;img'));assert.ok(!html.includes('<img src=x'));assert.ok(!/<form|<input|<select|data-action=/.test(html));assert.ok(html.includes('查看工地'));
+  const before=structuredClone(runtime.snapshot());
   const unchanged=observerFrame(runtime.snapshot(),before);assert.equal(unchanged.world.construction,undefined);
   runtime.world.construction!.projects[0].reason='已自主停工';runtime.world.revision++;const changed=observerFrame(runtime.snapshot(),before);assert.equal(changed.world.construction!.projects[0].reason,'已自主停工');
   assert.equal(runtime.world.construction!.projects[0].stages[0].worked,0);assert.equal(runtime.world.id,w.id);

@@ -41,10 +41,36 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  godot:
+    name: Godot offline headless
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Fetch pinned official Godot (verify before extraction or execution)
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/Godot_v4.6.3-stable_linux.x86_64.zip"
+          curl --fail --show-error --silent --location --proto '=https' --proto-redir '=https' --retry 3 --max-time 180 \
+            https://github.com/godotengine/godot-builds/releases/download/4.6.3-stable/Godot_v4.6.3-stable_linux.x86_64.zip -o "$archive"
+          printf '%s  %s\n' a035258da32b77f966a5376f9fa29c30a6adde826a85ba918e1605bd1fc9823eba7d85f1dd5e748956bd2ba72827c0025ffa11bb82aec91128c407a2e723c99c "$archive" | sha512sum --check --strict
+          mkdir -p "$RUNNER_TEMP/godot-engine"
+          unzip -q "$archive" -d "$RUNNER_TEMP/godot-engine"
+          chmod u+x "$RUNNER_TEMP/godot-engine/Godot_v4.6.3-stable_linux.x86_64"
+          printf 'GODOT_BIN=%s\n' "$RUNNER_TEMP/godot-engine/Godot_v4.6.3-stable_linux.x86_64" >> "$GITHUB_ENV"
+      - name: Fresh import and offline synthetic suites
+        run: node scripts/test-godot-headless.mjs
+
   # Keep the original required-check name. A skipped or cancelled shard is not a pass.
   verify:
     name: verify
-    needs: tests
+    needs: [tests, godot]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -52,6 +78,9 @@ jobs:
       - name: Require all test shards
         env:
           TEST_RESULT: ${{ needs.tests.result }}
+          GODOT_RESULT: ${{ needs.godot.result }}
         run: |
           printf 'Test shards: %s\n' "$TEST_RESULT"
           test "$TEST_RESULT" = success
+          printf 'Godot: %s\n' "$GODOT_RESULT"
+          test "$GODOT_RESULT" = success

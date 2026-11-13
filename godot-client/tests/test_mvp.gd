@@ -1,6 +1,6 @@
 extends SceneTree
 const Main = preload("res://main.gd")
-var client: Node2D
+var client: Node3D
 var elapsed := 0.0
 var revision := -1.0
 func _initialize() -> void:
@@ -16,14 +16,14 @@ func _process(delta: float) -> bool:
 		assert(client.world.map.width == 32 and client.world.map.height == 24)
 		assert(client.world.residents.size() == 2)
 		assert(client.world.buildings.size() == 1)
-		assert(client.mode_label.text.contains("no LLM"))
+		assert(client.mode_label.text.contains("不调用大模型"))
 		assert(not client.world.clock.paused)
 		if revision < 0:
 			revision = client.world.revision
 		elif client.world.revision > revision:
 			client._next_resident()
 			assert(not client.selected.is_empty())
-			assert(client.detail.text.contains("hunger"))
+			assert(client.detail.text.contains("饥饿"))
 			print("PASS: advancing 32x24 MVP snapshot, 2 residents, explicit rule mode, selection")
 			quit()
 	if elapsed > 12:

@@ -11,7 +11,7 @@ import {decisionChoices,prompt} from '../src/server/decisions.js';
 import {parseChoice} from '../src/server/affordances.js';
 import {WorldStore,workingEvents} from '../src/server/store.js';
 import {emitLedgerEvent} from '../src/world/events.js';
-import {childHelpProfile} from '../src/client/emergency-care.js';
+
 import {DAY,YEAR} from '../src/world/time.js';
 
 /** Isolated callback adversaries; full freight/menu integration lives in child-help-mail.test.ts. */
@@ -130,9 +130,8 @@ test('review: a different courier cannot retroactively collect paper before its 
  assert.equal(f.n.outbound!.attempts.length,2);assert.equal(f.n.outbound!.attempts[1].pickedAt,f.w.minute);
 });
 
-
-test('review: read-only mail history escapes external labels and old notices do not acquire fabricated transport',()=>{
+test('review: old notices do not acquire fabricated transport during choice generation',()=>{
  const f=fixture();f.w.foreignTrade!.merchants[0].origin='<img src=x onerror=alert(1)>';carryChildHelpMail(f.w,f.s,'depart',f.w.minute);
- const before=JSON.stringify(f.w),html=childHelpProfile(f.w,f.reporter);assert.match(html,/&lt;img/);assert.ok(!html.includes('<img'));assert.equal(JSON.stringify(f.w),before);
- delete f.n.outbound;const legacy=JSON.stringify(f.w);childHelpProfile(f.w,f.reporter);childHelpOutsideChoices(f.w,f.p);assert.equal(JSON.stringify(f.w),legacy);assert.equal(f.n.outbound,undefined);
+ const before=JSON.stringify(f.w);assert.equal(JSON.stringify(f.w),before);
+ delete f.n.outbound;const legacy=JSON.stringify(f.w);childHelpOutsideChoices(f.w,f.p);assert.equal(JSON.stringify(f.w),legacy);assert.equal(f.n.outbound,undefined);
 });

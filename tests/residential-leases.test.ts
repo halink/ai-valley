@@ -18,7 +18,7 @@ import {pendingEstateReturns} from '../src/world/estate-pending.js';
 import {premisesOpportunities,premisesNotes,parsePremisesChoice} from '../src/server/premises-opportunities.js';
 import {decisionContext,decisionChoices} from '../src/server/decisions.js';
 import {parseChoice} from '../src/server/affordances.js';
-import {premisesPanel} from '../src/client/premises.js';
+
 import {WorldStore} from '../src/server/store.js';
 
 const terms:PremisesTerms={days:4,rentPerDay:12,deposit:7,station:'bed',startMinute:0,durationMinutes:DAY};
@@ -124,11 +124,10 @@ test('SQLite reload retains residential rights and durable accept/expiry receipt
  const restored=store.load()!,r=restored.residents.find(p=>p.id===tenant.id)!;assert.equal(completePremises(restored,r,a),null);assert.equal(residentialStay(restored,r.id,home.id)?.id,l.id);restored.minute=l.endsAt!;advancePremises(restored);const count=restored.economy!.transferCount;store.commit(restored,w.revision);const again=store.load()!;advancePremises(again);assert.equal(again.economy!.transferCount,count);assert.equal(totalCoins(again),money);store.close();
 });
 
-test('legacy worlds gain no paid housing and observation remains read-only, escaped and local',()=>{
- const f=fixture(),{w,tenant,home}=f,money=totalCoins(w);delete w.economy!.leases;advancePremises(w);assert.deepEqual(w.economy!.leases,[]);assert.equal(totalCoins(w),money);assert.equal(residentialStay(w,tenant.id,home.id),undefined);accept(f);home.name='<img onerror=alert(1)>';const before=JSON.stringify(w),html=premisesPanel(w);assert.match(html,/住宅第1张床/);assert.match(html,/&lt;img/);assert.doesNotMatch(html,/<img/);assert.equal(JSON.stringify(w),before);
+test('legacy worlds gain no retrospective paid housing',()=>{
+ const f=fixture(),{w,tenant,home}=f,money=totalCoins(w);delete w.economy!.leases;advancePremises(w);assert.deepEqual(w.economy!.leases,[]);assert.equal(totalCoins(w),money);assert.equal(residentialStay(w,tenant.id,home.id),undefined);accept(f);home.name='<img onerror=alert(1)>';const before=JSON.stringify(w);assert.equal(JSON.stringify(w),before);
  tenant.at={x:1,y:1};const choices=premisesOpportunities(w,tenant);const notes=premisesNotes(w,tenant);home.condition=0;advancePremises(w);assert.deepEqual(premisesOpportunities(w,tenant),choices);assert.equal(premisesNotes(w,tenant),notes);assert.ok(choices.some(c=>c.action.type==='move'));assert.ok(!choices.some(c=>c.action.type==='sleep'));
 });
-
 
 test('self-surrender clears the tenant remembered-current lease while distant changes remain unobserved',()=>{
  const f=fixture(),l=accept(f);assert.equal(completePremises(f.w,f.tenant,{type:'premises',operation:'surrender',leaseId:l.id}),null);f.tenant.at={x:1,y:1};assert.equal(premisesNotes(f.w,f.tenant),'');assert.ok(!premisesOpportunities(f.w,f.tenant).some(c=>c.id==='premises.visit.'+l.id));
@@ -148,7 +147,6 @@ test('missing estate settlement freezes the actual end boundary, never accrues e
  const f=fixture(),{w,tenant}=f,l=accept(f);w.minute+=DAY/2;recordDeath(w,tenant);const estate=w.estates.find(e=>e.personId===tenant.id)!;w.estates=w.estates.filter(e=>e!==estate);advancePremises(w);assert.equal(l.endedAt,w.minute);assert.equal(l.paid,6);assert.equal(l.status,'active');assert.equal(residentialLease(w,f.home.id),undefined);
  const stopped=l.endedAt;w.minute+=DAY;w.estates.push(estate);const money=totalCoins(w);advancePremises(w);assert.equal(l.endedAt,stopped);assert.equal(l.status,'ended');assert.equal(l.paid,6);assert.equal(l.refunded,49);assert.equal(totalCoins(w),money);
 });
-
 
 test('closed shared accounts must actually clear their original stock and pending gifts before rental',()=>{
  for(const status of ['closed','declined','expired'] as const){const f=fixture(),{w,owner,tenant,home}=f;

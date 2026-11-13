@@ -41,9 +41,9 @@ for(const trigger of ['depart','resume','travel'] as const)for(const failure of 
  const f=prepared(trigger),stock=new Map(f.c.members.map(m=>[m.providerId,{...person(f.w,m.providerId).inventory}]));
  const rationNumber=(f.c.journey?.rationsUsed??0)+1,counts=new Map<string,number>();for(const m of f.c.members)counts.set(m.providerId,(counts.get(m.providerId)??0)+1);
  const assertDebit=(w:World)=>{for(const [id,count] of counts){assert.equal(person(w,id).inventory.meal,stock.get(id)!.meal!-count);assert.equal(person(w,id).inventory.water,stock.get(id)!.water!-count);}assert.equal(w.familyRelocation!.agreements.find(c=>c.id===f.c.id)!.journey!.rationsUsed,rationNumber);};
- const store=new WorldStore(':memory:');store.commit(f.w,null);t.after(()=>store.close());
+ const store=new WorldStore(':memory:');store.commit(f.w,null);const runtimes:ValleyRuntime[]=[];t.after(()=>{try{for(const runtime of [...runtimes].reverse())runtime.stop();}finally{store.close();}});
  const makeRuntime=(events:RuntimeFoodEvent[])=>new ValleyRuntime(store,credentials,offlineModel,{mode:'formal',directEatingEvidence:{observe:e=>{events.push(e);}}});
- const events:RuntimeFoodEvent[]=[],runtime=makeRuntime(events);t.after(()=>runtime.stop());runtime.start();
+ const events:RuntimeFoodEvent[]=[],runtime=makeRuntime(events);runtimes.push(runtime);runtime.start();
  const db=(store as unknown as {db:DatabaseSync}).db,tables=['worlds','terrain','resource_bases','events','receipts','event_people','event_animals','archive_meta'];
  const snapshot=()=>tables.map(table=>db.prepare('SELECT * FROM '+table+' ORDER BY rowid').all());
  if(failure==='sqlite')db.exec("CREATE TEMP TRIGGER reject_family_ration BEFORE UPDATE ON worlds BEGIN SELECT RAISE(ABORT, 'synthetic_family_sql_failure'); END");
@@ -53,12 +53,12 @@ for(const trigger of ['depart','resume','travel'] as const)for(const failure of 
  assert.throws(()=>runtime.tick(now+=1000),failure==='sqlite'?/synthetic_family_sql_failure/:/stale_world_revision/);assert.equal(drafts,1);inspect.mock.restore();
  assert.deepEqual(runtime.world,before);assert.deepEqual(store.loadForRuntime(),saved);assert.deepEqual(snapshot(),sqlBefore);assert.deepEqual(runtime.directEatingEvidenceStatus(),status);assert.equal(events.length,count);assert.deepEqual(receipts(events),[]);
  let recovered=runtime;const recoveredEvents:RuntimeFoodEvent[]=failure==='sqlite'?events:[];
- if(failure==='sqlite')db.exec('DROP TRIGGER reject_family_ration');else{runtime.stop();recovered=makeRuntime(recoveredEvents);t.after(()=>recovered.stop());recovered.start();}
+ if(failure==='sqlite')db.exec('DROP TRIGGER reject_family_ration');else{runtime.stop();recovered=makeRuntime(recoveredEvents);runtimes.push(recovered);recovered.start();}
  recovered.tick(now+=1000);recovered.stop();assertDebit(recovered.world);assertDebit(store.loadForRuntime()!);
  const rows=receipts(recoveredEvents);assert.equal(rows.length,f.c.members.length);
  assert.deepEqual(rows.map(r=>[r.relocationId,r.trigger,r.rationNumber,r.memberIndex,r.memberCount,r.providerId,r.beneficiaryId]),f.c.members.map((m,i)=>[f.c.id,trigger,rationNumber,i,f.c.members.length,m.providerId,m.personId]));
  assert.equal(new Set(rows.map(r=>r.beneficiaryId)).size,f.c.members.length);
- const restartedEvents:RuntimeFoodEvent[]=[],restarted=makeRuntime(restartedEvents);t.after(()=>restarted.stop());restarted.start();restarted.tick(now+=1000);restarted.stop();
+ const restartedEvents:RuntimeFoodEvent[]=[],restarted=makeRuntime(restartedEvents);runtimes.push(restarted);restarted.start();restarted.tick(now+=1000);restarted.stop();
  assert.deepEqual(receipts(restartedEvents),[]);assertDebit(store.loadForRuntime()!);assert.equal(network,0);
 });
 
@@ -76,10 +76,10 @@ test('family journey runtime: published actual member receipts are independent d
 
 for(const asynchronous of [false,true])test(`family journey runtime: ${asynchronous?'async':'throwing'} observer cannot reverse committed group debit`,t=>{
  t.mock.timers.enable({apis:['setInterval']});let now=1_700_000_000_000;t.mock.method(Date,'now',()=>now);let network=0;t.mock.method(globalThis,'fetch',async()=>{network++;throw new Error('Offline network prohibited');});
- const f=prepared('depart'),store=new WorldStore(':memory:');store.commit(f.w,null);t.after(()=>store.close());let observations=0;
+ const f=prepared('depart'),store=new WorldStore(':memory:');store.commit(f.w,null);const runtimes:ValleyRuntime[]=[];t.after(()=>{try{for(const runtime of [...runtimes].reverse())runtime.stop();}finally{store.close();}});let observations=0;
  const runtime=new ValleyRuntime(store,credentials,offlineModel,{mode:'formal',directEatingEvidence:{observe:e=>{
   if(e.type==='food_step_committed'&&e.familyJourneyMeals?.length){observations++;assert.equal(e.familyJourneyMeals.length,f.c.members.length);if(asynchronous)return Promise.reject(new Error('Offline observer'));throw new Error('Offline observer');}
- }}});t.after(()=>runtime.stop());runtime.start();runtime.tick(now+=1000);
+ }}});runtimes.push(runtime);runtime.start();runtime.tick(now+=1000);
  assert.equal(observations,1);assert.equal(runtime.directEatingEvidenceStatus()!.failure,asynchronous?'async_observer':'observer_threw');
  for(const id of new Set(f.c.members.map(m=>m.providerId))){const count=f.c.members.filter(m=>m.providerId===id).length;for(const item of ['meal','water'] as const){assert.equal(person(runtime.world,id).inventory[item],person(f.w,id).inventory[item]!-count);assert.equal(person(store.loadForRuntime()!,id).inventory[item],person(f.w,id).inventory[item]!-count);}}
  runtime.tick(now+=1000);assert.equal(observations,1);assert.equal(store.loadForRuntime()!.familyRelocation!.agreements[0].journey!.rationsUsed,1);assert.equal(network,0);
@@ -87,9 +87,10 @@ for(const asynchronous of [false,true])test(`family journey runtime: ${asynchron
 
 for(const trigger of ['depart','resume','travel'] as const)test(`family journey runtime ${trigger}: enabled and disabled evidence preserve world, menus and durable save`,t=>{
  t.mock.timers.enable({apis:['setInterval']});let now=1_700_000_000_000;t.mock.method(Date,'now',()=>now);let network=0;t.mock.method(globalThis,'fetch',async()=>{network++;throw new Error('Offline network prohibited');});
- const f=prepared(trigger),events:RuntimeFoodEvent[]=[],stores=[new WorldStore(':memory:'),new WorldStore(':memory:')];for(const store of stores){store.commit(structuredClone(f.w),null);t.after(()=>store.close());}
+ const f=prepared(trigger),events:RuntimeFoodEvent[]=[],stores=[new WorldStore(':memory:'),new WorldStore(':memory:')];for(const store of stores)store.commit(structuredClone(f.w),null);
+ const runtimes:ValleyRuntime[]=[];t.after(()=>{try{for(const runtime of [...runtimes].reverse())runtime.stop();}finally{for(const store of stores)store.close();}});
  const enabled=new ValleyRuntime(stores[0],credentials,offlineModel,{mode:'formal',directEatingEvidence:{observe:e=>{events.push(e);}}}),disabled=new ValleyRuntime(stores[1],credentials,offlineModel,{mode:'formal'});
- for(const runtime of [enabled,disabled]){t.after(()=>runtime.stop());runtime.start();}now+=1000;enabled.tick(now);disabled.tick(now);
+ for(const runtime of [enabled,disabled]){runtimes.push(runtime);runtime.start();}now+=1000;enabled.tick(now);disabled.tick(now);
  assert.equal(receipts(events).length,f.c.members.length);assert.equal(disabled.directEatingEvidenceStatus(),null);assert.deepEqual(enabled.world,disabled.world);assert.deepEqual(stores[0].loadForRuntime(),stores[1].loadForRuntime());
  assert.deepEqual(enabled.world.residents.map(r=>decisionChoices(decisionContext(enabled.world,r))),disabled.world.residents.map(r=>decisionChoices(decisionContext(disabled.world,r))));assert.equal(network,0);
 });

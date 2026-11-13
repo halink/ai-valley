@@ -1,5 +1,5 @@
-import {fishingEcologyPanel} from '../src/client/fishing-observation.js';
-import {industryPanel} from '../src/client/industry.js';
+
+
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {createWorld} from '../src/world/seed.js';
@@ -51,40 +51,4 @@ test('independent review: dry barrier prevents transfer between adjacent registe
  w.map.tiles[12*64+31]='grass';
  w.minute+=DAY;advanceFishing(w);
  assert.equal(right.amount,0);assert.equal(left.species!.carp!.departed,0);ledger(left);ledger(right);
-});
-
-// Unlike the three ecology baseline checks above, these observation cases fail
-// against the former hard-coded capacity / pooled-progress industry panel.
-function freezeTree(value:object){for(const child of Object.values(value))if(child&&typeof child==='object'&&!Object.isFrozen(child))freezeTree(child);Object.freeze(value);}
-test('independent observation: a half-full capacity-24 pool remains visible and reading cannot mutate the world',()=>{
- const {w,left}=fixture();w.industry!.fishing={'0,0':left};
- const definition=structuredClone(w.definitions[left.definition!]);definition.version=2;definition.data.capacity=24;
- w.definitions['ecology/fishing-process@2']=definition;left.definition='ecology/fishing-process@2';left.amount=12;
- const stocks=Object.values(left.species!);for(const s of stocks)Object.assign(s!,{amount:3,opening:3});
- const before=JSON.stringify(w);freezeTree(w);const html=industryPanel(w);
- assert.match(html,/实际种群\s*12\s*\/\s*24/);assert.equal(JSON.stringify(w),before);
-});
-
-test('independent observation: missing bound definition remains unknown without silently registering defaults',()=>{
- const {w,left}=fixture();w.industry!.fishing={'0,0':left};left.definition='ecology/fishing-process@404';
- delete w.definitions['ecology/fishing-process@1'];
- const before=JSON.stringify(w);freezeTree(w);const html=industryPanel(w);
- assert.match(html,/容量[^<。]*未知|未知[^<。]*容量/);assert.equal(JSON.stringify(w),before);
-});
-
-test('independent observation: explicit null capacity is unknown rather than a default twelve',()=>{
- const {w,left}=fixture();w.industry!.fishing={'0,0':left};
- w.definitions[left.definition!].data.capacity=null;
- const before=JSON.stringify(w);freezeTree(w);const html=fishingEcologyPanel(w);
- assert.match(html,/容量未知/);assert.equal(JSON.stringify(w),before);
-});
-
-test('independent observation: untrusted saved sector keys are escaped and an extinct species remains visible at capacity',()=>{
- const {w,left}=fixture();const key='<img src=x onerror="alert(1)">';w.industry!.fishing={[key]:left};
- for(const s of Object.values(left.species!))Object.assign(s!,{amount:0,opening:0});
- Object.assign(left.species!.bream!,{amount:12,opening:12});left.amount=12;
- const before=JSON.stringify(w);freezeTree(w);const html=fishingEcologyPanel(w);
- assert.ok(html.includes('&lt;img src=x onerror=&quot;alert(1)&quot;&gt;'));
- assert.doesNotMatch(html,/<img/);assert.match(html,/河鲤 0 份 · 已耗尽，不能自行繁殖/);
- assert.equal(JSON.stringify(w),before);
 });

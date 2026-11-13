@@ -14,7 +14,7 @@ import {waterSupplyOpportunities} from '../src/server/water-supply-opportunities
 import {decisionChoices,decisionContext} from '../src/server/decisions.js';
 import {parseChoice} from '../src/server/affordances.js';
 import {stepWorld,submitPlan} from '../src/world/engine.js';
-import {waterSupportPanel} from '../src/client/water-support.js';
+
 import {WorldStore} from '../src/server/store.js';
 import {DAY,YEAR} from '../src/world/time.js';
 
@@ -62,7 +62,6 @@ test('severe thresholds are case-specific and sleeping recipients cannot be fed 
  const next=structuredClone(w.definitions['health/rules@1']);next.version=2;next.data.severeSeverity=25;w.definitions['health/rules@2']=next;w.health!.cases[0].definition='health/rules@2';assert.match(assistedWaterNeed(w,adult)!,/重症/);delete w.health!.cases[0].definition;
  adult.activity={planId:'asleep',action:{type:'sleep',minutes:10},startedAt:w.minute,remaining:10,path:[],target:{...adult.at},definition:w.activeDefinitions['action/routine']};assert.match(completeWaterSupply(w,provider,aid())!,/清醒/);assert.equal(bucket.amount,4);
 });
-
 
 test('revocation, refusal or expiry during five-minute assistance spends nothing and never resets authority on reload',()=>{
  for(const change of ['revoke','refusal','expiry'] as const){
@@ -123,8 +122,8 @@ test('public or raw filled vessels cannot be offered and duplicate outstanding o
  const f=fixture(),{w,provider,child,bucket}=f;bucket.ownerId='commons';bucket.buildingId=f.hall.id;assert.match(completeWaterSupply(w,provider,action(w,provider,{operation:'offerVessel',targetId:child.id,vesselId:bucket.id}))!,/本人携带/);bucket.ownerId=provider.id;bucket.buildingId=null;bucket.quality='raw';assert.match(completeWaterSupply(w,provider,action(w,provider,{operation:'offerVessel',targetId:child.id,vesselId:bucket.id}))!,/安全水/);bucket.quality='safe';gift(f);assert.match(completeWaterSupply(w,provider,action(w,provider,{operation:'offerVessel',targetId:child.id,vesselId:bucket.id}))!,/提议/);assert.equal(w.waterSupply!.gifts!.length,1);
 });
 
-test('observer escapes names and distinguishes authorization, permission withdrawal and actual ownership delivery',()=>{
- const f=fixture(),{w,adult,provider,child}=f;adult.name='<script>x</script>';authorize(f);gift(f);let html=waterSupportPanel(w);assert.ok(!html.includes('<script>'));assert.match(html,/&lt;script&gt;/);assert.match(html,/等待本人/);const c=w.waterSupply!.assistance![0];completeWaterSupply(w,adult,action(w,adult,{operation:'revokeAssist',authorizationId:c.id}));const g=w.waterSupply!.gifts![0];completeWaterSupply(w,child,action(w,child,{operation:'acceptVessel',giftId:g.id}));html=waterSupportPanel(w);assert.match(html,/已撤回/);assert.match(html,/已实际交接/);assert.equal(waterDrunkToday(w,provider.id),0);
+test('permission withdrawal and actual ownership delivery remain separate',()=>{
+ const f=fixture(),{w,adult,provider,child}=f;adult.name='<script>x</script>';authorize(f);gift(f);const c=w.waterSupply!.assistance![0];completeWaterSupply(w,adult,action(w,adult,{operation:'revokeAssist',authorizationId:c.id}));const g=w.waterSupply!.gifts![0];completeWaterSupply(w,child,action(w,child,{operation:'acceptVessel',giftId:g.id}));assert.equal(waterDrunkToday(w,provider.id),0);
 });
 
 test('normal submitted revocation is immediate before another actors pending assistance can complete',()=>{

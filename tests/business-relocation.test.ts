@@ -173,12 +173,6 @@ test('stale site-bound work fails after finish instead of using old authorizatio
  assert.match(employmentReason(f.w,f.worker,stale)!,/地点已改变/);assert.equal(f.c.paid,0);assert.deepEqual(f.c.attendance,[]);
 });
 
-test('observer relocation panel is escaped, read-only and explains independent consent and unpaid pause',async()=>{
- const {businessRelocationPanel}=await import('../src/client/business-relocation.js');const f=fixture(),m=f.propose();f.b.name='<script>alert(1)</script>';f.worker.name='<img src=x onerror=alert(1)>';const snapshot=JSON.stringify(f.w);
- const html=businessRelocationPanel(f.w);assert.equal(JSON.stringify(f.w),snapshot);assert.ok(!html.includes('<script>'));assert.ok(!html.includes('<img'));assert.ok(html.includes('&lt;script&gt;'));assert.match(html,/未工作不计薪/);assert.match(html,/原聘期不延长/);assert.match(html,/尚未在旧址阅读/);
- consent(f,m.id);assert.match(businessRelocationPanel(f.w),/已在新址独立同意/);assert.ok(!html.includes('<button'));
-});
-
 test('old prepaid purchase orders still settle at source while preparing and refund only their unspent remainder',async()=>{
  const {accountBalance}=await import('../src/world/economy.js');const f=fixture(),{w,owner,other,b}=f;
  assert.equal(completeEconomy(w,owner,{type:'economy',operation:'order',businessId:b.id,item:'wood',quantity:4,price:2,maximumLevyBasisPoints:0}),null);

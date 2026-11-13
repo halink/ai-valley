@@ -1,3 +1,6 @@
+import {mvpSleepProblem} from './mvp-rooms.js';
+import {advanceMvpThirst,mvpDrinkReason,completeMvpDrink} from './mvp-drinking.js';
+import {recordCompletedMovement} from './completed-movement.js';
 import {completedWorkIdentity} from '../shared/work-completion.js';
 import {procurementCapable,publicCargoDeliveryReason} from './public-food-procurement.js';
 import {initializeSocialAppointments,advanceSocialAppointments,socialAppointmentReason,socialAppointmentTarget,socialAppointmentTravelReason,socialAppointmentWork,completeSocialAppointment,socialAppointmentReceiptId,recordSocialAppointmentFailure} from './social-appointments.js';
@@ -252,6 +255,7 @@ function targetFor(world:World,r:Resident,a:Action,definition:string,elapsed=0):
   if(a.type==='sleep'){const b=sleepBuilding(world,r,a);if(!b||!a.buildingId&&world.rooms&&residentBed(world,r,b)===null)return fail('尚未拥有可使用的真实床位，当前住处存在床位缺口');return {target:b.door,duration:a.minutes};}
   return {target:r.at,duration:a.minutes};
  }
+ if(a.type==='mvpDrink'){const error=mvpDrinkReason(world,r);return error?fail(error):{target:{...r.at},duration:5};}
  if(a.type==='eat')return Object.hasOwn(goods,a.item)&&goods[a.item].food>0&&has(r.inventory,{[a.item]:1})?{target:r.at,duration:5}:fail('没有这份可以食用的实际食品');
  if(a.type==='gather'){
   const resource=world.resources.find(v=>v.id===a.resourceId);
@@ -336,6 +340,7 @@ function begin(world:World,r:Resident,elapsed=0){
  const outdoors=['move','gather','plant','water','harvest','build','construction','landRights','regionSurvey','industry','leave','settle','lodge'].includes(action.type);
  if((path.length||outdoors)&&!world.rooms){r.inside=null;r.roomAt=null;}
  r.activity={planId:plan.id,action,startedAt:world.minute,remaining:route.duration,path,target:{...route.target},definition,travelProgress:0,...(route.cargo?{cargo:route.cargo}:{})};
+ const mvpBedError=mvpSleepProblem(world,r);if(mvpBedError){failure(world,r,mvpBedError);return;}
  const exitError=prepareRoomExit(world,r,true);if(exitError){failure(world,r,exitError);return;}
  const bodyError=reserveBody(world,r,r.activity);if(bodyError){failure(world,r,bodyError);return;}
  if(action.type==='socialAppointment')r.activity.appointmentStartedAt=world.minute-elapsed;
@@ -400,6 +405,7 @@ function completeAtomic(world:World,r:Resident,a:Action,definition:string,elapse
  const social=executeSocialAction(world,r,a);if(social.handled)return social.ok?null:social.error??'行为当前无法完成';
  const record=(text:string,kind:'action'|'construction'|'trade'|'production'='action',actors=[r.id])=>emitEvent(world,{kind,actors,place:{...r.at},text});
  if(a.type==='move'||a.type==='wait'||a.type==='sleep')return null;
+ if(a.type==='mvpDrink')return completeMvpDrink(world,r);
  if(a.type==='eat'){
   if(!has(r.inventory,{[a.item]:1}))return '食物已经不足';const nutrition=foodValue(world,'person:'+r.id,a.item),before=r.hunger;consume(r.inventory,{[a.item]:1});r.hunger=Math.max(0,r.hunger-nutrition);const event=record(`${r.name}吃了一份${names[a.item]}。`);
   recordDirectEating(world,{at:world.minute,residentId:r.id,eventId:event.id,planId:r.activity!.planId,container:'person:'+r.id,item:a.item,quantity:1,nutrition,hungerRelief:before-r.hunger});return null;
@@ -527,6 +533,7 @@ function processActivity(world:World,r:Resident,minutes:number){
   if(error||!b||!same(b.door,r.at)){failure(world,r,error??'没有实际到达所选厨房');return;}
  }
  if(activity.action.type==='health'){const error=healthReason(world,r,activity.action);if(error){failure(world,r,error);syncMedicalTransport(world);return;}}
+ const mvpBedError=mvpSleepProblem(world,r);if(mvpBedError){failure(world,r,mvpBedError);return;}
  const interior=moveInRoom(world,r,minutes);syncMedicalTransport(world);syncBodies(world);syncFamilyEscorts(world);if(interior.error){failure(world,r,interior.error);syncMedicalTransport(world);return;}
  if(r.activity!==activity)return;
  if(interior.moving){endDecisionProtection(world,r,'decision');return;}
@@ -539,7 +546,8 @@ function processActivity(world:World,r:Resident,minutes:number){
    endDecisionProtection(world,r,'decision');
    const duration=world.map.tiles[next.y*world.map.width+next.x]==='road'?.75:1,needed=(1-progress)*duration;
    if(available+1e-9<needed){progress+=available/duration;available=0;break;}
-   available-=needed;progress=0;r.at=activity.path.shift()!;r.inside=null;noteGroundTransportStep(world,r);
+   const completedFrom={...r.at};
+   available-=needed;progress=0;r.at=activity.path.shift()!;r.inside=null;recordCompletedMovement(world,r.id,completedFrom,r.at);noteGroundTransportStep(world,r);
    if(activity.cargo?.pickedUp){const body=world.residents.find(v=>v.id===activity.cargo!.bodyId);if(body){body.at={...r.at};body.inside=null;}}
    observe(world,r);
   }
@@ -613,6 +621,7 @@ export function stepWorld(world:World,minutes:number,options:{exactEndMinute?:nu
     continue;
    }if(r.health<=0){recordDeath(world,r);continue;}
    const hadChoice=!!(r.plan||r.activity);
+   advanceMvpThirst(world,r,dt);
    processActivity(world,r,dt);
    const bodyRules=physiology(world,r);r.hunger=Math.min(100,r.hunger+bodyRules.hungerPerMinute*dt);
    if(r.activity?.action.type!=='sleep'||r.activity.path.length||r.activity.room?.path.length)r.energy=Math.max(0,r.energy-bodyRules.energyPerMinute*dt);

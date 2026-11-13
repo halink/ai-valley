@@ -9,11 +9,10 @@ import {WorldStore} from '../src/server/store.js';
 import {fishSpecies,type FishSpecies} from '../src/shared/fish-species.js';
 import type {FishPool,IndustryAction} from '../src/shared/industry.js';
 import type {Action,Building,Resident,World} from '../src/shared/types.js';
-import {animalInspector} from '../src/client/animal-observation.js';
-import {ecologyPanel} from '../src/client/ecology.js';
+
 import {createWorld} from '../src/world/seed.js';
 import {createFrontierWorld} from '../src/world/formal-seed.js';
-import {advanceFishing,fishWindow,fishWindows,fishSchoolView,fishingKey,fishingStockAt,initializeFishing,takeFish,wildFishAt} from '../src/world/fishing.js';
+import {advanceFishing,fishWindows,fishingStockAt,initializeFishing,takeFish,wildFishAt} from '../src/world/fishing.js';
 import {completeIndustry,industryTarget,initializeIndustry} from '../src/world/industry.js';
 import {advanceFood,foodTransaction,initializeFood} from '../src/world/food.js';
 import {completeEconomy,initializeEconomy,totalCoins} from '../src/world/economy.js';
@@ -68,7 +67,7 @@ test('real catches and duck predation debit the selected same species and preser
  run(w,r,action);assert.equal(r.inventory.carp,1);assert.equal(r.inventory.fish,2);assert.deepEqual(w.food!.lots['person:'+r.id].fish,old);
  assert.equal(pool.species!.carp!.amount,opening-1);assert.equal(pool.species!.carp!.caught,1);
  pool.shoal!.at={...pool.shoal!.anchor};assert.equal(wildFishAt(w,shore),'carp');assert.equal(pool.species!.carp!.amount,opening-2);assert.equal(pool.species!.carp!.eaten,1);conservation(w);
- assert.match(animalInspector(w,{kind:'fish',id:fishingKey(pool.shoal!.at)}),/河鲤/);assert.match(ecologyPanel(w),/未分种旧鲜鱼 2/);
+
 });
 
 test('multiple active species reach normal menus and an exhausted chosen species never silently changes the catch',()=>{
@@ -138,7 +137,6 @@ test('old sparse food definitions accept new fish without changing any existing 
  foodTransaction(w,()=>{r.inventory.cod=1;});assert.equal(w.food!.lots['person:'+r.id].cod![0].definition,'food/life/fish-species@1');assert.equal(w.food!.lots['person:'+r.id].cod![0].expiresAt,w.minute+3*DAY);assert.deepEqual(w.definitions['food/life@1'],definition);assert.deepEqual(w.food!.lots['person:'+r.id].fish,old);
 });
 
-
 test('a partially completed selected-species action resumes once from durable state without resetting physical work',()=>{
  const {w,r,shore}=fixture(),store=new WorldStore(':memory:');
  try{
@@ -176,7 +174,6 @@ test('nearby exhausted shores cannot hide the next registered pool behind a glob
  assert.ok(choice);const action=choice.action as IndustryAction;
  assert.equal(fishingStockAt(w,action.at!),right);assert.equal(action.fishSpecies,'carp');assert.ok(Math.abs(r.at.x-action.at!.x)+Math.abs(r.at.y-action.at!.y)<=12);
 });
-
 
 test('new fish reserve proposals require the residents real species stock and do not crowd legacy civic choices',()=>{
  const {w,r,home}=fixture();home.kind='lodge';home.ownerId='commons';home.definition='building/lodge@1';r.at={...home.door};initializeCivic(w);

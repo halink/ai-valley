@@ -4,7 +4,7 @@ import {createHash} from 'node:crypto';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {join} from 'node:path';
 import {testTmpdir} from '../scripts/repository-temporary.mjs';
-import type {Resident,World,WorldEvent} from '../src/shared/types.js';
+import type {Resident,World} from '../src/shared/types.js';
 import type {WaterSupplyAction,WaterVessel} from '../src/shared/water-supply.js';
 import type {HistoryPage} from '../src/shared/history.js';
 import {createWorld} from '../src/world/seed.js';
@@ -17,8 +17,7 @@ import {YEAR} from '../src/world/time.js';
 import {emitEvent} from '../src/world/events.js';
 import {WorldStore} from '../src/server/store.js';
 import {historyKey,normalizeHistory,parseHistoryQuery,HistoryQueryError} from '../src/server/history-query.js';
-import {HistoryReader,archiveControls,archiveTimeline} from '../src/client/history.js';
-import {waterEventDetails,rememberWaterDetails} from '../src/client/water-history.js';
+
 import {decisionChoices,decisionContext} from '../src/server/decisions.js';
 import {parseChoice} from '../src/server/affordances.js';
 import {submitPlan,stepWorld} from '../src/world/engine.js';
@@ -112,23 +111,4 @@ test('durable archive retains old water snapshots after the recent window, owner
   for(let i=0;i<200;i++)emitEvent(w,{kind:'system',actors:[],place:{x:0,y:0},text:'later unrelated fact '+i});
   store.commit(w,previous);store.close();store=new WorldStore(path);const restored=store.loadForRuntime()!;assert.ok(!restored.events.some(e=>e.id===event.id));assert.deepEqual(store.historyPage(w.id,{waterOnly:true}).events,[historical]);assert.equal(restored.waterSupply!.vessels[0].ownerId,other.id);assert.equal(restored.waterSupply!.vessels[0].amount,6);
  }finally{store.close();rmSync(dir,{recursive:true,force:true});}
-});
-
-test('water history presentation uses event snapshots only, escapes identifiers and labels legacy facts as lacking snapshots',()=>{
- const f=fixture(),{w,r}=f,v=bucket(f,r,2);v.id='<script>bucket</script>';const e=complete(w,r,{operation:'drink',vesselId:v.id}),before=waterEventDetails(e);v.amount=6;v.ownerId='someone-else';assert.equal(waterEventDetails(e),before);assert.match(before,/实际饮用 1份/);assert.match(before,/2 \/ 6份/);assert.match(before,/1 \/ 6份/);assert.match(before,/&lt;script&gt;/);assert.ok(!before.includes('<script>'));assert.match(before,/尚未启用口渴/);assert.match(archiveTimeline([e],w),/这次供水的实物记录/);
- const legacy={...e};delete legacy.waterSupply;assert.equal(waterEventDetails(legacy),'');assert.ok(!archiveTimeline([legacy],w).includes('这次供水的实物记录'));
-});
-
-test('reader transmits water scope and notices only matching new facts while keeping an older page stable',async()=>{
- const f=fixture(),{w,r}=f,v=bucket(f,r,2),event=complete(w,r,{operation:'drink',vesselId:v.id});const urls:URL[]=[];
- const fetcher=(async(input:URL)=>{urls.push(new URL(input));return new Response(JSON.stringify({worldId:w.id,events:[event],hasMore:urls.length===1,nextCursor:urls.length===1?'older':null,observedRevision:w.revision} satisfies HistoryPage),{headers:{'content-type':'application/json'}});}) as typeof fetch;
- const reader=new HistoryReader('http://localhost/api/',()=>{},fetcher);try{await reader.configure(w.id,{waterOnly:true});assert.equal(urls[0].searchParams.get('water'),'1');await reader.older();assert.equal(reader.index,1);emitEvent(w,{kind:'action',actors:[r.id],place:r.at,text:'仅谈到饮水，不是完成事实'});reader.observe(w,true);assert.equal(reader.news,false);complete(w,r,{operation:'drink',vesselId:v.id});reader.observe(w,true);assert.equal(reader.news,true);assert.equal(reader.page!.events[0].id,event.id);assert.match(archiveControls('chronicle',reader,w),/早期文字记录/);assert.ok(!archiveControls('chronicle',reader,w).includes('name="water"'),'fixed scope has no editable duplicate');
- }finally{reader.destroy();}
-});
-
-test('opened water details survive panel replacement without opening unrelated events or undoing a manual close',()=>{
- let details=[{dataset:{waterEvent:'same'},open:true},{dataset:{waterEvent:'closed'},open:false}];
- const root={querySelectorAll:()=>details} as unknown as ParentNode;let restore=rememberWaterDetails(root);
- details=[{dataset:{waterEvent:'same'},open:false},{dataset:{waterEvent:'closed'},open:false},{dataset:{waterEvent:'new'},open:false}];restore();assert.deepEqual(details.map(d=>d.open),[true,false,false]);
- details[0].open=false;restore=rememberWaterDetails(root);details=[{dataset:{waterEvent:'same'},open:false}];restore();assert.equal(details[0].open,false);
 });
