@@ -12,6 +12,8 @@ import {createServer,type Server} from 'node:http';
 import {createWorld} from '../world/seed.js';
 import {stepWorld,submitPlan} from '../world/engine.js';
 import {distance} from '../world/navigation.js';
+import {canContactBerry} from '../world/berry-observation.js';
+import {canContactSpring} from '../world/spring-observation.js';
 import {VALLEY_VERSION} from '../shared/version.js';
 import type {Action,Resident,Snapshot,Tile,World} from '../shared/types.js';
 
@@ -92,9 +94,20 @@ export function createMvpSession(){
      if(!result.ok)throw new Error(`MVP plan rejected for ${r.id}: ${result.error}`);
      decisions[r.id]=(decisions[r.id]??0)+1;
     }
+    // A neighbour may finish harvesting after this resident chose a source.
+    // Keep the engine's rejected action (no inventory credit), then let the
+    // next tick choose from current stock instead of freezing the whole demo.
+    const gathering=new Map(world.residents.map(r=>[r.id,r.activity?.action]));
     stepWorld(world,1);
-    const failed=world.residents.find(r=>r.lastFailure);
-    if(failed)throw new Error(`MVP action failed for ${failed.id}: ${failed.lastFailure}`);
+    for(const failed of world.residents.filter(r=>r.lastFailure)){
+     const action=gathering.get(failed.id);
+     const source=action?.type==='gather'?world.resources.find(s=>s.id===action.resourceId):undefined;
+     const depleted=action?.type==='gather'&&source&&source.amount<action.quantity&&distance(failed.at,source.at)<=1
+      &&(source.kind!=='bush'||canContactBerry(world,failed,source))
+      &&(source.kind!=='spring'||canContactSpring(world,failed,source));
+     if(failed.lastFailure==='资源或实际位置已经变化'&&depleted)continue;
+     throw new Error(`MVP action failed for ${failed.id}: ${failed.lastFailure}`);
+    }
    }
   }catch(error){fault=error instanceof Error?error.message:String(error);world.clock.paused=true;world.clock.reason=fault;world.revision++;}
  };
