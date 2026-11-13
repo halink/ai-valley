@@ -114,7 +114,7 @@ static func mode_label(snapshot: Dictionary) -> String:
 # Detail formatting never turns missing fields into zero or an inferred decision.
 static func number_label(value: Variant) -> String:
 	if (value is int or value is float) and is_finite(value):
-		return str(value)
+		return ("%.1f" % value).trim_suffix(".0")
 	return "未知"
 
 static func inventory_label(person: Dictionary) -> String:
@@ -153,7 +153,7 @@ static func status_number(value: Variant, integer: bool = false) -> String:
 		return "未知"
 	if integer and value != floor(value):
 		return "未知"
-	return str(value)
+	return ("%.1f" % value).trim_suffix(".0")
 
 static func model_status(observation: Dictionary, actor_id: String = "") -> String:
 	var model = observation.get("model")
@@ -171,7 +171,7 @@ static func model_status(observation: Dictionary, actor_id: String = "") -> Stri
 			if not id is String:
 				valid_ids = false
 	if not actor_id.is_empty():
-		parts.append(("请求处理中" if actor_id in ids else "无进行中请求") if valid_ids else "请求：未知")
+		return ("该居民模型请求处理中" if actor_id in ids else "该居民无进行中模型请求") if valid_ids else "该居民模型请求：未知"
 	parts.append("进行中请求数：" + status_number(model.get("requestCount"), true))
 	parts.append("冷却中的供应商通道数：" + status_number(model.get("cooldownProviders"), true))
 	parts.append("快照时最长剩余冷却：" + status_number(model.get("cooldownRemainingMs")) + " ms")

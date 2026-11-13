@@ -22,6 +22,8 @@ var timer: Timer
 var busy := false
 var connected := false
 var first := true
+var panel_collapsed := false
+var model_diagnostics: Label
 
 func _ready() -> void:
 	valley = Valley3D.new()
@@ -32,22 +34,41 @@ func _ready() -> void:
 	panel.name = "ObserverPanel"
 	panel.theme = Theme.new()
 	panel.theme.default_font = UI_FONT
-	panel.position = Vector2(12, 12)
-	panel.size = Vector2(480, 740)
 	panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
-	panel.offset_right = 492
-	panel.offset_bottom = 752
+	panel.position = Vector2(12, 12)
+	panel.theme.default_font_size = 16
+	var paper := StyleBoxFlat.new()
+	paper.bg_color = Color(0.96, 0.94, 0.86, 0.96)
+	paper.set_corner_radius_all(10)
+	paper.content_margin_left = 12
+	paper.content_margin_right = 12
+	paper.content_margin_top = 10
+	paper.content_margin_bottom = 10
+	panel.add_theme_stylebox_override("panel", paper)
+	panel.theme.set_color("font_color", "Label", Color(0.19, 0.23, 0.20))
 	layer.add_child(panel)
+	var frame := VBoxContainer.new()
+	panel.add_child(frame)
+	var toggle := Button.new()
+	toggle.text = "山谷手记 · 收起"
+	frame.add_child(toggle)
 	var scroll := ScrollContainer.new()
 	scroll.name = "ObserverScroll"
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	panel.add_child(scroll)
+	frame.add_child(scroll)
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	toggle.pressed.connect(func():
+		panel_collapsed = not panel_collapsed
+		scroll.visible = not panel_collapsed
+		toggle.text = "山谷手记 · 展开" if panel_collapsed else "山谷手记 · 收起"
+		_resize_panel(panel)
+	)
 	var box := VBoxContainer.new()
 	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(box)
 	var title := Label.new()
 	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	title.text = "AI Valley · 手绘风格 3D MVP｜只读观察 · 首轮美术样片"
+	title.text = "AI Valley · 只读观察"
 	box.add_child(title)
 	var presets := VBoxContainer.new()
 	box.add_child(presets)
@@ -57,7 +78,8 @@ func _ready() -> void:
 		var origin := "http://127.0.0.1:3414" if presets.get_child_count() == 0 else "http://127.0.0.1:3415"
 		button.pressed.connect(_choose_endpoint.bind(origin))
 		presets.add_child(button)
-	var row := VBoxContainer.new()
+	var row := GridContainer.new()
+	row.columns = 2
 	box.add_child(row)
 	endpoint = LineEdit.new()
 	endpoint.text = "http://127.0.0.1:3414"
@@ -66,27 +88,34 @@ func _ready() -> void:
 		endpoint.text = str(JavaScriptBridge.eval("window.location.origin"))
 		presets.visible = false
 		endpoint.editable = false
+		endpoint.visible = false
 	endpoint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(endpoint)
 	var connect_button := Button.new()
-	connect_button.text = "连接／重新连接"
+	connect_button.text = "连接 / 重连"
+	connect_button.tooltip_text = "读取同源世界快照，不调用或启用模型"
 	connect_button.pressed.connect(_connect_server)
+	connect_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(connect_button)
 	var home := Button.new()
-	home.text = "回到地图中心"
+	home.text = "回到中心"
 	home.pressed.connect(_recenter)
+	home.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(home)
 	var next_person := Button.new()
-	next_person.text = "下一位居民（包括室内）"
+	next_person.text = "下一位居民"
 	next_person.pressed.connect(_next_resident)
+	next_person.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(next_person)
 	var enter := Button.new()
-	enter.text = "观察住宅内部"
+	enter.text = "住宅内部"
 	enter.pressed.connect(_enter_room)
+	enter.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(enter)
 	var leave := Button.new()
 	leave.text = "回到室外"
 	leave.pressed.connect(_leave_room)
+	leave.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(leave)
 	room_hint = Label.new()
 	room_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -97,13 +126,14 @@ func _ready() -> void:
 	box.add_child(endpoint_hint)
 	endpoint.text_changed.connect(_endpoint_edited)
 	_endpoint_edited(endpoint.text)
+	endpoint_hint.visible = not OS.has_feature("web")
 	connection_label = Label.new()
 	connection_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	connection_label.text = "尚未连接。预设仅填写地址，仍需点击连接。"
+	connection_label.text = "尚未连接 · 点击连接读取世界"
 	box.add_child(connection_label)
 	status = Label.new()
 	status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	status.text = "尚未连接。先单独启动对应服务，再点击连接。中键拖动 · 滚轮缩放 · 左键选择"
+	status.text = "中键拖动 · 滚轮缩放 · 左键选择"
 	box.add_child(status)
 	detail = Label.new()
 	detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -113,6 +143,16 @@ func _ready() -> void:
 	mode_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	mode_label.text = "尚未连接模拟世界"
 	box.add_child(mode_label)
+	var diagnostic_toggle := CheckButton.new()
+	diagnostic_toggle.text = "模型诊断"
+	for color_name in ["font_color", "font_hover_color", "font_pressed_color", "font_hover_pressed_color", "font_focus_color"]:
+		diagnostic_toggle.add_theme_color_override(color_name, Color(0.19, 0.23, 0.20))
+	box.add_child(diagnostic_toggle)
+	model_diagnostics = Label.new()
+	model_diagnostics.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	model_diagnostics.visible = false
+	box.add_child(model_diagnostics)
+	diagnostic_toggle.toggled.connect(func(value: bool): model_diagnostics.visible = value)
 	events_label = Label.new()
 	events_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	events_label.text = "近期事件：尚未收到"
@@ -130,7 +170,7 @@ func _ready() -> void:
 	add_child(timer)
 
 func _resize_panel(panel: PanelContainer) -> void:
-	panel.size = Vector2(480, maxf(240, get_viewport().get_visible_rect().size.y - 24))
+	panel.size = Vector2(330, 48 if panel_collapsed else maxf(240, get_viewport().get_visible_rect().size.y - 24))
 
 # Presets never start services, enable a model, or change a running connection.
 func _choose_endpoint(origin: String) -> void:
@@ -156,6 +196,7 @@ func _connect_server() -> void:
 	active_endpoint = ""
 	connection_label.text = "当前连接：无"
 	observation = {}
+	model_diagnostics.text = "当前模型状态未知"
 	_update_detail()
 	mode_label.text = "已断开 · 当前模型状态未知"
 	valley.settle_motion()
@@ -194,6 +235,7 @@ func _poll() -> void:
 		connection_label.text = "目标服务：" + active_endpoint + " · 已断开／数据过期"
 		observation = {}
 		_update_detail()
+		model_diagnostics.text = "当前模型状态未知"
 		mode_label.text = "已断开／数据过期 · 当前模型状态未知"
 		valley.settle_motion()
 		movement_feed.reset()
@@ -207,6 +249,7 @@ func _received(result: int, code: int, _headers: PackedStringArray, body: Packed
 		connection_label.text = "目标服务：" + active_endpoint + " · 已断开／数据过期"
 		observation = {}
 		_update_detail()
+		model_diagnostics.text = "当前模型状态未知"
 		mode_label.text = "已断开／数据过期 · 当前模型状态未知"
 		valley.settle_motion()
 		movement_feed.reset()
@@ -220,6 +263,7 @@ func _received(result: int, code: int, _headers: PackedStringArray, body: Packed
 		connection_label.text = "目标服务：" + active_endpoint + " · 已断开／数据过期"
 		observation = {}
 		_update_detail()
+		model_diagnostics.text = "当前模型状态未知"
 		mode_label.text = "已断开／数据过期 · 当前模型状态未知"
 		valley.settle_motion()
 		movement_feed.reset()
@@ -231,6 +275,7 @@ func _received(result: int, code: int, _headers: PackedStringArray, body: Packed
 		connection_label.text = "目标服务：" + active_endpoint + " · 已断开／数据过期"
 		observation = {}
 		_update_detail()
+		model_diagnostics.text = "当前模型状态未知"
 		mode_label.text = "已断开／数据过期 · 当前模型状态未知"
 		valley.settle_motion()
 		movement_feed.reset()
@@ -242,6 +287,7 @@ func _received(result: int, code: int, _headers: PackedStringArray, body: Packed
 		connection_label.text = "目标服务：" + active_endpoint + " · 已断开／数据过期"
 		observation = {}
 		_update_detail()
+		model_diagnostics.text = "当前模型状态未知"
 		mode_label.text = "已断开／数据过期 · 当前模型状态未知"
 		valley.settle_motion()
 		movement_feed.reset()
@@ -260,9 +306,11 @@ func _received(result: int, code: int, _headers: PackedStringArray, body: Packed
 		_recenter()
 		first = false
 	var paused: bool = world.get("clock", {}).get("paused", false)
-	connection_label.text = "当前连接：" + active_endpoint + " · 已收到服务端快照（不等于模型验收）"
-	status.text = "已连接 · 快照版本 %s · %s · 每 2 秒读取完整快照" % [world.revision, "已暂停" if paused else "世界时钟运行中"]
-	mode_label.text = Snapshot.mode_label(parsed) + "\n" + Snapshot.model_status(observation)
+	connection_label.text = "已连接 · 同源快照（非模型验收）"
+	connection_label.tooltip_text = active_endpoint
+	status.text = "快照 %s · %s" % [Snapshot.number_label(world.revision), "已暂停" if paused else "世界运行中"]
+	mode_label.text = Snapshot.mode_label(parsed)
+	model_diagnostics.text = Snapshot.model_status(observation)
 	if paused:
 		mode_label.text += " · 暂停原因：" + "服务端已暂停（原因未展示）"
 	var lines: Array[String] = []
@@ -289,7 +337,7 @@ func _update_detail() -> void:
 				detail.text = "已断开／数据过期 · 收到新快照前居民详情未知"
 				return
 			detail.text = "%s · %s · 健康 %s" % [Snapshot.resident_name(person), Snapshot.resident_status(person), Snapshot.number_label(person.get("health"))]
-			detail.text += " · " + Snapshot.action_detail(person) + " · 饥饿 %s · 精力 %s · " % [Snapshot.number_label(person.get("hunger")), Snapshot.number_label(person.get("energy"))] + Snapshot.inventory_label(person) + " · " + Snapshot.thirst_label(world, person.id) + " · " + Snapshot.failure_label(person) + "\n" + Snapshot.model_status(observation, person.id)
+			detail.text += "\n" + Snapshot.action_detail(person) + "\n饥饿 %s · 精力 %s\n" % [Snapshot.number_label(person.get("hunger")), Snapshot.number_label(person.get("energy"))] + Snapshot.inventory_label(person) + " · " + Snapshot.thirst_label(world, person.id) + " · " + Snapshot.failure_label(person) + "\n" + Snapshot.model_status(observation, person.id)
 			detail.text += " · 室内" if person.get("inside") != null else " · 室外"
 			return
 	selected = ""
