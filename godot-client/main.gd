@@ -168,6 +168,10 @@ func _ready() -> void:
 	timer.wait_time = 2.0
 	timer.timeout.connect(_poll)
 	add_child(timer)
+	# Web is a same-origin read-only observer. Fetching a snapshot does not
+	# start the world or enable a model; retain the button for manual retries.
+	if OS.has_feature("web"):
+		_connect_server.call_deferred()
 
 func _resize_panel(panel: PanelContainer) -> void:
 	panel.size = Vector2(330, 48 if panel_collapsed else maxf(240, get_viewport().get_visible_rect().size.y - 24))

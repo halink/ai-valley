@@ -18,7 +18,7 @@ npm ci
 npm run build:godot:web
 npm run demo:godot:web
 # 在浏览器打开 http://127.0.0.1:3414
-# 点击“连接／重新连接”，开始读取同源世界快照
+# 页面自动读取同源世界快照；“连接／重连”仅用于手动重试
 ```
 
 `npm run dev`、`npm run dev:web` 与 `npm run demo:godot:web` 是同一规则 Web 入口，只需运行一个。`npm run build` 仅检查 TypeScript 并编译后台，`npm start` 启动编译后的同一服务；Web 导出仍须独立执行。
