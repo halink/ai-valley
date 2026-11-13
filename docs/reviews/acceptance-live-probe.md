@@ -1,3 +1,5 @@
+> 历史记录：本页涉及的测试源码、夹具及专属验收脚本已于 2026-11-13 按项目所有者要求移除。旧命令仅作历史记录，不再可执行；历史结果不代表当前版本已验收。当前流程见仓库 CONTRIBUTING.md。
+
 # Independent live-probe wiring review
 
 Current status, 2026-11-10: the former live launcher and direct live guardian/worker paths are retired and fail closed pending prior request/billing reconciliation and a separately reviewed integration. Only offline synthetic regressions remain executable. The review and attempted-run record below are historical, not current live authorization. See [current entrypoint status](../implementation/acceptance-live-probe.md).

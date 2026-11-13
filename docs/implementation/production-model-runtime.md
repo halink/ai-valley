@@ -1,3 +1,5 @@
+> 历史记录：本页涉及的测试源码、夹具及专属验收脚本已于 2026-11-13 按项目所有者要求移除。旧命令仅作历史记录，不再可执行；历史结果不代表当前版本已验收。当前流程见仓库 CONTRIBUTING.md。
+
 # 生产候选与真实 runtime 的离线提交桥
 
 `production-model-runtime.ts` 新增 **仅合成、默认不接正式入口** 的组件。它把真实 `ValleyRuntime`、调用方独占的合成 `WorldStore`、`ProductionModelJournal` 和品牌内存 HTTP 候选连接起来。没有 CLI、网络、key、凭据回调或实时启用参数，不读取 `.env`、正式存档或旧运行证据。`main.ts` 仍固定无模型，生产 HTTP 的授权、旧未知请求核对、零价格与最多15分钟新鲜度检查均不变。

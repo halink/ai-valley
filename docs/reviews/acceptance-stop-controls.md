@@ -1,3 +1,5 @@
+> 历史记录：本页涉及的测试源码、夹具及专属验收脚本已于 2026-11-13 按项目所有者要求移除。旧命令仅作历史记录，不再可执行；历史结果不代表当前版本已验收。当前流程见仓库 CONTRIBUTING.md。
+
 # Acceptance stop controls: independent offline review
 
 Scope: optional `AcceptanceStopControl`, `ValleyRuntime` integration, and propagation of caller cancellation to model transport. This review does not authorize or execute a real model acceptance run. It uses synthetic price assessments, synthetic zero-cost replies, in-memory SQLite, mocked clocks, and blocked fetch. No credentials, existing saves, browser, npm, commit, or push were used.

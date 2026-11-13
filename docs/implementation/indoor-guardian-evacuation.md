@@ -1,3 +1,5 @@
+> 历史记录：本页涉及的测试源码、夹具及专属验收脚本已于 2026-11-13 按项目所有者要求移除。旧命令仅作历史记录，不再可执行；历史结果不代表当前版本已验收。当前流程见仓库 CONTRIBUTING.md。
+
 # 室内幼儿按已知地址尝试撤离
 
 这是[有限监护灾害护送](guardian-evacuation.md)的一个窄扩展：同处灾屋的当前监护人，可以选择把健康、未满6岁的幼儿接出，按本人已经知道的公共或本人所有诊所/会馆地址尝试护送。**地址不代表实时安全或空床；床位只在实际到达门口后核验和保留。**
@@ -30,7 +32,7 @@
 
 - 首批6项主回归在修改前全部因真实最终菜单缺少入口而失败；修改后扩为11项，覆盖实际菜单/选择、真实室内外路线、三阶段重载、到场无床、既有床权、动态危险/房间障碍、拒绝与标识篡改。
 - 独立复核使用独立场景及正常 `decisionContext → decisionChoices → parseChoice → submitPlan → stepWorld`。初版复现远方活动洪水使原寻路在接出时提前失败，已限定新模式的初始危险知情范围，保留实际逐边硬约束。
-- [主回归](../../tests/indoor-guardian-evacuation.test.ts) · [独立回归](../../tests/indoor-guardian-evacuation-review.test.ts) · [独立审查](../reviews/indoor-guardian-evacuation.md)。最终离线验证结果在下方追加，不把局部通过等同全仓或真实模型验收。
+- 主回归（历史路径：`../../tests/indoor-guardian-evacuation.test.ts`，已移除） · 独立回归（历史路径：`../../tests/indoor-guardian-evacuation-review.test.ts`，已移除） · [独立审查](../reviews/indoor-guardian-evacuation.md)。最终离线验证结果在下方追加，不把局部通过等同全仓或真实模型验收。
 
 ## 仍未覆盖
 

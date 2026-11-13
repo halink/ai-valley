@@ -1,3 +1,5 @@
+> 历史记录：本页涉及的测试源码、夹具及专属验收脚本已于 2026-11-13 按项目所有者要求移除。旧命令仅作历史记录，不再可执行；历史结果不代表当前版本已验收。当前流程见仓库 CONTRIBUTING.md。
+
 # SiliconFlow 单模型 HTTP 形状与九人离线接线
 
 本批继续准备受控九人测试，但**仅运行内存模拟 HTTP，没有真实 HTTP client/adapter、live CLI、凭据或实际数据发送**。默认真实运行保持关闭。公开 `run-nine-resident-acceptance.mjs --offline`、原 Qwen 主模型/DeepSeek 备用的十五日拟议方案以及原固定探针契约均不变。本模块不是另一条获准真实运行的入口。

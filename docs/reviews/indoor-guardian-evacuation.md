@@ -1,3 +1,5 @@
+> 历史记录：本页涉及的测试源码、夹具及专属验收脚本已于 2026-11-13 按项目所有者要求移除。旧命令仅作历史记录，不再可执行；历史结果不代表当前版本已验收。当前流程见仓库 CONTRIBUTING.md。
+
 # Indoor guardian evacuation independent review
 
 Scope: an actual current guardian carrying a healthy child under six out of a threatened room toward an already-known public or own clinic/lodge. Review covers the final choice menu, physical pickup/room exit/outdoor movement, deferred bed reservation, interruption and memory-only SQLite restart. This does not cover noncritical incapacitated adults or no-bed dry-ground evacuation.

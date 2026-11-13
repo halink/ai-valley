@@ -1,3 +1,5 @@
+> 历史记录：本页涉及的测试源码、夹具及专属验收脚本已于 2026-11-13 按项目所有者要求移除。旧命令仅作历史记录，不再可执行；历史结果不代表当前版本已验收。当前流程见仓库 CONTRIBUTING.md。
+
 # 救援后成人的有限非侵入式在场
 
 ## 本次切片与既有设计
@@ -41,7 +43,7 @@
 
 ## 隔离验证
 
-主测试 [adult-presence.test.ts](../../tests/adult-presence.test.ts) 使用真实最终菜单、选择解析、提交计划、实际撤险及步进，覆盖多阶段内存SQLite重载、现场权利与能力变化、即时停止、反重放、无营养或钱物收益、观察者更新和注入式离线运行时。独立测试与审查见 [adult-presence-review.test.ts](../../tests/adult-presence-review.test.ts) 和[独立审查](../reviews/adult-presence.md)。
+主测试 adult-presence.test.ts（历史路径：`../../tests/adult-presence.test.ts`，已移除） 使用真实最终菜单、选择解析、提交计划、实际撤险及步进，覆盖多阶段内存SQLite重载、现场权利与能力变化、即时停止、反重放、无营养或钱物收益、观察者更新和注入式离线运行时。独立测试与审查见 adult-presence-review.test.ts（历史路径：`../../tests/adult-presence-review.test.ts`，已移除） 和[独立审查](../reviews/adult-presence.md)。
 
 独立审查首先发现核实累计量 `NaN` 可绕过检查，以及缺失位置、停止列表和来源目击数组会使菜单崩溃；已加入有限数、完整性与真实事件期限校验。审查还指出核实完成前缺乏表达性停止，现已补齐排队和最后一步的窄停止入口。最初失败与修复后结果分开记录，不掩盖边界问题。
 

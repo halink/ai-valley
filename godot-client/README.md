@@ -36,13 +36,12 @@ npm run demo:godot:web
 
 ```sh
 npm run check
-npm test
-npm run test:godot
+npm run build
 npm run build:godot:web
 ```
 
-完整 TypeScript 测试要求 Linux，具体见[贡献指南](../CONTRIBUTING.md)。`test:godot` 自动导入隔离资源并运行离线合成检查，不能替代实际 WebGL、鼠标操作或真实模型验收。
+自动化测试与专属测试运行器已按要求删除，运行、验收和安全保护脚本保留；CI 仅做后台编译。Web 导出与实际浏览器操作分开记录，不把构建成功当成已可玩。
 
-当前证据：Web release 已导出，静态文件和同源快照 HTTP 检查、规则短测以及 Godot headless 检查已有通过记录。本次同一执行会话 HTTP 可访问，但另一会话及浏览器连接 loopback 服务被拒绝，因此**没有完成真实浏览器画面、GPU 和交互验收**。不能将构建成功写成已可玩。长期运行由项目所有者验证。
+历史证据（测试源码已移除，不代表本版本重新验收）：Web release 已导出，静态文件和同源快照 HTTP 检查、规则短测以及 Godot headless 检查已有通过记录。本次同一执行会话 HTTP 可访问，但另一会话及浏览器连接 loopback 服务被拒绝，因此**没有完成真实浏览器画面、GPU 和交互验收**。不能将构建成功写成已可玩。长期运行由项目所有者验证。
 
 详细 Web 环境、导出失效标记、安全边界见[浏览器 MVP 说明](../docs/godot-web-mvp.md)。

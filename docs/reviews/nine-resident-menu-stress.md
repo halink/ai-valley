@@ -1,3 +1,5 @@
+> 历史记录：本页涉及的测试源码、夹具及专属验收脚本已于 2026-11-13 按项目所有者要求移除。旧命令仅作历史记录，不再可执行；历史结果不代表当前版本已验收。当前流程见仓库 CONTRIBUTING.md。
+
 # 默认九人编号菜单离线压力验收审查
 
 ## 默认策略修正：保留v4，v5必须显式选择
@@ -141,7 +143,7 @@ v3终点葛川仍能决定/表达但饥饿96.392、健康15.476，无随身食�
 
 ## v2历史审查结论
 
-2026年11月10日，对37b0df0收录的v2[测试控制器](../../tests/helpers/nine-resident-menu-stress.ts)及[专项测试](../../tests/nine-resident-menu-stress.test.ts)未发现阻断问题；下面的哈希限定当时版本，不把历史结论转移给未来修改。这个结论认可已保存证据的完整性和所声明范围，**不认可九人生存或真实模型自主性通过**。15日实际结果为6/9存活，`actionCoveragePassed=true`、`scriptedSurvivalPassed=false`。
+2026年11月10日，对37b0df0收录的v2测试控制器（历史路径：`../../tests/helpers/nine-resident-menu-stress.ts`，已移除）及专项测试（历史路径：`../../tests/nine-resident-menu-stress.test.ts`，已移除）未发现阻断问题；下面的哈希限定当时版本，不把历史结论转移给未来修改。这个结论认可已保存证据的完整性和所声明范围，**不认可九人生存或真实模型自主性通过**。15日实际结果为6/9存活，`actionCoveragePassed=true`、`scriptedSurvivalPassed=false`。
 
 本页摘要来自独立复核已生成证据的工作。审查者没有重新运行长模拟、作者的六项专项或全仓测试；逐条决定复放、实际合成SQLite重开，与作者先前执行的物理模拟和测试结果是不同层次的证据。复现命令及输出格式见[实现说明](../implementation/nine-resident-menu-stress.md)。原始本地日志、合成数据库和工具输出不随源码收录。
 

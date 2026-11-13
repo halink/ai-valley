@@ -1,3 +1,5 @@
+> 历史记录：本页涉及的测试源码、夹具及专属验收脚本已于 2026-11-13 按项目所有者要求移除。旧命令仅作历史记录，不再可执行；历史结果不代表当前版本已验收。当前流程见仓库 CONTRIBUTING.md。
+
 # 成人紧急基础照护与童年监护历史
 
 ## 复现与既有设计
@@ -19,7 +21,7 @@
 
 ## 隔离证据
 
-主回归 [adult-emergency-care.test.ts](../../tests/adult-emergency-care.test.ts) 在旧实现 **8 项中 6 项失败**，包括真实最终菜单缺项和错误的代理判定；两个原权限边界用例通过。最小修复后 **8/8** 通过。独立测试与结论见 [独立审查](../reviews/adult-emergency-care.md)。
+主回归 adult-emergency-care.test.ts（历史路径：`../../tests/adult-emergency-care.test.ts`，已移除） 在旧实现 **8 项中 6 项失败**，包括真实最终菜单缺项和错误的代理判定；两个原权限边界用例通过。最小修复后 **8/8** 通过。独立测试与结论见 [独立审查](../reviews/adult-emergency-care.md)。
 
 覆盖 `decisionContext → decisionChoices → parseChoice → submitPlan → stepWorld` 实际链路、在场历史监护人自己/第三人施救、18 岁边界、正常成长清理与旧成人/老人数据、儿童现有权限、19/20/20.001 健康阈值、本人独立接受、有效拒绝、执行最后四分之一分钟失效，以及内存 SQLite 重载后继续或保守失败。重载不补造同意、钱货或身份。
 

@@ -1,3 +1,5 @@
+> 历史记录：本页涉及的测试源码、夹具及专属验收脚本已于 2026-11-13 按项目所有者要求移除。旧命令仅作历史记录，不再可执行；历史结果不代表当前版本已验收。当前流程见仓库 CONTRIBUTING.md。
+
 # Nine-resident food-chain independent review
 
 > Historical review: the numeric results below are superseded by the family-stock/gift and full observation-slice extension reviewed in [nine-food-accounting.md](nine-food-accounting.md). The current run has four SQLite reopen checkpoints, 229 selected/completed actions with none pending or failed, and root reconciliation 45 + 12 − 1 − 48 = 8. Earlier three-reopen, 211-action and nine-root figures describe only the prior run.

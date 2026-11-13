@@ -1,3 +1,5 @@
+> 历史记录：本页涉及的测试源码、夹具及专属验收脚本已于 2026-11-13 按项目所有者要求移除。旧命令仅作历史记录，不再可执行；历史结果不代表当前版本已验收。当前流程见仓库 CONTRIBUTING.md。
+
 # MVP-0 painted material slice v1
 
 Two project-bound original PNG textures generated with the built-in image generation tool on 2026-11-12. Not downloaded from a third-party asset store. Preserve source bytes (including metadata); no claim of verified provenance signature. These are actual albedo materials used by `valley_3d.gd`, not a concept image shown instead of the game.

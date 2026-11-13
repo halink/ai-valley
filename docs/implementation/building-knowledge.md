@@ -1,3 +1,5 @@
+> 历史记录：本页涉及的测试源码、夹具及专属验收脚本已于 2026-11-13 按项目所有者要求移除。旧命令仅作历史记录，不再可执行；历史结果不代表当前版本已验收。当前流程见仓库 CONTRIBUTING.md。
+
 # 已知建筑地址与现场观察
 
 本次修复[访客引导](visitor-guidance.md)中已核实的信息边界问题：记住某处建筑的地址，不再让正常决定上下文自动包含整栋建筑的实时记录。规则仍遵循[世界事实、居民所知与观察者所见](../design/simulation.md#世界事实居民所知与观察者所见)的区分。
@@ -38,7 +40,7 @@
 
 ## 回归
 
-[building-knowledge.test.ts](../../tests/building-knowledge.test.ts)覆盖：
+building-knowledge.test.ts（历史路径：`../../tests/building-knowledge.test.ts`，已移除）覆盖：
 
 1. 普通访客只知道远处公共会馆地址时，改变屋况、容量、住户登记、床位分配及公共库存，完整决定上下文、最终选择和模型提示保持相同。
 2. 到场观察、私宅内外的差别、身处另一房间、睡眠与失能边界。
@@ -48,7 +50,7 @@
 6. 旧档式已知地址重载不增加观察证据，完整建筑事实继续保留。
 7. 九至十格外、另一房间内的登记菜单不随隐藏床位变化，八格内才获得相应现场选项；床位不足不会误禁合法厨房。
 
-[kitchen-destination.test.ts](../../tests/kitchen-destination.test.ts)补充指定厨房损毁、在途权限变化、共享门口的两厨房并发、旧活动占用与在途计划重载和参数校验，防止静默改道或权限放宽。室内工位与公共值班测试继续覆盖实际行走、排他占用及重载。
+kitchen-destination.test.ts（历史路径：`../../tests/kitchen-destination.test.ts`，已移除）补充指定厨房损毁、在途权限变化、共享门口的两厨房并发、旧活动占用与在途计划重载和参数校验，防止静默改道或权限放宽。室内工位与公共值班测试继续覆盖实际行走、排他占用及重载。
 
 ```sh
 node --import tsx --test tests/building-knowledge.test.ts tests/kitchen-destination.test.ts tests/visitor-guidance.test.ts tests/decisions.test.ts tests/affordances.test.ts tests/rooms.test.ts tests/public-duties.test.ts

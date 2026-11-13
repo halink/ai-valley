@@ -1,3 +1,5 @@
+> 历史记录：本页涉及的测试源码、夹具及专属验收脚本已于 2026-11-13 按项目所有者要求移除。旧命令仅作历史记录，不再可执行；历史结果不代表当前版本已验收。当前流程见仓库 CONTRIBUTING.md。
+
 # Shelter capacity fixture correction
 
 The original capacity case was red at `tests/disaster-supply-chain.test.ts:122`: no normal shelter choice. Seed 73 rain generates a simultaneous windstorm; the residents start outside it, while the original hall door `(17,19)` is inside it. A usable dry roof does not imply a permitted route. The existing danger-edge restriction correctly prevents entering that storm.

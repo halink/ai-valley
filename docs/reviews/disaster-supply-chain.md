@@ -1,6 +1,8 @@
+> 历史记录：本页涉及的测试源码、夹具及专属验收脚本已于 2026-11-13 按项目所有者要求移除。旧命令仅作历史记录，不再可执行；历史结果不代表当前版本已验收。当前流程见仓库 CONTRIBUTING.md。
+
 # 天气灾害与供水联合验收复核
 
-独立只读复核了 [联合测试](../../tests/disaster-supply-chain.test.ts)、[验收范围](../implementation/disaster-supply-chain.md)，以及安全供水、天气灾害文档中的关联修订。结论：未发现阻断项，没有改动生产规则或开启正式天气。
+独立只读复核了 联合测试（历史路径：`../../tests/disaster-supply-chain.test.ts`，已移除）、[验收范围](../implementation/disaster-supply-chain.md)，以及安全供水、天气灾害文档中的关联修订。结论：未发现阻断项，没有改动生产规则或开启正式天气。
 
 ## 已核实
 

@@ -1,3 +1,5 @@
+> 历史记录：本页涉及的测试源码、夹具及专属验收脚本已于 2026-11-13 按项目所有者要求移除。旧命令仅作历史记录，不再可执行；历史结果不代表当前版本已验收。当前流程见仓库 CONTRIBUTING.md。
+
 # 自主居民的有限个人赠粮
 
 ## 切片与权限边界
@@ -39,7 +41,7 @@
 
 ## 隔离验证与复现
 
-主测试 [personal-food-gifts.test.ts](../../tests/personal-food-gifts.test.ts) 从真实最终菜单、`parseChoice`、`submitPlan`、世界步进与内存SQLite验证行为。初始未实现时3项真实菜单测试全部失败；完成实现后21项通过。独立反例与修复详见[独立审查](../reviews/personal-food-gifts.md)。
+主测试 personal-food-gifts.test.ts（历史路径：`../../tests/personal-food-gifts.test.ts`，已移除） 从真实最终菜单、`parseChoice`、`submitPlan`、世界步进与内存SQLite验证行为。初始未实现时3项真实菜单测试全部失败；完成实现后21项通过。独立反例与修复详见[独立审查](../reviews/personal-food-gifts.md)。
 
 ```sh
 node --import tsx --test tests/personal-food-gifts.test.ts tests/personal-food-gifts-review.test.ts

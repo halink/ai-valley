@@ -1,3 +1,5 @@
+> 历史记录：本页涉及的测试源码、夹具及专属验收脚本已于 2026-11-13 按项目所有者要求移除。旧命令仅作历史记录，不再可执行；历史结果不代表当前版本已验收。当前流程见仓库 CONTRIBUTING.md。
+
 # 十五日合成轨迹：饥饿与健康因果审计
 
 后续已执行本文提出的只观察交接窗口重放，详见[食物交接窗口重放](food-handoff-window-replay.md)。下文保留的是前一轮审计的证据与当时未执行项。
@@ -84,7 +86,7 @@ v3、v4、原 v5、候选分别对齐 2293、2463、2461、2459 个动作前后/
 
 **本文件是本地归档审计摘要，不是仓库自带的完整复现包。** 下列历史输入、审计程序、原型测试和详细结果都位于被 `.gitignore` 排除的 `output/`，没有随本文提交。它们是本次具体数值与历史选择对账的底层证据；新克隆仅有本文和当前源码，不能独立复现这些历史结论。复验需要另行保留并提供对应归档及审计工具，不能用当前控制器重新生成一条轨迹来替代历史输入。
 
-已跟踪的 [`src/world/engine.ts`](../../src/world/engine.ts)、[`src/shared/physiology.ts`](../../src/shared/physiology.ts) 和 [`tests/helpers/nine-resident-menu-stress.ts`](../../tests/helpers/nine-resident-menu-stress.ts) 可核对机制及当前脚本规则，但不替代上述历史证据，也不证明历史源码完全相同。
+已跟踪的 [`src/world/engine.ts`](../../src/world/engine.ts)、[`src/shared/physiology.ts`](../../src/shared/physiology.ts) 和 `tests/helpers/nine-resident-menu-stress.ts`（历史路径：`../../tests/helpers/nine-resident-menu-stress.ts`，已移除） 可核对机制及当前脚本规则，但不替代上述历史证据，也不证明历史源码完全相同。
 
 - 主生理对账：`output/survival-nutrition-audit/reconcile.py`、`reconciliation-summary.json` 与各轨迹逐分钟 JSON。
 - 独立生理验证：`output/survival-causality-review/independent_check.py`、`summary.json` 与各 `*-independent.json`。

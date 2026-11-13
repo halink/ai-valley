@@ -1,3 +1,5 @@
+> 历史记录：本页涉及的测试源码、夹具及专属验收脚本已于 2026-11-13 按项目所有者要求移除。旧命令仅作历史记录，不再可执行；历史结果不代表当前版本已验收。当前流程见仓库 CONTRIBUTING.md。
+
 # 居民活动与决策保护观察
 
 批次 1 的只读观察部分已经接入居民名册、地图人物选框、人物档案和历史年表。该界面只读取已有快照，不提交居民行动，不改变保护期限、床位分配、资源或世界时间。它不代表批次 1 的可达粮食余量、旧档救急和真实模型长跑已经完成。
@@ -47,4 +49,4 @@ node --import tsx --test tests/resident-status.test.ts tests/history-reader.test
 
 本轮已完成类型检查和构建。浏览器视觉验收仍待补：自建九人内存场景已准备，但本执行环境启动 Chromium 时因 `socket() failed: Operation not permitted` 退出；批准提权后仍有相同限制。另试提供的云浏览器，无法连接本地隔离预览端口，返回 `net::ERR_CONNECTION_REFUSED`。因此不把桌面/手机截图、实际布局、关闭重开及页面交互冒充为已通过。下一轮应以同类隔离场景核对 1440×1000 和 390×844 视口、长文本换行、名册与档案重开、停表后的余时保持，以及保护结束后的年表记录。
 
-实现入口：resident-status.ts（旧实现已退役，历史版本可追溯） · [定向测试](../../tests/resident-status.test.ts) · [设计](../design/observation.md#活动与危机状态) · [实施批次](roadmap.md#批次-1-紧急生存与可观察性)
+实现入口：resident-status.ts（旧实现已退役，历史版本可追溯） · 定向测试（历史路径：`../../tests/resident-status.test.ts`，已移除） · [设计](../design/observation.md#活动与危机状态) · [实施批次](roadmap.md#批次-1-紧急生存与可观察性)

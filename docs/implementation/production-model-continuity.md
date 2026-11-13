@@ -1,3 +1,5 @@
+> 历史记录：本页涉及的测试源码、夹具及专属验收脚本已于 2026-11-13 按项目所有者要求移除。旧命令仅作历史记录，不再可执行；历史结果不代表当前版本已验收。当前流程见仓库 CONTRIBUTING.md。
+
 # 默认九人三期合成 runtime 连续性演练
 
 本批扩展固定离线 worker，不接入真实模型。正式 `main.ts`、HTTP实现、价格来源、policy/admission、runtime、价格会话和启动预算实现保持不变。`sustained` 与 `sustained_crash_response` 是固定测试场景，不接受任意代码、模型、地址、密钥或真实存档。

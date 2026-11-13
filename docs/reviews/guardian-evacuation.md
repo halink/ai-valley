@@ -1,3 +1,5 @@
+> 历史记录：本页涉及的测试源码、夹具及专属验收脚本已于 2026-11-13 按项目所有者要求移除。旧命令仅作历史记录，不再可执行；历史结果不代表当前版本已验收。当前流程见仓库 CONTRIBUTING.md。
+
 # 健康幼儿灾害护送独立审查
 
 范围：`guardian-evacuation.ts`、健康机会生成、最终菜单限额、`MedicalTransport.evacuationDangerId` 及医疗引擎接入。只使用隔离 `createWorld` fixture，不读取真实存档或密钥，不调用模型、浏览器或 npm，不提交或推送。

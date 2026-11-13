@@ -1,3 +1,5 @@
+> 历史记录：本页涉及的测试源码、夹具及专属验收脚本已于 2026-11-13 按项目所有者要求移除。旧命令仅作历史记录，不再可执行；历史结果不代表当前版本已验收。当前流程见仓库 CONTRIBUTING.md。
+
 # Personal food gifting: independent adversarial review
 
 Result: PASS for the reviewed feature, its 36 targeted tests, and the 74-test expanded regression run. Three adversarial defects were reproduced, fixed, and independently retested. This is not a certification of the unrelated pre-existing dirty worktree or live-model behavior.

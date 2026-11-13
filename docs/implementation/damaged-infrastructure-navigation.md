@@ -1,3 +1,5 @@
+> 历史记录：本页涉及的测试源码、夹具及专属验收脚本已于 2026-11-13 按项目所有者要求移除。旧命令仅作历史记录，不再可执行；历史结果不代表当前版本已验收。当前流程见仓库 CONTRIBUTING.md。
+
 # 损坏桥码头离开后的禁止重入寻路
 
 ## 证据与范围
@@ -31,7 +33,7 @@
 
 ## 验证
 
-[`tests/damaged-infrastructure-navigation.test.ts`](../../tests/damaged-infrastructure-navigation.test.ts) 覆盖道路诱发的非法重入、有限步数、洪水叠加、与逐边 `walkable` 广度扫描的一致性、只读查询、健康/退役/其他设施对照，以及途中新增损坏。
+`tests/damaged-infrastructure-navigation.test.ts`（历史路径：`../../tests/damaged-infrastructure-navigation.test.ts`，已移除） 覆盖道路诱发的非法重入、有限步数、洪水叠加、与逐边 `walkable` 广度扫描的一致性、只读查询、健康/退役/其他设施对照，以及途中新增损坏。
 
 另经真实最终编号菜单选择记得的食源地址，实际离桥途中保存并从内存 SQLite 重载；到场后另选采集真实 3 份浆果，再另选吃 1 份。库存守恒、到场不自动吃饭、实际饥饿缓解和仍需承担的健康损失分别断言。它是合成行动闭环，不是真实模型选择或长期供食验收。
 

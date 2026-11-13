@@ -1,3 +1,5 @@
+> 历史记录：本页涉及的测试源码、夹具及专属验收脚本已于 2026-11-13 按项目所有者要求移除。旧命令仅作历史记录，不再可执行；历史结果不代表当前版本已验收。当前流程见仓库 CONTRIBUTING.md。
+
 # 生存与聚落复苏
 
 [返回游戏设计](README.md)
@@ -18,7 +20,7 @@
 - [本地公共储备采购](../implementation/public-food-reserves.md)已接通独立表决、有限预存款、现场交粮与领取；[有限受保护代管](../implementation/protected-custody.md)接通分别同意、独立复核、真实维护与原址产物保全，不授予监护权。[单人成人](../implementation/visitor-journey.md)与[成人亲属](../implementation/adult-family-journey.md)新来访已可分段自主行走、本人进食/休息和明确返家或拆队。
 - 粮食只读面板、[有限儿童现场喂养](../implementation/emergency-child-care.md)、[成人紧急基础照护](../implementation/adult-emergency-care.md)及[救援后成人有限在场](../implementation/adult-presence.md)各有独立实现；后者不新增给药、喂养、身体移动或代理权限。多处取货的完整补给安排、镇外公共采购、接待变更消息、连续照护接班及完整粮水保障仍未完成。[安全水供给动作](../implementation/safe-water-supply.md)已经接通，独立口渴和脱水损耗尚未启用。这些有限交付不代表全面食品安全、完整旅程保障或真实模型长期供给已经验收。
 
-隔离回归见 [decision-protection.test.ts](../../tests/decision-protection.test.ts)，无须模型密钥或付费调用。预测复制成本的优化与受控九人测量见[生存预测性能验收](../implementation/survival-performance.md)；端到端服务延迟和大人口最坏耗时尚未验收。此结果不代表正式存档真实模型的 15 日或四季运行已经通过。
+隔离回归见 decision-protection.test.ts（历史路径：`../../tests/decision-protection.test.ts`，已移除），无须模型密钥或付费调用。预测复制成本的优化与受控九人测量见[生存预测性能验收](../implementation/survival-performance.md)；端到端服务延迟和大人口最坏耗时尚未验收。此结果不代表正式存档真实模型的 15 日或四季运行已经通过。
 
 ## 生计余量
 

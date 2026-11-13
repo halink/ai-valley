@@ -1,3 +1,5 @@
+> 历史记录：本页涉及的测试源码、夹具及专属验收脚本已于 2026-11-13 按项目所有者要求移除。旧命令仅作历史记录，不再可执行；历史结果不代表当前版本已验收。当前流程见仓库 CONTRIBUTING.md。
+
 # Independent synthetic process/budget review
 
 Reviewed the six new process ledger, storage, state, guardian, watchdog and worker files. The reviewer changed only this document and `tests/production-model-process-review.test.ts`. No production entrypoint, bridge, HTTP/admission/source-price implementation, real save, credentials, environment file, network access, sandbox retry, commit or push was used.

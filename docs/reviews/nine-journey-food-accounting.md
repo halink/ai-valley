@@ -1,3 +1,5 @@
+> 历史记录：本页涉及的测试源码、夹具及专属验收脚本已于 2026-11-13 按项目所有者要求移除。旧命令仅作历史记录，不再可执行；历史结果不代表当前版本已验收。当前流程见仓库 CONTRIBUTING.md。
+
 # 九人旅途食物账本独立审查
 
 日期：2026-11-07。范围：`tests/helpers/nine-food-accounting.ts` 的 `journeyMeals` / `familyJourneyMeals` 接入，以及对应主集成测试。未改主 helper、引擎、真实模拟或存档。

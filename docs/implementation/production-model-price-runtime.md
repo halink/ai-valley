@@ -1,3 +1,5 @@
+> 历史记录：本页涉及的测试源码、夹具及专属验收脚本已于 2026-11-13 按项目所有者要求移除。旧命令仅作历史记录，不再可执行；历史结果不代表当前版本已验收。当前流程见仓库 CONTRIBUTING.md。
+
 # 合成价格期与真实 runtime 的排空封段桥
 
 `createSyntheticPriceRuntimeSegment` 连接已有合成价格会话、生产候选 journal、品牌内存 HTTP 和真实 `ValleyRuntime`。它没有 CLI、真实 transport、key、URL、路径或调用方时钟入口。正式 `main.ts`、production policy/admission、HTTP 实现与 live 脚本未改，依然默认阻断。不得用本组件或合成零价格解除旧请求/账单未知状态。

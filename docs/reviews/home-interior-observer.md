@@ -1,3 +1,5 @@
+> 历史记录：本页涉及的测试源码、夹具及专属验收脚本已于 2026-11-13 按项目所有者要求移除。旧命令仅作历史记录，不再可执行；历史结果不代表当前版本已验收。当前流程见仓库 CONTRIBUTING.md。
+
 # Home interior observer: independent review
 
 Scope: the opt-in development observer's residential interiors, continuous follow between the same outdoor and indoor world records, and return to the original 2D observer. The formal default remains 2D. This review changes only `tests/isometric-interior-review.test.ts` and this document, apart from test logs under `output`.
