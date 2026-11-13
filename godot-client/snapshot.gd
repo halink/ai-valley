@@ -87,10 +87,11 @@ static func activity_label(person: Dictionary) -> String:
 	var activity = person.get("activity")
 	if not activity is Dictionary:
 		return "暂无进行中行为 · 决策状态未知"
-	if not activity.get("path", []).is_empty() or (activity.get("room") is Dictionary and not activity.room.get("path", []).is_empty()):
-		return "移动中"
 	var action_type = activity.get("action", {}).get("type", "unknown")
-	return "到达现场：" + action_name(str(action_type))
+	var purpose := action_name(str(action_type))
+	if not activity.get("path", []).is_empty() or (activity.get("room") is Dictionary and not activity.room.get("path", []).is_empty()):
+		return "移动中 · 接下来：" + purpose
+	return "到达现场：" + purpose
 
 static func valid_position(at: Variant) -> bool:
 	if not at is Dictionary:
