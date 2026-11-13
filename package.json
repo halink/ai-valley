@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "node --import tsx src/server/godot-web-main.ts",
     "dev:web": "node --import tsx src/server/godot-web-main.ts",
-    "build": "tsc --noEmit && tsc -p tsconfig.server.json",
+    "build": "tsc --noEmit && node scripts/clean-build.mjs && tsc -p tsconfig.server.json",
     "start": "node build/server/godot-web-main.js",
     "test": "node scripts/test.mjs",
     "check": "tsc --noEmit",

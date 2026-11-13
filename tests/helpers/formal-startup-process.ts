@@ -1,7 +1,9 @@
+// Isolated regression helper, not a product CLI. Tests pass a clean environment.
+if(process.env.VALLEY_SYNTHETIC_STARTUP_TEST!=='enabled')throw new Error('synthetic_startup_test_only');
 import {resolve} from 'node:path';
-import {startFormalServer} from './formal-startup.js';
-import {FORMAL_DAY_MINUTES} from '../world/time.js';
-import {readProductionModelPolicy} from './production-model-policy.js';
+import {startFormalServer} from '../../src/server/formal-startup.js';
+import {FORMAL_DAY_MINUTES} from '../../src/world/time.js';
+import {readProductionModelPolicy} from '../../src/server/production-model-policy.js';
 
 const port=Number(process.env.PORT??3412);
 const mode='formal';

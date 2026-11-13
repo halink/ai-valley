@@ -12,13 +12,13 @@ import {WorldStore} from '../src/server/store.js';
 import {ValleyRuntime} from '../src/server/runtime.js';
 
 const ownedProcesses=new Map<string,Array<{child:ChildProcess;done:Promise<unknown>}>>();
-const entry=fileURLToPath(new URL('../src/server/main.ts',import.meta.url));
+const entry=fileURLToPath(new URL('./helpers/formal-startup-process.ts',import.meta.url));
 const loader=fileURLToPath(new URL('../node_modules/tsx/dist/loader.mjs',import.meta.url));
 const fingerprint=(path:string)=>['','-wal','-journal'].map(suffix=>existsSync(path+suffix)?createHash('sha256').update(readFileSync(path+suffix)).digest('hex'):null);
 function launch(database:string,cwd:string,port=0){
  // Explicit clean environment: never inherit credentials, .env loading, preload
  // flags, proxies, or the user's save path. Every database is synthetic.
- const child=spawn(process.execPath,['--import',loader,entry],{cwd,env:{PORT:String(port),VALLEY_DB:database,HOME:cwd,TMPDIR:cwd,TMP:cwd,TEMP:cwd},stdio:['ignore','pipe','pipe']});
+ const child=spawn(process.execPath,['--import',loader,entry],{cwd,env:{VALLEY_SYNTHETIC_STARTUP_TEST:'enabled',PORT:String(port),VALLEY_DB:database,HOME:cwd,TMPDIR:cwd,TMP:cwd,TEMP:cwd},stdio:['ignore','pipe','pipe']});
  let stdout='',stderr='';child.stdout.on('data',chunk=>{stdout+=String(chunk);});child.stderr.on('data',chunk=>{stderr+=String(chunk);});
  const done=new Promise<{code:number|null;signal:NodeJS.Signals|null}>(resolve=>child.once('exit',(code,signal)=>resolve({code,signal})));
  const started=new Promise<number>((resolve,reject)=>{
