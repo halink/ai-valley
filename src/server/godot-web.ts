@@ -1,5 +1,6 @@
 /** Serve only the explicit Godot export artifacts, never the repository or .env. */
-import {readFileSync,lstatSync,realpathSync,existsSync} from 'node:fs';
+import {createReadStream,openSync,closeSync,fstatSync,constants,lstatSync,realpathSync,existsSync} from 'node:fs';
+import {pipeline} from 'node:stream';
 import {join,dirname} from 'node:path';
 import type {IncomingMessage,ServerResponse} from 'node:http';
 const types:Record<string,string>={
@@ -15,15 +16,29 @@ export function serveGodotWeb(req:IncomingMessage,res:ServerResponse,root:string
  const file=path==='/'?'index.html':path.slice(1);
  if(!Object.hasOwn(types,file))return false;
  res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');
+ let fd:number|undefined;
  try{
   const base=realpathSync(root);
   if(!existsSync(join(base,'.ready')))throw Error('export not ready');
   const target=join(base,file),stat=lstatSync(target);
   if(!stat.isFile()||stat.isSymbolicLink()||dirname(realpathSync(target))!==base)throw Error('invalid export');
-  const bytes=readFileSync(target);
-  res.writeHead(200,{'Content-Type':types[file],'Content-Length':bytes.length});
-  res.end(req.method==='HEAD'?undefined:bytes);
- }catch{res.writeHead(404,{'Content-Type':'text/plain; charset=utf-8'});res.end(req.method==='HEAD'?undefined:'Godot Web export missing. Run npm run build:godot:web first.');}
+  fd=openSync(target,constants.O_RDONLY|constants.O_NOFOLLOW);
+  const opened=fstatSync(fd);
+  if(!opened.isFile()||opened.dev!==stat.dev||opened.ino!==stat.ino)throw Error('export changed');
+  res.writeHead(200,{'Content-Type':types[file],'Content-Length':opened.size});
+  if(req.method==='HEAD'){
+   closeSync(fd);fd=undefined;res.end();
+  }else{
+   // WASM/PCK can be large. Stream with backpressure rather than synchronously
+   // loading the entire asset on the world simulation's event loop.
+   const stream=createReadStream(target,{fd,autoClose:true});fd=undefined;
+   pipeline(stream,res,error=>{if(error)res.destroy();});
+  }
+ }catch{
+  if(fd!==undefined)closeSync(fd);
+  if(res.headersSent){res.destroy();return true;}
+  res.writeHead(404,{'Content-Type':'text/plain; charset=utf-8'});res.end(req.method==='HEAD'?undefined:'Godot Web export missing. Run npm run build:godot:web first.');
+ }
  return true;
 }
 
