@@ -60,7 +60,9 @@ export function createMvpWorld():World {
  * deliberately bounded engineering policy is visibly labelled in snapshots. */
 export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string} {
  if(r.hunger>=35&&(r.inventory.berry??0)>0)return {action:{type:'eat',item:'berry'},reason:'饥饿且带有浆果，进食'};
- if(r.hunger>=35||(r.inventory.berry??0)<3){
+ // Immediate needs come before optional stocking: an empty bag must not
+ // send a thirsty or exhausted resident on a food-reserve trip.
+ if(r.hunger>=35){
   const source=w.resources.filter(s=>s.kind==='bush'&&s.amount>=1&&r.knownResources.includes(s.id)).sort((a,b)=>distance(r.at,a.at)-distance(r.at,b.at))[0];
   if(source)return {action:{type:'gather',resourceId:source.id,quantity:Math.min(3,source.amount)},reason:'前往已知果丛，采集有限食物'};
  }
@@ -70,6 +72,10 @@ export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string
   if(source)return {action:{type:'gather',resourceId:source.id,quantity:1},reason:'口渴且没有清水，前往泉水取一份'};
  }
  if(r.energy<70)return {action:{type:'sleep',minutes:120},reason:'返回共屋休息，恢复精力'};
+ if((r.inventory.berry??0)<3){
+  const source=w.resources.filter(s=>s.kind==='bush'&&s.amount>=1&&r.knownResources.includes(s.id)).sort((a,b)=>distance(r.at,a.at)-distance(r.at,b.at))[0];
+  if(source)return {action:{type:'gather',resourceId:source.id,quantity:Math.min(3,source.amount)},reason:'前往已知果丛补充少量浆果储备'};
+ }
  return {action:{type:'wait',minutes:30},reason:'暂时没有紧迫需要，停留观察'};
 }
 export function createMvpSession(){
