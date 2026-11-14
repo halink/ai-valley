@@ -12,7 +12,7 @@ import {createServer,type Server} from 'node:http';
 import {createWorld} from '../world/seed.js';
 import {stepWorld,submitPlan} from '../world/engine.js';
 import {distance} from '../world/navigation.js';
-import {canContactBerry} from '../world/berry-observation.js';
+import {berryApproachPath,canContactBerry} from '../world/berry-observation.js';
 import {canContactSpring} from '../world/spring-observation.js';
 import {VALLEY_VERSION} from '../shared/version.js';
 import type {Action,Resident,Snapshot,Tile,World} from '../shared/types.js';
@@ -63,7 +63,7 @@ export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string
  // Immediate needs come before optional stocking: an empty bag must not
  // send a thirsty or exhausted resident on a food-reserve trip.
  if(r.hunger>=35){
-  const source=w.resources.filter(s=>s.kind==='bush'&&s.amount>=1&&r.knownResources.includes(s.id)).sort((a,b)=>distance(r.at,a.at)-distance(r.at,b.at))[0];
+  const source=w.resources.filter(s=>s.kind==='bush'&&s.amount>=1&&r.knownResources.includes(s.id)).sort((a,b)=>distance(r.at,a.at)-distance(r.at,b.at)).find(s=>berryApproachPath(w,r.at,s)!==null);
   if(source)return {action:{type:'gather',resourceId:source.id,quantity:Math.min(3,source.amount)},reason:'前往已知果丛，采集有限食物'};
  }
  if((mvpThirst(w,r)??0)>=50-1e-9){
@@ -73,10 +73,10 @@ export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string
  }
  if(r.energy<70)return {action:{type:'sleep',minutes:120},reason:'返回共屋休息，恢复精力'};
  if((r.inventory.berry??0)<3){
-  const source=w.resources.filter(s=>s.kind==='bush'&&s.amount>=1&&r.knownResources.includes(s.id)).sort((a,b)=>distance(r.at,a.at)-distance(r.at,b.at))[0];
+  const source=w.resources.filter(s=>s.kind==='bush'&&s.amount>=1&&r.knownResources.includes(s.id)).sort((a,b)=>distance(r.at,a.at)-distance(r.at,b.at)).find(s=>berryApproachPath(w,r.at,s)!==null);
   if(source)return {action:{type:'gather',resourceId:source.id,quantity:Math.min(3,source.amount)},reason:'前往已知果丛补充少量浆果储备'};
  }
- return {action:{type:'wait',minutes:30},reason:'暂时没有紧迫需要，停留观察'};
+ return {action:{type:'wait',minutes:30},reason:'当前没有可执行的规则行动，短暂等待'};
 }
 export function createMvpSession(){
  const world=createMvpWorld();
