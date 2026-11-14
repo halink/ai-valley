@@ -114,6 +114,15 @@ func pan(delta: Vector2) -> void:
 func zoom(direction: float) -> void:
 	camera.size = clampf(camera.size * direction, 8, 70)
 
+# Only focus actors already rendered from the current validated snapshot.
+# Do not infer an outdoor location for indoor, absent or unknown residents.
+func focus_resident(id: String) -> bool:
+	if not people.has(id): return false
+	var actor: Node3D = people[id]
+	focus = actor.position
+	position_camera()
+	return true
+
 func mat(color: String, grass := false) -> StandardMaterial3D:
 	var key := color + str(grass)
 	if materials.has(key): return materials[key]

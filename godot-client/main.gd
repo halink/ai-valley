@@ -108,6 +108,12 @@ func _ready() -> void:
 	next_person.pressed.connect(_next_resident)
 	next_person.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(next_person)
+	var locate := Button.new()
+	locate.text = "定位居民"
+	locate.tooltip_text = "仅移动镜头到当前视图中的所选居民，不移动居民"
+	locate.pressed.connect(_locate_resident)
+	locate.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(locate)
 	var enter := Button.new()
 	enter.text = "住宅内部"
 	enter.pressed.connect(_enter_room)
@@ -363,6 +369,18 @@ func _next_resident() -> void:
 	selected = people[(index + 1) % people.size()].id
 	_update_detail()
 	valley.show_world(world, selected, connected)
+
+func _locate_resident() -> void:
+	if not connected:
+		status.text = "数据过期，收到新快照后才能定位居民"
+		return
+	if selected.is_empty():
+		status.text = "请先选择一位居民"
+		return
+	if not valley.focus_resident(selected):
+		status.text = "所选居民不在当前视图中；室内居民请先进入住宅，未知位置不推测"
+		return
+	status.text = "已定位所选居民 · 仅移动镜头，不持续跟随"
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_MIDDLE and not event.pressed:
