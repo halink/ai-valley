@@ -25,6 +25,7 @@ var connected := false
 var first := true
 var panel_collapsed := false
 var model_diagnostics: Label
+var resident_events_only := false
 
 func _ready() -> void:
 	valley = Valley3D.new()
@@ -164,6 +165,15 @@ func _ready() -> void:
 	model_diagnostics.visible = false
 	box.add_child(model_diagnostics)
 	diagnostic_toggle.toggled.connect(func(value: bool): model_diagnostics.visible = value)
+	var event_filter := CheckButton.new()
+	event_filter.text = "只看所选居民参与的事件"
+	for color_name in ["font_color", "font_hover_color", "font_pressed_color", "font_hover_pressed_color", "font_focus_color"]:
+		event_filter.add_theme_color_override(color_name, Color(0.19, 0.23, 0.20))
+	box.add_child(event_filter)
+	event_filter.toggled.connect(func(value: bool):
+		resident_events_only = value
+		_update_events()
+	)
 	events_label = Label.new()
 	events_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	events_label.text = "近期事件：尚未收到"
@@ -328,10 +338,6 @@ func _received(result: int, code: int, _headers: PackedStringArray, body: Packed
 	model_diagnostics.text = Snapshot.model_status(observation)
 	if paused:
 		mode_label.text += " · 暂停原因：" + "服务端已暂停（原因未展示）"
-	var lines: Array[String] = []
-	for entry in world.get("events", []).slice(-3):
-		lines.append(str(entry.get("text", "")))
-	events_label.text = "近期事件：\n" + "\n".join(lines)
 	_update_detail()
 	var paths: Dictionary = movement_feed.observe(world, parsed.get("movement"))
 	if paths.is_empty():
@@ -344,7 +350,11 @@ func _recenter() -> void:
 		return
 	valley.center(world)
 
+func _update_events() -> void:
+	events_label.text = Snapshot.event_summary(world, selected, resident_events_only, connected)
+
 func _update_detail() -> void:
+	_update_events()
 	world_summary_label.text = Snapshot.world_summary(world) if connected else "世界时间与环境资源：未连接／数据过期"
 	detail.text = "尚未选择居民。室内／地图外居民不会被放到室外显示。"
 	for person in world.get("residents", []):
@@ -357,6 +367,7 @@ func _update_detail() -> void:
 			detail.text += " · 室内" if person.get("inside") != null else " · 室外"
 			return
 	selected = ""
+	_update_events()
 
 func _next_resident() -> void:
 	var people: Array = world.get("residents", [])
