@@ -10,7 +10,7 @@ import {readSpeechTone,readSpeechText} from '../shared/speech-tone.js';
 import {barterTerms,sameBarterTerms} from '../shared/barter.js';
 import {barterActionReason} from './barter.js';
 import {canSeeOutdoorPoint} from './outdoor-observation.js';
-import {canInspectSpring,canContactSpring} from './spring-observation.js';
+import {canInspectSpring,canContactSpring,springApproachPath} from './spring-observation.js';
 import {berryApproachPath,canInspectBerry,canContactBerry} from './berry-observation.js';
 import {initializePersonalFoodGifts,advancePersonalFoodGifts,personalFoodGiftTarget,personalFoodGiftTravelReason,personalFoodGiftWork,completePersonalFoodGift,personalFoodGiftReceiptId,personalFoodGiftReason} from './personal-food-gifts.js';
 import {isPersonalFoodGiftStop} from '../shared/personal-food-gifts.js';
@@ -333,9 +333,7 @@ function begin(world:World,r:Resident,elapsed=0){
  // their existing semantics; completion still checks the live edge again.
  const springId=action.type==='gather'?action.resourceId:action.type==='waterSupply'&&action.operation==='fillSpring'||action.type==='frontierHazard'&&action.operation==='clearSpring'?action.sourceId:undefined;
  const spring=springId?world.resources.find(s=>s.id===springId&&s.kind==='spring'):undefined;
- if(path&&spring&&!walkable(world,spring.at,path.at(-1)??r.at)){
-  const approach=findPath(world,r.at,spring.at);path=approach===null?null:approach.slice(0,-1);
- }
+ if(path&&spring)path=springApproachPath(world,r.at,spring);
  if(path===null){failure(world,r,'目标目前没有可达路线',action);return;}
  const outdoors=['move','gather','plant','water','harvest','build','construction','landRights','regionSurvey','industry','leave','settle','lodge'].includes(action.type);
  if((path.length||outdoors)&&!world.rooms){r.inside=null;r.roomAt=null;}

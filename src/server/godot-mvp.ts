@@ -13,7 +13,7 @@ import {createWorld} from '../world/seed.js';
 import {stepWorld,submitPlan} from '../world/engine.js';
 import {distance} from '../world/navigation.js';
 import {berryApproachPath,canContactBerry} from '../world/berry-observation.js';
-import {canContactSpring} from '../world/spring-observation.js';
+import {canContactSpring,springApproachPath} from '../world/spring-observation.js';
 import {VALLEY_VERSION} from '../shared/version.js';
 import type {Action,Resident,Snapshot,Tile,World} from '../shared/types.js';
 
@@ -68,7 +68,9 @@ export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string
  }
  if((mvpThirst(w,r)??0)>=50-1e-9){
   if((r.inventory.water??0)>=1)return {action:{type:'mvpDrink'},reason:'口渴，选择饮用一份随身清水'};
-  const source=w.resources.find(s=>s.kind==='spring'&&s.amount>=1&&r.knownResources.includes(s.id));
+  const source=w.resources.filter(s=>s.kind==='spring'&&s.amount>=1&&s.floodDamage?.clearedAt!==null&&r.knownResources.includes(s.id))
+   .sort((a,b)=>distance(r.at,a.at)-distance(r.at,b.at))
+   .find(s=>springApproachPath(w,r.at,s)!==null);
   if(source)return {action:{type:'gather',resourceId:source.id,quantity:1},reason:'口渴且没有清水，前往泉水取一份'};
  }
  if(r.energy<70)return {action:{type:'sleep',minutes:120},reason:'返回共屋休息，恢复精力'};
