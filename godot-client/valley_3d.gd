@@ -11,6 +11,8 @@ var room_id := ""
 var room_layouts := {}
 var room_world := ""
 var camera: Camera3D
+var sun: DirectionalLight3D
+var sky_environment: Environment
 var terrain: Node3D
 var actors: Node3D
 var focus := Vector3(16, 0, 12)
@@ -74,7 +76,7 @@ func _ready() -> void:
 	add_child(camera)
 	camera.current = true
 	position_camera()
-	var sun := DirectionalLight3D.new()
+	sun = DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-55, -35, 0)
 	sun.light_color = Color("fff0ce")
 	sun.light_energy = 1.15
@@ -82,6 +84,7 @@ func _ready() -> void:
 	add_child(sun)
 	var environment := WorldEnvironment.new()
 	var env := Environment.new()
+	sky_environment = env
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = Color("dce4d3")
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
@@ -89,6 +92,23 @@ func _ready() -> void:
 	env.ambient_light_energy = 0.65
 	environment.environment = env
 	add_child(environment)
+
+# Presentation only: consume the same authoritative minute as the observer clock.
+# No wall-clock interpolation: paused or disconnected worlds retain their light.
+func update_daylight(world: Dictionary) -> void:
+	var minute = world.get("minute")
+	if not (minute is int or minute is float) or not is_finite(minute) or minute < 0 or minute > 9007199254740991:
+		return
+	var hour := fmod(float(minute), 1440.0) / 60.0
+	var elevation := sin((hour - 6.0) / 24.0 * TAU)
+	var daylight := smoothstep(-0.15, 0.35, elevation)
+	var twilight := (1.0 - absf(daylight * 2.0 - 1.0))
+	# Keep the hand-painted scene readable at night; this is not real moonlight.
+	sun.light_energy = lerpf(0.22, 1.15, daylight)
+	sun.light_color = Color("a7bce6").lerp(Color("fff0ce"), daylight).lerp(Color("ffbd88"), twilight * 0.45)
+	sky_environment.background_color = Color("303b58").lerp(Color("dce4d3"), daylight)
+	sky_environment.ambient_light_color = Color("a4b4d2").lerp(Color("cddbd7"), daylight)
+	sky_environment.ambient_light_energy = lerpf(0.48, 0.65, daylight)
 
 func position_camera() -> void:
 	camera.position = focus + Vector3(26, 30, 32)
@@ -165,6 +185,7 @@ func clear_children(node: Node) -> void:
 		child.queue_free()
 
 func show_world(world: Dictionary, selected: String, continuous := true, paths: Dictionary = {}) -> void:
+	update_daylight(world)
 	if not room_id.is_empty() and (world.get("id", "") != room_world or not room_layouts.has(room_id)):
 		room_id = ""
 		map_key = ""
