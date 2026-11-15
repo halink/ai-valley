@@ -218,7 +218,7 @@ ${choices.map(c=>c.id+'. '+c.label).join('\n')}
  const hasGoals=choices.some(c=>c.action.type==='agency'&&['reflect','conclude'].includes(c.action.operation));
  const chooseDuration=choices.some(c=>c.chooseDuration);
  const steps=maxPlanSteps(context);
- const sequence=steps>1?`若已有连贯安排，可以用 {"steps":[{"choice":"第一个编号"},{"choice":"第二个编号"}]} 按顺序选最多${steps}项。每一步自行填写该选项要求的字段。只确定第一步时，仍可只选一项。`:'';
+ const sequence=steps>1?`若已有连贯安排，可以用 {"steps":[{"choice":"第一个编号"},{"choice":"第二个编号"}]} 按顺序选最多${steps}项。每一步自行填写该选项要求的字段。只确定第一步时，仍可只选一项。队列仅能使用本次列出的编号，不保证后续条件仍成立；执行失败会停止剩余计划并重新决定。`:'';
  const recovery=choices.some(c=>c.action.type==='sleep'&&c.chooseDuration)&&context.formal?.sleepRecoveryPerHour!==undefined?`实际睡眠每小时约恢复${Math.round(context.formal.sleepRecoveryPerHour*10)/10}点体力，上限100。原地停留不会恢复睡眠体力。`:'';
  const interpretationEvidence=interpretationEvidenceNote(context,choices);
  const foodGiftNotes=context.formal?.personalFoodGiftNotes??'';
@@ -256,7 +256,13 @@ ${state}${familyNotes}${remaining}`}];
  }
  return messages;
 }
-function maxPlanSteps(context:DecisionContext){const formal=context.formal;return formal&&!formal.aboard&&!formal.passenger?formal.planSteps??1:1;}
+function maxPlanSteps(context:DecisionContext){
+ const formal=context.formal;
+ // Preserve formal/transport limits. The small MVP may propose a short queue,
+ // but only from its current observations; the engine revalidates every step.
+ if(formal)return !formal.aboard&&!formal.passenger?formal.planSteps??1:1;
+ return context.mvpDrinking&&!context.foreign&&!context.outside?3:1;
+}
 export interface ModelResult {decision:ModelDecision;inputTokens:number;outputTokens:number;latencyMs:number;}
 export class DecisionError extends Error {constructor(message:string,public stats:{inputTokens:number;outputTokens:number;latencyMs:number},public feedback?:string){super(message);}}
 export function parseForeignReply(raw:string,choices:ActionChoice[]){const body=raw.trim();if(body.startsWith('{')||body.startsWith('```'))return parseChoice(body,choices);const match=/^([1-9]\d{0,2})(?:[,，]\s*([1-9]\d{0,2}))?(?:[,，]\s*([1-9]\d{0,3}))?$/.exec(body);if(!match)throw new Error('invalid_foreign_reply');const [,choice,quantity,price]=match;return parseChoice(JSON.stringify({choice,...(quantity?{quantity:Number(quantity)}:{}),...(price?{price:Number(price)}:{})}),choices);}
