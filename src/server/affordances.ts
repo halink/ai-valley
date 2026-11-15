@@ -22,7 +22,7 @@ import {employmentChoiceFields,parseEmploymentChoice} from './employment-opportu
 import {foreignChoiceFields,parseForeignChoice} from './foreign-opportunities.js';
 import {constructionChoiceFields,parseConstructionChoice} from './construction-opportunities.js';
 
-export interface ActionChoice {id:string;label:string;action:Action;chooseDuration?:boolean;}
+export interface ActionChoice {id:string;label:string;action:Action;chooseDuration?:boolean;chooseQuantity?:number;}
 const itemNames=itemLabels;
 const resourceNames={tree:'木材',rock:'石料',bush:'浆果',spring:'清水'};
 const manhattan=(a:Vec,b:Vec)=>Math.abs(a.x-b.x)+Math.abs(a.y-b.y);
@@ -86,7 +86,8 @@ export function buildChoices(c:DecisionContext):ActionChoice[]{
  for(let i=0;i<4;i++)for(const [index,kind] of sourceKinds.entries()){
   const r=sources[index][i];if(!r)continue;
   const quantity=Math.min(3,Math.floor(r.amount));
-  add(gathering,`gather.${r.id}`,`去(${r.at.x},${r.at.y})采集${quantity}份${resourceNames[kind]}（路线和余量须执行时核实）`,{type:'gather',resourceId:r.id,quantity});
+  if(c.mvpDrinking&&(kind==='bush'||kind==='spring'))gathering.push({id:`gather.${r.id}`,label:`去(${r.at.x},${r.at.y})采集${resourceNames[kind]}，填写本人决定的 quantity（1–${quantity} 整份；路线和余量须执行时核实）`,action:{type:'gather',resourceId:r.id,quantity},chooseQuantity:quantity});
+  else add(gathering,`gather.${r.id}`,`去(${r.at.x},${r.at.y})采集${quantity}份${resourceNames[kind]}（路线和余量须执行时核实）`,{type:'gather',resourceId:r.id,quantity});
  }
  const farming=group();
  const plots=[...c.plots].filter(p=>p.ownerId===c.actor.id).sort((a,b)=>manhattan(a.at,c.actor.at)-manhattan(b.at,c.actor.at)||a.id.localeCompare(b.id));
@@ -140,9 +141,14 @@ function parseSelection(value:unknown,choices:ActionChoice[]):ModelDecision{
  const choice=choices.find(c=>c.id===data.choice);if(!choice)throw new Error('unknown_choice');
  const fields=choice.action.type==='socialAppointment'?(choice.action.operation==='offer'?['startsIn','windowMinutes']:choice.action.operation==='wait'?['minutes']:[]):choice.action.type==='personalFoodGift'&&choice.action.operation==='offer'?['quantity']:choice.action.type==='lastWish'&&choice.action.operation==='declare'?['amount']:choice.action.type==='landRights'?(choice.action.operation==='survey'?['x','y','days']:choice.action.operation==='offerParcel'?['price']:[]):choice.action.type==='premises'?(choice.action.operation==='offer'?[...premisesFields]:[]):choice.action.type==='design'&&choice.action.operation==='draw'?['drawing']:choice.action.type==='ferry'?(choice.action.operation==='post'?['fare','departIn']:choice.action.operation==='build'?['minutes']:[]):choice.action.type==='buildingMigration'&&choice.action.operation==='work'?['minutes']:choice.action.type==='culture'?(choice.action.operation==='propose'?['name','startsIn','windowMinutes','capacity']:['prepare','attend'].includes(choice.action.operation)?['minutes']:choice.action.operation==='supply'?['quantity']:[]):choice.action.type==='social'?(choice.action.operation==='start'?['minutes']:choice.action.operation==='interpret'?['affection','trust','conflict']:[]):choice.action.type==='household'?(choice.action.operation==='create'?['name','amount','quantity']:choice.action.operation==='proposeGift'?['amount','quantity','ownPercent']:['deposit','withdraw'].includes(choice.action.operation)?['amount','quantity']:[]):choice.action.type==='debt'?(choice.action.operation==='lend'?['principal','repayment','days']:['repay','forgive'].includes(choice.action.operation)?['amount']:[]):choice.action.type==='agency'&&choice.action.operation==='arm'?['threshold','days','uses','cooldown']:choice.action.type==='longCare'&&choice.action.operation==='offer'?['fee','days','startsIn','startMinute','windowMinutes','visitsPerDay']:choice.action.type==='health'&&choice.action.operation==='offer'?['fee','startsIn']:choice.action.type==='industry'?choice.action.operation==='craft'?['minutes']:[]:choice.action.type==='education'?educationChoiceFields(choice.action):choice.action.type==='construction'?constructionChoiceFields(choice.action):choice.action.type==='economy'?economyChoiceFields(choice.action):choice.action.type==='civic'?civicChoiceFields(choice.action):choice.action.type==='employment'?employmentChoiceFields(choice.action):choice.action.type==='foreignTrade'?foreignChoiceFields(choice.action):[];
  const chooseDuration=choice.chooseDuration&&(choice.action.type==='sleep'||choice.action.type==='wait');
- const allowed=choice.action.type==='offer'?['choice','intention','text','give','want']:['choice','intention','text',...fields,...(chooseDuration?['minutes']:[])];
+ const chooseQuantity=choice.action.type==='gather'?choice.chooseQuantity:undefined;
+ const allowed=choice.action.type==='offer'?['choice','intention','text','give','want']:['choice','intention','text',...fields,...(chooseDuration?['minutes']:[]),...(chooseQuantity!==undefined?['quantity']:[])];
  if(Object.keys(data).some(k=>!allowed.includes(k)))throw new Error('unexpected_choice_field');
  const action=choice.action.type==='landRights'?parseLandRightsChoice(choice.action,data):choice.action.type==='premises'?parsePremisesChoice(choice.action,data):choice.action.type==='design'?parseDesignChoice(choice.action,data):choice.action.type==='education'?parseEducationChoice(choice.action,data):choice.action.type==='construction'?parseConstructionChoice(choice.action,data):choice.action.type==='economy'?parseEconomyChoice(choice.action,data):choice.action.type==='civic'?parseCivicChoice(choice.action,data):choice.action.type==='employment'?parseEmploymentChoice(choice.action,data):choice.action.type==='foreignTrade'?parseForeignChoice(choice.action,data):structuredClone(choice.action);
+ if(chooseQuantity!==undefined&&action.type==='gather'){
+  if(typeof data.quantity!=='number'||!Number.isSafeInteger(data.quantity)||data.quantity<1||data.quantity>chooseQuantity)throw new Error('invalid_gather_quantity');
+  action.quantity=data.quantity;
+ }
  if(action.type==='socialAppointment'){const limits={startsIn:[30,2880],windowMinutes:[15,120],minutes:[1,120]};for(const k of fields as Array<keyof typeof limits>){const n=data[k],range=limits[k];if(typeof n!=='number'||!Number.isSafeInteger(n)||n<range[0]||n>range[1])throw new Error('invalid_social_appointment_terms');Object.assign(action,{[k]:n});}}
  if(action.type==='personalFoodGift'&&action.operation==='offer'&&data.quantity!==undefined){if(typeof data.quantity!=='number'||!Number.isSafeInteger(data.quantity)||data.quantity<1||data.quantity>(action.ageTerms?.maxQuantity??3))throw new Error('invalid_personal_food_gift_quantity');action.quantity=data.quantity;}
  if(chooseDuration&&(action.type==='sleep'||action.type==='wait')){
@@ -173,7 +179,7 @@ function parseSelection(value:unknown,choices:ActionChoice[]):ModelDecision{
   action.give={...data.give};action.want={...data.want};
  }
  const stated=typeof data.intention==='string'?data.intention.trim():'';
- const description=chooseDuration&&(action.type==='sleep'||action.type==='wait')?`${action.type==='sleep'?'到自己的床上睡':'原地停留'}${action.minutes}分钟`:decisionDescription(action,choice.label);
+ const description=chooseQuantity!==undefined&&action.type==='gather'?`本人决定尝试采集${action.quantity}份资源`:chooseDuration&&(action.type==='sleep'||action.type==='wait')?`${action.type==='sleep'?'到自己的床上睡':'原地停留'}${action.minutes}分钟`:decisionDescription(action,choice.label);
  return {intention:stated&&stated!=='简短中文打算'?stated:description,actions:[action]};
 }
 

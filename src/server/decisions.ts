@@ -284,6 +284,7 @@ export function parseModelCompletion(context:DecisionContext,prepared:ReturnType
   const code=error instanceof Error?error.message:'';
   const feedback=code==='invalid_personal_goal'
    ?'你选择了写目标或回顾目标，但没有给出合格的 text。若仍作此选择，请写出自己的文字（1–240字）。'
+   :code==='invalid_gather_quantity'?'采集选项需要 quantity：请填写从 1 到该选项注明上限的整数份数，不要省略或填写小数。'
    :code==='invalid_rest_duration'?'选择了需要时长的睡眠或停留。若仍作此选择，请填写 minutes，取值为本人决定的 1–720 整数分钟。'
    :code==='repeated_active_goal'?'同一个目标已生效，无需再登记。请决定接下来做什么；如果改变了目标，可以写下新的打算。'
    :'请检查选项编号和该行要求的字段，按要求填全并只输出一个 JSON 对象。';
