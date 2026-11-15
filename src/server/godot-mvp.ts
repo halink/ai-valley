@@ -12,6 +12,7 @@ import {createServer,type Server} from 'node:http';
 import {createWorld} from '../world/seed.js';
 import {stepWorld,submitPlan,planStartError} from '../world/engine.js';
 import {distance} from '../world/navigation.js';
+import {canContactSocialTarget} from '../world/social-observation.js';
 import {berryApproachPath,canContactBerry} from '../world/berry-observation.js';
 import {canContactSpring,springApproachPath} from '../world/spring-observation.js';
 import {VALLEY_VERSION} from '../shared/version.js';
@@ -19,12 +20,12 @@ import type {Action,Resident,Snapshot,Tile,World} from '../shared/types.js';
 
 export const GODOT_MVP_PORT=3414;
 export const GODOT_MVP_NOTICE='隔离核心循环：本地规则驱动，非真实模型；内存世界，退出后重置';
-export type MvpPhase='deciding'|'travelling'|'gathering'|'eating'|'resting'|'waiting'|'stopped'|'drinking';
+export type MvpPhase='deciding'|'travelling'|'gathering'|'eating'|'resting'|'waiting'|'stopped'|'drinking'|'talking';
 export function mvpPhase(r:Resident):MvpPhase {
  if(r.status!=='alive')return 'stopped';
  if(!r.activity)return 'deciding';
  if(r.activity.path.length||r.activity.room?.path.length)return 'travelling';
- return ({mvpDrink:'drinking',gather:'gathering',eat:'eating',sleep:'resting',wait:'waiting'} as const)[r.activity.action.type as 'gather'|'eat'|'sleep'|'wait']??'waiting';
+ return ({talk:'talking',mvpDrink:'drinking',gather:'gathering',eat:'eating',sleep:'resting',wait:'waiting'} as const)[r.activity.action.type as 'gather'|'eat'|'sleep'|'wait']??'waiting';
 }
 export function createMvpWorld():World {
  const world=createWorld(3414);
@@ -98,6 +99,17 @@ export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string
  // Keep the remaining portion; replenish only after the carried supply runs out.
  const waterTrip=(r.inventory.water??0)<1?mvpWaterTrip(w,r):null;
  if(waterTrip)return {action:waterTrip,reason:'当前紧急需求已处理，前往已知泉水补足两份清水储备'};
+ // A greeting is a performed, finite action, not a model-generated dialogue.
+ // Only address a known person already in actual contact; never pursue them.
+ const recentlySpoke=w.events.some(e=>e.kind==='conversation'&&e.actors.includes(r.id)&&w.minute-e.at<360);
+ if(r.canExpress&&!recentlySpoke&&r.hunger<35&&(mvpThirst(w,r)??0)<50-1e-9&&r.energy>=70&&(r.inventory.berry??0)>=3&&(r.inventory.water??0)>=1){
+  const target=w.residents.find(p=>p.id!==r.id&&p.canExpress&&(!p.activity||p.activity.action.type==='wait')&&(!p.plan||p.plan.actions.every(a=>a.type==='wait'))&&canContactSocialTarget(w,r,p));
+  if(target){
+   const action:Action={type:'talk',targetId:target.id,text:'〔规则示例问候〕你好，愿你今天在山谷过得顺利。',tone:'friendly'};
+   const error=planStartError(w,{id:'mvp-greeting-preview',actorId:r.id,actorRevision:r.revision,createdAt:w.minute,definition:w.activeDefinitions['action/routine'],intention:'本地规则：向眼前空闲熟人问候',actions:[action]});
+   if(error===null)return {action,reason:'基本需求已处理，向眼前空闲熟人问候；固定规则示例，不是模型对话'};
+  }
+ }
  return {action:{type:'wait',minutes:30},reason:'当前没有可执行的规则行动，短暂等待'};
 }
 export function createMvpSession(){
@@ -107,7 +119,7 @@ export function createMvpSession(){
  const decisions:Record<string,number>={};
  const snapshot=():Snapshot&{roomViews:ReturnType<typeof roomObservation>}&{observation:ReturnType<typeof mvpObservation>}&{movement:ReturnType<typeof completedMovementSnapshot>}&{mvp:{driver:'local-rules';notice:string;ephemeral:true;fault:string|null;phases:Record<string,MvpPhase>;decisions:Record<string,number>}}=>({
   roomViews:roomObservation(world),observation:mvpObservation(world,[],[]),movement:completedMovementSnapshot(world),world:structuredClone(world),serverTime:new Date().toISOString(),version:VALLEY_VERSION,mapRevision:'godot-mvp-map-1',
-  capabilities:{active:['小地图只读观察','本地规则采集/进食/休息闭环'],pending:['真实模型决策验收','持久存档','最终绘本素材']},
+  capabilities:{active:['小地图只读观察','本地规则采集/进食/休息闭环','有限面对面规则问候'],pending:['真实模型决策验收','持久存档','最终绘本素材']},
   mvp:{driver:'local-rules',notice:GODOT_MVP_NOTICE,ephemeral:true,fault,phases:Object.fromEntries(world.residents.map(r=>[r.id,mvpPhase(r)])),decisions:{...decisions}},
  });
  const advance=(minutes=1)=>{
@@ -134,6 +146,9 @@ export function createMvpSession(){
       &&(source.kind!=='bush'||canContactBerry(world,failed,source))
       &&(source.kind!=='spring'||canContactSpring(world,failed,source));
      if(failed.lastFailure==='资源或实际位置已经变化'&&depleted)continue;
+     // A listener may leave while the finite utterance is being performed.
+     // Keep the engine's failure, without inventing speech or freezing time.
+     if(failed.lastFailure==='对方已经不在能够交谈的位置'&&action?.type==='talk')continue;
      throw new Error(`MVP action failed for ${failed.id}: ${failed.lastFailure}`);
     }
    }
