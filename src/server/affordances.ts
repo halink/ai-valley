@@ -50,9 +50,11 @@ export function buildChoices(c:DecisionContext):ActionChoice[]{
  const add=(g:ActionChoice[],id:string,label:string,action:Action)=>g.push({id,label,action});
  const rest=group();
  const home=c.buildings.find(b=>b.id===c.actor.homeId&&(!b.observed||b.observed.condition>0&&b.observed.ownResidence!==false));
- if(c.formal){
+ // MVP residents choose their own time just as formal residents do.
+ // This changes the vocabulary, not scheduling or the rule-demo policy.
+ if(c.formal||c.mvpDrinking){
   rest.push({id:'wait.duration',label:'原地停留（填写本人决定的 minutes，1–720分钟）',action:{type:'wait',minutes:0},chooseDuration:true});
-  if(home&&home.observed?.ownBed!==false&&c.formal.hasBed!==false){
+  if(home&&home.observed?.ownBed!==false&&c.formal?.hasBed!==false){
    const distance=manhattan(home.door,c.actor.at);
    rest.push({id:'sleep.duration',label:`${home.observed?'到自己的床上睡觉':'按登记住处尝试回自己的床睡觉，屋况和床位尚待核实'}${distance?`（距家至少${distance}格，路程另计）`:''}，填写本人决定的 minutes（1–720分钟）`,action:{type:'sleep',minutes:0},chooseDuration:true});
   }
