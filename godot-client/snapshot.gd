@@ -341,3 +341,27 @@ static func event_summary(world: Dictionary, selected: String, resident_only: bo
 	if lines.is_empty():
 		return "近期事件（%s）：当前快照无记录，不代表从未发生" % scope
 	return "近期事件（%s，最新在前，最多 8 条）：\n" % scope + "\n".join(lines) + "\n仅展示当前快照，不是完整历史或个人记忆。"
+
+# Only the resident's delivered records; never fill gaps from the world ledger.
+static func memory_summary(person: Dictionary) -> String:
+	var memories = person.get("memories")
+	if not memories is Array:
+		return "本人近期经历：未知"
+	var records: Array = []
+	for memory in memories:
+		if not memory is Dictionary or not memory.get("text") is String:
+			continue
+		var received = memory.get("receivedAt")
+		if not (received is int or received is float) or not is_finite(received) or received < 0:
+			continue
+		records.append(memory)
+	records.sort_custom(func(a, b): return a.receivedAt > b.receivedAt)
+	var lines: Array[String] = ["本人近期经历 · 最多3条已收到记录"]
+	for memory in records.slice(0, 3):
+		var source: String = {"self": "亲历", "witness": "目睹", "heard": "听闻"}.get(memory.get("source"), "来源未知")
+		var excerpt: String = memory.text.replace("\n", " ").replace("\r", " ").replace("\t", " ").strip_edges().left(180)
+		if memory.text.length() > 180: excerpt += "…"
+		lines.append("收到于世界分钟 %s · %s：%s" % [number_label(memory.receivedAt), source, excerpt])
+	if records.is_empty(): lines.append("当前快照无可显示记录，不代表没有经历。")
+	lines.append("仅为居民收到的记录节选，不是完整记忆、模型思维或事实核验。")
+	return "\n".join(lines)

@@ -13,6 +13,7 @@ var endpoint: LineEdit
 var status: Label
 var world_summary_label: Label
 var detail: Label
+var memories_label: Label
 var events_label: Label
 var mode_label: Label
 var endpoint_hint: Label
@@ -173,10 +174,21 @@ func _ready() -> void:
 	world_summary_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	world_summary_label.text = "世界时间与环境资源：等待快照"
 	box.add_child(world_summary_label)
+	var memory_toggle := CheckButton.new()
+	memory_toggle.text = "查看本人近期经历"
+	for color_name in ["font_color", "font_hover_color", "font_pressed_color", "font_hover_pressed_color", "font_focus_color"]:
+		memory_toggle.add_theme_color_override(color_name, Color(0.19, 0.23, 0.20))
+	box.add_child(memory_toggle)
 	detail = Label.new()
 	detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	detail.text = "尚未选择居民。室内／地图外居民不会被放到室外显示。"
 	box.add_child(detail)
+	memories_label = Label.new()
+	memories_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	memories_label.visible = false
+	memories_label.text = "本人近期经历：未连接／数据过期"
+	box.add_child(memories_label)
+	memory_toggle.toggled.connect(func(enabled: bool): memories_label.visible = enabled)
 	mode_label = Label.new()
 	mode_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	mode_label.text = "尚未连接模拟世界"
@@ -374,6 +386,7 @@ func _update_events() -> void:
 func _update_detail() -> void:
 	if not connected: _stop_follow()
 	_update_events()
+	memories_label.text = "本人近期经历：请选择居民" if connected else "本人近期经历：未连接／数据过期"
 	world_summary_label.text = Snapshot.world_summary(world) if connected else "世界时间与环境资源：未连接／数据过期"
 	detail.text = "尚未选择居民。室内／地图外居民不会被放到室外显示。"
 	for person in world.get("residents", []):
@@ -385,6 +398,7 @@ func _update_detail() -> void:
 			detail.text += "\n" + Snapshot.action_detail(person) + "\n饥饿 %s · 精力 %s\n" % [Snapshot.number_label(person.get("hunger")), Snapshot.number_label(person.get("energy"))] + Snapshot.inventory_label(person) + " · " + Snapshot.thirst_label(world, person.id) + " · " + Snapshot.failure_label(person) + "\n" + Snapshot.model_status(observation, person.id)
 			detail.text += " · 室内" if person.get("inside") != null else " · 室外"
 			detail.text += "\n" + Snapshot.plan_summary(person)
+			memories_label.text = Snapshot.memory_summary(person)
 			return
 	selected = ""
 	_update_events()
