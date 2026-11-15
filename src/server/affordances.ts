@@ -71,9 +71,23 @@ export function buildChoices(c:DecisionContext):ActionChoice[]{
  if(kitchen&&count(c,'turnip')>=2&&count(c,'water')>=1)add(food,'cook.1',`${kitchen.observed?`去${kitchen.name}的厨房`:`按已知地址尝试去${kitchen.name}的厨房，屋况与工位须核实，`}做1份餐食（2芜菁、1水）`,{type:'cook',quantity:1,buildingId:kitchen.id});
  const gathering=group();
  const nearestResources=[...c.resources].filter(r=>r.amount>0&&!r.waterBlocked&&(!c.formal||c.formal.age>=18||r.kind==='bush'||r.kind==='spring')).sort((a,b)=>manhattan(a.at,c.actor.at)-manhattan(b.at,c.actor.at)||a.id.localeCompare(b.id));
- // Formal berry and spring candidates retain alternate known sources separately.
- // Validation worlds keep their original small vocabulary.
- for(const kind of ['tree','rock','bush','spring'] as const){if(c.formal&&(kind==='bush'||kind==='spring'))continue;const r=nearestResources.find(r=>r.kind===kind);if(!r)continue;const quantity=Math.min(3,Math.floor(r.amount));if(quantity<1)continue;add(gathering,`gather.${r.id}`,`去(${r.at.x},${r.at.y})采集${quantity}份${resourceNames[kind]}`,{type:'gather',resourceId:r.id,quantity});}
+ // Formal sources have their own evidence-based opportunity menu. The small
+ // drinking MVP exposes alternate *supplied observations*, not only the nearest
+ // source: a model can change its choice after a failed route or competition.
+ // No unseen source, guaranteed route, or automatic replacement is introduced.
+ const sourceKinds=['tree','rock','bush','spring'] as const;
+ const sources=sourceKinds.map(kind=>{
+  if(c.formal&&(kind==='bush'||kind==='spring'))return [];
+  const limit=c.mvpDrinking&&(kind==='bush'||kind==='spring')?4:1;
+  return nearestResources.filter(r=>r.kind===kind&&Number.isFinite(r.amount)&&Math.floor(r.amount)>=1).slice(0,limit);
+ });
+ // Interleave kinds so alternate berries cannot push the first water choice
+ // behind every berry within the bounded final category rotation.
+ for(let i=0;i<4;i++)for(const [index,kind] of sourceKinds.entries()){
+  const r=sources[index][i];if(!r)continue;
+  const quantity=Math.min(3,Math.floor(r.amount));
+  add(gathering,`gather.${r.id}`,`去(${r.at.x},${r.at.y})采集${quantity}份${resourceNames[kind]}（路线和余量须执行时核实）`,{type:'gather',resourceId:r.id,quantity});
+ }
  const farming=group();
  const plots=[...c.plots].filter(p=>p.ownerId===c.actor.id).sort((a,b)=>manhattan(a.at,c.actor.at)-manhattan(b.at,c.actor.at)||a.id.localeCompare(b.id));
  const empty=plots.find(p=>!p.crop),dry=plots.find(p=>p.crop?.definition==='crop/turnip@1'&&p.crop.wateredDay!==Math.floor(c.minute/DAY)&&(p.observed?p.observed.atMinute===c.minute&&p.observed.stage==='growing':p.crop.growth<4)),ripe=plots.find(p=>p.crop?.definition==='crop/turnip@1'&&(p.observed?p.observed.atMinute===c.minute&&p.observed.stage==='mature':p.crop.growth>=4));
