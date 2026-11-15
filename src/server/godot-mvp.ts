@@ -83,7 +83,9 @@ export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string
  }
  if((r.inventory.berry??0)<3){
   const source=w.resources.filter(s=>s.kind==='bush'&&s.amount>=1&&r.knownResources.includes(s.id)).sort((a,b)=>distance(r.at,a.at)-distance(r.at,b.at)).find(s=>berryApproachPath(w,r.at,s)!==null);
-  if(source)return {action:{type:'gather',resourceId:source.id,quantity:Math.min(3,source.amount)},reason:'前往已知果丛补充少量浆果储备'};
+  // Reserve three portions in total, not three more on every top-up.
+  // Gathering uses whole units; never debit stock or credit inventory here.
+  if(source)return {action:{type:'gather',resourceId:source.id,quantity:Math.min(Math.ceil(3-(r.inventory.berry??0)),Math.floor(source.amount))},reason:'前往已知果丛补足三份浆果储备的缺口'};
  }
  return {action:{type:'wait',minutes:30},reason:'当前没有可执行的规则行动，短暂等待'};
 }
