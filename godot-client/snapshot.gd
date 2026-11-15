@@ -202,8 +202,28 @@ static func plan_summary(person: Dictionary) -> String:
 static func failure_label(person: Dictionary) -> String:
 	if not person.has("lastFailure"):
 		return "上次行为失败：未知"
-	# Error strings can originate in external/model input. Do not echo them.
-	return "上次行为失败：" + ("无记录" if person.lastFailure == null else "有记录（详情已隐藏）")
+	# Match whole engine-owned strings only; never echo arbitrary/model text.
+	if person.lastFailure == null:
+		return "上次行为失败：无记录"
+	var reasons := {
+		"没有这份可以食用的实际食品": "所选食品不存在、不可食用或数量不足",
+		"没有携带一份实际清水": "随身清水不足",
+		"资源已不足，须重新决定": "目标资源不足，需要重新决定",
+		"资源或实际位置已经变化": "资源或实际位置已变化，需要重新决定",
+		"尚未找到这处资源": "目标资源不存在或尚未被居民发现",
+		"目标目前没有可达路线": "目标目前没有可达路线",
+		"泉水已淤塞，须退水后实际清理才可安全取用": "泉水淤塞，暂不能取水",
+		"尚未拥有可使用的真实床位，当前住处存在床位缺口": "当前没有可用床位",
+		"MVP当前没有可使用的真实自有床位": "当前没有可用自有床位",
+		"真实床位已经失效，须留在当前位置重新决定": "原床位已失效，需要重新决定",
+		"原床位已经改变，须留在当前位置重新决定": "原床位已改变，需要重新决定",
+		"实际床位或室内路线已阻断，须留在当前位置重新决定": "床位或室内路线受阻",
+		"真实床位仍被其他居民实际占用，须重新决定": "床位被其他居民占用"
+	}
+	var reason := "有记录（未识别原因，详情已隐藏）"
+	if person.lastFailure is String:
+		reason = reasons.get(person.lastFailure, reason)
+	return "上次行为失败：" + reason + "（历史记录，不代表当前仍受阻）"
 
 static func status_number(value: Variant, integer: bool = false) -> String:
 	if number_label(value) == "未知" or value < 0:
