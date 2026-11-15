@@ -102,6 +102,16 @@ export function buildChoices(c:DecisionContext):ActionChoice[]{
  if(address&&manhattan(address.door,c.actor.at)>0)add(travel,'move.home',`回到登记住处门外(${address.door.x},${address.door.y})查看`,{type:'move',to:{...address.door}});
  const field=knownLandChoice(c);if(field)travel.push(field);
  for(const b of [...c.buildings].filter(b=>b.ownerId==='commons').sort((a,b)=>manhattan(a.door,c.actor.at)-manhattan(b.door,c.actor.at)).slice(0,2))if(manhattan(b.door,c.actor.at)>0)add(travel,`move.${b.id}`,`去${b.name}门外(${b.door.x},${b.door.y})`,{type:'move',to:{...b.door}});
+ const revisit=group();
+ // Remembered addresses never imply current stock or a clear route. Revisit
+ // only sources outside the supplied live observations, then decide again.
+ if(c.mvpDrinking&&!c.formal){
+  for(const kind of ['spring','bush'] as const){
+   const known=(c.mvpKnownSources??[]).filter(r=>r.kind===kind&&!c.resources.some(v=>v.id===r.id)&&manhattan(r.at,c.actor.at)>0)
+    .sort((a,b)=>manhattan(a.at,c.actor.at)-manhattan(b.at,c.actor.at)||a.id.localeCompare(b.id)).slice(0,2);
+   for(const r of known)add(revisit,`revisit.${r.id}`,`重访已知${resourceNames[kind]}来源(${r.at.x},${r.at.y})；当前余量和状态未知，路线须核实，到场后自行决定是否采集`,{type:'move',to:{...r.at}});
+  }
+ }
  const exploration=group();
  // A direction is an intention to discover; no unseen resource or person is asserted to exist there.
  for(const [id,name,dx,dy] of [['east','东',6,0],['south','南',0,6],['west','西',-6,0],['north','北',0,-6]] as const){const to={x:c.actor.at.x+dx,y:c.actor.at.y+dy};if(to.x<0||to.y<0||to.x>=c.bounds.width||to.y>=c.bounds.height)continue;add(exploration,`explore.${id}`,`向${name}探索6格（路线须可达）`,{type:'move',to});}

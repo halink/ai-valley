@@ -181,6 +181,7 @@ export interface DecisionContext {
  actor:Pick<Resident,'id'|'name'|'traits'|'hunger'|'energy'|'health'|'inventory'|'skills'|'intention'|'at'|'homeId'|'lastFailure'|'recentActions'> & {coins?:number;agency?:Resident['agency'];barterEligible?:boolean};
  bounds:{width:number;height:number};minute:number;season:Season;weather:World['weather'];
  people:Array<Pick<Resident,'id'|'name'|'at'|'intention'|'status'> & {inside?:string|null;roomAt?:Vec|null;relation:Relation|null;talkEligible?:boolean;interactionEligible?:boolean;barterEligible?:boolean;talkDistance?:number;bodyObservation?:import('./body-observation.js').BodyObservation}>;
+ mvpKnownSources?:Array<{id:string;kind:'bush'|'spring';at:Vec}>;
  buildings:KnownBuilding[];resources:Array<Omit<Resource,'floodDamage'>&{waterBlocked?:boolean}>;plots:Array<Plot&{observed?:import('./crop-observation.js').CropObservation}>;knownLand:Array<{id:string;at:Vec}>;offers:Offer[];proposals:Proposal[];memories:Memory[];
 }
 export interface ModelDecision {intention:string;actions:Action[];}
