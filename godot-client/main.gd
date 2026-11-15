@@ -27,6 +27,7 @@ var panel_collapsed := false
 var model_diagnostics: Label
 var resident_events_only := false
 var observer_panel: PanelContainer
+var follow_button: CheckButton
 
 func _ready() -> void:
 	valley = Valley3D.new()
@@ -129,6 +130,17 @@ func _ready() -> void:
 	leave.pressed.connect(_leave_room)
 	leave.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(leave)
+	follow_button = CheckButton.new()
+	follow_button.text = "跟随所选居民"
+	follow_button.tooltip_text = "只跟随当前视图中的居民；拖动、断连或离开视图时停止"
+	for color_name in ["font_color", "font_hover_color", "font_pressed_color", "font_hover_pressed_color", "font_focus_color"]:
+		follow_button.add_theme_color_override(color_name, Color(0.19, 0.23, 0.20))
+	box.add_child(follow_button)
+	follow_button.toggled.connect(func(enabled: bool):
+		if enabled and (not connected or selected.is_empty() or not valley.focus_resident(selected)):
+			_stop_follow()
+			status.text = "请先选择当前视图中的居民；过期或未知位置不能跟随"
+	)
 	# Keep interactive controls above variable-height snapshot text.
 	var event_filter := CheckButton.new()
 	event_filter.text = "只看所选居民参与的事件"
@@ -351,6 +363,7 @@ func _received(result: int, code: int, _headers: PackedStringArray, body: Packed
 	_room_status()
 
 func _recenter() -> void:
+	_stop_follow()
 	if world.is_empty():
 		return
 	valley.center(world)
@@ -359,6 +372,7 @@ func _update_events() -> void:
 	events_label.text = Snapshot.event_summary(world, selected, resident_events_only, connected)
 
 func _update_detail() -> void:
+	if not connected: _stop_follow()
 	_update_events()
 	world_summary_label.text = Snapshot.world_summary(world) if connected else "世界时间与环境资源：未连接／数据过期"
 	detail.text = "尚未选择居民。室内／地图外居民不会被放到室外显示。"
@@ -387,6 +401,7 @@ func _next_resident() -> void:
 	valley.show_world(world, selected, connected)
 
 func _locate_resident() -> void:
+	_stop_follow()
 	if not connected:
 		status.text = "数据过期，收到新快照后才能定位居民"
 		return
@@ -397,6 +412,17 @@ func _locate_resident() -> void:
 		status.text = "所选居民不在当前视图中；室内居民请先进入住宅，未知位置不推测"
 		return
 	status.text = "已定位所选居民 · 仅移动镜头，不持续跟随"
+
+func _stop_follow() -> void:
+	if follow_button != null:
+		follow_button.set_pressed_no_signal(false)
+
+func _process(_delta: float) -> void:
+	if follow_button == null or not follow_button.button_pressed:
+		return
+	if not connected or selected.is_empty() or not valley.focus_resident(selected):
+		_stop_follow()
+		status.text = "跟随已停止：目标不在当前有效视图中"
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_MIDDLE and not event.pressed:
@@ -413,6 +439,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_MIDDLE:
+			if event.pressed: _stop_follow()
 			dragging = event.pressed
 		if event.pressed and event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:
 			valley.zoom(0.87 if event.button_index == MOUSE_BUTTON_WHEEL_UP else 1.15)
@@ -439,6 +466,7 @@ func _room_status() -> void:
 	room_hint.text = "住宅内部 · 剖面视图 · 使用快照位置 · 位置未知居民数：" + str(unknown) + " · 床位数：" + str(_bed_count())
 
 func _enter_room() -> void:
+	_stop_follow()
 	if not connected: return
 	var id := ""
 	for person in world.residents:
@@ -452,6 +480,7 @@ func _enter_room() -> void:
 	_room_status()
 
 func _leave_room() -> void:
+	_stop_follow()
 	valley.leave_room(world)
 	valley.show_world(world,selected,false)
 	_room_status()
