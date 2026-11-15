@@ -10,7 +10,7 @@ import {enableCompletedMovement,completedMovementSnapshot} from '../world/comple
 import {randomUUID} from 'node:crypto';
 import {createServer,type Server} from 'node:http';
 import {createWorld} from '../world/seed.js';
-import {stepWorld,submitPlan} from '../world/engine.js';
+import {stepWorld,submitPlan,planStartError} from '../world/engine.js';
 import {distance} from '../world/navigation.js';
 import {berryApproachPath,canContactBerry} from '../world/berry-observation.js';
 import {canContactSpring,springApproachPath} from '../world/spring-observation.js';
@@ -73,7 +73,14 @@ export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string
    .find(s=>springApproachPath(w,r.at,s)!==null);
   if(source)return {action:{type:'gather',resourceId:source.id,quantity:1},reason:'口渴且没有清水，前往泉水取一份'};
  }
- if(r.energy<70)return {action:{type:'sleep',minutes:120},reason:'返回共屋休息，恢复精力'};
+ if(r.energy<70){
+  const action:Action={type:'sleep',minutes:120};
+  // Preview on the engine's isolated copy: invalid homes, occupied/missing
+  // beds and blocked approaches must not freeze this rule-only demo.
+  // Execution still rechecks changes after selection; never grant free rest.
+  const problem=planStartError(w,{id:'mvp-rest-preview',actorId:r.id,actorRevision:r.revision,createdAt:w.minute,definition:w.activeDefinitions['action/routine'],intention:'本地规则：休息可行性预检',actions:[action]});
+  if(problem===null)return {action,reason:'返回共屋休息，恢复精力'};
+ }
  if((r.inventory.berry??0)<3){
   const source=w.resources.filter(s=>s.kind==='bush'&&s.amount>=1&&r.knownResources.includes(s.id)).sort((a,b)=>distance(r.at,a.at)-distance(r.at,b.at)).find(s=>berryApproachPath(w,r.at,s)!==null);
   if(source)return {action:{type:'gather',resourceId:source.id,quantity:Math.min(3,source.amount)},reason:'前往已知果丛补充少量浆果储备'};
