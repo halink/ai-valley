@@ -174,6 +174,31 @@ static func action_detail(person: Dictionary) -> String:
 		target_text = "(%s, %s)" % [target.x, target.y]
 	return activity_label(person) + " · 目标位置 " + target_text + " · 剩余工作时间 " + number_label(activity.get("remaining")) + " 世界分钟（不含路程）"
 
+# The current accepted plan is an explicit game artifact, not hidden model reasoning.
+# Never fall back to person.intention: that text can outlive its completed plan.
+static func plan_summary(person: Dictionary) -> String:
+	if not person.has("plan"):
+		return "行为计划：未知"
+	var plan = person.get("plan")
+	if plan == null:
+		return "行为计划：当前没有待执行计划（不代表居民没有意愿）"
+	if not plan is Dictionary or not plan.get("actions") is Array:
+		return "行为计划：未知"
+	var intention = plan.get("intention")
+	var declared := "未提供"
+	if intention is String and not intention.strip_edges().is_empty():
+		# Plain Label text, bounded and single-line; never render markup or links.
+		declared = intention.replace("\n", " ").replace("\r", " ").replace("\t", " ").strip_edges().left(240)
+		if intention.length() > 240: declared += "…"
+	var queued: Array[String] = []
+	for action in plan.actions.slice(0, 5):
+		queued.append(action_name(str(action.get("type", ""))) if action is Dictionary else "未知行为")
+	var next := "无后续动作"
+	if not queued.is_empty():
+		next = " → ".join(queued)
+		if plan.actions.size() > 5: next += " → …"
+	return "行为计划 · 已提交意图：" + declared + "\n后续队列：" + next + "\n当前动作见上方；队列尚未完成，可能失败或改变。不是模型思维记录。"
+
 static func failure_label(person: Dictionary) -> String:
 	if not person.has("lastFailure"):
 		return "上次行为失败：未知"

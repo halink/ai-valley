@@ -384,6 +384,7 @@ func _update_detail() -> void:
 			detail.text = "%s · %s · 健康 %s" % [Snapshot.resident_name(person), Snapshot.resident_status(person), Snapshot.number_label(person.get("health"))]
 			detail.text += "\n" + Snapshot.action_detail(person) + "\n饥饿 %s · 精力 %s\n" % [Snapshot.number_label(person.get("hunger")), Snapshot.number_label(person.get("energy"))] + Snapshot.inventory_label(person) + " · " + Snapshot.thirst_label(world, person.id) + " · " + Snapshot.failure_label(person) + "\n" + Snapshot.model_status(observation, person.id)
 			detail.text += " · 室内" if person.get("inside") != null else " · 室外"
+			detail.text += "\n" + Snapshot.plan_summary(person)
 			return
 	selected = ""
 	_update_events()
