@@ -26,6 +26,7 @@ var first := true
 var panel_collapsed := false
 var model_diagnostics: Label
 var resident_events_only := false
+var observer_panel: PanelContainer
 
 func _ready() -> void:
 	valley = Valley3D.new()
@@ -33,6 +34,9 @@ func _ready() -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
 	var panel := PanelContainer.new()
+	observer_panel = panel
+	# Wheel events can bubble at scroll limits; never let the panel pass them to the map.
+	panel.mouse_force_pass_scroll_events = false
 	panel.name = "ObserverPanel"
 	panel.theme = Theme.new()
 	panel.theme.default_font = UI_FONT
@@ -125,6 +129,16 @@ func _ready() -> void:
 	leave.pressed.connect(_leave_room)
 	leave.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(leave)
+	# Keep interactive controls above variable-height snapshot text.
+	var event_filter := CheckButton.new()
+	event_filter.text = "只看所选居民参与的事件"
+	for color_name in ["font_color", "font_hover_color", "font_pressed_color", "font_hover_pressed_color", "font_focus_color"]:
+		event_filter.add_theme_color_override(color_name, Color(0.19, 0.23, 0.20))
+	box.add_child(event_filter)
+	event_filter.toggled.connect(func(value: bool):
+		resident_events_only = value
+		_update_events()
+	)
 	room_hint = Label.new()
 	room_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	room_hint.text = "室外视图 · 观察房间不会移动居民"
@@ -165,15 +179,6 @@ func _ready() -> void:
 	model_diagnostics.visible = false
 	box.add_child(model_diagnostics)
 	diagnostic_toggle.toggled.connect(func(value: bool): model_diagnostics.visible = value)
-	var event_filter := CheckButton.new()
-	event_filter.text = "只看所选居民参与的事件"
-	for color_name in ["font_color", "font_hover_color", "font_pressed_color", "font_hover_pressed_color", "font_focus_color"]:
-		event_filter.add_theme_color_override(color_name, Color(0.19, 0.23, 0.20))
-	box.add_child(event_filter)
-	event_filter.toggled.connect(func(value: bool):
-		resident_events_only = value
-		_update_events()
-	)
 	events_label = Label.new()
 	events_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	events_label.text = "近期事件：尚未收到"
@@ -402,6 +407,10 @@ func _notification(what: int) -> void:
 		dragging = false
 
 func _unhandled_input(event: InputEvent) -> void:
+	# Guard the entire visible panel, including padding and scroll boundaries.
+	# The global middle-button release above still ends a drag over the UI.
+	if event is InputEventMouse and observer_panel != null and observer_panel.is_visible_in_tree() and observer_panel.get_global_rect().has_point(event.position):
+		return
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_MIDDLE:
 			dragging = event.pressed
