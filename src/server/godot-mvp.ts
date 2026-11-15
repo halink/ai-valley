@@ -56,6 +56,16 @@ export function createMvpWorld():World {
  adoptMvpRooms(world);
  return world;
 }
+/** A two-portion carried reserve covers the MVP's nominal daily water need.
+ * Selection never credits stock; the engine owns travel and collection. */
+function mvpWaterTrip(w:World,r:Resident):Action|null {
+ const missing=Math.max(0,Math.floor(2-(r.inventory.water??0)));
+ if(!missing)return null;
+ const source=w.resources.filter(s=>s.kind==='spring'&&s.amount>=1&&s.floodDamage?.clearedAt!==null&&r.knownResources.includes(s.id))
+  .sort((a,b)=>distance(r.at,a.at)-distance(r.at,b.at))
+  .find(s=>springApproachPath(w,r.at,s)!==null);
+ return source?{type:'gather',resourceId:source.id,quantity:Math.min(missing,Math.floor(source.amount))}:null;
+}
 /** No global information is claimed to be a resident's model knowledge. This
  * deliberately bounded engineering policy is visibly labelled in snapshots. */
 export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string} {
@@ -68,10 +78,8 @@ export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string
  }
  if((mvpThirst(w,r)??0)>=50-1e-9){
   if((r.inventory.water??0)>=1)return {action:{type:'mvpDrink'},reason:'口渴，选择饮用一份随身清水'};
-  const source=w.resources.filter(s=>s.kind==='spring'&&s.amount>=1&&s.floodDamage?.clearedAt!==null&&r.knownResources.includes(s.id))
-   .sort((a,b)=>distance(r.at,a.at)-distance(r.at,b.at))
-   .find(s=>springApproachPath(w,r.at,s)!==null);
-  if(source)return {action:{type:'gather',resourceId:source.id,quantity:1},reason:'口渴且没有清水，前往泉水取一份'};
+  const action=mvpWaterTrip(w,r);
+  if(action)return {action,reason:'口渴且没有清水，前往泉水补足两份随身清水储备'};
  }
  if(r.energy<70){
   const action:Action={type:'sleep',minutes:120};
@@ -87,6 +95,9 @@ export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string
   // Gathering uses whole units; never debit stock or credit inventory here.
   if(source)return {action:{type:'gather',resourceId:source.id,quantity:Math.min(Math.ceil(3-(r.inventory.berry??0)),Math.floor(source.amount))},reason:'前往已知果丛补足三份浆果储备的缺口'};
  }
+ // Keep the remaining portion; replenish only after the carried supply runs out.
+ const waterTrip=(r.inventory.water??0)<1?mvpWaterTrip(w,r):null;
+ if(waterTrip)return {action:waterTrip,reason:'当前紧急需求已处理，前往已知泉水补足两份清水储备'};
  return {action:{type:'wait',minutes:30},reason:'当前没有可执行的规则行动，短暂等待'};
 }
 export function createMvpSession(){
