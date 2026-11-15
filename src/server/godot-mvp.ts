@@ -76,13 +76,16 @@ function mvpCanStart(w:World,r:Resident,action:Action):boolean {
 export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string} {
  // Each recipient chooses independently, using exact received terms and its
  // own supplies. No automatic acceptance, distant stock probe, or free food.
- if((r.inventory.berry??0)<1&&(r.inventory.water??0)>=2&&r.energy>=70&&(mvpThirst(w,r)??0)<50-1e-9){
+ const wantsFood=(r.inventory.berry??0)<1&&(r.inventory.water??0)>=2;
+ const wantsWater=(r.inventory.water??0)<1&&(r.inventory.berry??0)>=2&&r.hunger<35;
+ if((wantsFood||wantsWater)&&r.energy>=70&&(mvpThirst(w,r)??0)<50-1e-9){
   const offer=w.offers.find(o=>o.targetId===r.id&&o.status==='open'&&o.expiresAt>w.minute
-   &&Object.keys(o.give).length===1&&o.give.berry===1&&Object.keys(o.want).length===1&&o.want.water===1
+   &&Object.keys(o.give).length===1&&Object.keys(o.want).length===1
+   &&(wantsFood&&o.give.berry===1&&o.want.water===1||wantsWater&&o.give.water===1&&o.want.berry===1)
    &&w.residents.some(p=>p.id===o.actorId&&canContactSocialTarget(w,r,p)));
   if(offer){
    const action:Action={type:'accept',offerId:offer.id,offerTerms:barterTerms(offer)};
-   if(mvpCanStart(w,r,action))return {action,reason:'本地规则独立接受当面报价：用一份富余清水换一份浆果，交付后再决定进食'};
+   if(mvpCanStart(w,r,action))return {action,reason:wantsFood?'本地规则独立接受当面报价：用一份富余清水换一份浆果，交付后再决定进食':'本地规则独立接受当面报价：用一份富余浆果换一份清水，交付后再决定饮用'};
   }
  }
  if(r.hunger>=35&&(r.inventory.berry??0)>=1)return {action:{type:'eat',item:'berry'},reason:'饥饿且带有一整份浆果，进食'};
@@ -105,12 +108,6 @@ export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string
   const problem=planStartError(w,{id:'mvp-rest-preview',actorId:r.id,actorRevision:r.revision,createdAt:w.minute,definition:w.activeDefinitions['action/routine'],intention:'本地规则：休息可行性预检',actions:[action]});
   if(problem===null)return {action,reason:'返回共屋休息，恢复精力'};
  }
- if((r.inventory.berry??0)<3){
-  const source=w.resources.filter(s=>s.kind==='bush'&&s.amount>=1&&r.knownResources.includes(s.id)).sort((a,b)=>distance(r.at,a.at)-distance(r.at,b.at)).find(s=>berryApproachPath(w,r.at,s)!==null);
-  // Reserve three portions in total, not three more on every top-up.
-  // Gathering uses whole units; never debit stock or credit inventory here.
-  if(source)return {action:{type:'gather',resourceId:source.id,quantity:Math.min(Math.ceil(3-(r.inventory.berry??0)),Math.floor(source.amount))},reason:'前往已知果丛补足三份浆果储备的缺口'};
- }
  // Remain available briefly after quoting, but never suppress urgent needs.
  const pending=w.offers.find(o=>o.actorId===r.id&&o.status==='open'&&o.expiresAt>w.minute+225);
  if(pending&&r.hunger<35&&r.energy>=70&&(mvpThirst(w,r)??0)<50-1e-9
@@ -118,13 +115,21 @@ export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string
   return {action:{type:'wait',minutes:5},reason:'在原处短暂等候对方独立决定，不自动成交'};
  // Offer only one's own surplus, without assuming the other person's needs
  // or consent. Existing offers provide a finite cooldown even when ignored.
- if(r.hunger<35&&r.energy>=70&&(mvpThirst(w,r)??0)<50-1e-9&&(r.inventory.berry??0)>=3&&(r.inventory.water??0)<1
+ if(r.hunger<35&&r.energy>=70&&(mvpThirst(w,r)??0)<50-1e-9
+  &&((r.inventory.berry??0)>=3&&(r.inventory.water??0)<1||(r.inventory.water??0)>=2&&(r.inventory.berry??0)<1)
   &&!w.offers.some(o=>o.actorId===r.id&&w.minute<o.expiresAt+120)){
   const target=w.residents.find(p=>p.id!==r.id&&p.canExpress&&(!p.activity||p.activity.action.type==='wait')&&canContactSocialTarget(w,r,p));
   if(target){
-   const action:Action={type:'offer',targetId:target.id,give:{berry:1},want:{water:1}};
-   if(mvpCanStart(w,r,action))return {action,reason:'向眼前熟人提出一份浆果换一份清水，等待对方独立选择；规则示例'};
+   const giveWater=(r.inventory.water??0)>=2&&(r.inventory.berry??0)<1;
+   const action:Action={type:'offer',targetId:target.id,give:giveWater?{water:1}:{berry:1},want:giveWater?{berry:1}:{water:1}};
+   if(mvpCanStart(w,r,action))return {action,reason:giveWater?'向眼前熟人提出一份清水换一份浆果，等待对方独立选择；规则示例':'向眼前熟人提出一份浆果换一份清水，等待对方独立选择；规则示例'};
   }
+ }
+ if((r.inventory.berry??0)<3){
+  const source=w.resources.filter(s=>s.kind==='bush'&&s.amount>=1&&r.knownResources.includes(s.id)).sort((a,b)=>distance(r.at,a.at)-distance(r.at,b.at)).find(s=>berryApproachPath(w,r.at,s)!==null);
+  // Reserve three portions in total, not three more on every top-up.
+  // Gathering uses whole units; never debit stock or credit inventory here.
+  if(source)return {action:{type:'gather',resourceId:source.id,quantity:Math.min(Math.ceil(3-(r.inventory.berry??0)),Math.floor(source.amount))},reason:'前往已知果丛补足三份浆果储备的缺口'};
  }
  // Keep the remaining portion; replenish only after the carried supply runs out.
  const waterTrip=(r.inventory.water??0)<1?mvpWaterTrip(w,r):null;
