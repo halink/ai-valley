@@ -12,6 +12,7 @@ import {createServer,type Server} from 'node:http';
 import {createWorld} from '../world/seed.js';
 import {stepWorld,submitPlan,planStartError} from '../world/engine.js';
 import {distance} from '../world/navigation.js';
+import {barterTerms} from '../shared/barter.js';
 import {canContactSocialTarget} from '../world/social-observation.js';
 import {berryApproachPath,canContactBerry} from '../world/berry-observation.js';
 import {canContactSpring,springApproachPath} from '../world/spring-observation.js';
@@ -69,7 +70,21 @@ function mvpWaterTrip(w:World,r:Resident):Action|null {
 }
 /** No global information is claimed to be a resident's model knowledge. This
  * deliberately bounded engineering policy is visibly labelled in snapshots. */
+function mvpCanStart(w:World,r:Resident,action:Action):boolean {
+ return planStartError(w,{id:'mvp-exchange-preview',actorId:r.id,actorRevision:r.revision,createdAt:w.minute,definition:w.activeDefinitions['action/routine'],intention:'本地规则：当面交换预检',actions:[action]})===null;
+}
 export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string} {
+ // Each recipient chooses independently, using exact received terms and its
+ // own supplies. No automatic acceptance, distant stock probe, or free food.
+ if((r.inventory.berry??0)<1&&(r.inventory.water??0)>=2&&r.energy>=70&&(mvpThirst(w,r)??0)<50-1e-9){
+  const offer=w.offers.find(o=>o.targetId===r.id&&o.status==='open'&&o.expiresAt>w.minute
+   &&Object.keys(o.give).length===1&&o.give.berry===1&&Object.keys(o.want).length===1&&o.want.water===1
+   &&w.residents.some(p=>p.id===o.actorId&&canContactSocialTarget(w,r,p)));
+  if(offer){
+   const action:Action={type:'accept',offerId:offer.id,offerTerms:barterTerms(offer)};
+   if(mvpCanStart(w,r,action))return {action,reason:'本地规则独立接受当面报价：用一份富余清水换一份浆果，交付后再决定进食'};
+  }
+ }
  if(r.hunger>=35&&(r.inventory.berry??0)>=1)return {action:{type:'eat',item:'berry'},reason:'饥饿且带有一整份浆果，进食'};
  // Immediate needs come before optional stocking: an empty bag must not
  // send a thirsty or exhausted resident on a food-reserve trip.
@@ -96,6 +111,21 @@ export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string
   // Gathering uses whole units; never debit stock or credit inventory here.
   if(source)return {action:{type:'gather',resourceId:source.id,quantity:Math.min(Math.ceil(3-(r.inventory.berry??0)),Math.floor(source.amount))},reason:'前往已知果丛补足三份浆果储备的缺口'};
  }
+ // Remain available briefly after quoting, but never suppress urgent needs.
+ const pending=w.offers.find(o=>o.actorId===r.id&&o.status==='open'&&o.expiresAt>w.minute+225);
+ if(pending&&r.hunger<35&&r.energy>=70&&(mvpThirst(w,r)??0)<50-1e-9
+  &&w.residents.some(p=>p.id===pending.targetId&&canContactSocialTarget(w,r,p)))
+  return {action:{type:'wait',minutes:5},reason:'在原处短暂等候对方独立决定，不自动成交'};
+ // Offer only one's own surplus, without assuming the other person's needs
+ // or consent. Existing offers provide a finite cooldown even when ignored.
+ if(r.hunger<35&&r.energy>=70&&(mvpThirst(w,r)??0)<50-1e-9&&(r.inventory.berry??0)>=3&&(r.inventory.water??0)<1
+  &&!w.offers.some(o=>o.actorId===r.id&&w.minute<o.expiresAt+120)){
+  const target=w.residents.find(p=>p.id!==r.id&&p.canExpress&&(!p.activity||p.activity.action.type==='wait')&&canContactSocialTarget(w,r,p));
+  if(target){
+   const action:Action={type:'offer',targetId:target.id,give:{berry:1},want:{water:1}};
+   if(mvpCanStart(w,r,action))return {action,reason:'向眼前熟人提出一份浆果换一份清水，等待对方独立选择；规则示例'};
+  }
+ }
  // Keep the remaining portion; replenish only after the carried supply runs out.
  const waterTrip=(r.inventory.water??0)<1?mvpWaterTrip(w,r):null;
  if(waterTrip)return {action:waterTrip,reason:'当前紧急需求已处理，前往已知泉水补足两份清水储备'};
@@ -119,7 +149,7 @@ export function createMvpSession(){
  const decisions:Record<string,number>={};
  const snapshot=():Snapshot&{roomViews:ReturnType<typeof roomObservation>}&{observation:ReturnType<typeof mvpObservation>}&{movement:ReturnType<typeof completedMovementSnapshot>}&{mvp:{driver:'local-rules';notice:string;ephemeral:true;fault:string|null;phases:Record<string,MvpPhase>;decisions:Record<string,number>}}=>({
   roomViews:roomObservation(world),observation:mvpObservation(world,[],[]),movement:completedMovementSnapshot(world),world:structuredClone(world),serverTime:new Date().toISOString(),version:VALLEY_VERSION,mapRevision:'godot-mvp-map-1',
-  capabilities:{active:['小地图只读观察','本地规则采集/进食/休息闭环','有限面对面规则问候'],pending:['真实模型决策验收','持久存档','最终绘本素材']},
+  capabilities:{active:['小地图只读观察','本地规则采集/进食/休息闭环','有限面对面规则问候','独立选择的食水交换'],pending:['真实模型决策验收','持久存档','最终绘本素材']},
   mvp:{driver:'local-rules',notice:GODOT_MVP_NOTICE,ephemeral:true,fault,phases:Object.fromEntries(world.residents.map(r=>[r.id,mvpPhase(r)])),decisions:{...decisions}},
  });
  const advance=(minutes=1)=>{
@@ -149,6 +179,13 @@ export function createMvpSession(){
      // A listener may leave while the finite utterance is being performed.
      // Keep the engine's failure, without inventing speech or freezing time.
      if(failed.lastFailure==='对方已经不在能够交谈的位置'&&action?.type==='talk')continue;
+     // A quoted counterparty or stock may change before actual settlement.
+     // The engine rejects atomically; retry policy next tick, never credit goods.
+     if((action?.type==='offer'||action?.type==='accept')&&[
+      '须另一位在场的实际当事人，不能与自己虚构交换','报价物品或本人实际库存无效','对方还有未处理的报价',
+      '报价已经失效或没有交给本人','报价已经失效','交易须有两位不同的实际在场当事人','任一方的实际库存已不足',
+      '当前没有实际可见且可接近的交流对象，须先前往寻找','当前视野内没有找到对方，须先前往寻找',
+     ].includes(failed.lastFailure!))continue;
      throw new Error(`MVP action failed for ${failed.id}: ${failed.lastFailure}`);
     }
    }
