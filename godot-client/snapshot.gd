@@ -297,10 +297,10 @@ static func resident_room_position(at: Variant, room: Dictionary) -> bool:
 # Central vocabulary for protocol enums; extend here when adding actions/items.
 # Unknown protocol identifiers are not user-facing names.
 static func item_name(code: String) -> String:
-	return {"berry": "浆果", "water": "水", "wood": "木材", "stone": "石头", "fish": "鱼", "grain": "谷物", "meat": "肉", "bread": "面包"}.get(code, "未知物品")
+	return {"seed": "种子", "turnip": "根菜", "berry": "浆果", "water": "水", "wood": "木材", "stone": "石头", "fish": "鱼", "grain": "谷物", "meat": "肉", "bread": "面包"}.get(code, "未知物品")
 
 static func action_name(code: String) -> String:
-	return {"wait": "等待", "gather": "采集", "eat": "进食", "mvpDrink": "饮水", "rest": "休息", "move": "移动", "sleep": "睡觉", "fish": "钓鱼", "talk": "交谈"}.get(code, "未知行为")
+	return {"plant": "播种", "water": "浇水", "harvest": "收获", "wait": "等待", "gather": "采集", "eat": "进食", "mvpDrink": "饮水", "rest": "休息", "move": "移动", "sleep": "睡觉", "fish": "钓鱼", "talk": "交谈"}.get(code, "未知行为")
 
 static func error_name(code: String) -> String:
 	return {"http_429": "请求受限（HTTP 429）", "http_error": "服务响应错误", "invalid_response": "响应格式无效", "unresolved_request": "请求未完成", "other_failure": "其他错误"}.get(code, "未知")

@@ -8,6 +8,7 @@ var rest_transforms: Dictionary = {}
 var activity_pose := "idle"
 var activity_phase := 0.0
 var carried_food := 0
+var carried_roots := 0
 var carried_water := 0
 var gathering_kind := ""
 var action_item := ""
@@ -123,6 +124,7 @@ func provision(size: Vector3, color: String) -> MeshInstance3D:
 func update_provisions(person: Dictionary, world: Dictionary) -> void:
 	var inventory: Dictionary = person.get("inventory", {})
 	carried_food = maxi(0, int(inventory.get("berry", 0)))
+	carried_roots = maxi(0, int(inventory.get("turnip", 0)))
 	carried_water = maxi(0, int(inventory.get("water", 0)))
 	gathering_kind = ""
 	dining = false
@@ -131,6 +133,7 @@ func update_provisions(person: Dictionary, world: Dictionary) -> void:
 	if not activity is Dictionary: return
 	var action: Dictionary = activity.get("action", {})
 	action_item = str(action.get("item", ""))
+	food_prop.material_override = paint(Color("e9d5a4" if action_item == "turnip" else "b45858"))
 	if action.get("type") == "eat" and action.get("mvpAtTable", false) and person.get("inside") != null and onsite_pose(person) == "eat":
 		for b in world.get("buildings", []):
 			if b.id == person.inside and b.id == person.get("homeId"):
@@ -145,6 +148,10 @@ func update_provisions(person: Dictionary, world: Dictionary) -> void:
 			if source.id == action.get("resourceId"):
 				gathering_kind = str(source.kind)
 				facing_target = Vector3(source.at.x,0,source.at.y)
+	elif action.get("type") in ["plant", "water", "harvest"]:
+		for plot in world.get("plots", []):
+			if plot.id == action.get("plotId"):
+				facing_target = Vector3(plot.at.x,0,plot.at.y-1)
 	elif action.get("type") == "talk":
 		for other in world.get("residents", []):
 			if other.id == action.get("targetId") and other.get("inside") == person.get("inside"):
@@ -179,7 +186,7 @@ func update_bed_pose(person: Dictionary, room: Dictionary) -> void:
 func advance_activity(delta: float) -> void:
 	if activity_pose != "idle":
 		activity_phase += maxf(delta, 0.0) * 2.8
-		if facing_target is Vector3 and activity_pose in ["gather", "talk", "eat"]:
+		if facing_target is Vector3 and activity_pose in ["gather", "talk", "eat", "plant", "water", "harvest"]:
 			var direction: Vector3 = facing_target - position
 			if direction.length_squared() > .01:
 				rotation.y = lerp_angle(rotation.y, atan2(-direction.x,-direction.z), minf(delta*6.0,1.0))
@@ -219,6 +226,9 @@ static func onsite_pose(person: Dictionary) -> String:
 	if not action is Dictionary: return "idle"
 	match action.get("type"):
 		"gather": return "gather"
+		"plant": return "plant"
+		"water": return "water"
+		"harvest": return "harvest"
 		"eat": return "eat"
 		"talk": return "talk"
 		"mvpDrink": return "drink"
@@ -234,9 +244,10 @@ func set_activity_pose(person: Dictionary, enabled: bool) -> void:
 
 func present_pose(walking: bool, phase: float) -> void:
 	reset_pose()
-	food_prop.visible = not walking and activity_pose == "eat" and action_item == "berry" and carried_food > 0
+	food_prop.visible = not walking and activity_pose == "eat" and ((action_item == "berry" and carried_food > 0) or (action_item == "turnip" and carried_roots > 0))
 	water_prop.visible = carried_water > 0 or (not walking and activity_pose == "gather" and gathering_kind == "spring")
 	water_prop.position = Vector3(.25,.75,.19)
+	water_prop.rotation = Vector3.ZERO
 	basket.visible = carried_food > 0
 	for i in range(carried_berries.size()): carried_berries[i].visible = carried_food > i
 	if walking:
@@ -250,6 +261,13 @@ func present_pose(walking: bool, phase: float) -> void:
 		for side in [-1, 1]:
 			for label in ["Sleeve", "Hand"]: pivot_part(label+str(side), Vector3(side*.29,1.08,0), reach)
 		if gathering_kind == "spring": water_prop.position = Vector3(.33,.45 + sin(phase)*.08,-.32)
+	elif activity_pose in ["plant", "water", "harvest"]:
+		var reach := .6 + sin(phase)*.22
+		for side in [-1,1]:
+			for label in ["Sleeve", "Hand"]: pivot_part(label+str(side),Vector3(side*.29,1.08,0),reach)
+		if activity_pose == "water":
+			water_prop.position = Vector3(.30,.56,-.30)
+			water_prop.rotation.x = -.65
 	elif activity_pose in ["eat", "drink"]:
 		var lift := (2.15 if activity_pose == "drink" else 1.8) + sin(phase)*.12
 		for label in ["Sleeve", "Hand"]: pivot_part(label+"1", Vector3(.29,1.08,0), lift)

@@ -216,6 +216,7 @@ func show_world(world: Dictionary, selected: String, continuous := true, paths: 
 	if not continuous or world.get("clock", {}).get("paused", false):
 		settle_motion()
 	last_revision = revision
+	draw_gardens(world)
 	for resource in world.get("resources", []):
 		var at := Vector3(resource.at.x, 0, resource.at.y)
 		if resource.kind == "spring":
@@ -443,4 +444,40 @@ func show_room(world: Dictionary, selected: String, continuous := true) -> void:
 		label.pixel_size = 0.01
 		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 		label.position = actor.position + Vector3(0,2,0)
+		actors.add_child(label)
+
+# Each bed is an actual owned plot; growth and moisture come only from snapshots.
+func draw_gardens(world: Dictionary) -> void:
+	for plot in world.get("plots", []):
+		if not str(plot.id).begins_with("mvp-garden-"): continue
+		var at := Vector3(plot.at.x,0,plot.at.y)
+		var crop: Variant = plot.get("crop")
+		var wet: bool = crop is Dictionary and crop.get("wateredDay",-1) == floorf(float(world.minute)/1440.0)
+		box(actors,at+Vector3(0,.025,0),Vector3(1.85,.10,1.85),mat("6c5140" if wet else "9b7550"))
+		for dx in [-.95,.95]: box(actors,at+Vector3(dx,.10,0),Vector3(.09,.16,2.0),painted_surfaces.get_material("wood"))
+		for dz in [-.95,.95]: box(actors,at+Vector3(0,.10,dz),Vector3(2.0,.16,.09),painted_surfaces.get_material("wood"))
+		var status := "空田"
+		if crop is Dictionary:
+			var definition: Dictionary = world.get("definitions", {}).get(crop.definition, {})
+			var days: float = float(definition.get("data", {}).get("growthDays", 4))
+			var growth := clampf(float(crop.growth)/maxf(1,days),0,1)
+			status = "成熟" if growth >= 1 else "生长 %s/%s 天" % [str(int(crop.growth)),str(int(days))]
+			status += " · 已浇水" if wet else " · 未浇水"
+			for dx in [-.55,.55]:
+				for dz in [-.55,.55]:
+					var root := at+Vector3(dx,.12,dz)
+					if growth > 0: orb(actors,root,Vector3(.12,.12,.12)*(0.5+growth),mat("e9d5a4"))
+					for side in [-1,1]:
+						var leaf := orb(actors,root+Vector3(side*.10,.06+growth*.16,0),Vector3(.10+growth*.10,.07+growth*.15,.08),mat("72905c",true))
+						leaf.rotation.z = side*.45
+		var owner := ""
+		for person in world.get("residents", []):
+			if person.id == plot.ownerId: owner = str(person.name)
+		var label := Label3D.new()
+		label.font = UI_FONT
+		label.text = owner+"的小菜园 · "+status
+		label.position = at+Vector3(0,.18,1.55)
+		label.font_size = 25
+		label.pixel_size = .01
+		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 		actors.add_child(label)
