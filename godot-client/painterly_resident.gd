@@ -85,13 +85,24 @@ func construct(person: Dictionary) -> void:
 	part("Head",[Vector3(0,1.19,0),Vector3(.13,1.23,.12),Vector3(.185,1.39,.16),Vector3(.17,1.52,.15),Vector3(.1,1.57,.1),Vector3(0,1.59,0)],Vector3.ZERO,skin)
 	part("Hair",[Vector3(0,1.49,0),Vector3(.185,1.49,.16),Vector3(.19,1.55,.17),Vector3(.12,1.64,.12),Vector3(0,1.66,0)],Vector3(0,0,.025),"514638")
 	if variant == 0:
-		part("SoftCap",[Vector3(0,1.55,0),Vector3(.22,1.55,.20),Vector3(.22,1.59,.20),Vector3(.16,1.72,.15),Vector3(0,1.74,0)],Vector3.ZERO,"a99361")
+		part("SoftCap",[Vector3(0,1.55,0),Vector3(.26,1.55,.23),Vector3(.26,1.58,.23),Vector3(.19,1.60,.17),Vector3(.16,1.72,.15),Vector3(0,1.74,0)],Vector3.ZERO,"a99361")
+		part("Neckerchief",[Vector3(0,1.01,0),Vector3(.13,1.01,.115),Vector3(.19,1.08,.145),Vector3(.12,1.16,.105),Vector3(0,1.16,0)],Vector3(0,0,-.025),"d6b674")
+		part("ScarfEnd",[Vector3(0,.87,0),Vector3(.055,.91,.025),Vector3(.07,1.07,.03),Vector3(0,1.07,0)],Vector3(-.04,0,-.165),"d6b674")
 	else:
-		part("HairKnot",[Vector3.ZERO,Vector3(.09,.03,.09),Vector3(.1,.12,.10),Vector3(0,.19,0)],Vector3(0,1.45,.16),"514638")
+		part("HairKnot",[Vector3.ZERO,Vector3(.12,.03,.12),Vector3(.13,.12,.12),Vector3(0,.19,0)],Vector3(0,1.45,.16),"514638")
+		for side in [-1,1]:
+			part("HairLock"+str(side),[Vector3(0,1.14,0),Vector3(.065,1.20,.075),Vector3(.065,1.43,.085),Vector3(.045,1.52,.06),Vector3(0,1.52,0)],Vector3(side*.15,0,.04),"514638")
+		# A simple linen front panel is clothing, not an invented equipment item.
+		part("LinenFront",[Vector3(0,.51,0),Vector3(.17,.52,.018),Vector3(.15,.75,.02),Vector3(.11,1.04,.018),Vector3(0,1.04,0)],Vector3(0,0,-.165),"d4c9a6")
 		part("Collar",[Vector3(0,1.08,0),Vector3(.16,1.08,.12),Vector3(.13,1.18,.11),Vector3(0,1.18,0)],Vector3.ZERO,"d9bb7e")
+	# Face pieces remain within the existing head envelope and move with it.
+	for side in [-1,1]:
+		part("Ear"+str(side),[Vector3.ZERO,Vector3(.036,.02,.035),Vector3(.04,.095,.04),Vector3(0,.12,0)],Vector3(side*.175,1.32,.005),skin)
+		part("Brow"+str(side),[Vector3.ZERO,Vector3(.037,.008,.009),Vector3(.032,.019,.009),Vector3(0,.024,0)],Vector3(side*.073,1.465,-.145),"514638")
+	part("Mouth",[Vector3.ZERO,Vector3(.035,.005,.009),Vector3(.026,.013,.009),Vector3(0,.017,0)],Vector3(0,1.30,-.144),"936755")
 	part("Nose",[Vector3.ZERO,Vector3(.04,.03,.045),Vector3(.035,.10,.065),Vector3(0,.12,0)],Vector3(0,1.32,-.15),skin)
 	for side in [-1,1]:
-		part("Eye"+str(side),[Vector3.ZERO,Vector3(.016,.016,.014),Vector3(0,.032,0)],Vector3(side*.073,1.415,-.145),"403c36")
+		part("Eye"+str(side),[Vector3.ZERO,Vector3(.016,.016,.014),Vector3(0,.032,0)],Vector3(side*.073,1.415,-.158),"403c36")
 	set_meta("garments",garments)
 	update_appearance(person)
 	for child in get_children(): rest_transforms[child.name] = child.transform
@@ -212,7 +223,7 @@ func update_appearance(person: Dictionary) -> void:
 		var material := paint(color)
 		for child in get_children():
 			var label := str(child.name)
-			if (feature == "shirt" and child in garments) or (feature == "hair" and label in ["Hair","HairKnot"]) or (feature == "skin" and (label in ["Head","Neck","Nose"] or label.begins_with("Hand"))):
+			if (feature == "shirt" and child in garments) or (feature == "hair" and (label.begins_with("Hair") or label.begins_with("Brow"))) or (feature == "skin" and (label in ["Head","Neck","Nose"] or label.begins_with("Hand") or label.begins_with("Ear"))):
 				child.material_override = material
 
 # Only transforms geometry children; authoritative root, labels and selection stay fixed.
@@ -311,5 +322,5 @@ func present_pose(walking: bool, phase: float) -> void:
 		for berry in carried_berries: berry.visible = false
 	elif activity_pose == "rest":
 		# Bowed head at the authoritative indoor cell, not a fake bed teleport.
-		for label in ["Head", "Hair", "HairKnot", "SoftCap", "Nose", "Eye-1", "Eye1"]:
+		for label in ["Head", "Hair", "HairKnot", "HairLock-1", "HairLock1", "SoftCap", "Nose", "Eye-1", "Eye1", "Ear-1", "Ear1", "Brow-1", "Brow1", "Mouth"]:
 			if rest_transforms.has(label): pivot_part(label, Vector3(0,1.2,0), -0.3)

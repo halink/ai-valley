@@ -204,6 +204,12 @@ func _ready() -> void:
 	world_summary_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	world_summary_label.text = "世界时间与环境资源：等待快照"
 	box.add_child(world_summary_label)
+	var place_labels := CheckButton.new()
+	place_labels.text = "显示资源与菜园标记"
+	place_labels.tooltip_text = "显示真实资源余量与田地生长；关闭让场景更清爽"
+	place_labels.add_theme_color_override("font_color", Color("263c30"))
+	box.add_child(place_labels)
+	place_labels.toggled.connect(valley.set_place_labels)
 	var memory_toggle := CheckButton.new()
 	memory_toggle.text = "查看本人近期经历"
 	for color_name in ["font_color", "font_hover_color", "font_pressed_color", "font_hover_pressed_color", "font_focus_color"]:

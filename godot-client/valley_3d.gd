@@ -10,6 +10,7 @@ var room_id := ""
 var room_layouts := {}
 var room_world := ""
 var observer_inset := 0.0
+var show_place_labels := false
 var camera: Camera3D
 var sun: DirectionalLight3D
 var sky_environment: Environment
@@ -262,9 +263,7 @@ func show_world(world: Dictionary, selected: String, continuous := true, paths: 
 		label.text = Snapshot.resource_name(resource.kind) + "：" + str(resource.amount)
 		# Keep resource captions off the nearby resident's hands and face.
 		label.position = at + Vector3(0, 0.18, 1.35)
-		label.font_size = 30
-		label.pixel_size = 0.01
-		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		style_caption(label, true)
 		actors.add_child(label)
 	var visible_ids := {}
 	for person in world.get("residents", []):
@@ -303,6 +302,25 @@ func show_world(world: Dictionary, selected: String, continuous := true, paths: 
 			people[id].queue_free()
 			people.erase(id)
 
+# Optional detailed annotations, off by default so scenery reads as a place.
+func set_place_labels(enabled: bool) -> void:
+	show_place_labels = enabled
+	for label in get_tree().get_nodes_in_group("valley_place_labels"):
+		label.visible = enabled
+
+func style_caption(label: Label3D, place := false) -> void:
+	label.font = UI_FONT
+	label.font_size = 36
+	label.pixel_size = .012
+	label.modulate = Color("293d32")
+	label.outline_modulate = Color("f2e8cf")
+	label.outline_size = 6
+	label.no_depth_test = true
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	if place:
+		label.add_to_group("valley_place_labels")
+		label.visible = show_place_labels
+
 func create_person(person: Dictionary) -> Node3D:
 	var actor := PainterlyResident.new()
 	actor.construct(person)
@@ -315,7 +333,7 @@ func create_person(person: Dictionary) -> Node3D:
 
 func build_terrain(world: Dictionary) -> void:
 	var map: Dictionary = world.map
-	var palette := {"grass": "82966c", "water": "7caeb1", "path": "c8ac7c", "soil": "a78e6c", "sand": "ddc79c", "cliff": "929185", "road": "b8aa8c", "bridge": "87745b"}
+	var palette := {"grass": "82966c", "water": "7caeb1", "path": "a38c6a", "soil": "a78e6c", "sand": "b3a084", "cliff": "929185", "road": "b8aa8c", "bridge": "87745b"}
 	box(terrain, Vector3((map.width-1)*0.5, -0.5, (map.height-1)*0.5), Vector3(map.width, 0.9, map.height), mat("918374"))
 	for y in range(map.height):
 		for x in range(map.width):
@@ -331,7 +349,7 @@ func build_terrain(world: Dictionary) -> void:
 		var w: float = building.width
 		var d: float = building.height
 		var at := Vector3(building.at.x+(w-1)*0.5, 0, building.at.y+(d-1)*0.5)
-		box(terrain, at+Vector3(0, 1.2, 0), Vector3(w, 2.4, d), mat("f1ddba"))
+		box(terrain, at+Vector3(0, 1.2, 0), Vector3(w, 2.4, d), mat("c5b69b"))
 		box(terrain, at+Vector3(0, 0.18, 0), Vector3(w+0.12, 0.36, d+0.12), painted_surfaces.get_material("stone"))
 		for side in [-1, 1]:
 			var roof := box(terrain, at+Vector3(side*w*0.26, 2.65, 0), Vector3(w*0.6, 0.16, d+0.7), painted_surfaces.get_material("roof"))
@@ -406,11 +424,11 @@ func show_room(world: Dictionary, selected: String, continuous := true) -> void:
 	var h: float = room.height
 	box(terrain, Vector3((w-1)/2, -0.15, (h+2)/2), Vector3(w, 0.3, h-3), painted_surfaces.get_material("wood"))
 	# Back/side walls are full height; near walls are cut away for observation.
-	box(terrain, Vector3((w-1)/2, 1.2, 2.4), Vector3(w, 2.4, 0.2), mat("f1ddba"))
-	box(terrain, Vector3(0, 1.2, (h+2)/2), Vector3(0.2, 2.4, h-3), mat("f1ddba"))
-	box(terrain, Vector3(w-1, 0.15, (h+2)/2), Vector3(0.2, 0.3, h-3), mat("f1ddba"))
+	box(terrain, Vector3((w-1)/2, 1.2, 2.4), Vector3(w, 2.4, 0.2), mat("c5b69b"))
+	box(terrain, Vector3(0, 1.2, (h+2)/2), Vector3(0.2, 2.4, h-3), mat("c5b69b"))
+	box(terrain, Vector3(w-1, 0.15, (h+2)/2), Vector3(0.2, 0.3, h-3), mat("c5b69b"))
 	for x in range(int(w)):
-		if x != int(room.entry.x): box(terrain, Vector3(x, 0.15, h-1), Vector3(1,0.3,0.2), mat("f1ddba"))
+		if x != int(room.entry.x): box(terrain, Vector3(x, 0.15, h-1), Vector3(1,0.3,0.2), mat("c5b69b"))
 	# Kitchen work happens at its existing authoritative front interaction cell.
 	for slot in room.slots:
 		if slot.kind != "kitchen": continue
@@ -488,11 +506,12 @@ func show_room(world: Dictionary, selected: String, continuous := true) -> void:
 		actor.get_node("Selection").visible = person.id == selected
 		var label := Label3D.new()
 		label.font = UI_FONT
-		label.text = Snapshot.resident_name(person) + " · " + Snapshot.activity_label(person)
-		label.font_size = 24
-		label.pixel_size = 0.01
-		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-		label.position = actor.position + Vector3(0,2,0)
+		label.text = Snapshot.resident_name(person)
+		style_caption(label)
+		label.visible = person.id == selected
+		var on_bed: bool = actor.activity_pose == "rest" and actor.bed_pose != null
+		label.position = actor.position + Vector3(0,3.2 if on_bed else 2.2,0)
+		if on_bed: actor.get_node("Selection").visible = false
 		actors.add_child(label)
 
 # Each bed is an actual owned plot; growth and moisture come only from snapshots.
@@ -524,9 +543,7 @@ func draw_gardens(world: Dictionary) -> void:
 			if person.id == plot.ownerId: owner = str(person.name)
 		var label := Label3D.new()
 		label.font = UI_FONT
-		label.text = owner+"的小菜园 · "+status
+		label.text = owner+"的田\n"+status.replace(" · ", "\n")
 		label.position = at+Vector3(0,.18,1.55)
-		label.font_size = 25
-		label.pixel_size = .01
-		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		style_caption(label, true)
 		actors.add_child(label)
