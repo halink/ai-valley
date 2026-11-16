@@ -9,6 +9,7 @@ var activity_pose := "idle"
 var activity_phase := 0.0
 var carried_food := 0
 var carried_roots := 0
+var carried_meals := 0
 var carried_water := 0
 var gathering_kind := ""
 var action_item := ""
@@ -17,6 +18,8 @@ var bed_pose: Variant = null
 var facing_target: Variant = null
 var props: Node3D
 var food_prop: MeshInstance3D
+var meal_bowl: MeshInstance3D
+var meal_surface: MeshInstance3D
 var water_prop: MeshInstance3D
 var basket: MeshInstance3D
 var carried_berries: Array[MeshInstance3D] = []
@@ -97,6 +100,9 @@ func construct(person: Dictionary) -> void:
 	props.name = "Provisions"
 	add_child(props)
 	food_prop = provision(Vector3(.11,.11,.11), "b45858")
+	meal_bowl = provision(Vector3.ONE, "d2bd8c")
+	meal_bowl.mesh = loft([Vector3(0,-.07,0),Vector3(.08,-.07,.08),Vector3(.17,.05,.17),Vector3(.16,.08,.16),Vector3(.13,.03,.13),Vector3(0,.03,0)])
+	meal_surface = provision(Vector3(.13,.015,.13),"af8650")
 	water_prop = provision(Vector3.ONE, "9b6948")
 	water_prop.mesh = loft([Vector3(0,-.12,0),Vector3(.10,-.12,.10),Vector3(.12,.02,.12),Vector3(.055,.12,.055),Vector3(.055,.19,.055),Vector3(0,.19,0)])
 	basket = provision(Vector3.ONE,"b39058")
@@ -125,6 +131,7 @@ func update_provisions(person: Dictionary, world: Dictionary) -> void:
 	var inventory: Dictionary = person.get("inventory", {})
 	carried_food = maxi(0, int(inventory.get("berry", 0)))
 	carried_roots = maxi(0, int(inventory.get("turnip", 0)))
+	carried_meals = maxi(0, int(inventory.get("meal", 0)))
 	carried_water = maxi(0, int(inventory.get("water", 0)))
 	gathering_kind = ""
 	dining = false
@@ -148,6 +155,8 @@ func update_provisions(person: Dictionary, world: Dictionary) -> void:
 			if source.id == action.get("resourceId"):
 				gathering_kind = str(source.kind)
 				facing_target = Vector3(source.at.x,0,source.at.y)
+	elif action.get("type") == "cook" and person.get("roomAt") is Dictionary:
+		facing_target = Vector3(person.roomAt.x,0,person.roomAt.y-1)
 	elif action.get("type") in ["plant", "water", "harvest"]:
 		for plot in world.get("plots", []):
 			if plot.id == action.get("plotId"):
@@ -186,7 +195,7 @@ func update_bed_pose(person: Dictionary, room: Dictionary) -> void:
 func advance_activity(delta: float) -> void:
 	if activity_pose != "idle":
 		activity_phase += maxf(delta, 0.0) * 2.8
-		if facing_target is Vector3 and activity_pose in ["gather", "talk", "eat", "plant", "water", "harvest"]:
+		if facing_target is Vector3 and activity_pose in ["gather", "talk", "eat", "plant", "water", "harvest", "cook"]:
 			var direction: Vector3 = facing_target - position
 			if direction.length_squared() > .01:
 				rotation.y = lerp_angle(rotation.y, atan2(-direction.x,-direction.z), minf(delta*6.0,1.0))
@@ -226,6 +235,7 @@ static func onsite_pose(person: Dictionary) -> String:
 	if not action is Dictionary: return "idle"
 	match action.get("type"):
 		"gather": return "gather"
+		"cook": return "cook"
 		"plant": return "plant"
 		"water": return "water"
 		"harvest": return "harvest"
@@ -245,6 +255,8 @@ func set_activity_pose(person: Dictionary, enabled: bool) -> void:
 func present_pose(walking: bool, phase: float) -> void:
 	reset_pose()
 	food_prop.visible = not walking and activity_pose == "eat" and ((action_item == "berry" and carried_food > 0) or (action_item == "turnip" and carried_roots > 0))
+	meal_bowl.visible = not walking and activity_pose == "eat" and action_item == "meal" and carried_meals > 0
+	meal_surface.visible = meal_bowl.visible
 	water_prop.visible = carried_water > 0 or (not walking and activity_pose == "gather" and gathering_kind == "spring")
 	water_prop.position = Vector3(.25,.75,.19)
 	water_prop.rotation = Vector3.ZERO
@@ -261,6 +273,9 @@ func present_pose(walking: bool, phase: float) -> void:
 		for side in [-1, 1]:
 			for label in ["Sleeve", "Hand"]: pivot_part(label+str(side), Vector3(side*.29,1.08,0), reach)
 		if gathering_kind == "spring": water_prop.position = Vector3(.33,.45 + sin(phase)*.08,-.32)
+	elif activity_pose == "cook":
+		for side in [-1,1]:
+			for label in ["Sleeve", "Hand"]: pivot_part(label+str(side),Vector3(side*.29,1.08,0),1.1+sin(phase+side)*.15)
 	elif activity_pose in ["plant", "water", "harvest"]:
 		var reach := .6 + sin(phase)*.22
 		for side in [-1,1]:
@@ -273,12 +288,16 @@ func present_pose(walking: bool, phase: float) -> void:
 		for label in ["Sleeve", "Hand"]: pivot_part(label+"1", Vector3(.29,1.08,0), lift)
 		var hand: Vector3 = Vector3(.29,1.08,0) + Basis(Vector3.RIGHT,lift) * Vector3(.045,-.43,0)
 		food_prop.position = hand + Vector3(0,0,-.04)
+		meal_bowl.position = hand + Vector3(0,-.02,-.08)
+		meal_surface.position = meal_bowl.position + Vector3(0,.045,0)
 		if activity_pose == "drink": water_prop.position = hand + Vector3(0,.05,-.02)
 		if dining:
 			for side in [-1,1]:
 				for label in ["Boot", "Trouser"]: pivot_part(label+str(side),Vector3(side*.13,.68,0),1.1)
 			for label in rest_transforms: get_node(NodePath(label)).position.y -= .20
 			food_prop.position.y -= .20
+			meal_bowl.position.y -= .20
+			meal_surface.position.y -= .20
 	elif activity_pose == "talk":
 		for label in ["Sleeve", "Hand"]: pivot_part(label+"1", Vector3(.29,1.08,0), .6 + sin(phase)*.18)
 	elif activity_pose == "rest" and bed_pose is Transform3D:

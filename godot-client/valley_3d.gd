@@ -383,6 +383,27 @@ func show_room(world: Dictionary, selected: String, continuous := true) -> void:
 	box(terrain, Vector3(w-1, 0.15, (h+2)/2), Vector3(0.2, 0.3, h-3), mat("f1ddba"))
 	for x in range(int(w)):
 		if x != int(room.entry.x): box(terrain, Vector3(x, 0.15, h-1), Vector3(1,0.3,0.2), mat("f1ddba"))
+	# Kitchen work happens at its existing authoritative front interaction cell.
+	for slot in room.slots:
+		if slot.kind != "kitchen": continue
+		var stove := Vector3(slot.at.x,0,slot.at.y-.85)
+		var cooking := false
+		for person in world.residents:
+			var activity: Variant = person.get("activity")
+			if person.get("inside") != room_id or not activity is Dictionary: continue
+			if activity.get("action", {}).get("type") != "cook" or not activity.get("path", []).is_empty(): continue
+			var at: Variant = person.get("roomAt")
+			if at is Dictionary and at.x == slot.at.x and at.y == slot.at.y and float(activity.get("remaining",0)) > 0:
+				cooking = true
+		box(terrain,stove+Vector3(0,.40,0),Vector3(1.5,.8,.9),mat("b8a68c"))
+		box(terrain,stove+Vector3(0,.82,0),Vector3(1.65,.12,1.0),mat("64594d"))
+		orb(terrain,stove+Vector3(0,.95,0),Vector3(.44,.20,.34),mat("555f5b"))
+		orb(terrain,stove+Vector3(0,1.10,0),Vector3(.37,.025,.27),mat("be9658" if cooking else "393e3a"))
+		for dx in [-.48,.48]: box(terrain,stove+Vector3(dx,1.02,0),Vector3(.16,.08,.12),mat("514b40"))
+		if cooking:
+			for i in range(3):
+				var offset := fmod(float(world.minute)*.13+i*.31,1.0)
+				orb(actors,stove+Vector3(sin(i*2.1)*.16,1.17+offset*.65,0),Vector3.ONE*(.06+offset*.04),mat("eee7d2"))
 	var bed_cells := {}
 	# Render the authoritative blocked table footprint, with two meal seats.
 	if world.get("mvpRooms", {}).get("version", 0) == 1:

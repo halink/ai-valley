@@ -21,12 +21,12 @@ import type {Action,Resident,Snapshot,Tile,World} from '../shared/types.js';
 
 export const GODOT_MVP_PORT=3414;
 export const GODOT_MVP_NOTICE='隔离核心循环：本地规则驱动，非真实模型；内存世界，退出后重置';
-export type MvpPhase='deciding'|'travelling'|'gathering'|'eating'|'resting'|'waiting'|'stopped'|'drinking'|'talking'|'planting'|'watering'|'harvesting';
+export type MvpPhase='deciding'|'travelling'|'gathering'|'eating'|'resting'|'waiting'|'stopped'|'drinking'|'talking'|'planting'|'watering'|'harvesting'|'cooking';
 export function mvpPhase(r:Resident):MvpPhase {
  if(r.status!=='alive')return 'stopped';
  if(!r.activity)return 'deciding';
  if(r.activity.path.length||r.activity.room?.path.length)return 'travelling';
- return ({plant:'planting',water:'watering',harvest:'harvesting',talk:'talking',mvpDrink:'drinking',gather:'gathering',eat:'eating',sleep:'resting',wait:'waiting'} as const)[r.activity.action.type as 'gather'|'eat'|'sleep'|'wait']??'waiting';
+ return ({cook:'cooking',plant:'planting',water:'watering',harvest:'harvesting',talk:'talking',mvpDrink:'drinking',gather:'gathering',eat:'eating',sleep:'resting',wait:'waiting'} as const)[r.activity.action.type as 'gather'|'eat'|'sleep'|'wait']??'waiting';
 }
 export function createMvpWorld():World {
  const world=createWorld(3414);
@@ -48,6 +48,7 @@ export function createMvpWorld():World {
  world.plots=world.residents.map((r,i)=>({id:'mvp-garden-'+i,ownerId:r.id,at:{x:18+i*3,y:18},crop:null}));world.graves=[];world.events=[];
  // Explicit finite starting seeds; the ordinary crop recipe still takes four watered days.
  world.definitions['action/mvp-garden@1']={id:'action/mvp-garden',version:1,kind:'action',dependencies:['crop/turnip@1'],data:{}};
+ world.definitions['action/mvp-cooking@1']={id:'action/mvp-cooking',version:1,kind:'action',dependencies:['recipe/meal@1'],data:{}};
  for(const [index,r]of world.residents.entries()){
   r.at={x:14+index*2,y:14};r.homeId=home.id;r.inside=null;r.roomAt=null;
   r.inventory={seed:2};r.hunger=index===0?65:25;r.energy=index===0?85:50;
@@ -72,7 +73,7 @@ function mvpWaterTrip(w:World,r:Resident):Action|null {
 }
 /** No global information is claimed to be a resident's model knowledge. This
  * deliberately bounded engineering policy is visibly labelled in snapshots. */
-function mvpPlanDefinition(w:World,action:Action){return ['plant','water','harvest'].includes(action.type)?'action/mvp-garden@1':w.activeDefinitions['action/routine'];}
+function mvpPlanDefinition(w:World,action:Action){return action.type==='cook'?'action/mvp-cooking@1':['plant','water','harvest'].includes(action.type)?'action/mvp-garden@1':w.activeDefinitions['action/routine'];}
 function mvpCanStart(w:World,r:Resident,action:Action):boolean {
  return planStartError(w,{id:'mvp-exchange-preview',actorId:r.id,actorRevision:r.revision,createdAt:w.minute,definition:mvpPlanDefinition(w,action),intention:'本地规则：行动预检',actions:[action]})===null;
 }
@@ -91,9 +92,9 @@ export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string
    if(mvpCanStart(w,r,action))return {action,reason:wantsFood?'本地规则独立接受当面报价：用一份富余清水换一份浆果，交付后再决定进食':'本地规则独立接受当面报价：用一份富余浆果换一份清水，交付后再决定饮用'};
   }
  }
- const food=(r.inventory.turnip??0)>=1?'turnip':'berry';
+ const food=(r.inventory.meal??0)>=1?'meal':(r.inventory.turnip??0)>=1?'turnip':'berry';
  if(r.hunger>=35&&r.hunger<80&&r.energy>=70&&(mvpThirst(w,r)??0)<50-1e-9&&(r.inventory[food]??0)>=1){const action:Action={type:'eat',item:food,mvpAtTable:true};if(mvpCanStart(w,r,action))return {action,reason:'带着自己的食物回共屋餐桌进食，不共享或凭空补充口粮'};}
- if(r.hunger>=35&&(r.inventory[food]??0)>=1)return {action:{type:'eat',item:food},reason:'饥饿且带有一整份食物，优先食用自己收获的根菜'};
+ if(r.hunger>=35&&(r.inventory[food]??0)>=1)return {action:{type:'eat',item:food},reason:'饥饿且带有一整份自有食物，优先餐食、其次根菜或浆果'};
  // Immediate needs come before optional stocking: an empty bag must not
  // send a thirsty or exhausted resident on a food-reserve trip.
  if(r.hunger>=35){
@@ -141,6 +142,14 @@ export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string
  // Keep the remaining portion; replenish only after the carried supply runs out.
  const waterTrip=(r.inventory.water??0)<1?mvpWaterTrip(w,r):null;
  if(waterTrip)return {action:waterTrip,reason:'当前紧急需求已处理，前往已知泉水补足两份清水储备'};
+ // A personal cooked meal uses real roots and water; never reserve scarce drinking water.
+ if(r.hunger<35&&r.energy>=70&&(mvpThirst(w,r)??0)<50-1e-9&&(r.inventory.turnip??0)>=2&&(r.inventory.meal??0)<1){
+  if((r.inventory.water??0)<2){const trip=mvpWaterTrip(w,r);if(trip)return {action:trip,reason:'为自己的根菜餐食取水，并保留一份饮水'};}
+  else if(!w.residents.some(p=>p.id!==r.id&&p.homeId===r.homeId&&(p.activity?.action.type==='cook'||p.plan?.actions.some(a=>a.type==='cook')))){
+   const action:Action={type:'cook',quantity:1,buildingId:r.homeId??undefined};
+   if(mvpCanStart(w,r,action))return {action,reason:'回共屋厨房，用本人两份根菜和一份水做一份餐食'};
+  }
+ }
  // Garden only after personal needs/reserves; no borrowed seeds or water.
  if(r.hunger<35&&r.energy>=70&&(mvpThirst(w,r)??0)<50-1e-9){
   const plot=w.plots.find(p=>p.ownerId===r.id&&p.id.startsWith('mvp-garden-'));
