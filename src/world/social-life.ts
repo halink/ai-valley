@@ -14,12 +14,15 @@ export function meetingSeat(w:World,m:Meeting,r:Resident):Vec|null {
  const [x,y]=[[0,0],[-2,0],[2,0],[0,2],[-2,2],[2,2],[-3,1],[3,1]][index],origin=m.roomAt??layout.entry,at={x:origin.x+x,y:origin.y+y};return roomPath(layout,r.inside===b.id?r.roomAt??layout.entry:layout.entry,at)!==null?at:null;
 }
 export function socialReason(w:World,r:Resident,a:SocialAction):string|null {
- if(!w.social||!capable(w,r))return '本人当前不能自主交谈或理解经历';
+ const mvp=w.mode==='validation'&&w.id.startsWith('godot-mvp-')&&!!w.mvpDrinking;
+ // The small valley reuses personal interpretations only, never meetings.
+ if((mvp?a.operation!=='interpret':!w.social)||!capable(w,r))return '本人当前不能自主交谈或理解经历';
  if(a.operation==='interpret'){
   const s=source(w,r,a.eventId);if(!s||!a.targetId||!person(w,a.targetId)||a.targetId===r.id||!r.knownPeople.includes(a.targetId)||!s.fact.actors.includes(a.targetId))return '只能理解本人实际经历或收到、且涉及已认识人物的具体记录';
   if(hasReceipt(w,`interpret:${r.id}:${a.eventId}:${a.targetId}`))return '本人已经就这条经历形成过理解，新的变化需要新的经历';
   return typeof a.text==='string'&&!!a.text.trim()&&a.text.length<=240&&[a.affection,a.trust,a.conflict].every(n=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=-5&&n<=5)?null:'请本人写1–240字理解，好感、信任、矛盾各自变化须为-5至5';
  }
+ if(!w.social)return '本人当前不能自主交谈或理解经历';
  if(a.operation==='start'){
   if(typeof a.text!=='string'||!a.text.trim()||a.text.length>80||!Number.isSafeInteger(a.minutes)||a.minutes!<30||a.minutes!>180)return '需要本人提出1–80字话题和30–180分钟的有限讨论时段';
   if(w.social.meetings.some(m=>m.status==='open'&&member(m,r.id)))return '本人已经参与一场尚未离开的讨论';
@@ -35,7 +38,9 @@ export function socialReason(w:World,r:Resident,a:SocialAction):string|null {
 export function socialTarget(w:World,r:Resident,a:SocialAction){const error=socialReason(w,r,a);if(error)return {target:r.at,duration:0,error};const m=meeting(w,a.meetingId);return {target:{...(['join','speak'].includes(a.operation)?m!.at:r.at)},duration:a.operation==='start'?5:a.operation==='speak'?3:a.operation==='join'?3:1};}
 function rememberRelation(r:Resident,id:string,eventId:string){let relation=r.relations.find(p=>p.targetId===id);if(!relation){relation={targetId:id,affection:0,trust:0,conflict:0,evidence:[]};r.relations.push(relation);}if(!relation.evidence.includes(eventId))relation.evidence.push(eventId);if(relation.evidence.length>80)relation.evidence=relation.evidence.slice(-80);return relation;}
 export function completeSocial(w:World,r:Resident,a:SocialAction):string|null {
- const error=socialReason(w,r,a);if(error)return error;const s=w.social!;
+ const error=socialReason(w,r,a);if(error)return error;
+ // Old MVP saves need no eager migration; create state only after a valid choice.
+ const s=w.social??={meetings:[],nextSerial:1,totals:{meetings:0,speeches:0,interpretations:0}};
  if(a.operation==='interpret'){
   const known=source(w,r,a.eventId)!,target=person(w,a.targetId)!,relation=rememberRelation(r,target.id,a.eventId!);
   relation.affection=Math.max(-100,Math.min(100,relation.affection+a.affection!));relation.trust=Math.max(-100,Math.min(100,relation.trust+a.trust!));relation.conflict=Math.max(0,Math.min(100,relation.conflict+a.conflict!));

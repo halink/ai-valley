@@ -174,6 +174,7 @@ export interface ContentDefinition {id:string;version:number;kind:'building'|'re
 export interface FormalOpportunity {id:string;label:string;action:Action;chooseDuration?:boolean;}
 export interface DecisionContext {
  mvpDrinking?:{thirst:number;canDrink:boolean};
+ mvpInterpretations?:FormalOpportunity[];
  relationshipMemories?:import('./relationship-memory.js').RelationshipMemories;
  foreign?:{origin:string;notice:string;choices:FormalOpportunity[]};
  outside?:{origin:string;notice:string;choices:FormalOpportunity[]};

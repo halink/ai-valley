@@ -134,7 +134,7 @@ export function buildChoices(c:DecisionContext):ActionChoice[]{
  const choices:ActionChoice[]=[];for(let i=0;choices.length<32;i++){let found=false;for(const g of categories){if(g[i]){choices.push(g[i]);found=true;if(choices.length===32)break;}}if(!found)break;}
  // Preserve the whole basic menu even when several people bring proposals on the same day.
  if(c.formal?.aboard)return [...choices.filter(c=>['wait','eat','talk'].includes(c.action.type)),...c.formal.opportunities.filter(c=>c.action.type==='ferry'||isRescueDecision(c.action)||isWaterSupportWithdrawal(c.action)||isPregnancyWithdrawal(c.action)||isLastWishWithdrawal(c.action)||isSocialAppointmentStop(c.action)||isPersonalFoodGiftStop(c.action))].filter(choice=>ageAllowsChoice(c.formal!.age,choice.action));
- return c.formal ? [...choices,...c.formal.opportunities].filter(choice=>ageAllowsChoice(c.formal!.age,choice.action)) : choices;
+ return c.formal ? [...choices,...c.formal.opportunities].filter(choice=>ageAllowsChoice(c.formal!.age,choice.action)) : c.mvpDrinking?[...choices,...(c.mvpInterpretations??[]).filter(choice=>choice.action.type==='social'&&choice.action.operation==='interpret')]:choices;
 }
 
 /** Rejects invalid model output. No random action, wait, speech or other fallback is supplied. */
