@@ -355,15 +355,66 @@ func build_terrain(world: Dictionary) -> void:
 		var at := Vector3(building.at.x+(w-1)*0.5, 0, building.at.y+(d-1)*0.5)
 		box(terrain, at+Vector3(0, 1.2, 0), Vector3(w, 2.4, d), mat("c5b69b"))
 		box(terrain, at+Vector3(0, 0.18, 0), Vector3(w+0.12, 0.36, d+0.12), painted_surfaces.get_material("stone"))
+		# A closed gable fills the former roof gap. All geometry is presentation,
+		# with no collision/path changes and no invented chimney or storage props.
+		var gable := PrismMesh.new()
+		gable.size = Vector3(w, 1.1, d)
+		mesh(terrain, gable, at+Vector3(0,2.95,0), mat("c5b69b"))
+		var half_span := w/2.0 + .22
+		var rise := 1.1
+		var slope := atan2(rise,half_span)
+		var roof_length := sqrt(half_span*half_span+rise*rise)
+		var wood := painted_surfaces.get_material("wood")
 		for side in [-1, 1]:
-			var roof := box(terrain, at+Vector3(side*w*0.26, 2.65, 0), Vector3(w*0.6, 0.16, d+0.7), painted_surfaces.get_material("roof"))
-			roof.rotation.z = side * -0.4
+			var roof := box(terrain, at+Vector3(side*half_span/2, 2.95, 0), Vector3(roof_length, .13, d+.44), painted_surfaces.get_material("roof"))
+			roof.rotation.z = -side*slope
+			# Thin fascia follows the roof, rather than cutting into the wall.
+			for end in [-1,1]:
+				var verge := box(terrain,at+Vector3(side*half_span/2,2.94,end*(d/2+.23)),Vector3(roof_length,.15,.12),wood)
+				verge.rotation.z = -side*slope
+			box(terrain,at+Vector3(side*half_span,2.39,0),Vector3(.14,.18,d+.48),wood)
+		box(terrain,at+Vector3(0,3.53,0),Vector3(.20,.16,d+.50),painted_surfaces.get_material("roof"))
 		var door := Vector3(building.door.x, 0.05, building.door.y)
 		box(terrain, door, Vector3(0.85, 0.1, 0.85), painted_surfaces.get_material("stone"))
-		# Door is placed on the wall nearest the authoritative entrance tile.
+		# Use the authoritative door to select the facade and exact lateral offset.
 		var relative := door-at
-		var front := Vector3(clampf(relative.x, -w/2, w/2), 0.9, clampf(relative.z, -d/2, d/2))
-		box(terrain, at+front, Vector3(0.8 if absf(relative.z)>absf(relative.x) else 0.12, 1.8, 0.12 if absf(relative.z)>absf(relative.x) else 0.8), painted_surfaces.get_material("wood"))
+		var along_z := absf(relative.z)>absf(relative.x)
+		var outward := Vector3(0,0,signf(relative.z)) if along_z else Vector3(signf(relative.x),0,0)
+		var tangent := Vector3.RIGHT if along_z else Vector3.BACK
+		var facade_width := w if along_z else d
+		var wall_center := at+outward*(d/2 if along_z else w/2)
+		var door_offset := clampf(relative.x if along_z else relative.z,-facade_width/2,facade_width/2)
+		var entry := wall_center+tangent*door_offset
+		_facade_piece(entry,tangent,outward,Vector3(0,.9,.025),Vector3(.8,1.8,.08),wood)
+		for side in [-1,1]:
+			_facade_piece(entry,tangent,outward,Vector3(side*.47,.97,.055),Vector3(.13,1.94,.12),wood)
+		_facade_piece(entry,tangent,outward,Vector3(0,1.97,.055),Vector3(1.08,.16,.13),wood)
+		# Flush dark glazing reads as a closed window, not an illuminated interior.
+		for side in [-1,1]:
+			var window_offset: float = door_offset+side*2.0
+			if absf(window_offset)+.62 < facade_width/2:
+				_facade_window(wall_center+tangent*window_offset,tangent,outward)
+		# A side window makes the building legible from the default isometric view.
+		var side_normal := Vector3.RIGHT if along_z else Vector3.BACK
+		var side_tangent := Vector3.BACK if along_z else Vector3.RIGHT
+		var side_center := at+side_normal*(w/2 if along_z else d/2)
+		_facade_window(side_center,side_tangent,side_normal)
+
+# Local coordinates: x runs along a wall; z is a few centimetres outside it.
+# Decorative frames participate in the same CPU ray occlusion as their wall.
+func _facade_piece(origin: Vector3, tangent: Vector3, normal: Vector3, offset: Vector3, size: Vector3, material: Material) -> void:
+	var dimensions := Vector3(size.x,size.y,size.z) if tangent.x != 0 else Vector3(size.z,size.y,size.x)
+	box(terrain,origin+tangent*offset.x+Vector3.UP*offset.y+normal*offset.z,dimensions,material)
+
+func _facade_window(origin: Vector3, tangent: Vector3, normal: Vector3) -> void:
+	var wood := painted_surfaces.get_material("wood")
+	_facade_piece(origin,tangent,normal,Vector3(0,1.43,.025),Vector3(.96,.94,.07),mat("526b70"))
+	for side in [-1,1]:
+		_facade_piece(origin,tangent,normal,Vector3(side*.52,1.43,.06),Vector3(.11,1.13,.12),wood)
+	for height in [.91,1.95]:
+		_facade_piece(origin,tangent,normal,Vector3(0,height,.06),Vector3(1.15,.11,.12),wood)
+	_facade_piece(origin,tangent,normal,Vector3(0,1.43,.075),Vector3(.055,.98,.07),wood)
+	_facade_piece(origin,tangent,normal,Vector3(0,1.43,.075),Vector3(1.0,.055,.07),wood)
 
 # CPU triangle queries use the same opaque mesh geometry as rendering. No
 # physics bodies/step lag: playback, rotations and camera changes apply now.
