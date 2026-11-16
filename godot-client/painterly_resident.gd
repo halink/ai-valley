@@ -11,6 +11,7 @@ var carried_food := 0
 var carried_water := 0
 var gathering_kind := ""
 var action_item := ""
+var bed_pose: Variant = null
 var facing_target: Variant = null
 var props: Node3D
 var food_prop: MeshInstance3D
@@ -139,6 +140,31 @@ func update_provisions(person: Dictionary, world: Dictionary) -> void:
 				var at: Variant = other.get("roomAt") if person.get("inside") != null else other.get("at")
 				if at is Dictionary: facing_target = Vector3(at.x,0,at.y)
 
+# The simulation stands at a reserved bedside interaction cell. Only the body
+# geometry occupies that bed; root/selection and all pathing remain unchanged.
+func update_bed_pose(person: Dictionary, room: Dictionary) -> void:
+	bed_pose = null
+	if onsite_pose(person) != "rest": return
+	var activity: Dictionary = person.activity
+	var pinned: Variant = activity.get("mvpBed")
+	var journey: Variant = activity.get("room")
+	if not pinned is Dictionary: return
+	if pinned.get("buildingId") != person.get("inside"): return
+	if journey is Dictionary and journey.get("buildingId") != person.get("inside"): return
+	for slot in room.get("slots", []):
+		if slot.get("kind") != "bed" or slot.get("key") != "bed:" + str(int(pinned.get("index", -1))): continue
+		if slot.at != person.get("roomAt"): return
+		if journey is Dictionary and slot.at != journey.get("target"): return
+		# Match the four occupied cells used by the rendered mattress.
+		for x in range(int(slot.at.x)-1, int(slot.at.x)+1):
+			for y in range(int(slot.at.y)-2, int(slot.at.y)):
+				var occupied := false
+				for cell in room.get("blocked", []):
+					if cell.x == x and cell.y == y: occupied = true
+				if not occupied: return
+		bed_pose = Transform3D(Basis(Vector3.RIGHT, PI/2), Vector3(-.5,.83,-2.32))
+		return
+
 func advance_activity(delta: float) -> void:
 	if activity_pose != "idle":
 		activity_phase += maxf(delta, 0.0) * 2.8
@@ -221,6 +247,15 @@ func present_pose(walking: bool, phase: float) -> void:
 		if activity_pose == "drink": water_prop.position = hand + Vector3(0,.05,-.02)
 	elif activity_pose == "talk":
 		for label in ["Sleeve", "Hand"]: pivot_part(label+"1", Vector3(.29,1.08,0), .6 + sin(phase)*.18)
+	elif activity_pose == "rest" and bed_pose is Transform3D:
+		# Cancel root yaw from a previous activity, without changing that root.
+		var local_bed: Transform3D = Transform3D(Basis(Vector3.UP,-rotation.y),Vector3.ZERO) * bed_pose
+		for label in rest_transforms:
+			get_node(NodePath(label)).transform = local_bed * rest_transforms[label]
+		food_prop.visible = false
+		water_prop.visible = false
+		basket.visible = false
+		for berry in carried_berries: berry.visible = false
 	elif activity_pose == "rest":
 		# Bowed head at the authoritative indoor cell, not a fake bed teleport.
 		for label in ["Head", "Hair", "HairKnot", "SoftCap", "Nose", "Eye-1", "Eye1"]:

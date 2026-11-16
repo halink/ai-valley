@@ -389,9 +389,18 @@ func show_room(world: Dictionary, selected: String, continuous := true) -> void:
 		for x in range(int(slot.at.x)-1, int(slot.at.x)+1):
 			for y in range(int(slot.at.y)-2, int(slot.at.y)):
 				var at := {"x":x,"y":y}
-				if at in room.blocked:
-					bed_cells[Vector2i(x,y)] = true
-					box(terrain, Vector3(x,0.3,y), Vector3(0.96,0.6,0.96),mat("b0c1b3"))
+				for cell in room.blocked:
+					if cell.x == x and cell.y == y: bed_cells[Vector2i(x,y)] = true
+		# One recognizable bed over the same authoritative 2×2 footprint.
+		var center_at := Vector3(slot.at.x-.5,0,slot.at.y-1.5)
+		box(terrain,center_at+Vector3(0,.30,0),Vector3(1.92,.25,1.92),painted_surfaces.get_material("wood"))
+		box(terrain,center_at+Vector3(0,.52,0),Vector3(1.82,.16,1.82),mat("e5dfc6"))
+		box(terrain,center_at+Vector3(0,.615,-.30),Vector3(1.80,.03,1.15),mat("91aaa2"))
+		box(terrain,center_at+Vector3(0,.66,.63),Vector3(.64,.12,.36),mat("f3e6ca"))
+		box(terrain,center_at+Vector3(0,.53,.94),Vector3(1.92,.86,.10),painted_surfaces.get_material("wood"))
+		for dx in [-.8,.8]:
+			for dz in [-.8,.8]:
+				box(terrain,center_at+Vector3(dx,.13,dz),Vector3(.13,.26,.13),painted_surfaces.get_material("wood"))
 	for at in room.blocked:
 		if not bed_cells.has(Vector2i(at.x,at.y)):
 			# Neutral obstacle marker: no invented table/care/kitchen furniture.
@@ -402,10 +411,12 @@ func show_room(world: Dictionary, selected: String, continuous := true) -> void:
 		var actor := create_person(person)
 		actor.position = Vector3(person.roomAt.x,0,person.roomAt.y)
 		actor.update_provisions(person, world)
+		actor.update_bed_pose(person, room)
 		actor.set_activity_pose(person, continuous and not world.get("clock", {}).get("paused", true))
 		if prior_poses.has(person.id) and prior_poses[person.id].pose == actor.activity_pose:
 			actor.activity_phase = prior_poses[person.id].phase
 			actor.rotation.y = prior_poses[person.id].angle
+		actor.present_pose(false, actor.activity_phase)
 		residents_root.add_child(actor)
 		people[person.id] = actor
 		actor.get_node("Selection").visible = person.id == selected
