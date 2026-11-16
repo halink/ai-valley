@@ -5,11 +5,11 @@ var painted_surfaces := PaintedSurfaces.new()
 const PainterlyResident = preload("res://painterly_resident.gd")
 # Read-only presentation: every interactive object is anchored to snapshot data.
 const Snapshot = preload("res://snapshot.gd")
-const MEADOW = preload("res://art/meadow-gouache-v1.png")
 const PLASTER = preload("res://art/plaster-gouache-v1.png")
 var room_id := ""
 var room_layouts := {}
 var room_world := ""
+var observer_inset := 0.0
 var camera: Camera3D
 var sun: DirectionalLight3D
 var sky_environment: Environment
@@ -73,7 +73,7 @@ func _ready() -> void:
 	add_child(actors)
 	camera = Camera3D.new()
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
-	camera.size = 34
+	camera.size = 23
 	camera.far = 200
 	add_child(camera)
 	camera.current = true
@@ -81,7 +81,7 @@ func _ready() -> void:
 	sun = DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-55, -35, 0)
 	sun.light_color = Color("fff0ce")
-	sun.light_energy = 1.15
+	sun.light_energy = 0.85
 	sun.shadow_enabled = true
 	add_child(sun)
 	var environment := WorldEnvironment.new()
@@ -91,7 +91,7 @@ func _ready() -> void:
 	env.background_color = Color("dce4d3")
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = Color("cddbd7")
-	env.ambient_light_energy = 0.65
+	env.ambient_light_energy = 0.45
 	environment.environment = env
 	add_child(environment)
 
@@ -106,15 +106,27 @@ func update_daylight(world: Dictionary) -> void:
 	var daylight := smoothstep(-0.15, 0.35, elevation)
 	var twilight := (1.0 - absf(daylight * 2.0 - 1.0))
 	# Keep the hand-painted scene readable at night; this is not real moonlight.
-	sun.light_energy = lerpf(0.22, 1.15, daylight)
+	sun.light_energy = lerpf(0.30, 0.85, daylight)
 	sun.light_color = Color("a7bce6").lerp(Color("fff0ce"), daylight).lerp(Color("ffbd88"), twilight * 0.45)
-	sky_environment.background_color = Color("303b58").lerp(Color("dce4d3"), daylight)
+	sky_environment.background_color = Color("46536a").lerp(Color("dce4d3"), daylight)
 	sky_environment.ambient_light_color = Color("a4b4d2").lerp(Color("cddbd7"), daylight)
-	sky_environment.ambient_light_energy = lerpf(0.48, 0.65, daylight)
+	sky_environment.ambient_light_energy = lerpf(0.62, 0.45, daylight)
+
+# Center the observed subject in the unobscured canvas, including on resize.
+func set_observer_inset(width: float) -> void:
+	observer_inset = maxf(width, 0.0)
+	_update_camera_inset()
+
+func _update_camera_inset() -> void:
+	if camera == null: return
+	var viewport_size := get_viewport().get_visible_rect().size
+	var inset := minf(observer_inset, viewport_size.x * 0.45)
+	camera.h_offset = -inset * 0.5 * camera.size / maxf(viewport_size.y, 1.0)
 
 func position_camera() -> void:
 	camera.position = focus + Vector3(26, 30, 32)
 	camera.look_at(focus)
+	_update_camera_inset()
 
 func center(world: Dictionary) -> void:
 	if world.is_empty(): return
@@ -124,8 +136,15 @@ func center(world: Dictionary) -> void:
 		camera.size = maxf(room.width, room.height) * 1.5
 		position_camera()
 		return
+	# Frame the real settlement rather than spending the first view on map edges.
+	# This is only a camera choice; no world objects or resident positions move.
+	var settlement: Variant = world.map.get("settlement")
 	focus = Vector3(world.map.width / 2.0, 0, world.map.height / 2.0)
-	camera.size = maxf(world.map.width, world.map.height) * 1.1
+	if settlement is Dictionary:
+		if (settlement.get("x") is float or settlement.get("x") is int) and (settlement.get("y") is float or settlement.get("y") is int):
+			if is_finite(settlement.x) and is_finite(settlement.y) and settlement.x >= 0 and settlement.y >= 0 and settlement.x < world.map.width and settlement.y < world.map.height:
+				focus = Vector3(settlement.x, 0, settlement.y + 1.5)
+	camera.size = clampf(maxf(world.map.width, world.map.height) * 0.72, 16, 28)
 	position_camera()
 
 func pan(delta: Vector2) -> void:
@@ -135,6 +154,7 @@ func pan(delta: Vector2) -> void:
 
 func zoom(direction: float) -> void:
 	camera.size = clampf(camera.size * direction, 8, 70)
+	_update_camera_inset()
 
 # Only focus actors already rendered from the current validated snapshot.
 # Do not infer an outdoor location for indoor, absent or unknown residents.
@@ -145,12 +165,20 @@ func focus_resident(id: String) -> bool:
 	position_camera()
 	return true
 
-func mat(color: String, grass := false) -> StandardMaterial3D:
+func mat(color: String, grass := false) -> Material:
 	var key := color + str(grass)
 	if materials.has(key): return materials[key]
+	if grass:
+		# Broad quiet pigment fields, not a high-frequency tiled photograph.
+		var meadow := ShaderMaterial.new()
+		meadow.shader = PaintedSurfaces.SHADER
+		meadow.set_shader_parameter("surface_kind", 4)
+		meadow.set_shader_parameter("pigment", Color(color))
+		materials[key] = meadow
+		return meadow
 	var material := StandardMaterial3D.new()
 	material.albedo_color = Color(color)
-	material.albedo_texture = MEADOW if grass else PLASTER
+	material.albedo_texture = PLASTER
 	material.roughness = 1.0
 	material.uv1_triplanar = true
 	material.uv1_world_triplanar = true
@@ -223,7 +251,7 @@ func show_world(world: Dictionary, selected: String, continuous := true, paths: 
 			orb(actors, at + Vector3(0, 0.05, 0), Vector3(1.6, 0.12, 1.6), painted_surfaces.get_material("water"))
 		elif resource.kind == "bush":
 			for i in range(3):
-				orb(actors, at + Vector3((i-1)*0.25, 0.38, sin(i)*0.2), Vector3(0.7, 0.8, 0.7), mat("a4b477" if resource.amount > 0 else "a59e7e", true))
+				orb(actors, at + Vector3((i-1)*0.25, 0.38, sin(i)*0.2), Vector3(0.7, 0.8, 0.7), mat("788d53" if resource.amount > 0 else "a59e7e", true))
 			if resource.amount > 0:
 				for i in range(mini(5, int(resource.amount))):
 					orb(actors, at + Vector3(cos(i*2.4)*0.35, 0.65, sin(i*2.4)*0.35), Vector3.ONE*0.15, mat("b45858"))
@@ -287,7 +315,7 @@ func create_person(person: Dictionary) -> Node3D:
 
 func build_terrain(world: Dictionary) -> void:
 	var map: Dictionary = world.map
-	var palette := {"grass": "ffffff", "water": "7caeb1", "path": "c8ac7c", "soil": "a78e6c", "sand": "ddc79c", "cliff": "929185", "road": "b8aa8c", "bridge": "87745b"}
+	var palette := {"grass": "82966c", "water": "7caeb1", "path": "c8ac7c", "soil": "a78e6c", "sand": "ddc79c", "cliff": "929185", "road": "b8aa8c", "bridge": "87745b"}
 	box(terrain, Vector3((map.width-1)*0.5, -0.5, (map.height-1)*0.5), Vector3(map.width, 0.9, map.height), mat("918374"))
 	for y in range(map.height):
 		for x in range(map.width):

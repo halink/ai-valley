@@ -29,6 +29,8 @@ var model_diagnostics: Label
 var resident_events_only := false
 var observer_panel: PanelContainer
 var follow_button: CheckButton
+var resident_title: Label
+var resident_action: Label
 
 func _ready() -> void:
 	valley = Valley3D.new()
@@ -45,6 +47,17 @@ func _ready() -> void:
 	panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
 	panel.position = Vector2(12, 12)
 	panel.theme.default_font_size = 16
+	for state in ["normal", "hover", "pressed", "focus", "disabled"]:
+		var button_style := StyleBoxFlat.new()
+		button_style.bg_color = Color("dce4cf") if state == "normal" else Color("c4d3b1")
+		if state == "disabled": button_style.bg_color = Color("e5e3d7")
+		button_style.set_corner_radius_all(6)
+		button_style.set_content_margin_all(9)
+		if state == "focus":
+			button_style.set_border_width_all(2)
+			button_style.border_color = Color("496549")
+		panel.theme.set_stylebox(state, "Button", button_style)
+		panel.theme.set_color("font_" + state + "_color" if state != "normal" else "font_color", "Button", Color("263c30"))
 	var paper := StyleBoxFlat.new()
 	paper.bg_color = Color(0.96, 0.94, 0.86, 0.96)
 	paper.set_corner_radius_all(10)
@@ -76,8 +89,25 @@ func _ready() -> void:
 	scroll.add_child(box)
 	var title := Label.new()
 	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	title.text = "AI Valley · 只读观察"
+	title.text = "山谷里的日常"
+	title.add_theme_font_size_override("font_size", 24)
 	box.add_child(title)
+	var help := Label.new()
+	help.text = "左键选居民 · 中键拖动画面 · 滚轮缩放\n观察不会改变居民行为"
+	help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	help.add_theme_font_size_override("font_size", 13)
+	box.add_child(help)
+	var resident_card := VBoxContainer.new()
+	resident_card.add_theme_constant_override("separation", 8)
+	box.add_child(resident_card)
+	resident_title = Label.new()
+	resident_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	resident_title.add_theme_font_size_override("font_size", 22)
+	resident_card.add_child(resident_title)
+	resident_action = Label.new()
+	resident_action.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	resident_action.add_theme_color_override("font_color", Color("496549"))
+	resident_card.add_child(resident_action)
 	var presets := VBoxContainer.new()
 	box.add_child(presets)
 	for preset in ["规则演示 · 3414 · 不存档／不调用模型", "持久世界 · 3415 · 需配置服务端"]:
@@ -106,7 +136,7 @@ func _ready() -> void:
 	connect_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(connect_button)
 	var home := Button.new()
-	home.text = "回到中心"
+	home.text = "回到家园"
 	home.pressed.connect(_recenter)
 	home.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(home)
@@ -117,7 +147,7 @@ func _ready() -> void:
 	row.add_child(next_person)
 	var locate := Button.new()
 	locate.text = "定位居民"
-	locate.tooltip_text = "仅移动镜头到当前视图中的所选居民，不移动居民"
+	locate.tooltip_text = "切换到居民所在视图并定位镜头，不移动居民"
 	locate.pressed.connect(_locate_resident)
 	locate.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(locate)
@@ -182,7 +212,7 @@ func _ready() -> void:
 	detail = Label.new()
 	detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	detail.text = "尚未选择居民。室内／地图外居民不会被放到室外显示。"
-	box.add_child(detail)
+	resident_card.add_child(detail)
 	memories_label = Label.new()
 	memories_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	memories_label.visible = false
@@ -207,6 +237,23 @@ func _ready() -> void:
 	events_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	events_label.text = "近期事件：尚未收到"
 	box.add_child(events_label)
+	# Keep technical facts available without turning the main view into a debugger.
+	var service_toggle := CheckButton.new()
+	service_toggle.text = "连接与运行信息"
+	service_toggle.add_theme_color_override("font_color", Color("263c30"))
+	box.add_child(service_toggle)
+	var service_info := VBoxContainer.new()
+	box.add_child(service_info)
+	for control in [row.get_child(0), connect_button, connection_label, diagnostic_toggle, model_diagnostics]:
+		control.reparent(service_info)
+	service_info.visible = false
+	service_toggle.toggled.connect(func(value: bool): service_info.visible = value)
+	box.move_child(mode_label, 2)
+	box.move_child(world_summary_label, 3)
+	box.move_child(row, 4)
+	box.move_child(follow_button, 5)
+	box.move_child(room_hint, 6)
+	box.move_child(resident_card, 7)
 	get_viewport().size_changed.connect(_resize_panel.bind(panel))
 	_resize_panel(panel)
 	http = HTTPRequest.new()
@@ -224,6 +271,7 @@ func _ready() -> void:
 		_connect_server.call_deferred()
 
 func _resize_panel(panel: PanelContainer) -> void:
+	valley.set_observer_inset(0 if panel_collapsed else 342)
 	panel.size = Vector2(330, 48 if panel_collapsed else maxf(240, get_viewport().get_visible_rect().size.y - 24))
 
 # Presets never start services, enable a model, or change a running connection.
@@ -357,6 +405,7 @@ func _received(result: int, code: int, _headers: PackedStringArray, body: Packed
 		selected = ""
 		first = true
 	if first:
+		if not world.get("residents", []).is_empty(): selected = world.residents[0].id
 		_recenter()
 		first = false
 	var paused: bool = world.get("clock", {}).get("paused", false)
@@ -384,20 +433,26 @@ func _update_events() -> void:
 	events_label.text = Snapshot.event_summary(world, selected, resident_events_only, connected)
 
 func _update_detail() -> void:
+	detail.tooltip_text = ""
+	if connected: _room_status()
 	if not connected: _stop_follow()
 	_update_events()
 	memories_label.text = "本人近期经历：请选择居民" if connected else "本人近期经历：未连接／数据过期"
-	world_summary_label.text = Snapshot.world_summary(world) if connected else "世界时间与环境资源：未连接／数据过期"
-	detail.text = "尚未选择居民。室内／地图外居民不会被放到室外显示。"
+	world_summary_label.text = Snapshot.world_summary(world).get_slice("\n", 0) if connected else "世界时间：未连接／数据过期"
+	world_summary_label.tooltip_text = Snapshot.world_summary(world) if connected else ""
+	resident_title.text = "选择一位居民" if connected else "连接已中断"
+	resident_action.text = "点击人物，或使用下一位居民" if connected else "等待新快照，当前画面已过期"
+	detail.text = ""
 	for person in world.get("residents", []):
 		if person.id == selected:
 			if not connected:
 				detail.text = "已断开／数据过期 · 收到新快照前居民详情未知"
 				return
-			detail.text = "%s · %s · 健康 %s" % [Snapshot.resident_name(person), Snapshot.resident_status(person), Snapshot.number_label(person.get("health"))]
-			detail.text += "\n" + Snapshot.action_detail(person) + "\n饥饿 %s · 精力 %s\n" % [Snapshot.number_label(person.get("hunger")), Snapshot.number_label(person.get("energy"))] + Snapshot.inventory_label(person) + " · " + Snapshot.thirst_label(world, person.id) + " · " + Snapshot.failure_label(person) + "\n" + Snapshot.model_status(observation, person.id)
-			detail.text += " · 室内" if person.get("inside") != null else " · 室外"
-			detail.text += "\n" + Snapshot.plan_summary(person)
+			resident_title.text = Snapshot.resident_name(person) + " · " + Snapshot.resident_status(person) + (" · 室内" if person.get("inside") != null else " · 室外")
+			resident_action.text = Snapshot.action_detail(person)
+			detail.text = "健康 %s   饥饿 %s   精力 %s\n" % [Snapshot.number_label(person.get("health")), Snapshot.number_label(person.get("hunger")), Snapshot.number_label(person.get("energy"))]
+			detail.text += Snapshot.thirst_label(world, person.id) + "\n" + Snapshot.inventory_label(person)
+			detail.tooltip_text = Snapshot.plan_summary(person) + "\n" + Snapshot.failure_label(person)
 			memories_label.text = Snapshot.memory_summary(person)
 			return
 	selected = ""
@@ -423,6 +478,17 @@ func _locate_resident() -> void:
 	if selected.is_empty():
 		status.text = "请先选择一位居民"
 		return
+	for person in world.get("residents", []):
+		if person.id != selected: continue
+		var inside: String = str(person.get("inside")) if person.get("inside") != null else ""
+		if inside != valley.room_id:
+			if inside.is_empty(): valley.leave_room(world)
+			elif not valley.enter_room(world, inside):
+				room_hint.text = "居民所在房间布局未知，无法定位"
+				return
+			valley.show_world(world, selected, false)
+		_room_status()
+		break
 	if not valley.focus_resident(selected):
 		status.text = "所选居民不在当前视图中；室内居民请先进入住宅，未知位置不推测"
 		return
@@ -475,10 +541,21 @@ func _invalidate_room() -> void:
 func _room_status() -> void:
 	room_hint.text = "室外视图 · 观察房间不会移动居民"
 	if valley.room_id.is_empty(): return
+	if not valley.room_layouts.has(valley.room_id):
+		room_hint.text = "原住宅布局已不可用"
+		return
 	var unknown := 0
+	var occupants := 0
+	var selected_here := false
 	for person in world.residents:
+		if person.get("inside") == valley.room_id:
+			occupants += 1
+			if person.id == selected: selected_here = true
 		if person.get("inside") == valley.room_id and not Snapshot.resident_room_position(person.get("roomAt"),valley.room_layouts[valley.room_id]): unknown += 1
-	room_hint.text = "住宅内部 · 剖面视图 · 使用快照位置 · 位置未知居民数：" + str(unknown) + " · 床位数：" + str(_bed_count())
+	room_hint.text = "住宅内部 · %s 人在家" % occupants
+	if occupants == 0: room_hint.text += "\n此刻无人在屋内，居民仍在室外生活"
+	elif not selected_here: room_hint.text += "\n所选居民不在这间屋内"
+	if unknown > 0: room_hint.text += "\n%s 位居民位置暂不可见" % unknown
 
 func _enter_room() -> void:
 	_stop_follow()
