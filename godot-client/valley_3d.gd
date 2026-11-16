@@ -27,6 +27,8 @@ const MOVE_SECONDS := 0.35
 const MAX_PLAYBACK_SECONDS := 1.4
 # Replay confirmed edges in order, never shortcut a corner or extrapolate.
 func _process(delta: float) -> void:
+	for id in people:
+		if not motions.has(id): people[id].advance_activity(delta)
 	for id in motions.keys():
 		var motion: Dictionary = motions[id]
 		motion.elapsed = minf(motion.duration, motion.elapsed + maxf(delta, 0.0))
@@ -229,7 +231,8 @@ func show_world(world: Dictionary, selected: String, continuous := true, paths: 
 		var label := Label3D.new()
 		label.font = UI_FONT
 		label.text = Snapshot.resource_name(resource.kind) + "：" + str(resource.amount)
-		label.position = at + Vector3(0, 1.2, 0)
+		# Keep resource captions off the nearby resident's hands and face.
+		label.position = at + Vector3(0, 0.18, 1.35)
 		label.font_size = 30
 		label.pixel_size = 0.01
 		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
@@ -260,6 +263,7 @@ func show_world(world: Dictionary, selected: String, continuous := true, paths: 
 			else:
 				actor.position = target
 		actor.update_appearance(person)
+		actor.update_provisions(person, world)
 		actor.set_activity_pose(person, continuous and not world.get("clock", {}).get("paused", true))
 		actor.set_meta("target", target)
 		actor.get_node("Selection").visible = person.id == selected
@@ -361,6 +365,9 @@ func leave_room(world: Dictionary) -> void:
 	center(world)
 
 func show_room(world: Dictionary, selected: String, continuous := true) -> void:
+	var prior_poses := {}
+	for id in people:
+		prior_poses[id] = {"pose":people[id].activity_pose,"phase":people[id].activity_phase,"angle":people[id].rotation.y}
 	clear_children(terrain)
 	clear_children(actors)
 	clear_people()
@@ -394,7 +401,11 @@ func show_room(world: Dictionary, selected: String, continuous := true) -> void:
 		if not Snapshot.resident_room_position(person.get("roomAt"),room): continue
 		var actor := create_person(person)
 		actor.position = Vector3(person.roomAt.x,0,person.roomAt.y)
+		actor.update_provisions(person, world)
 		actor.set_activity_pose(person, continuous and not world.get("clock", {}).get("paused", true))
+		if prior_poses.has(person.id) and prior_poses[person.id].pose == actor.activity_pose:
+			actor.activity_phase = prior_poses[person.id].phase
+			actor.rotation.y = prior_poses[person.id].angle
 		residents_root.add_child(actor)
 		people[person.id] = actor
 		actor.get_node("Selection").visible = person.id == selected

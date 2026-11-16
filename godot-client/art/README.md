@@ -31,7 +31,7 @@ Both outdoor and authoritative indoor views use the same character constructor.
 Validation: clean Godot import and offline headless geometry/material tests,
 including the real MVP IDs, outward normals, bounds, cache reuse and appearance
 updates. Movement, picking and interior regressions are included in the same
-runner. No GPU/window render or aesthetic acceptance is claimed. Native rendered
+runner. No GPU/window render or aesthetic acceptance is claimed. Browser-rendered
 review remains required for palette, facial readability and camera-distance scale.
 
 ## Original procedural painted surfaces v2
@@ -58,10 +58,37 @@ transparency or geometry alteration. This preserves existing CPU triangle
 occlusion and snapshot positions; painted ripples do not imply simulated flow.
 Grass, plaster, foliage and residents keep their previous materials. Water stays
 opaque and distinct from walkable ground, with subdued contrast to preserve
-resident/selection readability. `npm run test:godot` checks real scene material
-assignments and cache reuse, using offline synthetic snapshots only.
+resident/selection readability. Historical material checks used offline synthetic snapshots only; they were not
+browser or model acceptance. There is no maintained test runner for these assets.
 
-Native GPU review is still required: inspect roof seam aliasing at far zoom,
-timber direction on all door faces, water/grass separation, lighting and CJK
-labels on macOS. Headless import/structure checks do not establish rendered
+Browser visual review is required for material changes: inspect roof seam aliasing
+at far zoom, timber direction on all door faces, water/grass separation, lighting
+and CJK labels in the Web export. No native-client delivery is intended. Headless import/structure checks do not establish rendered
 quality or GPU shader compilation. No real-model or long-run acceptance claimed.
+
+
+## Visible food and water actions
+
+Residents now show the existing server-authoritative provision loop in the scene:
+
+- A small basket and up to three berry markers reflect whole carried berry portions.
+- A pottery flask is visible when carrying water. At an active spring-gather action,
+  the empty vessel is used as a presentation prop before the server credits water.
+- Onsite gather actions turn toward their actual resource. Berry picking and spring
+  scooping have distinct repeating hand motions; travel remains separate.
+- Eating a carried berry brings a berry to the hand; drinking brings the flask.
+  Finishing uses the existing server inventory deduction, not a visual callback.
+- Active conversation gestures toward the actual partner, using room coordinates
+  indoors. Indoor animation phase survives snapshot redraws.
+
+These are original low-poly, pigment-colored geometry, not a finished hand-painted
+character/animation pack. The basket/flask are presentation vessels, not additional
+owned equipment, craft recipes, or proof of successful collection. Berry markers cap
+at three and do not replace exact inventory data. Props disappear when the relevant
+stock is depleted. Actions stop on pause/disconnect; no local action completion,
+resource credit, speech, social result, or model choice is invented by animation.
+
+This increment changes presentation only. The default browser demo still uses
+explicit local rules, not AI; existing real-model mode remains separate. A short
+rule-driven run can validate only the exercised rule/state/presentation paths, not
+real-model autonomy, broad gameplay completeness, or long-term stability.

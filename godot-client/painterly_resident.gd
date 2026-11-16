@@ -6,6 +6,17 @@ var garments: Array[MeshInstance3D] = []
 var applied_colors: Dictionary = {}
 var rest_transforms: Dictionary = {}
 var activity_pose := "idle"
+var activity_phase := 0.0
+var carried_food := 0
+var carried_water := 0
+var gathering_kind := ""
+var action_item := ""
+var facing_target: Variant = null
+var props: Node3D
+var food_prop: MeshInstance3D
+var water_prop: MeshInstance3D
+var basket: MeshInstance3D
+var carried_berries: Array[MeshInstance3D] = []
 
 static func paint(color: Color) -> StandardMaterial3D:
 	var material := StandardMaterial3D.new()
@@ -78,6 +89,64 @@ func construct(person: Dictionary) -> void:
 	set_meta("garments",garments)
 	update_appearance(person)
 	for child in get_children(): rest_transforms[child.name] = child.transform
+	# Presentation vessels, not additional simulated inventory or equipment.
+	props = Node3D.new()
+	props.name = "Provisions"
+	add_child(props)
+	food_prop = provision(Vector3(.11,.11,.11), "b45858")
+	water_prop = provision(Vector3.ONE, "9b6948")
+	water_prop.mesh = loft([Vector3(0,-.12,0),Vector3(.10,-.12,.10),Vector3(.12,.02,.12),Vector3(.055,.12,.055),Vector3(.055,.19,.055),Vector3(0,.19,0)])
+	basket = provision(Vector3.ONE,"b39058")
+	basket.mesh = loft([Vector3(0,0,0),Vector3(.17,0,.10),Vector3(.20,.18,.12),Vector3(.17,.18,.09),Vector3(.14,.04,.07),Vector3(0,.04,0)])
+	basket.position = Vector3(-.20,.64,.23)
+	for i in range(3):
+		var berry := provision(Vector3(.09,.09,.09), "b45858")
+		berry.position = Vector3(-.24 + i*.085,.78,.21)
+		carried_berries.append(berry)
+
+func provision(size: Vector3, color: String) -> MeshInstance3D:
+	var node := MeshInstance3D.new()
+	var shape := SphereMesh.new()
+	shape.radius = 1.0
+	shape.height = 2.0
+	shape.radial_segments = 10
+	shape.rings = 5
+	node.mesh = shape
+	node.scale = size
+	node.material_override = paint(Color(color))
+	node.visible = false
+	props.add_child(node)
+	return node
+
+func update_provisions(person: Dictionary, world: Dictionary) -> void:
+	var inventory: Dictionary = person.get("inventory", {})
+	carried_food = maxi(0, int(inventory.get("berry", 0)))
+	carried_water = maxi(0, int(inventory.get("water", 0)))
+	gathering_kind = ""
+	facing_target = null
+	var activity: Variant = person.get("activity")
+	if not activity is Dictionary: return
+	var action: Dictionary = activity.get("action", {})
+	action_item = str(action.get("item", ""))
+	if action.get("type") == "gather":
+		for source in world.get("resources", []):
+			if source.id == action.get("resourceId"):
+				gathering_kind = str(source.kind)
+				facing_target = Vector3(source.at.x,0,source.at.y)
+	elif action.get("type") == "talk":
+		for other in world.get("residents", []):
+			if other.id == action.get("targetId") and other.get("inside") == person.get("inside"):
+				var at: Variant = other.get("roomAt") if person.get("inside") != null else other.get("at")
+				if at is Dictionary: facing_target = Vector3(at.x,0,at.y)
+
+func advance_activity(delta: float) -> void:
+	if activity_pose != "idle":
+		activity_phase += maxf(delta, 0.0) * 2.8
+		if facing_target is Vector3 and activity_pose in ["gather", "talk"]:
+			var direction: Vector3 = facing_target - position
+			if direction.length_squared() > .01:
+				rotation.y = lerp_angle(rotation.y, atan2(-direction.x,-direction.z), minf(delta*6.0,1.0))
+	present_pose(false, activity_phase)
 
 func update_appearance(person: Dictionary) -> void:
 	var appearance: Dictionary = person.get("appearance",{})
@@ -114,28 +183,44 @@ static func onsite_pose(person: Dictionary) -> String:
 	match action.get("type"):
 		"gather": return "gather"
 		"eat": return "eat"
+		"talk": return "talk"
 		"mvpDrink": return "drink"
 		"sleep":
 			if person.get("inside") != null and person.get("roomAt") is Dictionary: return "rest"
 	return "idle"
 
 func set_activity_pose(person: Dictionary, enabled: bool) -> void:
-	activity_pose = onsite_pose(person) if enabled else "idle"
+	var next_pose := onsite_pose(person) if enabled else "idle"
+	if next_pose != activity_pose: activity_phase = 0.0
+	activity_pose = next_pose
 	present_pose(false, 0.0)
 
 func present_pose(walking: bool, phase: float) -> void:
 	reset_pose()
+	food_prop.visible = not walking and activity_pose == "eat" and action_item == "berry" and carried_food > 0
+	water_prop.visible = carried_water > 0 or (not walking and activity_pose == "gather" and gathering_kind == "spring")
+	water_prop.position = Vector3(.25,.75,.19)
+	basket.visible = carried_food > 0
+	for i in range(carried_berries.size()): carried_berries[i].visible = carried_food > i
 	if walking:
 		for side in [-1, 1]:
 			var swing: float = sin(phase) * side * 0.24
 			for label in ["Boot", "Trouser"]: pivot_part(label+str(side), Vector3(side*.13,.67,0), swing)
 			for label in ["Sleeve", "Hand"]: pivot_part(label+str(side), Vector3(side*.29,1.08,0), -swing)
 	elif activity_pose == "gather":
+		var reach := .75 + sin(phase)*.3
+		if gathering_kind == "spring": reach = .45 + sin(phase)*.35
 		for side in [-1, 1]:
-			for label in ["Sleeve", "Hand"]: pivot_part(label+str(side), Vector3(side*.29,1.08,0), 0.8)
+			for label in ["Sleeve", "Hand"]: pivot_part(label+str(side), Vector3(side*.29,1.08,0), reach)
+		if gathering_kind == "spring": water_prop.position = Vector3(.33,.45 + sin(phase)*.08,-.32)
 	elif activity_pose in ["eat", "drink"]:
-		# Empty hand-to-mouth gesture, not an invented cup, food or success effect.
-		for label in ["Sleeve", "Hand"]: pivot_part(label+"1", Vector3(.29,1.08,0), 2.15 if activity_pose == "drink" else 1.8)
+		var lift := (2.15 if activity_pose == "drink" else 1.8) + sin(phase)*.12
+		for label in ["Sleeve", "Hand"]: pivot_part(label+"1", Vector3(.29,1.08,0), lift)
+		var hand: Vector3 = Vector3(.29,1.08,0) + Basis(Vector3.RIGHT,lift) * Vector3(.045,-.43,0)
+		food_prop.position = hand + Vector3(0,0,-.04)
+		if activity_pose == "drink": water_prop.position = hand + Vector3(0,.05,-.02)
+	elif activity_pose == "talk":
+		for label in ["Sleeve", "Hand"]: pivot_part(label+"1", Vector3(.29,1.08,0), .6 + sin(phase)*.18)
 	elif activity_pose == "rest":
 		# Bowed head at the authoritative indoor cell, not a fake bed teleport.
 		for label in ["Head", "Hair", "HairKnot", "SoftCap", "Nose", "Eye-1", "Eye1"]:
