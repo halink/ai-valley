@@ -8,7 +8,10 @@ function available(w:World,r:Resident,a:PersonalRoutine['action']):string|null {
  const home=w.buildings.find(b=>b.id===r.homeId);return home&&home.condition>0&&home.residents.includes(r.id)&&residentBed(w,r,home)!==null&&findPath(w,r.at,home.door)!==null?null:'原先同意使用的本人床位或实际通路已不可用';
 }
 export function agencyReason(w:World,r:Resident,a:AgencyAction):string|null {
- if(w.mode!=='formal'||!capable(w,r))return '本人目前不能自主安排自己的长期打算';
+ const mvp=w.mode==='validation'&&w.id.startsWith('godot-mvp-')&&!!w.mvpDrinking;
+ if((w.mode!=='formal'&&!mvp)||!capable(w,r))return '本人目前不能自主安排自己的长期打算';
+ // MVP permits personal intentions, not the formal world's automated routines.
+ if(mvp&&(!['reflect','conclude'].includes(a.operation)||a.operation==='reflect'&&!['daily','social','exploration'].includes(a.focus??'')))return '小山谷只支持生活、交流或探索目标及本人回顾';
  if(a.operation==='reflect'){
   if(!a.focus||!Object.hasOwn(focusNames,a.focus)||typeof a.text!=='string'||!a.text.trim()||a.text.length>240)return '请本人写下1–240字目标，并选择关注领域';
   return repeatsActiveGoal(r.agency,a)?'这个目标已经生效，可以按原目标行动，或本人另写不同的目标':null;

@@ -124,6 +124,12 @@ export function buildChoices(c:DecisionContext):ActionChoice[]{
   const format=(bag:typeof offer.give)=>Object.entries(bag).map(([item,n])=>`${n}${itemNames[item as Item]}`).join('、');
   add(trade,`accept.${offer.id}`,`接受${c.people.find(p=>p.id===offer.actorId)?.name??'对方'}的现有报价：交付${format(offer.want)}，换得${format(offer.give)}`,{type:'accept',offerId:offer.id,offerTerms:barterTerms(offer)});
  }
+ // A goal is the resident's own memory, never an automatic action policy.
+ if(c.mvpDrinking&&!c.formal){
+  const goals=group();
+  if(c.actor.agency?.goals.some(g=>g.status==='active'))add(goals,'goal.conclude','回顾并结束本人当前目标，填写text（1–240字）；回顾是本人看法，不代表世界已实现目标',{type:'agency',operation:'conclude'});
+  for(const [focus,label] of [['daily','日常生活'],['social','相处交流'],['exploration','探索']] as const)add(goals,`goal.${focus}`,`写下或修改本人${label}目标，填写text（1–240字）；只记录意图，不自动执行或保证完成`,{type:'agency',operation:'reflect',focus});
+ }
  // Round-robin the categories, rather than giving the first populated category all prompt space.
  const choices:ActionChoice[]=[];for(let i=0;choices.length<32;i++){let found=false;for(const g of categories){if(g[i]){choices.push(g[i]);found=true;if(choices.length===32)break;}}if(!found)break;}
  // Preserve the whole basic menu even when several people bring proposals on the same day.
