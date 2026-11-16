@@ -383,6 +383,22 @@ func show_room(world: Dictionary, selected: String, continuous := true) -> void:
 	for x in range(int(w)):
 		if x != int(room.entry.x): box(terrain, Vector3(x, 0.15, h-1), Vector3(1,0.3,0.2), mat("f1ddba"))
 	var bed_cells := {}
+	# Render the authoritative blocked table footprint, with two meal seats.
+	if world.get("mvpRooms", {}).get("version", 0) == 1:
+		var cx := floorf(w/2.0)
+		var table_center := Vector3(cx-.5,0,6.5)
+		box(terrain,table_center+Vector3(0,.83,0),Vector3(3.9,.15,1.9),painted_surfaces.get_material("wood"))
+		for dx in [-1.65,1.65]:
+			for dz in [-.65,.65]:
+				box(terrain,table_center+Vector3(dx,.4,dz),Vector3(.15,.8,.15),painted_surfaces.get_material("wood"))
+		for x in range(int(cx)-2,int(cx)+2):
+			for y in [6,7]: bed_cells[Vector2i(x,y)] = true
+		for dx in [-1,1]:
+			var seat := Vector3(cx+dx,0,8)
+			box(terrain,seat+Vector3(0,.43,0),Vector3(.72,.12,.72),painted_surfaces.get_material("wood"))
+			for sx in [-.25,.25]:
+				for sz in [-.25,.25]:
+					box(terrain,seat+Vector3(sx,.2,sz),Vector3(.09,.4,.09),painted_surfaces.get_material("wood"))
 	for slot in room.slots:
 		if slot.kind != "bed": continue
 		# Bed footprint is defined by roomLayout's blocked cells, not resident position.

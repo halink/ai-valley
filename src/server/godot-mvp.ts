@@ -88,6 +88,7 @@ export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string
    if(mvpCanStart(w,r,action))return {action,reason:wantsFood?'本地规则独立接受当面报价：用一份富余清水换一份浆果，交付后再决定进食':'本地规则独立接受当面报价：用一份富余浆果换一份清水，交付后再决定饮用'};
   }
  }
+ if(r.hunger>=35&&r.hunger<80&&r.energy>=70&&(mvpThirst(w,r)??0)<50-1e-9&&(r.inventory.berry??0)>=1){const action:Action={type:'eat',item:'berry',mvpAtTable:true};if(mvpCanStart(w,r,action))return {action,reason:'带着自己的食物回共屋餐桌进食，不共享或凭空补充口粮'};}
  if(r.hunger>=35&&(r.inventory.berry??0)>=1)return {action:{type:'eat',item:'berry'},reason:'饥饿且带有一整份浆果，进食'};
  // Immediate needs come before optional stocking: an empty bag must not
  // send a thirsty or exhausted resident on a food-reserve trip.

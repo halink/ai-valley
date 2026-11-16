@@ -1,4 +1,4 @@
-import {mvpSleepProblem} from './mvp-rooms.js';
+import {mvpSleepProblem,mvpDiningPlace} from './mvp-rooms.js';
 import {advanceMvpThirst,mvpDrinkReason,completeMvpDrink} from './mvp-drinking.js';
 import {recordCompletedMovement} from './completed-movement.js';
 import {completedWorkIdentity} from '../shared/work-completion.js';
@@ -256,6 +256,7 @@ function targetFor(world:World,r:Resident,a:Action,definition:string,elapsed=0):
   return {target:r.at,duration:a.minutes};
  }
  if(a.type==='mvpDrink'){const error=mvpDrinkReason(world,r);return error?fail(error):{target:{...r.at},duration:5};}
+ if(a.type==='eat'&&a.mvpAtTable){const place=mvpDiningPlace(world,r);if(!place)return fail('当前没有可到达的本人共屋餐位');if(!Object.hasOwn(goods,a.item)||goods[a.item].food<=0||!has(r.inventory,{[a.item]:1}))return fail('没有这份可以食用的实际食品');return {target:{...place.building.door},duration:5};}
  if(a.type==='eat')return Object.hasOwn(goods,a.item)&&goods[a.item].food>0&&has(r.inventory,{[a.item]:1})?{target:r.at,duration:5}:fail('没有这份可以食用的实际食品');
  if(a.type==='gather'){
   const resource=world.resources.find(v=>v.id===a.resourceId);
@@ -405,6 +406,7 @@ function completeAtomic(world:World,r:Resident,a:Action,definition:string,elapse
  if(a.type==='move'||a.type==='wait'||a.type==='sleep')return null;
  if(a.type==='mvpDrink')return completeMvpDrink(world,r);
  if(a.type==='eat'){
+  if(a.mvpAtTable){const place=mvpDiningPlace(world,r);if(!place||r.inside!==place.building.id||r.roomAt?.x!==place.at.x||r.roomAt.y!==place.at.y)return '尚未到达本人实际餐位';}
   if(!has(r.inventory,{[a.item]:1}))return '食物已经不足';const nutrition=foodValue(world,'person:'+r.id,a.item),before=r.hunger;consume(r.inventory,{[a.item]:1});r.hunger=Math.max(0,r.hunger-nutrition);const event=record(`${r.name}吃了一份${names[a.item]}。`);
   recordDirectEating(world,{at:world.minute,residentId:r.id,eventId:event.id,planId:r.activity!.planId,container:'person:'+r.id,item:a.item,quantity:1,nutrition,hungerRelief:before-r.hunger});return null;
  }

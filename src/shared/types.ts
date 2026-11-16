@@ -71,7 +71,7 @@ type DomainAction =
  | {type:'gather';resourceId:string;quantity:number}
  | {type:'plant'|'water'|'harvest';plotId:string}
  | {type:'mvpDrink'}
- | {type:'eat';item:Item}
+ | {type:'eat';item:Item;mvpAtTable?:true}
  | {type:'sleep';minutes:number;buildingId?:string}
  | {type:'cook';quantity:number;buildingId?:string}
  | {type:'talk';targetId:string;text:string;tone:import('./speech-tone.js').SpeechTone}

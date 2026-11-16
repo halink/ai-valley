@@ -94,3 +94,5 @@ rule-driven run can validate only the exercised rule/state/presentation paths, n
 real-model autonomy, broad gameplay completeness, or long-term stability.
 
 - 2026-11-16：床位显示使用代码生成的木床架、床垫、薄毯与枕头；实际睡眠在已锁定床位上显示仰卧几何。无新增外部素材或许可证依赖，所有床面位置来自权威房间布局，人物根节点仍为床旁交互格。
+
+- 2026-11-16：共屋餐桌/木凳为代码生成几何，沿用已有木材质和权威桌面阻挡范围。餐位吃饭姿态不改变居民根节点，不新增外部素材或许可。

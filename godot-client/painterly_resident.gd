@@ -11,6 +11,7 @@ var carried_food := 0
 var carried_water := 0
 var gathering_kind := ""
 var action_item := ""
+var dining := false
 var bed_pose: Variant = null
 var facing_target: Variant = null
 var props: Node3D
@@ -124,11 +125,21 @@ func update_provisions(person: Dictionary, world: Dictionary) -> void:
 	carried_food = maxi(0, int(inventory.get("berry", 0)))
 	carried_water = maxi(0, int(inventory.get("water", 0)))
 	gathering_kind = ""
+	dining = false
 	facing_target = null
 	var activity: Variant = person.get("activity")
 	if not activity is Dictionary: return
 	var action: Dictionary = activity.get("action", {})
 	action_item = str(action.get("item", ""))
+	if action.get("type") == "eat" and action.get("mvpAtTable", false) and person.get("inside") != null and onsite_pose(person) == "eat":
+		for b in world.get("buildings", []):
+			if b.id == person.inside and b.id == person.get("homeId"):
+				var index: int = b.residents.find(person.id)
+				var cx := floorf(maxf(16,float(b.width)*2)/2)
+				var at: Variant = person.get("roomAt")
+				if index in [0,1] and at is Dictionary and at.x == cx-1+index*2 and at.y == 8:
+					dining = true
+					facing_target = Vector3(at.x,0,at.y-1)
 	if action.get("type") == "gather":
 		for source in world.get("resources", []):
 			if source.id == action.get("resourceId"):
@@ -168,7 +179,7 @@ func update_bed_pose(person: Dictionary, room: Dictionary) -> void:
 func advance_activity(delta: float) -> void:
 	if activity_pose != "idle":
 		activity_phase += maxf(delta, 0.0) * 2.8
-		if facing_target is Vector3 and activity_pose in ["gather", "talk"]:
+		if facing_target is Vector3 and activity_pose in ["gather", "talk", "eat"]:
 			var direction: Vector3 = facing_target - position
 			if direction.length_squared() > .01:
 				rotation.y = lerp_angle(rotation.y, atan2(-direction.x,-direction.z), minf(delta*6.0,1.0))
@@ -245,6 +256,11 @@ func present_pose(walking: bool, phase: float) -> void:
 		var hand: Vector3 = Vector3(.29,1.08,0) + Basis(Vector3.RIGHT,lift) * Vector3(.045,-.43,0)
 		food_prop.position = hand + Vector3(0,0,-.04)
 		if activity_pose == "drink": water_prop.position = hand + Vector3(0,.05,-.02)
+		if dining:
+			for side in [-1,1]:
+				for label in ["Boot", "Trouser"]: pivot_part(label+str(side),Vector3(side*.13,.68,0),1.1)
+			for label in rest_transforms: get_node(NodePath(label)).position.y -= .20
+			food_prop.position.y -= .20
 	elif activity_pose == "talk":
 		for label in ["Sleeve", "Hand"]: pivot_part(label+"1", Vector3(.29,1.08,0), .6 + sin(phase)*.18)
 	elif activity_pose == "rest" and bed_pose is Transform3D:

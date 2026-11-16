@@ -46,3 +46,14 @@ export function mvpSleepProblem(w:World,r:Resident):string|null{
  r.activity.mvpBed??={buildingId:b.id,index:bed};
  return null;
 }
+
+/** Optional MVP meal destination; never grants food or teleports the actor. */
+export function mvpDiningPlace(w:World,r:Resident){
+ if(!hasMvpRooms(w))return null;
+ const b=w.buildings.find(b=>b.id===r.homeId&&b.condition>0&&b.residents.includes(r.id));
+ if(!b)return null;const index=b.residents.indexOf(r.id);if(index>1)return null;
+ const layout=roomLayout(w,b),at={x:Math.floor(layout.width/2)-1+index*2,y:8};
+ const from=r.inside===b.id?r.roomAt:layout.entry;
+ if(!from||r.inside&&r.inside!==b.id||roomPath(layout,from,at)===null)return null;
+ return {building:b,at};
+}
