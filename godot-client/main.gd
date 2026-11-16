@@ -31,6 +31,7 @@ var observer_panel: PanelContainer
 var follow_button: CheckButton
 var resident_title: Label
 var resident_action: Label
+var inventory_detail: Label
 
 func _ready() -> void:
 	valley = Valley3D.new()
@@ -99,6 +100,7 @@ func _ready() -> void:
 	box.add_child(help)
 	var resident_card := VBoxContainer.new()
 	resident_card.add_theme_constant_override("separation", 8)
+	resident_card.custom_minimum_size.y = 202
 	box.add_child(resident_card)
 	resident_title = Label.new()
 	resident_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -106,6 +108,8 @@ func _ready() -> void:
 	resident_card.add_child(resident_title)
 	resident_action = Label.new()
 	resident_action.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	resident_action.custom_minimum_size.y = 48
+	resident_action.add_theme_font_size_override("font_size", 20)
 	resident_action.add_theme_color_override("font_color", Color("496549"))
 	resident_card.add_child(resident_action)
 	var presets := VBoxContainer.new()
@@ -136,7 +140,7 @@ func _ready() -> void:
 	connect_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(connect_button)
 	var home := Button.new()
-	home.text = "回到家园"
+	home.text = "家园全景"
 	home.pressed.connect(_recenter)
 	home.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(home)
@@ -146,7 +150,7 @@ func _ready() -> void:
 	next_person.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(next_person)
 	var locate := Button.new()
-	locate.text = "定位居民"
+	locate.text = "近看居民"
 	locate.tooltip_text = "切换到居民所在视图并定位镜头，不移动居民"
 	locate.pressed.connect(_locate_resident)
 	locate.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -248,18 +252,41 @@ func _ready() -> void:
 	service_toggle.text = "连接与运行信息"
 	service_toggle.add_theme_color_override("font_color", Color("263c30"))
 	box.add_child(service_toggle)
+	var help_toggle := CheckButton.new()
+	help_toggle.text = "操作帮助"
+	help_toggle.add_theme_color_override("font_color", Color("263c30"))
+	box.add_child(help_toggle)
+	help.reparent(box)
+	help.visible = false
+	help_toggle.toggled.connect(func(value: bool): help.visible = value)
+	var life_toggle := CheckButton.new()
+	life_toggle.text = "随身物品与生活记录"
+	life_toggle.add_theme_color_override("font_color", Color("263c30"))
+	box.add_child(life_toggle)
+	var life_info := VBoxContainer.new()
+	box.add_child(life_info)
+	inventory_detail = Label.new()
+	inventory_detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	life_info.add_child(inventory_detail)
+	for control in [event_filter, memory_toggle, memories_label, events_label]: control.reparent(life_info)
+	life_info.visible = false
+	life_toggle.toggled.connect(func(value: bool): life_info.visible = value)
 	var service_info := VBoxContainer.new()
 	box.add_child(service_info)
 	for control in [row.get_child(0), connect_button, connection_label, diagnostic_toggle, model_diagnostics]:
 		control.reparent(service_info)
 	service_info.visible = false
 	service_toggle.toggled.connect(func(value: bool): service_info.visible = value)
+	mode_label.add_theme_font_size_override("font_size", 13)
+	box.move_child(world_summary_label, 1)
 	box.move_child(mode_label, 2)
-	box.move_child(world_summary_label, 3)
+	box.move_child(resident_card, 3)
 	box.move_child(row, 4)
 	box.move_child(follow_button, 5)
 	box.move_child(room_hint, 6)
-	box.move_child(resident_card, 7)
+	box.move_child(life_toggle, 7)
+	box.move_child(life_info, 8)
+	box.move_child(help, help_toggle.get_index() + (1 if help.get_index() > help_toggle.get_index() else 0))
 	get_viewport().size_changed.connect(_resize_panel.bind(panel))
 	_resize_panel(panel)
 	http = HTTPRequest.new()
@@ -433,6 +460,10 @@ func _recenter() -> void:
 	_stop_follow()
 	if world.is_empty():
 		return
+	if not valley.room_id.is_empty():
+		valley.leave_room(world)
+		valley.show_world(world, selected, false)
+		_room_status()
 	valley.center(world)
 
 func _update_events() -> void:
@@ -440,6 +471,8 @@ func _update_events() -> void:
 
 func _update_detail() -> void:
 	detail.tooltip_text = ""
+	resident_action.tooltip_text = ""
+	inventory_detail.text = "随身物品：未连接或未选择居民"
 	if connected: _room_status()
 	if not connected: _stop_follow()
 	_update_events()
@@ -455,9 +488,11 @@ func _update_detail() -> void:
 				detail.text = "已断开／数据过期 · 收到新快照前居民详情未知"
 				return
 			resident_title.text = Snapshot.resident_name(person) + " · " + Snapshot.resident_status(person) + (" · 室内" if person.get("inside") != null else " · 室外")
-			resident_action.text = Snapshot.action_detail(person)
+			resident_action.text = Snapshot.life_action(person, world)
+			resident_action.tooltip_text = Snapshot.action_detail(person)
 			detail.text = "健康 %s   饥饿 %s   精力 %s\n" % [Snapshot.number_label(person.get("health")), Snapshot.number_label(person.get("hunger")), Snapshot.number_label(person.get("energy"))]
-			detail.text += Snapshot.thirst_label(world, person.id) + "\n" + Snapshot.inventory_label(person)
+			detail.text += Snapshot.thirst_label(world, person.id)
+			inventory_detail.text = Snapshot.inventory_label(person)
 			detail.tooltip_text = Snapshot.plan_summary(person) + "\n" + Snapshot.failure_label(person)
 			memories_label.text = Snapshot.memory_summary(person)
 			return
@@ -498,7 +533,8 @@ func _locate_resident() -> void:
 	if not valley.focus_resident(selected):
 		status.text = "所选居民不在当前视图中；室内居民请先进入住宅，未知位置不推测"
 		return
-	status.text = "已定位所选居民 · 仅移动镜头，不持续跟随"
+	valley.close_view()
+	status.text = "已近看所选居民 · 仅移动镜头，不持续跟随"
 
 func _stop_follow() -> void:
 	if follow_button != null:

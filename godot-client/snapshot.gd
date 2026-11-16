@@ -174,6 +174,24 @@ static func action_detail(person: Dictionary) -> String:
 		target_text = "(%s, %s)" % [target.x, target.y]
 	return activity_label(person) + " · 目标位置 " + target_text + " · 剩余工作时间 " + number_label(activity.get("remaining")) + " 世界分钟（不含路程）"
 
+# Plain observer description of the actual action, not inferred intent.
+static func life_action(person: Dictionary, world: Dictionary) -> String:
+	var activity = person.get("activity")
+	if not activity is Dictionary: return activity_label(person)
+	var action: Dictionary = activity.get("action", {})
+	var kind := str(action.get("type", ""))
+	var verb: String = {"eat":"吃饭", "sleep":"休息", "mvpDrink":"喝水", "talk":"交谈", "plant":"播种", "water":"浇菜", "harvest":"收菜", "cook":"做饭", "wait":"停留"}.get(kind, action_name(kind))
+	if kind == "gather":
+		verb = "采集"
+		for source in world.get("resources", []):
+			if source.get("id") == action.get("resourceId"):
+				verb = "取水" if source.get("kind") == "spring" else "采浆果" if source.get("kind") == "bush" else "采集" + resource_name(str(source.get("kind")))
+	var path = activity.get("path", [])
+	var room = activity.get("room")
+	var travelling: bool = path is Array and not path.is_empty()
+	if room is Dictionary and room.get("path") is Array: travelling = travelling or not room.path.is_empty()
+	return "在路上 · 去" + verb if travelling else "正在" + verb
+
 # The current accepted plan is an explicit game artifact, not hidden model reasoning.
 # Never fall back to person.intention: that text can outlive its completed plan.
 static func plan_summary(person: Dictionary) -> String:

@@ -153,6 +153,10 @@ func pan(delta: Vector2) -> void:
 	focus -= (camera.global_basis.x * delta.x + Vector3(camera.global_basis.y.x, 0, camera.global_basis.y.z) * delta.y) * scale_factor
 	position_camera()
 
+func close_view() -> void:
+	camera.size = 11
+	_update_camera_inset()
+
 func zoom(direction: float) -> void:
 	camera.size = clampf(camera.size * direction, 8, 70)
 	_update_camera_inset()
