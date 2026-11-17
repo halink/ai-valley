@@ -1,33 +1,61 @@
 extends Node3D
-const UI_FONT = preload("res://art/fonts/ValleyCJK-Regular.otf")
-const PaintedSurfaces = preload("res://painted_surfaces.gd")
-var painted_surfaces := PaintedSurfaces.new()
+const Art = preload("res://valley_interface_style.gd")
+const Craft = preload("res://valley_craft.gd")
+const Architecture = preload("res://valley_architecture.gd")
+const Botany = preload("res://valley_botany.gd")
+const RoomArt = preload("res://valley_room_art.gd")
 const PainterlyResident = preload("res://painterly_resident.gd")
 # Read-only presentation: every interactive object is anchored to snapshot data.
 const Snapshot = preload("res://snapshot.gd")
-const PLASTER = preload("res://art/plaster-gouache-v1.png")
+const MIST_BACKDROP = preload("res://art/valley-mists-v1.png")
+const MEADOW = preload("res://art/courtyard-meadow-v1.png")
+const GROUND_SHADER = preload("res://art/courtyard_ground.gdshader")
+const SHADOW_SHADER = preload("res://art/courtyard_shadow.gdshader")
+const TILE_COLORS := {"grass": 0, "path": 1, "water": 2, "soil": 3, "sand": 4, "road": 5, "bridge": 6, "cliff": 7}
 var room_id := ""
 var room_layouts := {}
 var room_world := ""
-var observer_inset := 0.0
 var show_place_labels := false
 var camera: Camera3D
 var sun: DirectionalLight3D
+var backdrop: TextureRect
 var sky_environment: Environment
+var building_doors := {}
 var terrain: Node3D
 var actors: Node3D
 var focus := Vector3(16, 0, 12)
 var map_key := ""
 var people := {}
-var materials := {}
 var residents_root: Node3D
 var motions := {}
 var last_revision := -1
+var camera_focus := Vector3(16, 0, 12)
+var camera_size := 26.0
+var outdoor_focus := Vector3.ZERO
+var outdoor_size := 26.0
+var outdoor_span := Vector2.ZERO
+var outdoor_fit := true
+var frame_span := Vector2.ZERO
+var fit_view := true
+const CAMERA_BOOM := Vector3(23, 32, 31)
 const MOVE_SECONDS := 0.35
+
+var craft := Craft.new()
+var architecture := Architecture.new(craft)
+var plants := Botany.new(craft, CAMERA_BOOM)
+var room_art := RoomArt.new(craft, architecture)
+var room_terrain_key := ""
+var garden_key := 0
 
 const MAX_PLAYBACK_SECONDS := 1.4
 # Replay confirmed edges in order, never shortcut a corner or extrapolate.
 func _process(delta: float) -> void:
+	var ease := 1.0 - exp(-10.0 * delta)
+	if fit_view:
+		_fit_camera_size()
+	camera_focus = camera_focus.lerp(focus, ease)
+	camera.size = lerpf(camera.size, camera_size, ease)
+	position_camera()
 	for id in people:
 		if not motions.has(id): people[id].advance_activity(delta)
 	for id in motions.keys():
@@ -51,6 +79,12 @@ func _process(delta: float) -> void:
 		if motion.elapsed >= motion.duration:
 			motions.erase(id)
 			actor.present_pose(false, 0.0)
+	var height := maxf(1.0, get_viewport().get_visible_rect().size.y)
+	for actor in people.values():
+		actor.advance_spacing(delta)
+		var caption: Label3D = actor.presentation.get_node("NameCaption")
+		if caption.visible:
+			caption.pixel_size = minf(.012, 25.0 * camera.size / (height * caption.font_size))
 
 func settle_motion() -> void:
 	for id in motions:
@@ -74,25 +108,37 @@ func _ready() -> void:
 	add_child(actors)
 	camera = Camera3D.new()
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
-	camera.size = 23
+	camera.size = camera_size
 	camera.far = 200
 	add_child(camera)
 	camera.current = true
 	position_camera()
 	sun = DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-55, -35, 0)
-	sun.light_color = Color("fff0ce")
-	sun.light_energy = 0.85
+	sun.rotation_degrees = Vector3(-49, -40, 0)
+	sun.shadow_blur = 2.3
+	sun.shadow_opacity = .74
+	sun.light_color = Color("fff4e4")
+	sun.light_energy = 0.68
 	sun.shadow_enabled = true
 	add_child(sun)
+	var sheet := CanvasLayer.new()
+	sheet.layer = -1
+	add_child(sheet)
+	backdrop = TextureRect.new()
+	backdrop.texture = MIST_BACKDROP
+	backdrop.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	backdrop.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	sheet.add_child(backdrop)
+	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var environment := WorldEnvironment.new()
 	var env := Environment.new()
 	sky_environment = env
-	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color("dce4d3")
+	env.background_mode = Environment.BG_CANVAS
+	env.background_canvas_max_layer = -1
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color("cddbd7")
-	env.ambient_light_energy = 0.45
+	env.ambient_light_color = Color("d8e0d6")
+	env.ambient_light_energy = 0.51
 	environment.environment = env
 	add_child(environment)
 
@@ -107,112 +153,90 @@ func update_daylight(world: Dictionary) -> void:
 	var daylight := smoothstep(-0.15, 0.35, elevation)
 	var twilight := (1.0 - absf(daylight * 2.0 - 1.0))
 	# Keep the hand-painted scene readable at night; this is not real moonlight.
-	sun.light_energy = lerpf(0.30, 0.85, daylight)
-	sun.light_color = Color("a7bce6").lerp(Color("fff0ce"), daylight).lerp(Color("ffbd88"), twilight * 0.45)
-	sky_environment.background_color = Color("46536a").lerp(Color("dce4d3"), daylight)
-	sky_environment.ambient_light_color = Color("a4b4d2").lerp(Color("cddbd7"), daylight)
-	sky_environment.ambient_light_energy = lerpf(0.62, 0.45, daylight)
-
-# Center the observed subject in the unobscured canvas, including on resize.
-func set_observer_inset(width: float) -> void:
-	observer_inset = maxf(width, 0.0)
-	_update_camera_inset()
-
-func _update_camera_inset() -> void:
-	if camera == null: return
-	var viewport_size := get_viewport().get_visible_rect().size
-	var inset := minf(observer_inset, viewport_size.x * 0.45)
-	camera.h_offset = -inset * 0.5 * camera.size / maxf(viewport_size.y, 1.0)
+	sun.light_energy = lerpf(0.29, 0.68, daylight)
+	sun.light_color = Color("acc2e4").lerp(Color("fff4e4"), daylight).lerp(Color("f5bd91"), twilight * .35)
+	backdrop.modulate = Color("acbbcc").lerp(Color.WHITE, daylight).lerp(Color("f2dfc9"), twilight * .38)
+	sky_environment.ambient_light_color = Color("a6b5d3").lerp(Color("d8e0d6"), daylight)
+	sky_environment.ambient_light_energy = lerpf(0.56, 0.51, daylight)
 
 func position_camera() -> void:
-	camera.position = focus + Vector3(26, 30, 32)
-	camera.look_at(focus)
-	_update_camera_inset()
+	camera.position = camera_focus + CAMERA_BOOM
+	camera.look_at(camera_focus)
+
+func _settle_camera() -> void:
+	camera_focus = focus
+	camera.size = camera_size
+	position_camera()
+
+func _fit_camera_size() -> void:
+	var viewport := get_viewport().get_visible_rect().size
+	var width := maxf(viewport.x - 100, 1)
+	var height := maxf(viewport.y - 154, 1)
+	var scale_factor := maxf(frame_span.x / width, frame_span.y / height)
+	camera_size = clampf(viewport.y * scale_factor, 9, 100)
 
 func center(world: Dictionary) -> void:
 	if world.is_empty(): return
+	fit_view = true
+	var extents: Vector3
 	if room_layouts.has(room_id):
 		var room: Dictionary = room_layouts[room_id]
-		focus = Vector3(room.width / 2.0, 0, room.height / 2.0)
-		camera.size = maxf(room.width, room.height) * 1.5
-		position_camera()
-		return
-	# Frame the real settlement rather than spending the first view on map edges.
-	# This is only a camera choice; no world objects or resident positions move.
-	var settlement: Variant = world.map.get("settlement")
-	focus = Vector3(world.map.width / 2.0, 0, world.map.height / 2.0)
-	if settlement is Dictionary:
-		if (settlement.get("x") is float or settlement.get("x") is int) and (settlement.get("y") is float or settlement.get("y") is int):
-			if is_finite(settlement.x) and is_finite(settlement.y) and settlement.x >= 0 and settlement.y >= 0 and settlement.x < world.map.width and settlement.y < world.map.height:
-				focus = Vector3(settlement.x, 0, settlement.y + 1.5)
-	camera.size = clampf(maxf(world.map.width, world.map.height) * 0.72, 16, 28)
-	position_camera()
+		focus = Vector3((room.width - 1) * .5, .9, (room.height + 1) * .5)
+		extents = Vector3(room.width + .65, 2.9, room.height - 1)
+	else:
+		focus = Vector3((world.map.width - 1) * .5, .9, (world.map.height - 1) * .5)
+		extents = Vector3(world.map.width + 1.8, 4.7, world.map.height + 1.8)
+	var back := CAMERA_BOOM.normalized()
+	var right := Vector3.UP.cross(back).normalized()
+	var up := back.cross(right)
+	frame_span = Vector2(extents.dot(right.abs()), extents.dot(up.abs()))
+	_fit_camera_size()
+	if not room_id.is_empty(): _settle_camera()
 
 func pan(delta: Vector2) -> void:
+	fit_view = false
 	var scale_factor := camera.size / get_viewport().get_visible_rect().size.y
-	focus -= (camera.global_basis.x * delta.x + Vector3(camera.global_basis.y.x, 0, camera.global_basis.y.z) * delta.y) * scale_factor
+	var up := Vector3(camera.global_basis.y.x, 0, camera.global_basis.y.z)
+	var offset := (camera.global_basis.x * delta.x + up * delta.y / maxf(up.length_squared(), .2)) * scale_factor
+	camera_focus -= offset
+	focus = camera_focus
 	position_camera()
 
 func close_view() -> void:
-	camera.size = 11
-	_update_camera_inset()
+	fit_view = false
+	camera_size = 10.5
 
 func zoom(direction: float) -> void:
-	camera.size = clampf(camera.size * direction, 8, 70)
-	_update_camera_inset()
+	fit_view = false
+	camera_size = clampf(camera_size * direction, 5.0, 100)
 
 # Only focus actors already rendered from the current validated snapshot.
 # Do not infer an outdoor location for indoor, absent or unknown residents.
 func focus_resident(id: String) -> bool:
 	if not people.has(id): return false
 	var actor: Node3D = people[id]
-	focus = actor.position
-	position_camera()
+	focus = actor.position + Vector3(.8, .65, -.65)
 	return true
 
-func mat(color: String, grass := false) -> Material:
-	var key := color + str(grass)
-	if materials.has(key): return materials[key]
-	if grass:
-		# Broad quiet pigment fields, not a high-frequency tiled photograph.
-		var meadow := ShaderMaterial.new()
-		meadow.shader = PaintedSurfaces.SHADER
-		meadow.set_shader_parameter("surface_kind", 4)
-		meadow.set_shader_parameter("pigment", Color(color))
-		materials[key] = meadow
-		return meadow
-	var material := StandardMaterial3D.new()
-	material.albedo_color = Color(color)
-	material.albedo_texture = PLASTER
-	material.roughness = 1.0
-	material.uv1_triplanar = true
-	material.uv1_world_triplanar = true
-	material.uv1_scale = Vector3.ONE * 0.38
-	materials[key] = material
-	return material
+func frame_building(id: String) -> void:
+	if not building_doors.has(id): return
+	fit_view = false
+	focus = building_doors[id] + Vector3(-.8, .6, -1.5)
+	camera_size = 18.5
 
-func mesh(parent: Node3D, shape: Mesh, at: Vector3, material: Material) -> MeshInstance3D:
-	var item := MeshInstance3D.new()
-	item.mesh = shape
-	item.position = at
-	item.material_override = material
-	parent.add_child(item)
-	return item
+func building_screen_position(id: String) -> Vector2:
+	if not building_doors.has(id): return Vector2(-10000, -10000)
+	return camera.unproject_position(building_doors[id])
 
-func box(parent: Node3D, at: Vector3, size: Vector3, material: Material) -> MeshInstance3D:
-	var shape := BoxMesh.new()
-	shape.size = size
-	return mesh(parent, shape, at, material)
-
-func orb(parent: Node3D, at: Vector3, size: Vector3, material: Material) -> MeshInstance3D:
-	var shape := SphereMesh.new()
-	shape.radial_segments = 12
-	shape.rings = 6
-	shape.radius = 0.5
-	shape.height = 1
-	var item := mesh(parent, shape, at, material)
-	item.scale = size
-	return item
+func select_resident(id: String) -> void:
+	for key in people:
+		var actor: Node3D = people[key]
+		var on_bed: bool = actor.activity_pose == "rest" and actor.bed_pose != null
+		actor.presentation.get_node("Selection").visible = key == id and not on_bed
+		var label: Label3D = actor.presentation.get_node_or_null("NameCaption")
+		if label != null:
+			label.position.y = 3.2 if on_bed else 2.12
+			label.visible = key == id
 
 func clear_children(node: Node) -> void:
 	for child in node.get_children():
@@ -234,41 +258,34 @@ func show_world(world: Dictionary, selected: String, continuous := true, paths: 
 		clear_people()
 		last_revision = -1
 		map_key = ""
+		building_doors.clear()
 		return
 	var key := str(world.id) + ":" + str(world.get("mapRevision", 0)) + ":" + str(hash(world.map)) + ":" + str(hash(world.get("buildings", [])))
 	var reset := key != map_key
 	if reset:
 		clear_people()
+		room_terrain_key = ""
 		map_key = key
 		clear_children(terrain)
 		build_terrain(world)
-	clear_children(actors)
+	# The landscape and its props are static across resident-only updates.
+	var names: Array = []
+	for person in world.get("residents", []):
+		names.append([person.id, person.get("name", "")])
+	var prop_key := hash([world.get("resources", []), world.get("plots", []),
+		world.get("definitions", {}), names, floorf(float(world.minute) / 1440)])
+	if reset or prop_key != garden_key:
+		garden_key = prop_key
+		clear_children(actors)
+		draw_gardens(world)
+		draw_resources(world)
+		craft.batch(actors)
 	var revision := int(world.get("revision", 0))
 	var new_snapshot := revision != last_revision or reset
 	var animate: bool = continuous and not reset and revision > last_revision and not world.get("clock", {}).get("paused", false)
 	if not continuous or world.get("clock", {}).get("paused", false):
 		settle_motion()
 	last_revision = revision
-	draw_gardens(world)
-	for resource in world.get("resources", []):
-		var at := Vector3(resource.at.x, 0, resource.at.y)
-		if resource.kind == "spring":
-			orb(actors, at + Vector3(0, 0.05, 0), Vector3(1.6, 0.12, 1.6), painted_surfaces.get_material("water"))
-		elif resource.kind == "bush":
-			for i in range(3):
-				orb(actors, at + Vector3((i-1)*0.25, 0.38, sin(i)*0.2), Vector3(0.7, 0.8, 0.7), mat("788d53" if resource.amount > 0 else "a59e7e", true))
-			if resource.amount > 0:
-				for i in range(mini(5, int(resource.amount))):
-					orb(actors, at + Vector3(cos(i*2.4)*0.35, 0.65, sin(i*2.4)*0.35), Vector3.ONE*0.15, mat("b45858"))
-		else:
-			box(actors, at+Vector3(0,0.25,0), Vector3.ONE*0.5, mat("a7a397"))
-		var label := Label3D.new()
-		label.font = UI_FONT
-		label.text = Snapshot.resource_name(resource.kind) + "：" + str(resource.amount)
-		# Keep resource captions off the nearby resident's hands and face.
-		label.position = at + Vector3(0, 0.18, 1.35)
-		style_caption(label, true)
-		actors.add_child(label)
 	var visible_ids := {}
 	for person in world.get("residents", []):
 		if not Snapshot.visible(person): continue
@@ -278,6 +295,7 @@ func show_world(world: Dictionary, selected: String, continuous := true, paths: 
 		var actor: Node3D = people.get(person.id)
 		if actor == null:
 			actor = create_person(person)
+			_add_resident_caption(actor, person)
 			residents_root.add_child(actor)
 			people[person.id] = actor
 			actor.position = target
@@ -298,13 +316,14 @@ func show_world(world: Dictionary, selected: String, continuous := true, paths: 
 		actor.update_provisions(person, world)
 		actor.set_activity_pose(person, continuous and not world.get("clock", {}).get("paused", true))
 		actor.set_meta("target", target)
-		actor.get_node("Selection").visible = person.id == selected
+	select_resident(selected)
 	for id in people.keys():
 		if not visible_ids.has(id):
 			motions.erase(id)
 			residents_root.remove_child(people[id])
 			people[id].queue_free()
 			people.erase(id)
+	_space_residents()
 
 # Optional detailed annotations, off by default so scenery reads as a place.
 func set_place_labels(enabled: bool) -> void:
@@ -313,7 +332,7 @@ func set_place_labels(enabled: bool) -> void:
 		label.visible = enabled
 
 func style_caption(label: Label3D, place := false) -> void:
-	label.font = UI_FONT
+	label.font = Art.hand()
 	label.font_size = 36
 	label.pixel_size = .012
 	label.modulate = Color("293d32")
@@ -329,124 +348,89 @@ func create_person(person: Dictionary) -> Node3D:
 	var actor := PainterlyResident.new()
 	actor.construct(person)
 	var ring := TorusMesh.new()
-	ring.inner_radius = 0.43
-	ring.outer_radius = 0.49
-	var selection := mesh(actor, ring, Vector3(0, 0.04, 0), mat("efbd6a"))
+	ring.inner_radius = .398
+	ring.outer_radius = .426
+	var selection := craft.mesh(actor.presentation, ring, Vector3(0, .036, 0), craft.mat("e8c57f"))
+	selection.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	selection.name = "Selection"
 	return actor
 
 func build_terrain(world: Dictionary) -> void:
 	var map: Dictionary = world.map
-	var palette := {"grass": "82966c", "water": "7caeb1", "path": "a38c6a", "soil": "a78e6c", "sand": "b3a084", "cliff": "929185", "road": "b8aa8c", "bridge": "87745b"}
-	box(terrain, Vector3((map.width-1)*0.5, -0.5, (map.height-1)*0.5), Vector3(map.width, 0.9, map.height), mat("918374"))
-	for y in range(map.height):
-		for x in range(map.width):
-			var tile: String = map.tiles[y*int(map.width)+x]
-			var shape := PlaneMesh.new()
-			shape.size = Vector2.ONE
-			var surface: Material = mat(palette.get(tile, "b8aa8c"), tile == "grass")
-			if tile == "water": surface = painted_surfaces.get_material("water")
-			elif tile == "bridge": surface = painted_surfaces.get_material("wood")
-			elif tile == "cliff": surface = painted_surfaces.get_material("stone")
-			mesh(terrain, shape, Vector3(x, 0.01 if tile != "water" else 0.025, y), surface)
+	building_doors.clear()
+	var dimensions := Vector2i(map.width, map.height)
+	var map_center := Vector3((dimensions.x - 1) * .5, 0, (dimensions.y - 1) * .5)
+	_build_ground(map, dimensions, map_center)
+	plants.build_rim(terrain, map)
 	for building in world.get("buildings", []):
-		var w: float = building.width
-		var d: float = building.height
-		var at := Vector3(building.at.x+(w-1)*0.5, 0, building.at.y+(d-1)*0.5)
-		box(terrain, at+Vector3(0, 1.2, 0), Vector3(w, 2.4, d), mat("c5b69b"))
-		box(terrain, at+Vector3(0, 0.18, 0), Vector3(w+0.12, 0.36, d+0.12), painted_surfaces.get_material("stone"))
-		# A closed gable fills the former roof gap. All geometry is presentation,
-		# with no collision/path changes and no invented chimney or storage props.
-		var gable := PrismMesh.new()
-		gable.size = Vector3(w, 1.1, d)
-		mesh(terrain, gable, at+Vector3(0,2.95,0), mat("c5b69b"))
-		var half_span := w/2.0 + .22
-		var rise := 1.1
-		var slope := atan2(rise,half_span)
-		var roof_length := sqrt(half_span*half_span+rise*rise)
-		var wood := painted_surfaces.get_material("wood")
-		for side in [-1, 1]:
-			var roof := box(terrain, at+Vector3(side*half_span/2, 2.95, 0), Vector3(roof_length, .13, d+.44), painted_surfaces.get_material("roof"))
-			roof.rotation.z = -side*slope
-			# Thin fascia follows the roof, rather than cutting into the wall.
-			for end in [-1,1]:
-				var verge := box(terrain,at+Vector3(side*half_span/2,2.94,end*(d/2+.23)),Vector3(roof_length,.15,.12),wood)
-				verge.rotation.z = -side*slope
-			box(terrain,at+Vector3(side*half_span,2.39,0),Vector3(.14,.18,d+.48),wood)
-		box(terrain,at+Vector3(0,3.53,0),Vector3(.20,.16,d+.50),painted_surfaces.get_material("roof"))
-		var door := Vector3(building.door.x, 0.05, building.door.y)
-		box(terrain, door, Vector3(0.85, 0.1, 0.85), painted_surfaces.get_material("stone"))
-		# Use the authoritative door to select the facade and exact lateral offset.
-		var relative := door-at
-		var along_z := absf(relative.z)>absf(relative.x)
-		var outward := Vector3(0,0,signf(relative.z)) if along_z else Vector3(signf(relative.x),0,0)
-		var tangent := Vector3.RIGHT if along_z else Vector3.BACK
-		var facade_width := w if along_z else d
-		var wall_center := at+outward*(d/2 if along_z else w/2)
-		var door_offset := clampf(relative.x if along_z else relative.z,-facade_width/2,facade_width/2)
-		var entry := wall_center+tangent*door_offset
-		_facade_piece(entry,tangent,outward,Vector3(0,.9,.025),Vector3(.8,1.8,.08),wood)
-		for side in [-1,1]:
-			_facade_piece(entry,tangent,outward,Vector3(side*.47,.97,.055),Vector3(.13,1.94,.12),wood)
-		_facade_piece(entry,tangent,outward,Vector3(0,1.97,.055),Vector3(1.08,.16,.13),wood)
-		# Flush dark glazing reads as a closed window, not an illuminated interior.
-		for side in [-1,1]:
-			var window_offset: float = door_offset+side*2.0
-			if absf(window_offset)+.62 < facade_width/2:
-				_facade_window(wall_center+tangent*window_offset,tangent,outward)
-		# A side window makes the building legible from the default isometric view.
-		var side_normal := Vector3.RIGHT if along_z else Vector3.BACK
-		var side_tangent := Vector3.BACK if along_z else Vector3.RIGHT
-		var side_center := at+side_normal*(w/2 if along_z else d/2)
-		_facade_window(side_center,side_tangent,side_normal)
+		building_doors[str(building.id)] = architecture.build(terrain, building, map)
+	plants.courtyard(terrain, world)
 
-# Local coordinates: x runs along a wall; z is a few centimetres outside it.
-# Decorative frames participate in the same CPU ray occlusion as their wall.
-func _facade_piece(origin: Vector3, tangent: Vector3, normal: Vector3, offset: Vector3, size: Vector3, material: Material) -> void:
-	var dimensions := Vector3(size.x,size.y,size.z) if tangent.x != 0 else Vector3(size.z,size.y,size.x)
-	box(terrain,origin+tangent*offset.x+Vector3.UP*offset.y+normal*offset.z,dimensions,material)
-
-func _facade_window(origin: Vector3, tangent: Vector3, normal: Vector3) -> void:
-	var wood := painted_surfaces.get_material("wood")
-	_facade_piece(origin,tangent,normal,Vector3(0,1.43,.025),Vector3(.96,.94,.07),mat("526b70"))
-	for side in [-1,1]:
-		_facade_piece(origin,tangent,normal,Vector3(side*.52,1.43,.06),Vector3(.11,1.13,.12),wood)
-	for height in [.91,1.95]:
-		_facade_piece(origin,tangent,normal,Vector3(0,height,.06),Vector3(1.15,.11,.12),wood)
-	_facade_piece(origin,tangent,normal,Vector3(0,1.43,.075),Vector3(.055,.98,.07),wood)
-	_facade_piece(origin,tangent,normal,Vector3(0,1.43,.075),Vector3(1.0,.055,.07),wood)
+func _build_ground(map: Dictionary, dimensions: Vector2i, center: Vector3) -> void:
+	var tile_image := Image.create_empty(dimensions.x, dimensions.y, false, Image.FORMAT_R8)
+	for y in range(dimensions.y):
+		for x in range(dimensions.x):
+			var index: int = TILE_COLORS.get(map.tiles[y * dimensions.x + x], 0)
+			tile_image.set_pixel(x, y, Color(index / 255.0, 0, 0))
+	var paint := ShaderMaterial.new()
+	paint.shader = GROUND_SHADER
+	paint.set_shader_parameter("tile_map", ImageTexture.create_from_image(tile_image))
+	paint.set_shader_parameter("meadow", MEADOW)
+	paint.set_shader_parameter("map_size", Vector2(dimensions))
+	var ground := PlaneMesh.new()
+	ground.size = Vector2(dimensions)
+	craft.mesh(terrain, ground, center + Vector3(0, .012, 0), paint)
+	craft.box(terrain, center - Vector3.UP * .28, Vector3(dimensions.x, .55, dimensions.y), craft.mat("8e8069"))
+	craft.box(terrain, center - Vector3.UP * .517, Vector3(dimensions.x + .055, .086, dimensions.y + .055), craft.mat("7b6a54"))
+	craft.box(terrain, center + Vector3(0, -.58, 0), Vector3(dimensions.x + .22, .10, dimensions.y + .22), craft.mat("655744"))
+	var veil := ShaderMaterial.new()
+	veil.shader = SHADOW_SHADER
+	veil.set_shader_parameter("board_size", Vector2(dimensions))
+	var shadow := PlaneMesh.new()
+	shadow.size = Vector2(dimensions) + Vector2(14, 14)
+	var paper_shadow := craft.mesh(terrain, shadow, center - Vector3(0, .66, 0), veil)
+	paper_shadow.name = "PaperShadow"
+	paper_shadow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
 # CPU triangle queries use the same opaque mesh geometry as rendering. No
 # physics bodies/step lag: playback, rotations and camera changes apply now.
 # Labels and the selection ring are annotations, not pick/occlusion surfaces.
-func pick(screen: Vector2) -> String:
+func pick(screen: Vector2) -> Dictionary:
 	var origin := camera.project_ray_origin(screen)
 	var direction := camera.project_ray_normal(screen)
 	var nearest := camera.far
-	var result := ""
+	var result := {}
 	var pending: Array[Node] = [terrain, actors, residents_root]
 	while not pending.is_empty():
 		var node: Node = pending.pop_back()
 		if node is Node3D and not node.is_visible_in_tree(): continue
 		pending.append_array(node.get_children())
-		if not node is MeshInstance3D or node.name == "Selection": continue
+		if not node is MeshInstance3D or node.name in ["Selection", "PaperShadow"]: continue
 		var item := node as MeshInstance3D
 		if item.mesh == null: continue
+		var inverse := item.global_transform.affine_inverse()
+		var local_origin := inverse * origin
+		var local_direction := (inverse.basis * direction).normalized()
+		if item.get_aabb().intersects_ray(local_origin, local_direction) == null: continue
 		if not item.mesh.has_meta("pick_triangles"):
 			item.mesh.set_meta("pick_triangles", item.mesh.generate_triangle_mesh())
 		var triangles: TriangleMesh = item.mesh.get_meta("pick_triangles")
-		var inverse := item.global_transform.affine_inverse()
-		var hit := triangles.intersect_ray(inverse * origin, (inverse.basis * direction).normalized())
+		var hit := triangles.intersect_ray(local_origin, local_direction)
 		if hit.is_empty(): continue
+		if item.has_meta("foliage_pixels") and not Botany.visible_texel(item, hit.position): continue
 		var point: Vector3 = item.global_transform * hit.position
 		var distance := (point-origin).dot(direction)
 		if distance < 0 or distance >= nearest: continue
 		nearest = distance
-		result = ""
+		result = {}
 		var owner_node: Node = item
 		while owner_node != self:
 			if owner_node.has_meta("resident_id"):
-				result = owner_node.get_meta("resident_id")
+				result = {"resident": owner_node.get_meta("resident_id")}
+				break
+			if owner_node.has_meta("building_id"):
+				var id: String = owner_node.get_meta("building_id")
+				if not id.is_empty(): result = {"building": id}
 				break
 			owner_node = owner_node.get_parent()
 	return result
@@ -454,6 +438,11 @@ func pick(screen: Vector2) -> String:
 # Cutaway presentation in room coordinates, not an outdoor footprint or teleport.
 func enter_room(world: Dictionary, id: String) -> bool:
 	if not room_layouts.has(id): return false
+	if room_id.is_empty():
+		outdoor_focus = focus
+		outdoor_size = camera_size
+		outdoor_span = frame_span
+		outdoor_fit = fit_view
 	room_id = id
 	room_world = world.id
 	map_key = ""
@@ -461,89 +450,37 @@ func enter_room(world: Dictionary, id: String) -> bool:
 	center(world)
 	return true
 
-func leave_room(world: Dictionary) -> void:
+func leave_room(_world: Dictionary) -> void:
+	if room_id.is_empty(): return
 	room_id = ""
 	map_key = ""
-	center(world)
+	focus = outdoor_focus
+	camera_size = outdoor_size
+	frame_span = outdoor_span
+	fit_view = outdoor_fit
+	if fit_view: _fit_camera_size()
+	_settle_camera()
 
 func show_room(world: Dictionary, selected: String, continuous := true) -> void:
 	var prior_poses := {}
 	for id in people:
 		prior_poses[id] = {"pose":people[id].activity_pose,"phase":people[id].activity_phase,"angle":people[id].rotation.y}
-	clear_children(terrain)
 	clear_children(actors)
 	clear_people()
 	map_key = ""
 	var room: Dictionary = room_layouts[room_id]
-	var w: float = room.width
-	var h: float = room.height
-	box(terrain, Vector3((w-1)/2, -0.15, (h+2)/2), Vector3(w, 0.3, h-3), painted_surfaces.get_material("wood"))
-	# Back/side walls are full height; near walls are cut away for observation.
-	box(terrain, Vector3((w-1)/2, 1.2, 2.4), Vector3(w, 2.4, 0.2), mat("c5b69b"))
-	box(terrain, Vector3(0, 1.2, (h+2)/2), Vector3(0.2, 2.4, h-3), mat("c5b69b"))
-	box(terrain, Vector3(w-1, 0.15, (h+2)/2), Vector3(0.2, 0.3, h-3), mat("c5b69b"))
-	for x in range(int(w)):
-		if x != int(room.entry.x): box(terrain, Vector3(x, 0.15, h-1), Vector3(1,0.3,0.2), mat("c5b69b"))
-	# Kitchen work happens at its existing authoritative front interaction cell.
-	for slot in room.slots:
-		if slot.kind != "kitchen": continue
-		var stove := Vector3(slot.at.x,0,slot.at.y-.85)
-		var cooking := false
-		for person in world.residents:
-			var activity: Variant = person.get("activity")
-			if person.get("inside") != room_id or not activity is Dictionary: continue
-			if activity.get("action", {}).get("type") != "cook" or not activity.get("path", []).is_empty(): continue
-			var at: Variant = person.get("roomAt")
-			if at is Dictionary and at.x == slot.at.x and at.y == slot.at.y and float(activity.get("remaining",0)) > 0:
-				cooking = true
-		box(terrain,stove+Vector3(0,.40,0),Vector3(1.5,.8,.9),mat("b8a68c"))
-		box(terrain,stove+Vector3(0,.82,0),Vector3(1.65,.12,1.0),mat("64594d"))
-		orb(terrain,stove+Vector3(0,.95,0),Vector3(.44,.20,.34),mat("555f5b"))
-		orb(terrain,stove+Vector3(0,1.10,0),Vector3(.37,.025,.27),mat("be9658" if cooking else "393e3a"))
-		for dx in [-.48,.48]: box(terrain,stove+Vector3(dx,1.02,0),Vector3(.16,.08,.12),mat("514b40"))
-		if cooking:
-			for i in range(3):
-				var offset := fmod(float(world.minute)*.13+i*.31,1.0)
-				orb(actors,stove+Vector3(sin(i*2.1)*.16,1.17+offset*.65,0),Vector3.ONE*(.06+offset*.04),mat("eee7d2"))
-	var bed_cells := {}
-	# Render the authoritative blocked table footprint, with two meal seats.
-	if world.get("mvpRooms", {}).get("version", 0) == 1:
-		var cx := floorf(w/2.0)
-		var table_center := Vector3(cx-.5,0,6.5)
-		box(terrain,table_center+Vector3(0,.83,0),Vector3(3.9,.15,1.9),painted_surfaces.get_material("wood"))
-		for dx in [-1.65,1.65]:
-			for dz in [-.65,.65]:
-				box(terrain,table_center+Vector3(dx,.4,dz),Vector3(.15,.8,.15),painted_surfaces.get_material("wood"))
-		for x in range(int(cx)-2,int(cx)+2):
-			for y in [6,7]: bed_cells[Vector2i(x,y)] = true
-		for dx in [-1,1]:
-			var seat := Vector3(cx+dx,0,8)
-			box(terrain,seat+Vector3(0,.43,0),Vector3(.72,.12,.72),painted_surfaces.get_material("wood"))
-			for sx in [-.25,.25]:
-				for sz in [-.25,.25]:
-					box(terrain,seat+Vector3(sx,.2,sz),Vector3(.09,.4,.09),painted_surfaces.get_material("wood"))
-	for slot in room.slots:
-		if slot.kind != "bed": continue
-		# Bed footprint is defined by roomLayout's blocked cells, not resident position.
-		for x in range(int(slot.at.x)-1, int(slot.at.x)+1):
-			for y in range(int(slot.at.y)-2, int(slot.at.y)):
-				var at := {"x":x,"y":y}
-				for cell in room.blocked:
-					if cell.x == x and cell.y == y: bed_cells[Vector2i(x,y)] = true
-		# One recognizable bed over the same authoritative 2×2 footprint.
-		var center_at := Vector3(slot.at.x-.5,0,slot.at.y-1.5)
-		box(terrain,center_at+Vector3(0,.30,0),Vector3(1.92,.25,1.92),painted_surfaces.get_material("wood"))
-		box(terrain,center_at+Vector3(0,.52,0),Vector3(1.82,.16,1.82),mat("e5dfc6"))
-		box(terrain,center_at+Vector3(0,.615,-.30),Vector3(1.80,.03,1.15),mat("91aaa2"))
-		box(terrain,center_at+Vector3(0,.66,.63),Vector3(.64,.12,.36),mat("f3e6ca"))
-		box(terrain,center_at+Vector3(0,.53,.94),Vector3(1.92,.86,.10),painted_surfaces.get_material("wood"))
-		for dx in [-.8,.8]:
-			for dz in [-.8,.8]:
-				box(terrain,center_at+Vector3(dx,.13,dz),Vector3(.13,.26,.13),painted_surfaces.get_material("wood"))
-	for at in room.blocked:
-		if not bed_cells.has(Vector2i(at.x,at.y)):
-			# Neutral obstacle marker: no invented table/care/kitchen furniture.
-			box(terrain,Vector3(at.x,0.06,at.y),Vector3(0.9,0.12,0.9),mat("a79881"))
+	var shared := false
+	for building in world.get("buildings", []):
+		if building.get("id") == room_id:
+			shared = building.get("kind") == "lodge"
+			break
+	var dining: bool = world.get("mvpRooms", {}).get("version", 0) == 1
+	var key := str([world.id, room_id, hash(room), shared, dining])
+	if key != room_terrain_key:
+		room_terrain_key = key
+		clear_children(terrain)
+		room_art.build(terrain, room, shared, dining)
+	room_art.paint_cooking(actors, world, room, room_id)
 	for person in world.residents:
 		if person.get("inside") != room_id or person.get("status") != "alive" or person.get("regionalLocation") != null or person.get("residency") == "outside": continue
 		if not Snapshot.resident_room_position(person.get("roomAt"),room): continue
@@ -558,16 +495,40 @@ func show_room(world: Dictionary, selected: String, continuous := true) -> void:
 		actor.present_pose(false, actor.activity_phase)
 		residents_root.add_child(actor)
 		people[person.id] = actor
-		actor.get_node("Selection").visible = person.id == selected
-		var label := Label3D.new()
-		label.font = UI_FONT
-		label.text = Snapshot.resident_name(person)
-		style_caption(label)
-		label.visible = person.id == selected
-		var on_bed: bool = actor.activity_pose == "rest" and actor.bed_pose != null
-		label.position = actor.position + Vector3(0,3.2 if on_bed else 2.2,0)
-		if on_bed: actor.get_node("Selection").visible = false
-		actors.add_child(label)
+		_add_resident_caption(actor, person)
+	_space_residents(true)
+	select_resident(selected)
+
+func _add_resident_caption(actor: Node3D, person: Dictionary) -> void:
+	var label := Label3D.new()
+	label.name = "NameCaption"
+	label.text = Snapshot.resident_name(person)
+	style_caption(label)
+	label.outline_size = 4
+	label.position.y = 2.12
+	actor.presentation.add_child(label)
+
+# More than one resident can occupy a cell. Keep the actor root and confirmed
+# path on that cell, while the visible figures stand apart within its bounds.
+func _space_residents(settle := false) -> void:
+	var cells := {}
+	var ids := people.keys()
+	ids.sort()
+	for id in ids:
+		var actor: PainterlyResident = people[id]
+		actor.offset_goal = Vector3.ZERO
+		if actor.activity_pose == "rest" and actor.bed_pose != null: continue
+		var target: Vector3 = actor.get_meta("target", actor.position)
+		var cell := Vector2i(roundi(target.x), roundi(target.z))
+		if not cells.has(cell): cells[cell] = []
+		cells[cell].append(actor)
+	var screen_right := Vector3.UP.cross(CAMERA_BOOM).normalized()
+	for group in cells.values():
+		if group.size() < 2: continue
+		for i in range(group.size()):
+			group[i].offset_goal = screen_right.rotated(Vector3.UP, PI + i * TAU / group.size()) * .393
+	if settle:
+		for actor in people.values(): actor.advance_spacing(1.0)
 
 # Each bed is an actual owned plot; growth and moisture come only from snapshots.
 func draw_gardens(world: Dictionary) -> void:
@@ -576,29 +537,34 @@ func draw_gardens(world: Dictionary) -> void:
 		var at := Vector3(plot.at.x,0,plot.at.y)
 		var crop: Variant = plot.get("crop")
 		var wet: bool = crop is Dictionary and crop.get("wateredDay",-1) == floorf(float(world.minute)/1440.0)
-		box(actors,at+Vector3(0,.025,0),Vector3(1.85,.10,1.85),mat("6c5140" if wet else "9b7550"))
-		for dx in [-.95,.95]: box(actors,at+Vector3(dx,.10,0),Vector3(.09,.16,2.0),painted_surfaces.get_material("wood"))
-		for dz in [-.95,.95]: box(actors,at+Vector3(0,.10,dz),Vector3(2.0,.16,.09),painted_surfaces.get_material("wood"))
 		var status := "空田"
+		var growth := -1.0
 		if crop is Dictionary:
 			var definition: Dictionary = world.get("definitions", {}).get(crop.definition, {})
 			var days: float = float(definition.get("data", {}).get("growthDays", 4))
-			var growth := clampf(float(crop.growth)/maxf(1,days),0,1)
-			status = "成熟" if growth >= 1 else "生长 %s/%s 天" % [str(int(crop.growth)),str(int(days))]
+			growth = clampf(float(crop.growth) / maxf(1, days), 0, 1)
+			status = "成熟" if growth >= 1 else "生长 %s/%s 天" % [str(int(crop.growth)), str(int(days))]
 			status += " · 已浇水" if wet else " · 未浇水"
-			for dx in [-.55,.55]:
-				for dz in [-.55,.55]:
-					var root := at+Vector3(dx,.12,dz)
-					if growth > 0: orb(actors,root,Vector3(.12,.12,.12)*(0.5+growth),mat("e9d5a4"))
-					for side in [-1,1]:
-						var leaf := orb(actors,root+Vector3(side*.10,.06+growth*.16,0),Vector3(.10+growth*.10,.07+growth*.15,.08),mat("72905c",true))
-						leaf.rotation.z = side*.45
+		plants.garden(actors, at, wet, growth)
 		var owner := ""
 		for person in world.get("residents", []):
 			if person.id == plot.ownerId: owner = str(person.name)
 		var label := Label3D.new()
-		label.font = UI_FONT
+		label.font = Art.hand()
 		label.text = owner+"的田\n"+status.replace(" · ", "\n")
 		label.position = at+Vector3(0,.18,1.55)
+		style_caption(label, true)
+		actors.add_child(label)
+
+func draw_resources(world: Dictionary) -> void:
+	for resource in world.get("resources", []):
+		var at := Vector3(resource.at.x, 0, resource.at.y)
+		match resource.kind:
+			"spring": plants.spring(actors, at, float(resource.amount))
+			"bush": plants.berry_bush(actors, at, float(resource.amount))
+			_: craft.stone(actors, at + Vector3.UP * .171, Vector3(.55, .42, .50), craft.mat("a7a397"), int(at.x + at.z))
+		var label := Label3D.new()
+		label.text = Snapshot.resource_name(resource.kind) + "：" + str(resource.amount)
+		label.position = at + Vector3(0, .18, 1.35)
 		style_caption(label, true)
 		actors.add_child(label)

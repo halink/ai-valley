@@ -2,10 +2,21 @@ extends RefCounted
 # Original code-authored material recipes; no external asset/license dependency.
 const SHADER = preload("res://art/painted_surfaces.gdshader")
 const RECIPES := {
-	"roof": [0, "686a70"],
-	"wood": [1, "91704f"],
-	"water": [2, "78a3a6"],
-	"stone": [3, "929389"],
+	"roof": [0, "68665f"],
+	"moss_roof": [0, "626b5d"],
+	"clay_roof": [0, "9c735a"],
+	"wood": [1, "a17d56"],
+	"light_wood": [1, "b18e61"],
+	"water": [2, "749f9a"],
+	"timber": [1, "745845"],
+	"floor": [3, "a38362"],
+	"light_floor": [3, "b39670"],
+	"woven": [4, "94816a"],
+	"indigo": [4, "62798b"],
+	"dyed_linen": [4, "a4765d"],
+	"cream_linen": [4, "ddcdb0"],
+	"soil": [5, "896c51"],
+	"wet_soil": [5, "735444"],
 }
 var cache := {}
 func get_material(kind: String) -> ShaderMaterial:

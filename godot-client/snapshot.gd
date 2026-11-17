@@ -333,33 +333,6 @@ static func resident_status(person: Dictionary) -> String:
 static func resource_name(code: String) -> String:
 	return {"spring": "泉水", "bush": "浆果丛", "tree": "树木", "rock": "岩石"}.get(code, "未知资源")
 
-# Observer-visible facts only, not a resident's memory or a complete history.
-static func event_summary(world: Dictionary, selected: String, resident_only: bool, connected: bool) -> String:
-	if not connected:
-		return "近期事件：未连接／数据过期，等待新快照"
-	if resident_only and selected.is_empty():
-		return "近期事件：请先选择一位居民"
-	var lines: Array[String] = []
-	var entries: Array = world.get("events", [])
-	for i in range(entries.size() - 1, -1, -1):
-		var entry = entries[i]
-		if not entry is Dictionary or not entry.get("text") is String:
-			continue
-		if resident_only and (not entry.get("actors") is Array or not selected in entry.actors):
-			continue
-		var at = entry.get("at")
-		var when := "时间未知"
-		if (at is int or at is float) and is_finite(at) and at >= 0 and at <= 9007199254740991:
-			var whole := int(floor(at))
-			when = "第 %d 天 %02d:%02d" % [int(whole / 1440) + 1, int((whole % 1440) / 60), whole % 60]
-		lines.append("[%s] %s" % [when, entry.text])
-		if lines.size() == 8:
-			break
-	var scope := "所选居民参与" if resident_only else "全谷"
-	if lines.is_empty():
-		return "近期事件（%s）：当前快照无记录，不代表从未发生" % scope
-	return "近期事件（%s，最新在前，最多 8 条）：\n" % scope + "\n".join(lines) + "\n仅展示当前快照，不是完整历史或个人记忆。"
-
 # Only the resident's delivered records; never fill gaps from the world ledger.
 static func memory_summary(person: Dictionary) -> String:
 	var memories = person.get("memories")

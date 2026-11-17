@@ -1,10 +1,12 @@
 extends Node3D
-## Original code-authored 3D resident sample. Geometry only, never simulation.
-## Local -Z is forward; feet sit at y=0.025 above the ground plane.
-static var meshes: Dictionary = {}
-var garments: Array[MeshInstance3D] = []
-var applied_colors: Dictionary = {}
-var rest_transforms: Dictionary = {}
+## Read-only actor presentation. The root stays at the authoritative cell.
+const ResidentFigure = preload("res://resident_figure.gd")
+
+static var vessel_meshes := {}
+var figure: ResidentFigure
+var presentation: Node3D
+var view_offset := Vector3.ZERO
+var offset_goal := Vector3.ZERO
 var activity_pose := "idle"
 var activity_phase := 0.0
 var carried_food := 0
@@ -28,89 +30,59 @@ static func paint(color: Color) -> StandardMaterial3D:
 	var material := StandardMaterial3D.new()
 	material.albedo_color = color
 	material.vertex_color_use_as_albedo = true
-	material.roughness = 0.94
+	material.roughness = 1.0
+	material.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
 	return material
 
-# Flat-shaded elliptical ring loft with subtly varied pigment per face.
+# Vessel profile follows its outside and the recessed bowl interior.
 # Rings are (radius_x, height, radius_z); closed caps, clockwise front faces.
 static func loft(rings: Array[Vector3]) -> ArrayMesh:
 	var key := str(rings)
-	if meshes.has(key): return meshes[key]
+	if vessel_meshes.has(key): return vessel_meshes[key]
 	var surface := SurfaceTool.new()
 	surface.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var sides := 10
+	var sides := 18
 	for row in range(rings.size()-1):
 		for side in range(sides):
-			var points: Array[Vector3] = []
-			for pair in [Vector2i(row,side),Vector2i(row+1,side),Vector2i(row+1,side+1),Vector2i(row,side+1)]:
-				var ring: Vector3 = rings[pair.x]
-				var angle: float = TAU * pair.y / sides
-				points.append(Vector3(cos(angle)*ring.x,ring.y,sin(angle)*ring.z))
-			for index in [0,2,1,0,3,2]:
-				var pigment := 0.91 + 0.09 * float((side*7+row*3)%5)/4.0
-				surface.set_color(Color(pigment,pigment,pigment))
-				surface.add_vertex(points[index])
+			var corners := [
+				Vector2i(row, side), Vector2i(row + 1, side),
+				Vector2i(row + 1, side + 1), Vector2i(row, side + 1)
+			]
+			for index in [0, 2, 1, 0, 3, 2]:
+				var corner: Vector2i = corners[index]
+				var ring := rings[corner.x]
+				var angle := TAU * corner.y / sides
+				var value := .958 + sin(angle * 3.0 + corner.x * .39) * .036
+				surface.set_color(Color(value, value, value))
+				surface.set_uv(Vector2(float(corner.y) / sides, ring.y))
+				surface.add_vertex(Vector3(cos(angle) * ring.x, ring.y, sin(angle) * ring.z))
 	surface.generate_normals()
 	var result := surface.commit()
-	meshes[key] = result
+	vessel_meshes[key] = result
 	return result
 
-func part(label: String, rings: Array[Vector3], at: Vector3, color: String, clothing := false) -> MeshInstance3D:
-	if rings[0] == Vector3.ZERO and rings[1].y > 0:
-		rings[0] = Vector3(0,rings[1].y,0)
-	var node := MeshInstance3D.new()
-	node.name = label
-	node.mesh = loft(rings)
-	node.position = at
-	node.material_override = paint(Color(color))
-	add_child(node)
-	if clothing: garments.append(node)
-	return node
-
 func construct(person: Dictionary) -> void:
-	set_meta("resident_id",str(person.id))
-	# Stable identity-derived silhouette, not inferred gender/job/personality.
-	var variant := int(str(person.id).sha256_text().substr(62,2).hex_to_int()) % 2
-	set_meta("silhouette",variant)
-	var skin := "d8ab83"
-	for side in [-1,1]:
-		part("Boot"+str(side),[Vector3.ZERO,Vector3(.105,.025,.16),Vector3(.105,.17,.16),Vector3(.08,.22,.09),Vector3(0,.22,0)],Vector3(side*.13,0,-.035),"65523f")
-		part("Trouser"+str(side),[Vector3.ZERO,Vector3(.075,.17,.085),Vector3(.09,.67,.1),Vector3(0,.67,0)],Vector3(side*.13,0,0),"657777")
-		var arm := part("Sleeve"+str(side),[Vector3.ZERO,Vector3(.065,.68,.075),Vector3(.1,1.05,.095),Vector3(.07,1.13,.07),Vector3(0,1.13,0)],Vector3(side*.29,0,0),"ffffff",true)
-		arm.rotation.z = -side*.07
-		part("Hand"+str(side),[Vector3.ZERO,Vector3(.065,.58,.065),Vector3(.075,.68,.075),Vector3(0,.73,0)],Vector3(side*.335,0,0),skin)
-	part("Tunic",[Vector3(0,.49,0),Vector3(.26 if variant==0 else .23,.49,.17),Vector3(.20,.85,.14),Vector3(.24,1.07,.16),Vector3(.12,1.15,.10),Vector3(0,1.15,0)],Vector3.ZERO,"ffffff",true)
-	part("Belt",[Vector3(0,.74,0),Vector3(.225,.74,.158),Vector3(.22,.79,.158),Vector3(0,.79,0)],Vector3.ZERO,"846b47")
-	part("Neck",[Vector3.ZERO,Vector3(.085,1.09,.08),Vector3(.085,1.25,.08),Vector3(0,1.25,0)],Vector3.ZERO,skin)
-	part("Head",[Vector3(0,1.19,0),Vector3(.13,1.23,.12),Vector3(.185,1.39,.16),Vector3(.17,1.52,.15),Vector3(.1,1.57,.1),Vector3(0,1.59,0)],Vector3.ZERO,skin)
-	part("Hair",[Vector3(0,1.49,0),Vector3(.185,1.49,.16),Vector3(.19,1.55,.17),Vector3(.12,1.64,.12),Vector3(0,1.66,0)],Vector3(0,0,.025),"514638")
-	if variant == 0:
-		part("SoftCap",[Vector3(0,1.55,0),Vector3(.26,1.55,.23),Vector3(.26,1.58,.23),Vector3(.19,1.60,.17),Vector3(.16,1.72,.15),Vector3(0,1.74,0)],Vector3.ZERO,"a99361")
-		part("Neckerchief",[Vector3(0,1.01,0),Vector3(.13,1.01,.115),Vector3(.19,1.08,.145),Vector3(.12,1.16,.105),Vector3(0,1.16,0)],Vector3(0,0,-.025),"d6b674")
-		part("ScarfEnd",[Vector3(0,.87,0),Vector3(.055,.91,.025),Vector3(.07,1.07,.03),Vector3(0,1.07,0)],Vector3(-.04,0,-.165),"d6b674")
-	else:
-		part("HairKnot",[Vector3.ZERO,Vector3(.12,.03,.12),Vector3(.13,.12,.12),Vector3(0,.19,0)],Vector3(0,1.45,.16),"514638")
-		for side in [-1,1]:
-			part("HairLock"+str(side),[Vector3(0,1.14,0),Vector3(.065,1.20,.075),Vector3(.065,1.43,.085),Vector3(.045,1.52,.06),Vector3(0,1.52,0)],Vector3(side*.15,0,.04),"514638")
-		# A simple linen front panel is clothing, not an invented equipment item.
-		part("LinenFront",[Vector3(0,.51,0),Vector3(.17,.52,.018),Vector3(.15,.75,.02),Vector3(.11,1.04,.018),Vector3(0,1.04,0)],Vector3(0,0,-.165),"d4c9a6")
-		part("Collar",[Vector3(0,1.08,0),Vector3(.16,1.08,.12),Vector3(.13,1.18,.11),Vector3(0,1.18,0)],Vector3.ZERO,"d9bb7e")
-	# Face pieces remain within the existing head envelope and move with it.
-	for side in [-1,1]:
-		part("Ear"+str(side),[Vector3.ZERO,Vector3(.036,.02,.035),Vector3(.04,.095,.04),Vector3(0,.12,0)],Vector3(side*.175,1.32,.005),skin)
-		part("Brow"+str(side),[Vector3.ZERO,Vector3(.037,.008,.009),Vector3(.032,.019,.009),Vector3(0,.024,0)],Vector3(side*.073,1.465,-.145),"514638")
-	part("Mouth",[Vector3.ZERO,Vector3(.035,.005,.009),Vector3(.026,.013,.009),Vector3(0,.017,0)],Vector3(0,1.30,-.144),"936755")
-	part("Nose",[Vector3.ZERO,Vector3(.04,.03,.045),Vector3(.035,.10,.065),Vector3(0,.12,0)],Vector3(0,1.32,-.15),skin)
-	for side in [-1,1]:
-		part("Eye"+str(side),[Vector3.ZERO,Vector3(.016,.016,.014),Vector3(0,.032,0)],Vector3(side*.073,1.415,-.158),"403c36")
-	set_meta("garments",garments)
+	var id := str(person.id)
+	set_meta("resident_id", id)
+	var variant := int(id.sha256_text().substr(62, 2).hex_to_int()) % 2
+	set_meta("silhouette", variant)
+	var wrapped := variant == 0
+	rotation.y = -2.94 if wrapped else -2.23
+	presentation = Node3D.new()
+	presentation.name = "Presentation"
+	add_child(presentation)
+	figure = ResidentFigure.new()
+	presentation.add_child(figure)
+	figure.construct(wrapped)
 	update_appearance(person)
-	for child in get_children(): rest_transforms[child.name] = child.transform
+	_build_provisions()
+
+func _build_provisions() -> void:
 	# Presentation vessels, not additional simulated inventory or equipment.
 	props = Node3D.new()
 	props.name = "Provisions"
-	add_child(props)
-	food_prop = provision(Vector3(.11,.11,.11), "b45858")
+	presentation.add_child(props)
+	food_prop = provision(Vector3.ONE * .048, "b45858")
 	meal_bowl = provision(Vector3.ONE, "d2bd8c")
 	meal_bowl.mesh = loft([Vector3(0,-.07,0),Vector3(.08,-.07,.08),Vector3(.17,.05,.17),Vector3(.16,.08,.16),Vector3(.13,.03,.13),Vector3(0,.03,0)])
 	meal_surface = provision(Vector3(.13,.015,.13),"af8650")
@@ -120,7 +92,7 @@ func construct(person: Dictionary) -> void:
 	basket.mesh = loft([Vector3(0,0,0),Vector3(.17,0,.10),Vector3(.20,.18,.12),Vector3(.17,.18,.09),Vector3(.14,.04,.07),Vector3(0,.04,0)])
 	basket.position = Vector3(-.20,.64,.23)
 	for i in range(3):
-		var berry := provision(Vector3(.09,.09,.09), "b45858")
+		var berry := provision(Vector3.ONE * .056, "b45858")
 		berry.position = Vector3(-.24 + i*.085,.78,.21)
 		carried_berries.append(berry)
 
@@ -152,6 +124,7 @@ func update_provisions(person: Dictionary, world: Dictionary) -> void:
 	var action: Dictionary = activity.get("action", {})
 	action_item = str(action.get("item", ""))
 	food_prop.material_override = paint(Color("e9d5a4" if action_item == "turnip" else "b45858"))
+	food_prop.scale = Vector3.ONE * (.089 if action_item == "turnip" else .048)
 	if action.get("type") == "eat" and action.get("mvpAtTable", false) and person.get("inside") != null and onsite_pose(person) == "eat":
 		for b in world.get("buildings", []):
 			if b.id == person.inside and b.id == person.get("homeId"):
@@ -210,30 +183,15 @@ func advance_activity(delta: float) -> void:
 			var direction: Vector3 = facing_target - position
 			if direction.length_squared() > .01:
 				rotation.y = lerp_angle(rotation.y, atan2(-direction.x,-direction.z), minf(delta*6.0,1.0))
-	present_pose(false, activity_phase)
+		present_pose(false, activity_phase)
 
 func update_appearance(person: Dictionary) -> void:
-	var appearance: Dictionary = person.get("appearance",{})
-	for feature in ["shirt","hair","skin"]:
-		var color := Color({"shirt":"9b6b55","hair":"514638","skin":"d8ab83"}[feature])
-		var value: Variant = appearance.get(feature)
-		if value is float or value is int: color = Color.hex(int(value)*256+255)
-		if applied_colors.get(feature) == color: continue
-		applied_colors[feature] = color
-		var material := paint(color)
-		for child in get_children():
-			var label := str(child.name)
-			if (feature == "shirt" and child in garments) or (feature == "hair" and (label.begins_with("Hair") or label.begins_with("Brow"))) or (feature == "skin" and (label in ["Head","Neck","Nose"] or label.begins_with("Hand") or label.begins_with("Ear"))):
-				child.material_override = material
+	figure.apply_appearance(person.get("appearance", {}))
 
-# Only transforms geometry children; authoritative root, labels and selection stay fixed.
-func reset_pose() -> void:
-	for label in rest_transforms:
-		get_node(NodePath(label)).transform = rest_transforms[label]
-
-func pivot_part(label: String, pivot: Vector3, angle: float) -> void:
-	var rotation_basis := Basis(Vector3.RIGHT, angle)
-	get_node(NodePath(label)).transform = Transform3D(rotation_basis, pivot - rotation_basis * pivot) * rest_transforms[label]
+func advance_spacing(delta: float) -> void:
+	if view_offset == Vector3.ZERO and offset_goal == Vector3.ZERO: return
+	view_offset = view_offset.move_toward(offset_goal, delta * 2.4)
+	presentation.position = Basis(Vector3.UP, -rotation.y) * view_offset
 
 static func onsite_pose(person: Dictionary) -> String:
 	var activity: Variant = person.get("activity")
@@ -261,66 +219,78 @@ func set_activity_pose(person: Dictionary, enabled: bool) -> void:
 	var next_pose := onsite_pose(person) if enabled else "idle"
 	if next_pose != activity_pose: activity_phase = 0.0
 	activity_pose = next_pose
-	present_pose(false, 0.0)
+	present_pose(false, activity_phase)
 
 func present_pose(walking: bool, phase: float) -> void:
-	reset_pose()
-	food_prop.visible = not walking and activity_pose == "eat" and ((action_item == "berry" and carried_food > 0) or (action_item == "turnip" and carried_roots > 0))
-	meal_bowl.visible = not walking and activity_pose == "eat" and action_item == "meal" and carried_meals > 0
+	figure.relax()
+	var eating := not walking and activity_pose == "eat"
+	var drinking := not walking and activity_pose == "drink"
+	var drawing_water := not walking and activity_pose == "gather" and gathering_kind == "spring"
+	var resting := not walking and activity_pose == "rest" and bed_pose is Transform3D
+	food_prop.visible = eating and ((action_item == "berry" and carried_food > 0) or (action_item == "turnip" and carried_roots > 0))
+	meal_bowl.visible = eating and action_item == "meal" and carried_meals > 0
 	meal_surface.visible = meal_bowl.visible
-	water_prop.visible = carried_water > 0 or (not walking and activity_pose == "gather" and gathering_kind == "spring")
-	water_prop.position = Vector3(.25,.75,.19)
-	water_prop.rotation = Vector3.ZERO
-	basket.visible = carried_food > 0
-	for i in range(carried_berries.size()): carried_berries[i].visible = carried_food > i
+	water_prop.visible = not resting and (carried_water > 0 or drawing_water)
+	basket.visible = not resting and carried_food > 0
+	for i in range(carried_berries.size()): carried_berries[i].visible = basket.visible and carried_food > i
+
 	if walking:
-		for side in [-1, 1]:
-			var swing: float = sin(phase) * side * 0.24
-			for label in ["Boot", "Trouser"]: pivot_part(label+str(side), Vector3(side*.13,.67,0), swing)
-			for label in ["Sleeve", "Hand"]: pivot_part(label+str(side), Vector3(side*.29,1.08,0), -swing)
-	elif activity_pose == "gather":
-		var reach := .75 + sin(phase)*.3
-		if gathering_kind == "spring": reach = .45 + sin(phase)*.35
-		for side in [-1, 1]:
-			for label in ["Sleeve", "Hand"]: pivot_part(label+str(side), Vector3(side*.29,1.08,0), reach)
-		if gathering_kind == "spring": water_prop.position = Vector3(.33,.45 + sin(phase)*.08,-.32)
-	elif activity_pose == "cook":
-		for side in [-1,1]:
-			for label in ["Sleeve", "Hand"]: pivot_part(label+str(side),Vector3(side*.29,1.08,0),1.1+sin(phase+side)*.15)
-	elif activity_pose in ["plant", "water", "harvest"]:
-		var reach := .6 + sin(phase)*.22
-		for side in [-1,1]:
-			for label in ["Sleeve", "Hand"]: pivot_part(label+str(side),Vector3(side*.29,1.08,0),reach)
-		if activity_pose == "water":
-			water_prop.position = Vector3(.30,.56,-.30)
-			water_prop.rotation.x = -.65
-	elif activity_pose in ["eat", "drink"]:
-		var lift := (2.15 if activity_pose == "drink" else 1.8) + sin(phase)*.12
-		for label in ["Sleeve", "Hand"]: pivot_part(label+"1", Vector3(.29,1.08,0), lift)
-		var hand: Vector3 = Vector3(.29,1.08,0) + Basis(Vector3.RIGHT,lift) * Vector3(.045,-.43,0)
-		food_prop.position = hand + Vector3(0,0,-.04)
-		meal_bowl.position = hand + Vector3(0,-.02,-.08)
-		meal_surface.position = meal_bowl.position + Vector3(0,.045,0)
-		if activity_pose == "drink": water_prop.position = hand + Vector3(0,.05,-.02)
-		if dining:
-			for side in [-1,1]:
-				for label in ["Boot", "Trouser"]: pivot_part(label+str(side),Vector3(side*.13,.68,0),1.1)
-			for label in rest_transforms: get_node(NodePath(label)).position.y -= .20
-			food_prop.position.y -= .20
-			meal_bowl.position.y -= .20
-			meal_surface.position.y -= .20
-	elif activity_pose == "talk":
-		for label in ["Sleeve", "Hand"]: pivot_part(label+"1", Vector3(.29,1.08,0), .6 + sin(phase)*.18)
-	elif activity_pose == "rest" and bed_pose is Transform3D:
-		# Cancel root yaw from a previous activity, without changing that root.
-		var local_bed: Transform3D = Transform3D(Basis(Vector3.UP,-rotation.y),Vector3.ZERO) * bed_pose
-		for label in rest_transforms:
-			get_node(NodePath(label)).transform = local_bed * rest_transforms[label]
-		food_prop.visible = false
-		water_prop.visible = false
-		basket.visible = false
-		for berry in carried_berries: berry.visible = false
-	elif activity_pose == "rest":
-		# Bowed head at the authoritative indoor cell, not a fake bed teleport.
-		for label in ["Head", "Hair", "HairKnot", "HairLock-1", "HairLock1", "SoftCap", "Nose", "Eye-1", "Eye1", "Ear-1", "Ear1", "Brow-1", "Brow1", "Mouth"]:
-			if rest_transforms.has(label): pivot_part(label, Vector3(0,1.2,0), -0.3)
+		figure.walk(phase)
+	else:
+		_pose_activity(phase, resting)
+
+	var waist := figure.belt()
+	water_prop.position = waist * Vector3(.223, -.040, .148)
+	water_prop.rotation = Vector3.ZERO
+	basket.position = waist * Vector3(-.220, -.115, .151)
+	for i in range(carried_berries.size()):
+		carried_berries[i].position = waist * Vector3(-.308 + i * .083, .014, .163)
+	if eating or drinking or drawing_water or (not walking and activity_pose == "water"):
+		_pose_held_item(eating, drinking, drawing_water)
+
+func _pose_activity(phase: float, resting: bool) -> void:
+	match activity_pose:
+		"gather":
+			var water := gathering_kind == "spring"
+			figure.torso.rotation.x = -.60 if water else -.35
+			figure.head.rotation.x = -.16 if water else -.11
+			figure.reach(0, .24 + sin(phase) * .10, .38, .12)
+			figure.reach(1, .39 + sin(phase + .3) * .26, .44, .21)
+		"cook":
+			figure.torso.rotation.x = -.12
+			figure.head.rotation.x = -.16
+			figure.reach(0, .50, .82 + sin(phase) * .17, .26)
+			figure.reach(1, .59, .78 + sin(phase + .9) * .22, .23)
+		"plant", "water", "harvest":
+			figure.torso.rotation.x = -.46 if activity_pose == "water" else -.59
+			figure.head.rotation.x = -.13
+			figure.reach(0, .32 + sin(phase) * .10, .48, .17)
+			figure.reach(1, .43 + sin(phase + .6) * .17, .67, .16)
+		"eat", "drink":
+			if dining: figure.sit()
+			var sip := activity_pose == "drink"
+			figure.torso.rotation.x = -.09 if sip else -.15
+			figure.head.rotation.x = .06 if sip else -.13
+			figure.reach(1, 1.08 if sip else .83, 1.39 + sin(phase) * .10, .64)
+			if meal_bowl.visible: figure.reach(0, .73, 1.18, .63)
+		"talk":
+			figure.torso.rotation.y = sin(phase * .6) * .064
+			figure.reach(1, .54, .76 + sin(phase) * .26, .26)
+		"rest":
+			if resting:
+				# Cancel root yaw while leaving the world anchor at the bedside cell.
+				figure.transform = Transform3D(Basis(Vector3.UP, -rotation.y), Vector3.ZERO) * bed_pose
+			else:
+				figure.head.rotation.x = -.28
+
+func _pose_held_item(eating: bool, drinking: bool, drawing_water: bool) -> void:
+	var hand := figure.grip(1)
+	if eating:
+		food_prop.position = hand * Vector3(0, -.022, -.028)
+		if meal_bowl.visible:
+			var other := figure.grip(0)
+			meal_bowl.position = hand.origin.lerp(other.origin, .5) + Vector3(0, -.024, -.074)
+			meal_surface.position = meal_bowl.position + Vector3(0, .045, 0)
+	elif water_prop.visible:
+		water_prop.position = hand * Vector3(0, -.015, -.058)
+		water_prop.rotation.x = -1.05 if drinking else (-.19 if drawing_water else -.82)
