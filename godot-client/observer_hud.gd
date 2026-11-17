@@ -15,12 +15,30 @@ const Art = preload("res://valley_interface_style.gd")
 const ValleyJournal = preload("res://valley_journal.gd")
 const Snapshot = preload("res://snapshot.gd")
 
-# Small facade studies for the place register, in the palette of the scene meshes.
+# Place-register category sketches, in the palette of the scene meshes.
 class RoofSketch extends Control:
 	var kind := ""
 
 	func _draw() -> void:
 		var at := Vector2((size.x - 64.0) * .5, (size.y - 50.0) * .5)
+		# Resource sketches identify a category, never current stock or availability.
+		if kind == "bush":
+			_shape(at, [Vector2(7,40),Vector2(30,34),Vector2(58,40),Vector2(36,47)], Color(.26,.21,.13,.16))
+			draw_line(at + Vector2(32,42), at + Vector2(30,24), Color("78634b"), 4, true)
+			_shape(at, [Vector2(8,33),Vector2(5,24),Vector2(14,15),Vector2(24,16),Vector2(31,6),Vector2(42,12),Vector2(43,19),Vector2(54,19),Vector2(59,30),Vector2(48,40),Vector2(24,39)], Color("697953"))
+			_shape(at, [Vector2(10,25),Vector2(17,17),Vector2(25,20),Vector2(33,10),Vector2(39,16),Vector2(33,26),Vector2(20,32)], Color("879066"))
+			for berry in [Vector2(20,25), Vector2(36,29), Vector2(45,22)]:
+				draw_circle(at + berry, 3.2, Color("935b53"), true, -1, true)
+				draw_circle(at + berry + Vector2(-.7,-.8), .8, Color("c59a80"), true, -1, true)
+			return
+		if kind == "spring":
+			_shape(at, [Vector2(4,31),Vector2(16,18),Vector2(40,15),Vector2(60,26),Vector2(57,38),Vector2(34,46),Vector2(11,41)], Color("88877a"))
+			_shape(at, [Vector2(10,30),Vector2(22,23),Vector2(43,21),Vector2(53,28),Vector2(48,36),Vector2(30,40),Vector2(15,36)], Color("759994"))
+			_shape(at, [Vector2(5,27),Vector2(11,16),Vector2(20,17),Vector2(24,25),Vector2(14,29)], Color("b0aa95"))
+			_shape(at, [Vector2(41,18),Vector2(47,12),Vector2(56,17),Vector2(58,26),Vector2(48,25)], Color("a19e8b"))
+			draw_line(at + Vector2(22,29), at + Vector2(40,27), Color("cad2bc"), 1.5, true)
+			draw_line(at + Vector2(28,35), at + Vector2(43,32), Color("b3c6b6"), 1.5, true)
+			return
 		if kind == "garden":
 			# A place-register sketch, not a claim about this plot's crop state.
 			_shape(at, [Vector2(3,30),Vector2(33,13),Vector2(62,28),Vector2(32,47)], Color("947359"))

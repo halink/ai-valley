@@ -17,6 +17,7 @@ var observation: Dictionary = {}
 var selected_resident := ""
 var selected_building := ""
 var selected_plot := ""
+var selected_resource := ""
 var active_endpoint := ""
 var mode_text := ""
 var source_tag := ""
@@ -125,6 +126,8 @@ func _received(result: int, code: int, _headers: PackedStringArray, body: Packed
 	if reset: valley.center(world)
 	if not selected_resident.is_empty() and _resident(selected_resident).is_empty():
 		_choose_resident("")
+	if not selected_resource.is_empty() and _resource(selected_resource).is_empty():
+		_choose_building("")
 	if not selected_plot.is_empty() and _plot(selected_plot).is_empty():
 		_choose_building("")
 	if not selected_building.is_empty() and _building(selected_building).is_empty():
@@ -159,6 +162,7 @@ func _reset_context() -> void:
 	selected_resident = ""
 	selected_building = ""
 	selected_plot = ""
+	selected_resource = ""
 	hud.select_resident("")
 	hud.show_place("", "", "", false)
 	hud.set_hover("", Vector2.ZERO)
@@ -188,10 +192,41 @@ func _choose_plot(id: String, locate := true) -> void:
 	selected_resident = ""
 	selected_building = ""
 	selected_plot = id
+	selected_resource = ""
 	hud.select_resident("")
 	valley.select_resident("")
 	if not valley.room_id.is_empty(): _leave_room()
 	if locate: valley.frame_plot(id)
+	_update_place_card()
+
+func _resource(id: String) -> Dictionary:
+	for resource in world.get("resources", []):
+		if resource.get("id") == id and resource.get("kind") in ["bush", "spring"]: return resource
+	return {}
+
+func _resource_title(resource: Dictionary) -> String:
+	if resource.is_empty(): return "资源地点"
+	return "%s · %s, %s" % [Snapshot.resource_name(resource.kind), str(resource.at.x), str(resource.at.y)]
+
+func _resource_stock(resource: Dictionary) -> String:
+	var amount: Variant = resource.get("amount")
+	if not (amount is float or amount is int) or not is_finite(float(amount)) or amount < 0:
+		return "当前余量未知"
+	return "当前已耗尽" if amount == 0 else "当前余量 %s 份" % str(amount)
+
+func _choose_resource(id: String, locate := true) -> void:
+	if not connected or _resource(id).is_empty():
+		_notice("等待新的资源信息")
+		return
+	_set_follow(false)
+	selected_resident = ""
+	selected_building = ""
+	selected_plot = ""
+	selected_resource = id
+	hud.select_resident("")
+	valley.select_resident("")
+	if not valley.room_id.is_empty(): _leave_room()
+	if locate: valley.frame_resource(id)
 	_update_place_card()
 
 func _building_name(building: Dictionary) -> String:
@@ -225,6 +260,7 @@ func _choose_resident(id: String, locate := true) -> void:
 	selected_resident = id
 	selected_building = ""
 	selected_plot = ""
+	selected_resource = ""
 	hud.show_place("", "", "", false)
 	hud.select_resident(id)
 	valley.select_resident(id)
@@ -232,12 +268,16 @@ func _choose_resident(id: String, locate := true) -> void:
 	if locate and _can_locate(_resident(id)): _locate_resident()
 
 func _choose_building(id: String, locate := true) -> void:
+	if not _resource(id).is_empty():
+		_choose_resource(id, locate)
+		return
 	if not _plot(id).is_empty():
 		_choose_plot(id, locate)
 		return
 	if id.is_empty():
 		selected_building = ""
 		selected_plot = ""
+		selected_resource = ""
 		hud.show_place("", "", "", false)
 		return
 	if not connected or _building(id).is_empty():
@@ -249,6 +289,7 @@ func _choose_building(id: String, locate := true) -> void:
 	valley.select_resident("")
 	selected_building = id
 	selected_plot = ""
+	selected_resource = ""
 	if not valley.room_id.is_empty():
 		_leave_room()
 	if locate: valley.frame_building(id)
@@ -320,6 +361,9 @@ func _update_hud() -> void:
 	for plot in world.get("plots", []):
 		if not plot is Dictionary or not str(plot.get("id", "")).begins_with("mvp-garden-"): continue
 		places[plot.id] = {"title": GardenObservation.title(world, plot), "note": GardenObservation.stage(world, plot) if connected else "状态已过期", "kind": "garden"}
+	for resource in world.get("resources", []):
+		if resource.get("kind") not in ["bush", "spring"]: continue
+		places[resource.id] = {"title": _resource_title(resource), "note": _resource_stock(resource) if connected else "状态已过期", "kind": resource.kind}
 	hud.update_directory(people, places)
 	var summary := Snapshot.world_summary(world) if connected else ""
 	var clock := summary.get_slice("\n", 0).trim_suffix("（世界时间）") if connected else "世界时间未知"
@@ -362,6 +406,12 @@ func _update_place_card() -> void:
 		hud.show_room("", "")
 	else:
 		hud.show_room(_building_name(room), "%s 人在室内" % _occupants(valley.room_id))
+	if connected and not selected_resource.is_empty():
+		var resource := _resource(selected_resource)
+		if not resource.is_empty():
+			var note := _resource_stock(resource) + "\n采集须居民亲自到达并完成行动\n是否前往由居民自己决定\n资源余量不等于随身库存"
+			hud.show_place(selected_resource, _resource_title(resource), note, false)
+			return
 	if connected and not selected_plot.is_empty():
 		var plot := _plot(selected_plot)
 		if not plot.is_empty():
@@ -387,6 +437,9 @@ func _notice(message: String) -> void:
 func _process(_delta: float) -> void:
 	if following and not valley.focus_resident(selected_resident):
 		_set_follow(false)
+	if not selected_resource.is_empty() and valley.room_id.is_empty() and connected:
+		var screen: Vector2 = valley.resource_screen_position(selected_resource)
+		hud.position_place(screen, get_viewport().get_visible_rect().grow(-10).has_point(screen))
 	if not selected_plot.is_empty() and valley.room_id.is_empty() and connected:
 		var screen: Vector2 = valley.plot_screen_position(selected_plot)
 		hud.position_place(screen, get_viewport().get_visible_rect().grow(-10).has_point(screen))
@@ -456,6 +509,8 @@ func _inspect_at(position: Vector2) -> void:
 	var target: Dictionary = valley.pick(position)
 	if target.has("resident"):
 		_choose_resident(target.resident)
+	elif target.has("resource"):
+		_choose_resource(target.resource, false)
 	elif target.has("plot"):
 		_choose_plot(target.plot, false)
 	elif target.has("building"):
@@ -470,6 +525,8 @@ func _hover_at(position: Vector2) -> void:
 	var caption := ""
 	if target.has("resident") and target.resident != selected_resident:
 		caption = Snapshot.resident_name(_resident(target.resident))
+	elif target.has("resource") and target.resource != selected_resource:
+		caption = _resource_title(_resource(target.resource))
 	elif target.has("plot") and target.plot != selected_plot:
 		caption = GardenObservation.title(world, _plot(target.plot))
 	elif target.has("building") and target.building != selected_building:

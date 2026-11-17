@@ -22,6 +22,7 @@ var backdrop: TextureRect
 var sky_environment: Environment
 var building_doors := {}
 var plot_positions := {}
+var resource_positions := {}
 var terrain: Node3D
 var actors: Node3D
 var focus := Vector3(16, 0, 12)
@@ -240,6 +241,17 @@ func plot_screen_position(id: String) -> Vector2:
 	if not room_id.is_empty() or not plot_positions.has(id): return Vector2(-10000, -10000)
 	return camera.unproject_position(plot_positions[id] + Vector3(0, .18, 0))
 
+# Resource anchors refer only to the rendered, supported outdoor sources.
+func frame_resource(id: String) -> void:
+	if not room_id.is_empty() or not resource_positions.has(id): return
+	fit_view = false
+	focus = resource_positions[id] + Vector3(0, .3, 0)
+	camera_size = 10.5
+
+func resource_screen_position(id: String) -> Vector2:
+	if not room_id.is_empty() or not resource_positions.has(id): return Vector2(-10000, -10000)
+	return camera.unproject_position(resource_positions[id] + Vector3(0, .18, 0))
+
 func select_resident(id: String) -> void:
 	for key in people:
 		var actor: Node3D = people[key]
@@ -272,6 +284,7 @@ func show_world(world: Dictionary, selected: String, continuous := true, paths: 
 		map_key = ""
 		building_doors.clear()
 		plot_positions.clear()
+		resource_positions.clear()
 		return
 	var key := str(world.id) + ":" + str(world.get("mapRevision", 0)) + ":" + str(hash(world.map)) + ":" + str(hash(world.get("buildings", [])))
 	var reset := key != map_key
@@ -448,6 +461,9 @@ func pick(screen: Vector2) -> Dictionary:
 			if owner_node.has_meta("plot_id") and room_id.is_empty():
 				result = {"plot": owner_node.get_meta("plot_id")}
 				break
+			if owner_node.has_meta("resource_id") and room_id.is_empty():
+				result = {"resource": owner_node.get_meta("resource_id")}
+				break
 			owner_node = owner_node.get_parent()
 	return result
 
@@ -580,12 +596,20 @@ func draw_gardens(world: Dictionary) -> void:
 		actors.add_child(label)
 
 func draw_resources(world: Dictionary) -> void:
+	resource_positions.clear()
 	for resource in world.get("resources", []):
 		var at := Vector3(resource.at.x, 0, resource.at.y)
+		# Batch each source separately: sharing a material must not merge identities.
+		var source := Node3D.new()
+		actors.add_child(source)
+		if resource.kind in ["spring", "bush"]:
+			source.set_meta("resource_id", str(resource.id))
+			resource_positions[str(resource.id)] = at
 		match resource.kind:
-			"spring": plants.spring(actors, at, float(resource.amount))
-			"bush": plants.berry_bush(actors, at, float(resource.amount))
-			_: craft.stone(actors, at + Vector3.UP * .171, Vector3(.55, .42, .50), craft.mat("a7a397"), int(at.x + at.z))
+			"spring": plants.spring(source, at, float(resource.amount))
+			"bush": plants.berry_bush(source, at, float(resource.amount))
+			_: craft.stone(source, at + Vector3.UP * .171, Vector3(.55, .42, .50), craft.mat("a7a397"), int(at.x + at.z))
+		craft.batch(source)
 		var label := Label3D.new()
 		label.text = Snapshot.resource_name(resource.kind) + "：" + str(resource.amount)
 		label.position = at + Vector3(0, .18, 1.35)
