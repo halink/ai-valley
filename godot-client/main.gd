@@ -4,6 +4,7 @@ const Valley3D = preload("res://valley_3d.gd")
 const ObserverHud = preload("res://observer_hud.gd")
 const JournalRecords = preload("res://journal_records.gd")
 const Snapshot = preload("res://snapshot.gd")
+const GardenObservation = preload("res://garden_observation.gd")
 const MovementFeed = preload("res://completed_movement.gd")
 
 var valley: Valley3D
@@ -15,6 +16,7 @@ var world: Dictionary = {}
 var observation: Dictionary = {}
 var selected_resident := ""
 var selected_building := ""
+var selected_plot := ""
 var active_endpoint := ""
 var mode_text := ""
 var source_tag := ""
@@ -123,6 +125,8 @@ func _received(result: int, code: int, _headers: PackedStringArray, body: Packed
 	if reset: valley.center(world)
 	if not selected_resident.is_empty() and _resident(selected_resident).is_empty():
 		_choose_resident("")
+	if not selected_plot.is_empty() and _plot(selected_plot).is_empty():
+		_choose_building("")
 	if not selected_building.is_empty() and _building(selected_building).is_empty():
 		_choose_building("")
 	var paths: Dictionary = movement_feed.observe(world, parsed.get("movement"))
@@ -154,6 +158,7 @@ func _reset_context() -> void:
 	if not valley.room_id.is_empty(): valley.leave_room(world)
 	selected_resident = ""
 	selected_building = ""
+	selected_plot = ""
 	hud.select_resident("")
 	hud.show_place("", "", "", false)
 	hud.set_hover("", Vector2.ZERO)
@@ -169,6 +174,25 @@ func _building(id: String) -> Dictionary:
 	for building in world.get("buildings", []):
 		if building.get("id") == id: return building
 	return {}
+
+func _plot(id: String) -> Dictionary:
+	for plot in world.get("plots", []):
+		if plot is Dictionary and plot.get("id") == id and id.begins_with("mvp-garden-"): return plot
+	return {}
+
+func _choose_plot(id: String, locate := true) -> void:
+	if not connected or _plot(id).is_empty():
+		_notice("等待新的菜园信息")
+		return
+	_set_follow(false)
+	selected_resident = ""
+	selected_building = ""
+	selected_plot = id
+	hud.select_resident("")
+	valley.select_resident("")
+	if not valley.room_id.is_empty(): _leave_room()
+	if locate: valley.frame_plot(id)
+	_update_place_card()
 
 func _building_name(building: Dictionary) -> String:
 	var name_text: Variant = building.get("name")
@@ -200,6 +224,7 @@ func _choose_resident(id: String, locate := true) -> void:
 	_set_follow(false)
 	selected_resident = id
 	selected_building = ""
+	selected_plot = ""
 	hud.show_place("", "", "", false)
 	hud.select_resident(id)
 	valley.select_resident(id)
@@ -207,8 +232,12 @@ func _choose_resident(id: String, locate := true) -> void:
 	if locate and _can_locate(_resident(id)): _locate_resident()
 
 func _choose_building(id: String, locate := true) -> void:
+	if not _plot(id).is_empty():
+		_choose_plot(id, locate)
+		return
 	if id.is_empty():
 		selected_building = ""
+		selected_plot = ""
 		hud.show_place("", "", "", false)
 		return
 	if not connected or _building(id).is_empty():
@@ -219,6 +248,7 @@ func _choose_building(id: String, locate := true) -> void:
 	hud.select_resident("")
 	valley.select_resident("")
 	selected_building = id
+	selected_plot = ""
 	if not valley.room_id.is_empty():
 		_leave_room()
 	if locate: valley.frame_building(id)
@@ -287,6 +317,9 @@ func _update_hud() -> void:
 		if id.is_empty(): continue
 		var kind := "可看室内" if valley.room_layouts.has(id) else "仅外观"
 		places[id] = {"title": _building_name(building), "note": kind, "kind": str(building.get("kind", ""))}
+	for plot in world.get("plots", []):
+		if not plot is Dictionary or not str(plot.get("id", "")).begins_with("mvp-garden-"): continue
+		places[plot.id] = {"title": GardenObservation.title(world, plot), "note": GardenObservation.stage(world, plot) if connected else "状态已过期", "kind": "garden"}
 	hud.update_directory(people, places)
 	var summary := Snapshot.world_summary(world) if connected else ""
 	var clock := summary.get_slice("\n", 0).trim_suffix("（世界时间）") if connected else "世界时间未知"
@@ -329,6 +362,11 @@ func _update_place_card() -> void:
 		hud.show_room("", "")
 	else:
 		hud.show_room(_building_name(room), "%s 人在室内" % _occupants(valley.room_id))
+	if connected and not selected_plot.is_empty():
+		var plot := _plot(selected_plot)
+		if not plot.is_empty():
+			hud.show_place(selected_plot, GardenObservation.title(world, plot), GardenObservation.details(world, plot), false)
+			return
 	if building.is_empty() or not connected:
 		hud.show_place("", "", "", false)
 		return
@@ -349,6 +387,9 @@ func _notice(message: String) -> void:
 func _process(_delta: float) -> void:
 	if following and not valley.focus_resident(selected_resident):
 		_set_follow(false)
+	if not selected_plot.is_empty() and valley.room_id.is_empty() and connected:
+		var screen: Vector2 = valley.plot_screen_position(selected_plot)
+		hud.position_place(screen, get_viewport().get_visible_rect().grow(-10).has_point(screen))
 	if not selected_building.is_empty() and valley.room_id.is_empty() and connected:
 		var screen: Vector2 = valley.building_screen_position(selected_building)
 		var view := get_viewport().get_visible_rect().grow(-10)
@@ -415,6 +456,8 @@ func _inspect_at(position: Vector2) -> void:
 	var target: Dictionary = valley.pick(position)
 	if target.has("resident"):
 		_choose_resident(target.resident)
+	elif target.has("plot"):
+		_choose_plot(target.plot, false)
 	elif target.has("building"):
 		_choose_building(target.building, false)
 	else:
@@ -427,6 +470,8 @@ func _hover_at(position: Vector2) -> void:
 	var caption := ""
 	if target.has("resident") and target.resident != selected_resident:
 		caption = Snapshot.resident_name(_resident(target.resident))
+	elif target.has("plot") and target.plot != selected_plot:
+		caption = GardenObservation.title(world, _plot(target.plot))
 	elif target.has("building") and target.building != selected_building:
 		caption = _building_name(_building(target.building))
 	hud.set_hover(caption, position)

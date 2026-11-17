@@ -21,6 +21,15 @@ class RoofSketch extends Control:
 
 	func _draw() -> void:
 		var at := Vector2((size.x - 64.0) * .5, (size.y - 50.0) * .5)
+		if kind == "garden":
+			# A place-register sketch, not a claim about this plot's crop state.
+			_shape(at, [Vector2(3,30),Vector2(33,13),Vector2(62,28),Vector2(32,47)], Color("947359"))
+			_shape(at, [Vector2(3,30),Vector2(32,47),Vector2(62,28),Vector2(61,33),Vector2(32,51),Vector2(4,35)], Color("6f5744"))
+			for offset in [Vector2(19,29), Vector2(32,22), Vector2(33,36), Vector2(47,28)]:
+				draw_line(at + offset, at + offset + Vector2(0,-9), Color("5e7250"), 2, true)
+				_shape(at + offset, [Vector2(0,-5),Vector2(-8,-11),Vector2(-6,-4),Vector2(0,-2)], Color("78855c"))
+				_shape(at + offset, [Vector2(0,-5),Vector2(6,-13),Vector2(9,-9),Vector2(0,-2)], Color("596e50"))
+			return
 		var tile := Color("6c6b60") if kind == "lodge" else Color("6c795e")
 		if kind in ["store", "workshop", "barn"]: tile = Color("9b735d")
 		_shape(at, [Vector2(4,41), Vector2(34,46), Vector2(62,33), Vector2(61,39), Vector2(33,50), Vector2(5,45)], Color(.26,.21,.13,.16))
@@ -351,10 +360,10 @@ func _build_scene_cards() -> void:
 	place_name.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	place_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var close := _button(header, "收", func(): building_requested.emit(""), "LightButton", 15)
-	close.tooltip_text = "收起门牌"
-	close.accessibility_name = "收起门牌"
+	close.tooltip_text = "收起场所信息"
+	close.accessibility_name = "收起场所信息"
 	close.custom_minimum_size = Vector2(34, 34)
-	place_note = _label(content, "", 14, Art.CREAM)
+	place_note = _label(content, "", 14, Art.CREAM, true)
 	entry_button = _button(content, "进入室内", func(): doorway_requested.emit(place_id), "PaperButton", 17)
 	place_card.hide()
 	place_card.minimum_size_changed.connect(_queue_layout)
@@ -572,6 +581,7 @@ func show_place(id: String, title: String, note: String, can_enter: bool) -> voi
 		_refresh_drawer()
 	place_name.text = title
 	place_name.tooltip_text = title
+	place_note.custom_minimum_size.x = 266 if "\n" in note else 0
 	place_note.text = note
 	entry_button.visible = can_enter
 	place_card.visible = not id.is_empty() and not room_open and place_anchor_visible
@@ -602,7 +612,7 @@ func _layout_place() -> void:
 	var floor := dock.position.y - 12
 	if top + place_card.size.y > floor:
 		top = place_anchor.y - place_card.size.y - 20
-	top = clampf(top, 80, floor - place_card.size.y)
+	top = clampf(top, 80, maxf(80, floor - place_card.size.y))
 	place_card.position = Vector2(left, top)
 	var attachment := Vector2(place_anchor.x, place_anchor.y)
 	if place_anchor.y < top: attachment.y = top

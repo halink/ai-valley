@@ -21,6 +21,7 @@ var sun: DirectionalLight3D
 var backdrop: TextureRect
 var sky_environment: Environment
 var building_doors := {}
+var plot_positions := {}
 var terrain: Node3D
 var actors: Node3D
 var focus := Vector3(16, 0, 12)
@@ -228,6 +229,17 @@ func building_screen_position(id: String) -> Vector2:
 	if not building_doors.has(id): return Vector2(-10000, -10000)
 	return camera.unproject_position(building_doors[id])
 
+# Plot navigation only uses garden meshes rendered from the current snapshot.
+func frame_plot(id: String) -> void:
+	if not room_id.is_empty() or not plot_positions.has(id): return
+	fit_view = false
+	focus = plot_positions[id] + Vector3(0, .3, 0)
+	camera_size = 10.5
+
+func plot_screen_position(id: String) -> Vector2:
+	if not room_id.is_empty() or not plot_positions.has(id): return Vector2(-10000, -10000)
+	return camera.unproject_position(plot_positions[id] + Vector3(0, .18, 0))
+
 func select_resident(id: String) -> void:
 	for key in people:
 		var actor: Node3D = people[key]
@@ -259,6 +271,7 @@ func show_world(world: Dictionary, selected: String, continuous := true, paths: 
 		last_revision = -1
 		map_key = ""
 		building_doors.clear()
+		plot_positions.clear()
 		return
 	var key := str(world.id) + ":" + str(world.get("mapRevision", 0)) + ":" + str(hash(world.map)) + ":" + str(hash(world.get("buildings", [])))
 	var reset := key != map_key
@@ -432,6 +445,9 @@ func pick(screen: Vector2) -> Dictionary:
 				var id: String = owner_node.get_meta("building_id")
 				if not id.is_empty(): result = {"building": id}
 				break
+			if owner_node.has_meta("plot_id") and room_id.is_empty():
+				result = {"plot": owner_node.get_meta("plot_id")}
+				break
 			owner_node = owner_node.get_parent()
 	return result
 
@@ -532,6 +548,7 @@ func _space_residents(settle := false) -> void:
 
 # Each bed is an actual owned plot; growth and moisture come only from snapshots.
 func draw_gardens(world: Dictionary) -> void:
+	plot_positions.clear()
 	for plot in world.get("plots", []):
 		if not str(plot.id).begins_with("mvp-garden-"): continue
 		var at := Vector3(plot.at.x,0,plot.at.y)
@@ -545,7 +562,13 @@ func draw_gardens(world: Dictionary) -> void:
 			growth = clampf(float(crop.growth) / maxf(1, days), 0, 1)
 			status = "成熟" if growth >= 1 else "生长 %s/%s 天" % [str(int(crop.growth)), str(int(days))]
 			status += " · 已浇水" if wet else " · 未浇水"
-		plants.garden(actors, at, wet, growth)
+		# Keep each bed in its own batch so geometry retains its plot identity.
+		var bed := Node3D.new()
+		bed.set_meta("plot_id", str(plot.id))
+		actors.add_child(bed)
+		plants.garden(bed, at, wet, growth)
+		craft.batch(bed)
+		plot_positions[str(plot.id)] = at
 		var owner := ""
 		for person in world.get("residents", []):
 			if person.id == plot.ownerId: owner = str(person.name)
