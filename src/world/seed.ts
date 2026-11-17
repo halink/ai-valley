@@ -2,6 +2,11 @@ import type { Building, BuildingKind, Resident, Resource, Tile, World } from '..
 import { startingDefinitions } from './starting-content.js';
 import { YEAR } from './time.js';
 
+export function initialResident(id:string,name:string,age:number,at:Resident['at'],appearance:Resident['appearance'],traits:string[],skills:Resident['skills'],minute=480):Resident {
+ return {id,name,appearance,at,inside:null,bornAt:minute-age*YEAR,status:'alive',residency:'resident',homeId:`home-${id}`,traits,hunger:22,energy:90,health:100,inventory:{berry:6,seed:5,water:3,wood:4,stone:2},coins:30,skills,
+  relations:[],memories:[],knownPeople:[],knownResources:[],knownBuildings:[],plan:null,activity:null,intention:'正在观察新居周围',revision:0,decisionDue:minute,lastDecisionAt:-1,lastFailure:null,parents:[],guardianIds:[],pregnancy:null,canDecide:true,canExpress:true,refusesCare:false,deathAt:null};
+}
+
 export function createWorld(seed=4107):World {
  const width=80,height=64,tiles:Tile[]=Array(width*height).fill('grass');
  const set=(x:number,y:number,t:Tile)=>{if(x>=0&&y>=0&&x<width&&y<height)tiles[y*width+x]=t;};
@@ -42,8 +47,8 @@ export function createWorld(seed=4107):World {
  for(const [x,y]of [[21,27],[31,28],[39,32],[17,40]])resources.push({id:`berry-${x}-${y}`,kind:'bush',at:{x,y},amount:6,max:6,regrowthDays:4,lastHarvest:0});
  resources.push({id:'spring',kind:'spring',at:{x:51,y:28},amount:10000,max:10000,regrowthDays:1,lastHarvest:0});
  const makePerson=(id:string,name:string,age:number,x:number,y:number,hair:number,shirt:number,traits:string[],skills:Resident['skills']):Resident=>({
-  id,name,appearance:{hair,shirt,skin:0xe7b88a},at:{x,y},inside:null,bornAt:480-age*YEAR,status:'alive',residency:'resident',homeId:`home-${id}`,traits,hunger:22,energy:90,health:100,inventory:{berry:6,seed:5,water:3,wood:4,stone:2},coins:30,skills,
-  relations:[],memories:[],knownPeople:['lin','qiao','shen'].filter(p=>p!==id),knownResources:resources.filter(r=>Math.hypot(r.at.x-x,r.at.y-y)<18).map(r=>r.id),knownBuildings:buildings.map(b=>b.id),plan:null,activity:null,intention:'正在观察新居周围',revision:0,decisionDue:480,lastDecisionAt:-1,lastFailure:null,parents:[],guardianIds:[],pregnancy:null,canDecide:true,canExpress:true,refusesCare:false,deathAt:null,
+  ...initialResident(id,name,age,{x,y},{hair,shirt,skin:0xe7b88a},traits,skills),
+  knownPeople:['lin','qiao','shen'].filter(p=>p!==id),knownResources:resources.filter(r=>Math.hypot(r.at.x-x,r.at.y-y)<18).map(r=>r.id),knownBuildings:buildings.map(b=>b.id),
  });
  const defs=startingDefinitions([{ownerId:'lin',x:10,y:32,width:14,height:15},{ownerId:'qiao',x:39,y:33,width:14,height:15},{ownerId:'shen',x:21,y:31,width:12,height:16}]);
  const world:World={schemaVersion:1,id:`valley-validation-${seed}`,revision:0,seed,mode:'validation',minute:480,lastWallAt:0,clock:{paused:true,reason:'正在等待首次自主决定',realMinutesPerDay:120},weather:'sun',map:{width,height,tiles,name:'溪岚谷',entrance:{x:34,y:62}},buildings,resources,plots,

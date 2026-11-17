@@ -23,23 +23,28 @@ node --env-file=.env build/server/godot-mvp-persistent-main.js
 | --- | --- | --- | --- |
 | `deepseek-ai/DeepSeek-R1-0528-Qwen3-8B` | `siliconflow` | `SILICONFLOW_API_KEY` | SiliconFlow CN `/v1/chat/completions` |
 | `THUDM/GLM-Z1-9B-0414` | `siliconflow` | `SILICONFLOW_API_KEY` | 同上 |
+| `zai-org/GLM-5.3-Flash` | `siliconflow` | `SILICONFLOW_API_KEY` | 同上 |
 | `qwen3.8-flash` | `dashscope` | `DASHSCOPE_API_KEY` | `https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1/chat/completions` |
 
-Qwen 另需 `VALLEY_ALLOW_PAID_MODELS=yes`，不能默认为免费。**SiliconFlow 型号名称、空余额、配置中的声明都不能证明当前免费。** 启动前自行检查官方当日价格、账号免费资格及历史未决用量。服务没有供应商侧零费用保证或自动价格认证，不把 token 上限当费用上限。若只能接受零费用，请仅配置当日已核实免费的型号；免费资格或价格变化时停止服务。不会自动选择未配置的付费替代。
+`qwen3.8-flash` 与 `zai-org/GLM-5.3-Flash` 另需 `VALLEY_ALLOW_PAID_MODELS=yes`。GLM-5.3-Flash 通过 SiliconFlow 的非流式文本接口获取决策，并关闭思考模式。[SiliconFlow 型号公告](https://www.siliconflow.cn/news/ok5ja7brf921kgf1644yyedz) · [接口参数](https://docs.siliconflow.cn/docs/api/chat-completions-post)
+
+**SiliconFlow 型号名称、空余额、配置中的声明都不能证明当前免费。** 启动前自行检查官方当日价格、账号免费资格及历史未决用量。服务没有供应商侧零费用保证或自动价格认证，不把 token 上限当费用上限。若只能接受零费用，请仅配置当日已核实免费的型号；免费资格或价格变化时停止服务。不会自动选择未配置的付费替代。
 
 `.env` 由 Node 显式加载；程序不扫描密钥文件。不要提交 `.env`、密钥或运行存档。默认数据库为 `runtime/godot-mvp/world.sqlite`，用 `VALLEY_MVP_DB` 显式选择小世界存档，端口用 `VALLEY_MVP_PORT`（默认 3415）。不使用旧 `PORT` / `VALLEY_DB`；不会把旧大世界存档自动迁入小地图。后台保存仍仅支持 Linux 本地文件系统，这不限制 Mac 浏览器作为显示端。页面、资源及只读快照同源，监听 loopback；远程部署、真实浏览器画面和真实模型尚未验收。
 
 ## 运行与错误
 
-每次最多一个在途请求。单次 HTTP 超时沿用型号限制（Qwen 25 秒，其余 150 秒）；HTTP 重定向被拒绝，避免转发凭据到其他地址。没有 30 秒总运行上限。429 会按现有配额退避，可使用明确配置的备用。各型号的发生时间、截止时间和连续限流次数写入存档，同一型号跨正常重启维持 30 秒起、逐次翻倍、最长 15 分钟的退避，到期才允许再次请求；成功响应会清除该型号的连续限流状态，备用成功不会清除主模型冷却。其他错误（包括 401、402、5xx、超时或无法解析的结果）停表，不盲重试或自动切换。
+每次最多一个在途请求。单次 HTTP 超时沿用型号限制（Qwen 25 秒，其余 150 秒）；HTTP 重定向被拒绝，避免转发凭据到其他地址。没有 30 秒总运行上限。429 会按现有配额退避，可使用明确配置的备用。各型号的发生时间、截止时间和连续限流次数写入存档，同一型号跨正常重启维持 30 秒起、逐次翻倍、最长 15 分钟的退避，到期才允许再次请求；成功响应会清除该型号的连续限流状态，备用成功不会清除主模型冷却。
+
+收到完整回复后，如果选择未通过校验（`invalid_decision`），系统会记录本次失败和回复提供的用量，给该居民纠错反馈和按当时情况生成的选项。首次重选至少等待 5 秒，连续校验失败时至少等待 30 秒。世界使用居民等待决策时的时钟策略，获得可执行决定后继续推进。认证、网络超时、未完整的回复和其他未确认结果触发保护性停表。
 
 `/ai-town/api/world` 的 `mvp` 与 `observation` 明示驱动模式、停表状态、主备型号及故障状态，不返回密钥。世界 metrics 提供请求/成功/失败及用量估计；这些不是供应商账单。
 
 ## 重启与未决请求
 
-每次会话在存档旁写入 `.self-hosted-session` 标记，在首次请求前同步持久化。只有正常关闭且无在途/未知请求，才清除标记。进程崩溃、请求中退出、未知结果留下标记，下次启动拒绝。该机制是同一存档的保守防重发，不是跨主机/账号全局锁，也不是每条请求的可审计日志。
+每次会话在存档旁写入 `.self-hosted-session` 标记，在首次请求前同步持久化。只有正常关闭且无在途或未知请求，才清除标记。进程崩溃、请求中退出或结果未知时会留下标记。再次启动若发现标记或存档中的未决请求，网页入口会进入停表观察模式。该模式以只读方式打开 SQLite，在内存中生成新版地图用于观察，并保留存档、保护标记和世界时间。
 
-遇到 `godot_mvp_unresolved_session`：停止相关进程，保留并备份存档及标记，核对供应商请求与账单后，由部署者决定是否将标记移至备份。不要未经核对直接删除它或反复换数据库绕过阻塞。若存档本身还有 `metrics.inFlight`，仍会拒绝启动；这类恢复需明确审查存档，程序不自动抹除。崩溃可能发生在确定完成后，仍保守阻塞，不宣称一定产生了费用。
+恢复模型运行前，先停止观察服务，备份存档及标记并核对供应商的请求与账单。根据核对结果决定是否将标记移至备份，再启动服务。若存档仍有 `metrics.inFlight` 记录，模型会继续停表，需审查记录后处理。
 
 与受监督候选不同，本入口没有独立 watchdog、跨进程账号 registry、逐请求 journal 或价格时效停表。不要把本入口的成功启动视为这些能力已验收。长期运行结果由部署者验证和记录。
 
@@ -62,4 +67,4 @@ VALLEY_BACKUP_MODEL=
 VALLEY_ALLOW_PAID_MODELS=no
 ```
 
-需要备用时，明确填写供应商与其支持的另一个型号。仅允许免费调用时，不启用付费开关，并在运行前核实所选 SiliconFlow 型号当前免费资格；`VALLEY_ALLOW_PAID_MODELS=no` 仅禁止已知需另行启用的 Qwen 路径，不是供应商零费用硬上限。
+需要备用时，明确填写供应商与其支持的另一个型号。仅允许免费调用时，保留 `VALLEY_ALLOW_PAID_MODELS=no`，并核实所选 SiliconFlow 型号的当前免费资格。此开关只约束上文两款需显式启用的付费型号。

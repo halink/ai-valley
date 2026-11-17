@@ -43,9 +43,12 @@ export function completeSocial(w:World,r:Resident,a:SocialAction):string|null {
  const s=w.social??={meetings:[],nextSerial:1,totals:{meetings:0,speeches:0,interpretations:0}};
  if(a.operation==='interpret'){
   const known=source(w,r,a.eventId)!,target=person(w,a.targetId)!,relation=rememberRelation(r,target.id,a.eventId!);
+  const {affection,trust,conflict}=relation;
   relation.affection=Math.max(-100,Math.min(100,relation.affection+a.affection!));relation.trust=Math.max(-100,Math.min(100,relation.trust+a.trust!));relation.conflict=Math.max(0,Math.min(100,relation.conflict+a.conflict!));
-  const e=emitEvent(w,{kind:'relationship',actors:[r.id],place:{...r.at},witnesses:[r.id],interpretation:{observerId:r.id,targetId:target.id,sourceEventId:a.eventId!,source:known.memory.source},text:`${r.name}根据${known.memory.source==='heard'?'自己收到的消息':'自己的实际经历'}，对${target.name}形成自己的理解：“${a.text!.trim()}”。这是个人看法，不代表对方也这样想或消息已经核实。`});
-  relation.lastInterpretation={sourceEventId:a.eventId!,source:known.memory.source,recordEventId:e.id,at:w.minute,text:a.text!.trim(),affection:a.affection!,trust:a.trust!,conflict:a.conflict!};w.processed.push(`interpret:${r.id}:${a.eventId}:${a.targetId}`);s.totals.interpretations++;
+  const text=a.text!.trim();
+  const change={affection:relation.affection-affection,trust:relation.trust-trust,conflict:relation.conflict-conflict};
+  const e=emitEvent(w,{kind:'relationship',actors:[r.id],place:{...r.at},witnesses:[r.id],interpretation:{observerId:r.id,targetId:target.id,sourceEventId:a.eventId!,source:known.memory.source,text,change},text:`${r.name}根据${known.memory.source==='heard'?'自己收到的消息':'自己的实际经历'}，对${target.name}形成自己的理解：“${text}”。这是个人看法，不代表对方也这样想或消息已经核实。`});
+  relation.lastInterpretation={sourceEventId:a.eventId!,source:known.memory.source,recordEventId:e.id,at:w.minute,text,affection:a.affection!,trust:a.trust!,conflict:a.conflict!};w.processed.push(`interpret:${r.id}:${a.eventId}:${a.targetId}`);s.totals.interpretations++;
  }else if(a.operation==='start'){
   const id='discussion:'+s.nextSerial++,b=w.buildings.find(b=>b.id===r.inside),m:Meeting={id,definition:'social/meeting@1',hostId:r.id,topic:a.text!.trim(),at:{...r.at},roomId:r.inside,roomAt:r.inside?{...(r.roomAt??roomLayout(w,b!).entry)}:null,createdAt:w.minute,expiresAt:w.minute+a.minutes!,endedAt:null,status:'open',members:[{personId:r.id,seat:0,joinedAt:w.minute,leftAt:null}]};s.meetings.push(m);s.totals.meetings++;
   emitEvent(w,{kind:'conversation',actors:[r.id],place:{...r.at},conversationId:id,text:`${r.name}发起临时讨论：“${m.topic}”。想加入、回应或离开的人分别决定，不按名单轮流发言。`});

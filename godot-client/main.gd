@@ -6,14 +6,17 @@ const JournalRecords = preload("res://journal_records.gd")
 const Snapshot = preload("res://snapshot.gd")
 const GardenObservation = preload("res://garden_observation.gd")
 const MovementFeed = preload("res://completed_movement.gd")
+const ResidentMovement = preload("res://resident_movement.gd")
 
 var valley: Valley3D
 var hud: ObserverHud
 var movement_feed := MovementFeed.new()
+var resident_movement := ResidentMovement.new()
 var http: HTTPRequest
 var timer: Timer
 var world: Dictionary = {}
 var observation: Dictionary = {}
+var relationship_history: Variant
 var selected_resident := ""
 var selected_building := ""
 var selected_plot := ""
@@ -25,6 +28,8 @@ var decision_source := ""
 var connected := false
 var busy := false
 var following := false
+var doorway_active := false
+var pending_snapshot := {}
 var dragging := false
 var pointer_start := Vector2.ZERO
 var pointer_button := MOUSE_BUTTON_NONE
@@ -38,6 +43,7 @@ func _ready() -> void:
 	add_child(hud)
 	hud.overview_requested.connect(_recenter)
 	hud.resident_requested.connect(_choose_resident)
+	hud.residence_requested.connect(_view_residence)
 	hud.building_requested.connect(_choose_building)
 	hud.doorway_requested.connect(_enter_selected_building)
 	hud.outside_requested.connect(_leave_room)
@@ -61,7 +67,7 @@ func _ready() -> void:
 func _connect_server(origin: String) -> void:
 	var url := origin.strip_edges().trim_suffix("/")
 	if OS.has_feature("web"):
-		url = str(JavaScriptBridge.eval("window.location.origin"))
+		url = str(JavaScriptBridge.eval("new URL('./', window.location.href).href")).trim_suffix("/")
 	if not (url.begins_with("http://") or url.begins_with("https://")) or "@" in url or "?" in url or "#" in url:
 		_notice("请填写 HTTP(S) 观察地址")
 		return
@@ -72,11 +78,13 @@ func _connect_server(origin: String) -> void:
 	active_endpoint = url
 	mode_text = "等待新的世界快照"
 	movement_feed.reset()
+	resident_movement.reset()
 	valley.settle_motion()
 	_set_follow(false)
 	_reset_context()
 	world = {}
 	observation = {}
+	relationship_history = null
 	valley.room_layouts = {}
 	valley.show_world(world, "")
 	hud.show_feedback("正在连接山谷…")
@@ -108,22 +116,30 @@ func _received(result: int, code: int, _headers: PackedStringArray, body: Packed
 	if parsed.world.map.width * parsed.world.map.height > 4096 or parsed.world.residents.size() > 64 or parsed.world.get("resources", []).size() > 256 or parsed.world.get("buildings", []).size() > 64:
 		_connection_lost("地图超出当前观察范围")
 		return
+	if doorway_active:
+		pending_snapshot = parsed
+		return
+	_apply_snapshot(parsed)
 
+func _apply_snapshot(parsed: Dictionary) -> void:
 	var reset: bool = world.is_empty() or world.id != parsed.world.id
+	var map_resized: bool = not reset and (world.map.width != parsed.world.map.width or world.map.height != parsed.world.map.height)
 	var continuous: bool = connected and not reset
 	if reset: _reset_context()
 	world = parsed.world
 	observation = parsed.get("observation", {}) if parsed.get("observation") is Dictionary else {}
+	relationship_history = parsed.get("relationshipHistory")
 	valley.room_layouts = Snapshot.room_views(parsed)
 	mode_text = Snapshot.mode_label(parsed)
 	var mode: Dictionary = parsed.get("mvp", {})
 	decision_source = str(mode.get("driver", ""))
 	source_tag = {"local-rules": "规则演示", "model": "已配置模型", "disabled": "模型禁用"}.get(decision_source, "")
+	if mode.get("fault") == "unresolved_model_request": source_tag = "保护停表"
 	connected = true
 	if not continuous:
 		notice_until = 0
 		hud.show_feedback("")
-	if reset: valley.center(world)
+	if reset or (map_resized and valley.room_id.is_empty()): valley.center(world, true)
 	if not selected_resident.is_empty() and _resident(selected_resident).is_empty():
 		_choose_resident("")
 	if not selected_resource.is_empty() and _resource(selected_resource).is_empty():
@@ -133,18 +149,69 @@ func _received(result: int, code: int, _headers: PackedStringArray, body: Packed
 	if not selected_building.is_empty() and _building(selected_building).is_empty():
 		_choose_building("")
 	var paths: Dictionary = movement_feed.observe(world, parsed.get("movement"))
-	if paths.is_empty(): valley.settle_motion()
+	var trails := resident_movement.observe(world, parsed.get("residentMovement"), valley.room_layouts)
+	if continuous and following and _follow_doorway(trails): return
+	if not trails.is_empty() or not valley.room_id.is_empty():
+		paths = ResidentMovement.paths_in_scene(trails, valley.room_id)
 	valley.show_world(world, selected_resident, continuous, paths)
 	if following and not valley.focus_resident(selected_resident):
 		_locate_resident()
 	_update_hud()
 
+func _follow_doorway(trails: Dictionary) -> bool:
+	var id := selected_resident
+	var path: Array = trails.get(id, [])
+	if path.size() < 2 or path[0].roomId != valley.room_id: return false
+	var room: String = path[-1].roomId
+	if room == valley.room_id: return false
+	var cut := 1
+	while cut < path.size() and path[cut].roomId == valley.room_id:
+		cut += 1
+	for index in range(cut, path.size()):
+		if path[index].roomId != room: return false
+	var offset := Vector3(0, 0, .38 if room.is_empty() else -.38)
+	var departure := valley.walk_doorway(id, path.slice(0, cut), offset, false)
+	if departure <= 0.0: return false
+	var arrival := path.slice(cut)
+	var other_paths := ResidentMovement.paths_in_scene(trails, room)
+	other_paths.erase(id)
+	doorway_active = true
+	hud.pass_doorway(departure, Valley3D.DOORWAY_PLAYBACK_SECONDS, func() -> void:
+		var size := valley.camera.size
+		if room.is_empty():
+			valley.leave_room(world)
+		else:
+			valley.enter_room(world, room)
+		valley.show_world(world, id, true, other_paths)
+		valley.walk_doorway(id, arrival, offset, true)
+		valley.match_follow_view(id, size)
+		hud.set_hover("", Vector2.ZERO)
+		_update_hud()
+	, _finish_doorway)
+	return true
+
+func _finish_doorway() -> void:
+	doorway_active = false
+	var queued := pending_snapshot
+	pending_snapshot = {}
+	if not queued.is_empty(): _apply_snapshot(queued)
+
+func _cancel_doorway() -> void:
+	if not doorway_active: return
+	doorway_active = false
+	pending_snapshot = {}
+	hud.clear_fade()
+	valley.settle_motion()
+	valley.show_world(world, selected_resident, connected)
+
 func _connection_lost(reason: String) -> void:
 	var was_connected := connected
 	connected = false
 	observation = {}
+	relationship_history = null
 	mode_text = "数据过期 · 当前决策来源未知"
 	movement_feed.reset()
+	resident_movement.reset()
 	valley.settle_motion()
 	valley.room_layouts = {}
 	_set_follow(false)
@@ -157,7 +224,8 @@ func _connection_lost(reason: String) -> void:
 	_update_hud()
 
 func _reset_context() -> void:
-	hud.close_journal()
+	_cancel_doorway()
+	hud.close_book()
 	if not valley.room_id.is_empty(): valley.leave_room(world)
 	selected_resident = ""
 	selected_building = ""
@@ -206,7 +274,9 @@ func _resource(id: String) -> Dictionary:
 
 func _resource_title(resource: Dictionary) -> String:
 	if resource.is_empty(): return "资源地点"
-	return "%s · %s, %s" % [Snapshot.resource_name(resource.kind), str(resource.at.x), str(resource.at.y)]
+	var title := Snapshot.resource_place_name(world.map, resource)
+	if resource.kind == "spring" and title != Snapshot.resource_name(resource.kind): return title
+	return "%s · %s, %s" % [title, str(resource.at.x), str(resource.at.y)]
 
 func _resource_stock(resource: Dictionary) -> String:
 	var amount: Variant = resource.get("amount")
@@ -302,6 +372,14 @@ func _enter_selected_building(id: String) -> void:
 	_set_follow(false)
 	_enter_room(id)
 
+func _view_residence() -> void:
+	var person := _resident(selected_resident)
+	var id := str(person.get("homeId", ""))
+	if not connected or not valley.room_layouts.has(id): return
+	if valley.room_id == id: return
+	_choose_building(id, false)
+	_enter_selected_building(id)
+
 func _enter_room(id: String) -> bool:
 	if not valley.enter_room(world, id): return false
 	hud.dissolve()
@@ -326,6 +404,7 @@ func _recenter() -> void:
 	valley.center(world)
 
 func _locate_resident() -> void:
+	_cancel_doorway()
 	var person := _resident(selected_resident)
 	if not _can_locate(person):
 		_set_follow(false)
@@ -343,6 +422,7 @@ func _locate_resident() -> void:
 	if valley.focus_resident(selected_resident): valley.close_view()
 
 func _set_follow(enabled: bool) -> void:
+	_cancel_doorway()
 	following = enabled and _can_locate(_resident(selected_resident))
 	if enabled and not following: _notice("这位居民的位置暂不可见")
 	if following: _locate_resident()
@@ -357,6 +437,15 @@ func _update_hud() -> void:
 		var id := str(building.get("id", ""))
 		if id.is_empty(): continue
 		var kind := "可看室内" if valley.room_layouts.has(id) else "仅外观"
+		var layout: Dictionary = valley.room_layouts.get(id, {})
+		if layout.get("style") == "hall":
+			kind = "四人共用 · 做饭与用餐"
+		elif layout.get("style") in ["grower", "craft", "family"]:
+			var names := PackedStringArray()
+			for resident in building.get("residents", []):
+				var person := _resident(str(resident))
+				if not person.is_empty(): names.append(Snapshot.resident_name(person))
+			if not names.is_empty(): kind = "、".join(names) + ("的卧室" if names.size() == 1 else "同住")
 		places[id] = {"title": _building_name(building), "note": kind, "kind": str(building.get("kind", ""))}
 	for plot in world.get("plots", []):
 		if not plot is Dictionary or not str(plot.get("id", "")).begins_with("mvp-garden-"): continue
@@ -377,6 +466,7 @@ func _update_hud() -> void:
 	_update_resident_card()
 	_update_place_card()
 	_update_history()
+	hud.show_relations(world, relationship_history, connected)
 
 func _update_resident_card() -> void:
 	var person := _resident(selected_resident)
@@ -390,7 +480,9 @@ func _update_resident_card() -> void:
 		details += "健康 %s  ·  饥饿 %s  ·  精力 %s\n" % [Snapshot.number_label(person.get("health")), Snapshot.number_label(person.get("hunger")), Snapshot.number_label(person.get("energy"))]
 		details += Snapshot.thirst_label(world, person.id) + "\n\n"
 		details += Snapshot.memory_summary(person)
-	hud.show_resident(person, location, action, details, _can_locate(person), following)
+	var home_id := str(person.get("homeId", ""))
+	var residence := _building_name(_building(home_id)) if connected and valley.room_layouts.has(home_id) else ""
+	hud.show_resident(person, location, action, details, _can_locate(person), following, residence)
 
 func _occupants(id: String) -> int:
 	var count := 0
@@ -435,7 +527,7 @@ func _notice(message: String) -> void:
 	hud.show_feedback(message)
 
 func _process(_delta: float) -> void:
-	if following and not valley.focus_resident(selected_resident):
+	if following and not valley.focus_resident(selected_resident) and not doorway_active:
 		_set_follow(false)
 	if not selected_resource.is_empty() and valley.room_id.is_empty() and connected:
 		var screen: Vector2 = valley.resource_screen_position(selected_resource)
@@ -474,10 +566,10 @@ func _notification(what: int) -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
-		if hud.journal_open(): hud.close_journal()
-		elif not valley.room_id.is_empty(): _leave_room()
-		elif hud.has_drawer(): hud.close_drawer()
-		else: _choose_building("")
+		if not hud.close_book():
+			if not valley.room_id.is_empty(): _leave_room()
+			elif hud.has_drawer(): hud.close_drawer()
+			else: _choose_building("")
 		get_viewport().set_input_as_handled()
 		return
 	if event is InputEventMouse and _over_controls(event.position): return

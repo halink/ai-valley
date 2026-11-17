@@ -1,7 +1,8 @@
 export const QWEN_MODEL='qwen3.8-flash';
 export const DEEPSEEK_MODEL='deepseek-ai/DeepSeek-R1-0528-Qwen3-8B';
 export const GLM_MODEL='THUDM/GLM-Z1-9B-0414';
-export type ModelName=typeof QWEN_MODEL|typeof DEEPSEEK_MODEL|typeof GLM_MODEL;
+export const GLM_FLASH_MODEL='zai-org/GLM-5.3-Flash';
+export type ModelName=typeof QWEN_MODEL|typeof DEEPSEEK_MODEL|typeof GLM_MODEL|typeof GLM_FLASH_MODEL;
 export type ModelConnection={model:ModelName;key:string};
 export type ModelMessage={role:'system'|'user';content:string};
 type Usage={prompt_tokens?:number;completion_tokens?:number};
@@ -15,7 +16,12 @@ export const modelLimits={
  [QWEN_MODEL]:{inputBytes:980_000,tpm:4_500_000,rpm:null,answerTokens:768,thinkingTokens:512,startSlots:8,maxSlots:16},
  [DEEPSEEK_MODEL]:{inputBytes:40_000,tpm:45_000,rpm:900,answerTokens:512,thinkingTokens:1536,startSlots:4,maxSlots:8},
  [GLM_MODEL]:{inputBytes:120_000,tpm:null,rpm:null,answerTokens:400,thinkingTokens:2048,startSlots:2,maxSlots:4},
+ [GLM_FLASH_MODEL]:{inputBytes:120_000,tpm:null,rpm:null,answerTokens:768,thinkingTokens:0,startSlots:1,maxSlots:1},
 } as const;
+
+export function isModelName(model:string):model is ModelName{
+ return Object.hasOwn(modelLimits,model);
+}
 
 export function checkedInputBytes(model:ModelName,messages:ModelMessage[]):number{
  const bytes=Buffer.byteLength(JSON.stringify(messages),'utf8');
@@ -31,9 +37,15 @@ export function modelRequestPayload(model:ModelName,messages:ModelMessage[],temp
  if(Buffer.byteLength(encoded,'utf8')>modelLimits[model].inputBytes)throw new Error('model_context_limit');
  messages=JSON.parse(encoded) as ModelMessage[];
  const {answerTokens,thinkingTokens}=modelLimits[model];
- const qwen=model===QWEN_MODEL,deepseek=model===DEEPSEEK_MODEL;
- const options=qwen?{stream:true,stream_options:{include_usage:true},enable_thinking:true,thinking_budget:thinkingTokens}
-  :{stream:false,enable_thinking:deepseek,thinking_budget:deepseek||temperature===0.6?thinkingTokens:1536};
+ let options;
+ if(model===QWEN_MODEL){
+  options={stream:true,stream_options:{include_usage:true},enable_thinking:true,thinking_budget:thinkingTokens};
+ }else if(model===GLM_FLASH_MODEL){
+  options={stream:false,enable_thinking:false};
+ }else{
+  const deepseek=model===DEEPSEEK_MODEL;
+  options={stream:false,enable_thinking:deepseek,thinking_budget:deepseek||temperature===0.6?thinkingTokens:1536};
+ }
  return JSON.stringify({model,messages,temperature,max_tokens:answerTokens,...options});
 }
 export const SILICONFLOW_COMPLETIONS_ENDPOINT='https://api.siliconflow.cn/v1/chat/completions';

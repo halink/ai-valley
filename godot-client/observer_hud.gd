@@ -2,6 +2,7 @@ extends CanvasLayer
 
 signal overview_requested
 signal resident_requested(id: String)
+signal residence_requested
 signal building_requested(id: String)
 signal doorway_requested(id: String)
 signal outside_requested
@@ -13,6 +14,7 @@ signal place_labels_changed(enabled: bool)
 
 const Art = preload("res://valley_interface_style.gd")
 const ValleyJournal = preload("res://valley_journal.gd")
+const ValleyRelationships = preload("res://valley_relationships.gd")
 const Snapshot = preload("res://snapshot.gd")
 
 # Place-register category sketches, in the palette of the scene meshes.
@@ -88,6 +90,10 @@ var dock_buttons := {}
 var people_list: VBoxContainer
 var places_list: VBoxContainer
 var journal: ValleyJournal
+var relationships: ValleyRelationships
+var relation_entry: Button
+var residence_entry: Button
+var relation_opener: Button
 var mode_label: Label
 var run_label: Label
 var summary_label: Label
@@ -148,6 +154,14 @@ func _ready() -> void:
 	journal.dismissed.connect(func():
 		dock_buttons.events.set_pressed_no_signal(false)
 		dock_buttons.events.grab_focus()
+	)
+	relationships = ValleyRelationships.new()
+	root.add_child(relationships)
+	relationships.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	relationships.dismissed.connect(func():
+		dock_buttons.relations.set_pressed_no_signal(false)
+		if is_instance_valid(relation_opener) and relation_opener.is_visible_in_tree():
+			relation_opener.grab_focus()
 	)
 	root.resized.connect(_queue_layout)
 	_queue_layout()
@@ -211,12 +225,14 @@ func _build_navigation() -> void:
 	var overview := _button(dock, "全景", func(): overview_requested.emit(), "WoodButton", 20)
 	overview.custom_minimum_size = Vector2(81, 44)
 	overview.tooltip_text = "回到山谷全景"
-	for item in [["people", "居民"], ["places", "场所"], ["events", "手记"]]:
+	for item in [["people", "居民"], ["relations", "往来"], ["places", "场所"], ["events", "手记"]]:
 		var key: String = item[0]
 		var button := _button(dock, item[1], _toggle_pane.bind(key), "WoodButton", 20)
 		button.custom_minimum_size = overview.custom_minimum_size
 		button.toggle_mode = true
 		dock_buttons[key] = button
+	dock_buttons.relations.tooltip_text = "查看人物关系"
+	dock_buttons.relations.accessibility_name = "人物往来"
 
 	lens = HBoxContainer.new()
 	lens.add_theme_constant_override("separation", 3)
@@ -326,6 +342,11 @@ func _build_resident_pane(pane: VBoxContainer) -> void:
 	follow_button.toggle_mode = true
 	follow_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_brush_rule(pane, Art.MOSS, 47)
+	residence_entry = _button(pane, "", func(): residence_requested.emit())
+	residence_entry.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	residence_entry.hide()
+	relation_entry = _button(pane, "人物往来  ›", func(): _open_relations(relation_entry, resident_id))
+	relation_entry.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	detail_button = _button(pane, "随身物品与经历  ＋", _toggle_resident_detail)
 	detail_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	detail_body = VBoxContainer.new()
@@ -498,13 +519,25 @@ func _toggle_pane(pane: String) -> void:
 		if journal.visible:
 			journal.dismiss()
 		else:
+			relationships.dismiss()
 			set_hover("", Vector2.ZERO)
 			journal.open()
 			dock_buttons.events.set_pressed_no_signal(true)
 		return
+	if pane == "relations":
+		if relationships.visible: relationships.dismiss()
+		else: _open_relations(dock_buttons.relations)
+		return
 	active_pane = "" if active_pane == pane else pane
 	set_hover("", Vector2.ZERO)
 	_refresh_drawer()
+
+func _open_relations(opener: Button, person_id := "") -> void:
+	journal.dismiss()
+	set_hover("", Vector2.ZERO)
+	relation_opener = opener
+	relationships.open(person_id)
+	dock_buttons.relations.set_pressed_no_signal(true)
 
 func _visible_pane() -> String:
 	if not active_pane.is_empty(): return active_pane
@@ -519,7 +552,8 @@ func _refresh_drawer() -> void:
 	for key in panes:
 		panes[key].visible = key == visible_pane
 	for key in dock_buttons:
-		dock_buttons[key].set_pressed_no_signal(key == active_pane or (key == "events" and journal.visible))
+		dock_buttons[key].set_pressed_no_signal(key == active_pane
+			or (key == "events" and journal.visible) or (key == "relations" and relationships.visible))
 	drawer.visible = not visible_pane.is_empty()
 	scroll.scroll_vertical = 0
 	_queue_layout()
@@ -542,7 +576,7 @@ func select_resident(id: String) -> void:
 	active_pane = ""
 	_refresh_drawer()
 
-func show_resident(person: Dictionary, location: String, action: String, details: String, available: bool, following: bool) -> void:
+func show_resident(person: Dictionary, location: String, action: String, details: String, available: bool, following: bool, residence := "") -> void:
 	if person.is_empty(): return
 	var name_text := Snapshot.resident_name(person)
 	_paint_portrait(resident_portrait, str(person.id), name_text)
@@ -550,6 +584,9 @@ func show_resident(person: Dictionary, location: String, action: String, details
 	resident_location.text = location
 	resident_action.text = action
 	resident_detail.text = details
+	residence_entry.visible = not residence.is_empty()
+	residence_entry.text = residence + "  ›"
+	residence_entry.accessibility_name = "查看住处 " + residence
 	locate_button.disabled = not available
 	follow_button.disabled = not available
 	follow_button.set_pressed_no_signal(following)
@@ -646,11 +683,17 @@ func show_room(title: String, caption: String) -> void:
 	crumb_caption.text = caption
 	_queue_layout()
 
-func journal_open() -> bool:
-	return journal.visible
+func close_book() -> bool:
+	if relationships.visible:
+		relationships.dismiss()
+		return true
+	if journal.visible:
+		journal.dismiss()
+		return true
+	return false
 
-func close_journal() -> void:
-	journal.dismiss()
+func show_relations(world: Dictionary, history: Variant, connected: bool) -> void:
+	relationships.present(world, history, connected)
 
 func show_history(records: Array[Dictionary], connected: bool) -> void:
 	journal.present(records, connected)
@@ -682,13 +725,30 @@ func set_hover(caption: String, at: Vector2) -> void:
 	hover_card.position = Vector2(minf(at.x + 13, root.size.x - hover_card.size.x - 10), maxf(10, at.y - hover_card.size.y - 11))
 
 func covers_screen_point(at: Vector2) -> bool:
-	if journal_open(): return true
+	if journal.visible or relationships.visible: return true
 	for surface in [brand, dock, lens, tools, feedback, crumb, drawer, place_card, event_strip]:
 		if surface != null and surface.visible and surface.get_global_rect().has_point(at): return true
 	return false
 
-func dissolve() -> void:
+func clear_fade() -> void:
 	if fade_tween != null: fade_tween.kill()
+	fade_tween = null
+	fade.color = Color(Art.CREAM, 0)
+
+func dissolve() -> void:
+	clear_fade()
 	fade.color.a = .68
 	fade_tween = create_tween()
 	fade_tween.tween_property(fade, "color:a", 0.0, .24).set_trans(Tween.TRANS_SINE)
+
+func pass_doorway(departure: float, arrival: float, swap_scene: Callable, finished: Callable) -> void:
+	clear_fade()
+	fade.color = Color(Art.INK, 0)
+	var cover := minf(.19, departure)
+	fade_tween = create_tween().set_trans(Tween.TRANS_SINE)
+	fade_tween.tween_interval(departure - cover)
+	fade_tween.tween_property(fade, "color:a", .9, cover)
+	fade_tween.tween_callback(swap_scene)
+	fade_tween.tween_property(fade, "color:a", 0.0, .24)
+	fade_tween.tween_interval(maxf(arrival - .24, 0.0))
+	fade_tween.tween_callback(finished)

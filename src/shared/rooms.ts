@@ -1,11 +1,30 @@
 import {residentialStay} from './premises.js';
 import {commonsStay,leasedBed} from './commons.js';
+import {hasMvpHamlet,MVP_HALL,MVP_HOMES} from './mvp-hamlet.js';
 import type {Activity,Building,Resident,Vec,World} from './types.js';
-export interface RoomSlot {key:string;at:Vec;kind:'bed'|'table'|'kitchen'|'station'|'care'|'pen'|'crop'|'bodyBay';}
-export interface RoomLayout {width:number;height:number;entry:Vec;slots:RoomSlot[];blocked:Vec[];}
+export interface RoomSlot {key:string;at:Vec;kind:'bed'|'table'|'kitchen'|'station'|'care'|'pen'|'crop'|'bodyBay'|'seat';}
+export interface RoomLayout {width:number;height:number;entry:Vec;slots:RoomSlot[];blocked:Vec[];style?:'grower'|'craft'|'family'|'hall';}
 export interface RoomJourney {buildingId:string;mode:'work'|'exit';target:Vec;path:Vec[];progress:number;}
 export interface RoomState {tick:number;claims:Array<{buildingId:string;key:string;group:string;people:string[]}>;beds:Record<string,Record<string,number>>;}
+const homeLayouts={
+ [MVP_HOMES.lin]:{width:12,height:13,style:'grower',beds:[{x:3,y:6}],table:{x:8,y:7}},
+ [MVP_HOMES.qiao]:{width:13,height:13,style:'craft',beds:[{x:10,y:6}],table:{x:4,y:7}},
+ [MVP_HOMES.couple]:{width:15,height:14,style:'family',beds:[{x:6,y:7},{x:8,y:7}],table:{x:11,y:9}},
+} as const;
+function bedFootprint(slots:RoomSlot[]):Vec[]{
+ return slots.filter(s=>s.kind==='bed').flatMap(({at})=>[{x:at.x-1,y:at.y-2},{x:at.x,y:at.y-2},{x:at.x-1,y:at.y-1},{x:at.x,y:at.y-1}]);
+}
 export function roomLayout(w:World,b:Building):RoomLayout {
+ const hamlet=hasMvpHamlet(w);
+ const home=hamlet?homeLayouts[b.id as keyof typeof homeLayouts]:undefined;
+ if(home){
+  const {width,height,style,beds,table}=home;
+  const slots:RoomSlot[]=[{key:'table',kind:'table',at:{...table}},
+   ...beds.map((at,index)=>({key:'bed:'+index,kind:'bed' as const,at:{...at}}))];
+  const blocked=[...bedFootprint(slots),{x:table.x-1,y:table.y-1},{x:table.x,y:table.y-1}];
+  for(const p of w.residents)if(p.status==='dead'&&p.body?.storedAt===b.id&&p.roomAt&&!p.body.carriedBy)blocked.push({...p.roomAt});
+  return {style,width,height,entry:{x:Math.floor(width/2),y:height-2},slots,blocked};
+ }
  const beds=['home','lodge','clinic'].includes(b.kind)?b.capacity:0;
  const animals=b.kind==='barn'?Math.max(4,Math.floor(b.width*b.height/8)):0;
  const cols=Math.max(16,b.width*2),rows=Math.max(['workshop','store','greenhouse'].includes(b.kind)?16:13,Math.ceil(beds/2)*3+7,Math.ceil(animals/2)*4+5,b.height*2+3);
@@ -17,10 +36,23 @@ export function roomLayout(w:World,b:Building):RoomLayout {
  slots.push({key:'care',at:{x:4,y:5},kind:'care'});
  for(let i=0;i<animals;i++)slots.push({key:'pen:'+i,kind:'pen',at:{x:i%2?cols-5:4,y:7+Math.floor(i/2)*4}});
  if(b.kind==='greenhouse')for(let i=0;i<4;i++)slots.push({key:'crop:'+i,kind:'crop',at:{x:i%2?10:4,y:i<2?8:12}});
+ const hall=hamlet&&b.id===MVP_HALL;
+ if(hall)for(const [i,at] of [{x:center-1,y:8},{x:center+1,y:8},{x:center-3,y:7},{x:center+2,y:7}].entries())slots.push({key:'mvp-dining:'+i,kind:'seat',at});
  const blocked:Vec[]=[];if(!['barn','greenhouse'].includes(b.kind))for(let x=center-2;x<=center+1;x++)for(let y=6;y<=7;y++)blocked.push({x,y});
- for(const s of slots.filter(s=>s.kind==='bed'))for(let x=s.at.x-1;x<=s.at.x;x++)for(let y=s.at.y-2;y<s.at.y;y++)blocked.push({x,y});
+ blocked.push(...bedFootprint(slots));
  for(const p of w.residents)if(p.status==='dead'&&p.body?.storedAt===b.id&&p.roomAt&&!p.body.carriedBy)blocked.push({...p.roomAt});
- return {width:cols,height:rows,entry:{x:center,y:rows-2},slots,blocked};
+ return {width:cols,height:rows,entry:{x:center,y:rows-2},slots,blocked,...(hall?{style:'hall' as const}:{})};
+}
+export function mvpDiningSeat(w:World,r:Resident){
+ if(w.mvpRooms?.version!==1)return null;
+ const hamlet=hasMvpHamlet(w);
+ const building=w.buildings.find(b=>hamlet?b.id===MVP_HALL:b.id===r.homeId&&b.residents.includes(r.id));
+ if(!building||building.condition<=0)return null;
+ const index=(hamlet?w.residents.map(p=>p.id):building.residents).indexOf(r.id);
+ if(index<0)return null;
+ const layout=roomLayout(w,building),key='mvp-dining:'+index;
+ const at=hamlet?layout.slots.find(s=>s.key===key)?.at:index<2?{x:Math.floor(layout.width/2)-1+index*2,y:8}:undefined;
+ return at?{building,key,at}:null;
 }
 export function roomPath(layout:RoomLayout,from:Vec,to:Vec):Vec[]|null {
  const index=(p:Vec)=>p.y*layout.width+p.x,inBounds=(p:Vec)=>p.x>=1&&p.y>=4&&p.x<layout.width-1&&p.y<layout.height-1;
@@ -34,9 +66,8 @@ export function actionRoom(w:World,r:Resident,a:Activity):{building:Building;key
  // Unilateral decisions stay where the actor is; they do not approach a partner or chase oneself.
  if(action.type==='separate'||action.type==='respond'&&!action.accept&&w.proposals.find(p=>p.id===action.proposalId)?.actorId===r.id||action.type==='respond'&&!action.accept&&w.proposals.some(p=>p.id===action.proposalId&&p.kind==='care'&&p.targetId===r.id))return null;
  if(action.type==='eat'&&action.mvpAtTable&&w.mvpRooms?.version===1){
-  const b=w.buildings.find(b=>b.id===r.homeId&&b.residents.includes(r.id));if(!b)return null;
-  const index=b.residents.indexOf(r.id);if(index>1)return null;id=b.id;key='mvp-dining:'+index;
-  const center=Math.floor(roomLayout(w,b).width/2);target={x:center-1+index*2,y:8};
+  const seat=mvpDiningSeat(w,r);if(!seat)return null;
+  return {building:seat.building,key:seat.key,group,target:seat.at};
  }else if(action.type==='personalFoodGift'){
   if(action.operation!=='deliver'&&action.operation!=='return')return null;const c=w.personalFoodGifts?.gifts.find(c=>c.id===action.giftId);if(!c?.location.inside||!c.location.roomAt)return null;id=c.location.inside;target={...c.location.roomAt};key='personal-food-gift:'+c.id;
  }else if(action.type==='pregnancyPreparation'&&action.operation==='attend'){

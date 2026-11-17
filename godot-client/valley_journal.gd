@@ -10,26 +10,8 @@ const SEAL := Color("943f31")
 const ROW_HEIGHT := 70
 const ROW_GAP := 4
 
-class BookCover extends Control:
-	var cover := Art.cedar(Vector4.ZERO, Color(1.03, 1.0, .96))
-	var paper := Art.leaf(Vector4.ZERO, Color(1.14, 1.13, 1.12))
-
-	func _draw() -> void:
-		var edge := Rect2(Vector2.ZERO, size)
-		for spread in [Vector2(10, 12), Vector2(6, 8), Vector2(3, 5)]:
-			draw_rect(edge.grow_individual(spread.x, 0, spread.x, spread.y), Color(0.16, 0.11, 0.06, .09))
-		draw_style_box(cover, edge.grow(3))
-		draw_style_box(paper, edge.grow(-5))
-		var middle := size.x * .5
-		for step in range(13):
-			var alpha := .16 * pow(1.0 - step / 13.0, 2.1)
-			draw_rect(Rect2(middle - step - 1, 8, 1, size.y - 16), Color(.43, .28, .14, alpha))
-			draw_rect(Rect2(middle + step, 8, 1, size.y - 16), Color(.43, .28, .14, alpha * 0.7))
-		for y in [30.0, size.y - 30.0]:
-			draw_line(Vector2(middle - 5, y), Vector2(middle + 5, y), Color("7c5941"), 2.0, true)
-
 var lettering: Font
-var book: BookCover
+var book: Control
 var pages: HBoxContainer
 var scene_art: TextureRect
 var detail_stack: VBoxContainer
@@ -60,7 +42,7 @@ func _ready() -> void:
 	add_child(veil)
 	veil.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
-	book = BookCover.new()
+	book = Art.book_cover()
 	book.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(book)
 	pages = HBoxContainer.new()

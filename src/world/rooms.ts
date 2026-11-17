@@ -10,6 +10,7 @@ import {canApproachSocialTarget} from './social-observation.js';
 import {movementRate} from './health.js';
 import {knownAgeYears} from './time.js';
 import {isSelfCareAction} from './self-care.js';
+import {recordResidentMovement} from './completed-movement.js';
 import type {Resident,Vec,World} from '../shared/types.js';
 import {actionRoom,roomLayout,roomPath} from '../shared/rooms.js';
 export function initializeRooms(w:World){if(w.mode==='formal')w.rooms??={tick:-1,claims:[],beds:{}};}
@@ -55,6 +56,18 @@ function exitJourneyProblem(w:World,r:Resident,journey:NonNullable<Resident['act
  else if(from.x!==entry.x||from.y!==entry.y)return exitUnavailable;
  return null;
 }
+function stepToRoomCell(w:World,r:Resident,to:Vec):void {
+ const from=r.roomAt!,room=r.inside!;
+ r.roomAt=to;
+ recordResidentMovement(w,r.id,from,to,room);
+}
+function leaveThroughDoor(w:World,r:Resident):void {
+ const from=r.roomAt!,room=r.inside!;
+ r.inside=null;
+ r.roomAt=null;
+ delete r.activity!.room;
+ recordResidentMovement(w,r.id,from,r.at,room,null);
+}
 /** Room movement consumes the same world minutes as outdoor walking. Work starts at the actual slot. */
 export function moveInRoom(w:World,r:Resident,dt:number):{moving:boolean;error?:string}{
  if(!w.rooms||!r.activity)return {moving:false};const a=r.activity;
@@ -64,8 +77,8 @@ export function moveInRoom(w:World,r:Resident,dt:number):{moving:boolean;error?:
  if(a.action.type==='publicDuty'&&(a.action.operation==='receive'||a.action.operation==='inspect')){const error=dutyReason(w,r,a.action);if(error)return {moving:false,error};}
  if(a.room?.mode==='exit'){
   const journey=a.room,problem=exitJourneyProblem(w,r,journey);if(problem)return {moving:false,error:problem};
-  journey.progress+=dt*movementRate(w,r);while(journey.progress>=1&&journey.path.length){const error=exitJourneyProblem(w,r,journey);if(error)return {moving:false,error};r.roomAt=journey.path.shift()!;journey.progress--;}
-  if(!journey.path.length){const error=exitJourneyProblem(w,r,journey);if(error)return {moving:false,error};r.inside=null;r.roomAt=null;delete a.room;}
+  journey.progress+=dt*movementRate(w,r);while(journey.progress>=1&&journey.path.length){const error=exitJourneyProblem(w,r,journey);if(error)return {moving:false,error};stepToRoomCell(w,r,journey.path.shift()!);journey.progress--;}
+  if(!journey.path.length){const error=exitJourneyProblem(w,r,journey);if(error)return {moving:false,error};leaveThroughDoor(w,r);}
   return {moving:true};
  }
  if(a.path.length)return {moving:false};
@@ -74,12 +87,18 @@ export function moveInRoom(w:World,r:Resident,dt:number):{moving:boolean;error?:
  const {building:b,target,key,group}=work,layout=roomLayout(w,b);
  if(a.action.type==='commons'&&!canReachCommonsTable(w,r,b))return {moving:false,error:'共屋实际室内入口或桌台路线已经阻断，须留在当前位置重新决定'};
  if(a.action.type==='sleep'&&!a.action.buildingId){const assignments=w.rooms.beds[b.id]??={};assignments[r.id]=Number(key.slice(4));}
- if(r.inside!==b.id){if(r.at.x!==b.door.x||r.at.y!==b.door.y)return {moving:false,error:'对象的室内位置已经改变，须重新寻找实际入口'};r.inside=b.id;r.roomAt={...layout.entry};}
+ if(r.inside!==b.id){
+  if(r.at.x!==b.door.x||r.at.y!==b.door.y)return {moving:false,error:'对象的室内位置已经改变，须重新寻找实际入口'};
+  const previousRoom=r.inside,from=r.roomAt??r.at;
+  r.inside=b.id;
+  r.roomAt={...layout.entry};
+  recordResidentMovement(w,r.id,from,r.roomAt,previousRoom,b.id);
+ }
  r.roomAt??={...layout.entry};
  if(r.roomAt.x!==target.x||r.roomAt.y!==target.y){
   if(a.room&&(a.room.target.x!==target.x||a.room.target.y!==target.y))delete a.room;
   if(!a.room){const path=roomPath(layout,r.roomAt,target);if(path===null)return {moving:false,error:'室内入口至真实工位不可达'};a.room={buildingId:b.id,mode:'work',path,target,progress:0};}
-  a.room.progress+=dt*movementRate(w,r);while(a.room.progress>=1&&a.room.path.length){const error=guardianRoomStepProblem(w,r,a.room.path[0]);if(error)return {moving:false,error};r.roomAt=a.room.path.shift()!;a.room.progress--;}
+  a.room.progress+=dt*movementRate(w,r);while(a.room.progress>=1&&a.room.path.length){const error=guardianRoomStepProblem(w,r,a.room.path[0]);if(error)return {moving:false,error};stepToRoomCell(w,r,a.room.path.shift()!);a.room.progress--;}
   if(a.room.path.length)return {moving:true};delete a.room;return {moving:true};
  }
  if(a.action.type==='sleep'&&!a.action.buildingId){const assignments=w.rooms.beds[b.id]??={};assignments[r.id]=Number(key.slice(4));}
@@ -112,6 +131,6 @@ export function prepareRoomExit(w:World,r:Resident,checkOnly=false):string|null{
  if(['shareFoodSource','adultPresence','agency','wait','eat','talk','propose','respond','separate','familyConsent','tendChild','care'].includes(r.activity.action.type)&&r.activity.path.length===0)return null;
  const plan=roomExitPlan(w,r);if('error' in plan)return plan.error;if(checkOnly)return null;
  if(plan.path.length)r.activity.room={buildingId:plan.buildingId,mode:'exit',target:plan.entry,path:plan.path,progress:0};
- else {r.inside=null;r.roomAt=null;delete r.activity.room;}
+ else leaveThroughDoor(w,r);
  return null;
 }

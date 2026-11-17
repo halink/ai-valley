@@ -43,7 +43,7 @@ import {initializeEmployment,employmentDeadline} from '../world/employment.js';
 import {initializeConstruction,constructionDeadline} from '../world/construction.js';
 import {initializeForeignTrade,foreignCandidates,isForeignActor,foreignDecisionContext,applyForeignDecision,foreignDeadline} from '../world/foreign-trade.js';
 import {WorldStore, workingEvents} from './store.js';
-import {callModel,decisionContext,decisionChoices,prepareModelDecision,DecisionError,type ModelResult} from './decisions.js';
+import {callModel,decisionContext,decisionChoices,prepareModelDecision,DecisionError,isInvalidDecision,type ModelResult} from './decisions.js';
 import {GLM_MODEL,QWEN_MODEL,DEEPSEEK_MODEL,modelLimits,type ModelConnection,type ModelName} from './model-completion.js';
 import {ModelBudget} from './model-budget.js';
 import {DecisionWaitEvidence,type DecisionWaitEvidenceOptions} from './decision-wait-evidence.js';
@@ -609,8 +609,9 @@ export class ValleyRuntime {
    const code=error instanceof Error?error.message:'model_failed';
    const safe=/^(model_http_\d{3}|model_incomplete|model_stream_error|model_context_limit|invalid_decision|unsupported_action|invalid_action)$/.test(code)?code:'model_timeout_or_invalid_response';
    this.decisionEvidence?.requestFinished(evidenceRequest,error instanceof Error&&error.name==='TimeoutError'?'timeout':'failed',safe,this.world.minute);
-   if(this.selfHostedSafety&&safe!=='model_http_429'){this.stop();this.commit(w=>{w.metrics.lastError=safe;w.clock.reason='模型请求未核实，世界已停表';});return;}
-   const backup=provider===this.providers[0]?this.providers[1]:undefined;
+   const retryInvalidDecision=this.selfHostedSafety&&this.world.mode==='validation'&&isInvalidDecision(error);
+   if(this.selfHostedSafety&&safe!=='model_http_429'&&!retryInvalidDecision){this.stop();this.commit(w=>{w.metrics.lastError=safe;w.clock.reason='模型请求未核实，世界已停表';});return;}
+   const backup=provider===this.providers[0]&&!retryInvalidDecision?this.providers[1]:undefined;
    let retryDelay=30_000;
    if(!foreign&&!traveller&&error instanceof DecisionError&&error.feedback){
     if(!this.replyFeedback.has(actorId))retryDelay=5000;

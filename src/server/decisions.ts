@@ -268,6 +268,9 @@ function maxPlanSteps(context:DecisionContext){
 }
 export interface ModelResult {decision:ModelDecision;inputTokens:number;outputTokens:number;latencyMs:number;}
 export class DecisionError extends Error {constructor(message:string,public stats:{inputTokens:number;outputTokens:number;latencyMs:number},public feedback?:string){super(message);}}
+export function isInvalidDecision(error:unknown):error is DecisionError{
+ return error instanceof DecisionError && error.message==='invalid_decision';
+}
 export function parseForeignReply(raw:string,choices:ActionChoice[]){const body=raw.trim();if(body.startsWith('{')||body.startsWith('```'))return parseChoice(body,choices);const match=/^([1-9]\d{0,2})(?:[,，]\s*([1-9]\d{0,2}))?(?:[,，]\s*([1-9]\d{0,3}))?$/.exec(body);if(!match)throw new Error('invalid_foreign_reply');const [,choice,quantity,price]=match;return parseChoice(JSON.stringify({choice,...(quantity?{quantity:Number(quantity)}:{}),...(price?{price:Number(price)}:{})}),choices);}
 export function prepareModelDecision(context:DecisionContext,feedback:string|undefined,model:ModelName){
  const choices=decisionChoices(context);

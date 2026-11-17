@@ -7,6 +7,7 @@ const LEAF = preload("res://art/interface/cloth-bound-leaf-v1.png")
 const CEDAR = preload("res://art/interface/cedar-slip-v1.png")
 const LIN = preload("res://art/interface/lin-portrait-v1.png")
 const QIAO = preload("res://art/interface/qiao-portrait-v1.png")
+const HOUSEHOLD = preload("res://art/interface/household-portraits-v1.png")
 
 const INK := Color("352b21")
 const FADED := Color("595644")
@@ -20,6 +21,30 @@ const PAGE_REGION := Rect2(.034, .030, .952, .943)
 static var lettering: FontVariation
 static var reading: FontVariation
 static var portraits := {}
+
+class BookCover extends Control:
+	var cover: StyleBox
+	var paper: StyleBox
+
+	func _draw() -> void:
+		var edge := Rect2(Vector2.ZERO, size)
+		for spread in [Vector2(10, 12), Vector2(6, 8), Vector2(3, 5)]:
+			draw_rect(edge.grow_individual(spread.x, 0, spread.x, spread.y), Color(0.16, 0.11, 0.06, .09))
+		draw_style_box(cover, edge.grow(3))
+		draw_style_box(paper, edge.grow(-5))
+		var middle := size.x * .5
+		for step in range(13):
+			var alpha := .16 * pow(1.0 - step / 13.0, 2.1)
+			draw_rect(Rect2(middle - step - 1, 8, 1, size.y - 16), Color(.43, .28, .14, alpha))
+			draw_rect(Rect2(middle + step, 8, 1, size.y - 16), Color(.43, .28, .14, alpha * 0.7))
+		for y in [30.0, size.y - 30.0]:
+			draw_line(Vector2(middle - 5, y), Vector2(middle + 5, y), Color("7c5941"), 2.0, true)
+
+static func book_cover() -> BookCover:
+	var book := BookCover.new()
+	book.cover = cedar(Vector4.ZERO, Color(1.03, 1.0, .96))
+	book.paper = leaf(Vector4.ZERO, Color(1.14, 1.13, 1.12))
+	return book
 
 # A modest dab of pigment with dry, tapering ends.
 class BrushBox extends StyleBox:
@@ -90,11 +115,12 @@ static func brush(color: Color, padding := Vector2.ZERO, underline := false) -> 
 	return wash
 
 static func portrait(id: String) -> Texture2D:
-	if id not in ["lin", "qiao"]: return null
+	if id not in ["lin", "qiao", "yan", "tang"]: return null
 	if not portraits.has(id):
 		var view := AtlasTexture.new()
-		view.atlas = LIN if id == "lin" else QIAO
-		var region := Rect2(.014, .011, .972, .989) if id == "lin" else Rect2(.071, .006, .862, .994)
+		view.atlas = {"lin":LIN, "qiao":QIAO, "yan":HOUSEHOLD, "tang":HOUSEHOLD}[id]
+		var region: Rect2 = {"lin":Rect2(.014,.011,.972,.989), "qiao":Rect2(.071,.006,.862,.994),
+			"yan":Rect2(0,0,.499,1), "tang":Rect2(.501,0,.499,1)}[id]
 		view.region = _image_region(view.atlas, region)
 		view.filter_clip = true
 		portraits[id] = view

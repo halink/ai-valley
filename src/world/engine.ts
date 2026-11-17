@@ -1,4 +1,5 @@
 import {mvpSleepProblem,mvpDiningPlace} from './mvp-rooms.js';
+import {hasMvpHamlet,MVP_HALL} from '../shared/mvp-hamlet.js';
 import {advanceMvpThirst,mvpDrinkReason,completeMvpDrink} from './mvp-drinking.js';
 import {recordCompletedMovement} from './completed-movement.js';
 import {completedWorkIdentity} from '../shared/work-completion.js';
@@ -201,6 +202,7 @@ export function submitPlan(world:World,plan:Plan):{ok:boolean;error?:string} {
 }
 
 function kitchenUseReason(world:World,r:Resident,b:Building|undefined,start=world.minute,end=world.minute+.000001):string|null {
+ if(b&&hasMvpHamlet(world)&&b.id!==MVP_HALL)return '这间卧室没有厨房，须前往山居灶堂';
  if(!b||b.condition<=0||!(b.id===r.homeId&&b.residents.includes(r.id)||b.kind==='lodge'&&b.ownerId==='commons'||currentPremisesLease(world,b.id,start)?.tenantId===r.id&&currentPremisesLease(world,b.id,start)?.terms.station==='kitchen'))return '这处厨房已损坏或本人没有使用权';
  return premisesWorkReason(world,r.id,b.id,'kitchen',start,end)??publicKitchenReason(world,r,b.id)??employmentKitchenReason(world,r,b.id);
 }
@@ -281,7 +283,8 @@ function targetFor(world:World,r:Resident,a:Action,definition:string,elapsed=0):
   if(!Number.isInteger(a.quantity)||a.quantity<1||a.quantity>6)return fail('烹饪数量不合法');
   if(!has(r.inventory,world.definitions[definition]?.cost??{},a.quantity))return fail('烹饪所需实际材料已经不足');
   if(a.buildingId!==undefined&&a.buildingId!==r.homeId&&!r.knownBuildings.includes(a.buildingId))return fail('尚未知道这处厨房的地址');
-  const b=a.buildingId!==undefined?world.buildings.find(b=>b.id===a.buildingId):world.buildings.find(b=>b.id===r.homeId&&b.condition>0&&b.residents.includes(r.id))||world.buildings.find(b=>r.knownBuildings.includes(b.id)&&b.kind==='lodge'&&b.ownerId==='commons'&&b.condition>0);
+  const id=a.buildingId??(hasMvpHamlet(world)?MVP_HALL:undefined);
+  const b=id!==undefined?world.buildings.find(b=>b.id===id):world.buildings.find(b=>b.id===r.homeId&&b.condition>0&&b.residents.includes(r.id))||world.buildings.find(b=>r.knownBuildings.includes(b.id)&&b.kind==='lodge'&&b.ownerId==='commons'&&b.condition>0);
   if(!b)return fail('没有可使用的已知厨房');const problem=kitchenUseReason(world,r,b);if(problem)return fail(problem);return {target:b.door,duration:Number(world.definitions[definition]?.minutes??20)*a.quantity,buildingId:b.id};
  }
  if(a.type==='build')return {target:{x:a.at.x+Math.floor(Number(world.definitions[definition]?.data.width??6)/2),y:a.at.y+Number(world.definitions[definition]?.data.height??5)},duration:Number(world.definitions[definition]?.minutes??360)};

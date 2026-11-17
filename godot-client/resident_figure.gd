@@ -20,13 +20,19 @@ var hips: Array[Node3D] = []
 var knees: Array[Node3D] = []
 var shoes: Array[Node3D] = []
 
-func construct(wrapped: bool) -> void:
+static var heads := {}
+
+func construct(wrapped: bool, hair_style := "") -> void:
 	if not templates.has(wrapped): templates[wrapped] = _pattern(wrapped)
 	var pieces: Dictionary = templates[wrapped]
 	pigment = ShaderMaterial.new()
 	pigment.shader = PIGMENT
 	torso = _joint(self, "Coat", Vector3(0, .76, 0), pieces.coat)
-	head = _joint(torso, "Head", Vector3(0, .465 if wrapped else .490, .001), pieces.head)
+	var head_mesh: ArrayMesh = pieces.head
+	if not hair_style.is_empty():
+		if not heads.has(hair_style): heads[hair_style] = Face.new(wrapped, hair_style).build()
+		head_mesh = heads[hair_style]
+	head = _joint(torso, "Head", Vector3(0, .465 if wrapped else .490, .001), head_mesh)
 	for i in range(2):
 		var side := i * 2 - 1
 		var shoulder_x := .222 if wrapped else .239

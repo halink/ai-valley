@@ -15,7 +15,10 @@ func build(terrain: Node3D, room: Dictionary, shared: bool, dining: bool) -> voi
 	var width := float(room.width)
 	var depth := float(room.height) - 3.0
 	var center := Vector3((width - 1.0) * .5, 0, (room.height + 2.0) * .5)
-	var planks := craft.painted.get_material("floor" if shared else "light_floor")
+	var style := str(room.get("style", ""))
+	if style not in ["grower", "craft", "family", "hall"]: style = ""
+	var floor_key: String = {"craft":"smoke_floor", "family":"honey_floor"}.get(style, "floor" if shared else "light_floor")
+	var planks := craft.painted.get_material(floor_key)
 	var frame := craft.painted.get_material("timber")
 	craft.box(terrain, center - Vector3.UP * .30, Vector3(width + .29, .31, depth + .27), craft.mat("938575"))
 	craft.box(terrain, center - Vector3.UP * .097, Vector3(width, .19, depth), planks)
@@ -28,27 +31,45 @@ func build(terrain: Node3D, room: Dictionary, shared: bool, dining: bool) -> voi
 	var cast := craft.mesh(terrain, sheet, center - Vector3.UP * .5, shadow)
 	cast.name = "PaperShadow"
 	cast.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	_walls(terrain, room, center, depth, frame)
+	_walls(terrain, room, center, depth, frame, style)
 	var furnished := {}
 	for slot in room.slots:
 		match slot.kind:
 			"bed":
-				_bed(terrain, slot.at, width, shared)
+				if style == "family":
+					if slot.key == "bed:0":
+						var double_bed := Node3D.new()
+						double_bed.name = "DoubleBed"
+						double_bed.position = Vector3(slot.at.x + .5, 0, slot.at.y - 1.5)
+						double_bed.scale.x = 2.0
+						terrain.add_child(double_bed)
+						_bed(double_bed, {"x":.5,"y":1.5}, width, false, style)
+						craft.batch(double_bed)
+				else:
+					_bed(terrain, slot.at, width, shared, style)
 				for x in range(int(slot.at.x) - 1, int(slot.at.x) + 1):
 					for z in range(int(slot.at.y) - 2, int(slot.at.y)):
 						furnished[Vector2i(x, z)] = true
 			"kitchen":
 				_stove(terrain, _hearth_position(slot.at))
 			"table":
-				if dining:
+				if style in ["grower", "craft", "family"]:
+					_private_table(terrain, slot.at, style)
+					for x in [int(slot.at.x) - 1, int(slot.at.x)]:
+						furnished[Vector2i(x, int(slot.at.y) - 1)] = true
+				elif dining:
 					_table(terrain, slot.at)
 					for x in range(int(slot.at.x) - 2, int(slot.at.x) + 2):
 						for z in range(int(slot.at.y) - 2, int(slot.at.y)):
 							furnished[Vector2i(x, z)] = true
+			"seat":
+				if style == "hall" and slot.at.y != 8:
+					_stool(terrain, Vector3(slot.at.x, 0, slot.at.y))
 	for at in room.blocked:
 		if not furnished.has(Vector2i(at.x, at.y)):
 			craft.box(terrain, Vector3(at.x, .056, at.y), Vector3(.88, .11, .88), craft.mat("a3967e"))
-	if shared: _entry_weave(terrain, room.entry)
+	if shared and style.is_empty(): _entry_weave(terrain, room.entry)
+	if not style.is_empty(): _furnish(terrain, room, style)
 	craft.batch(terrain)
 
 func _entry_weave(root: Node3D, entry: Dictionary) -> void:
@@ -62,12 +83,12 @@ func _entry_weave(root: Node3D, entry: Dictionary) -> void:
 	for z in [-.74, .74]:
 		craft.box(root, at + Vector3(0, .018, z), Vector3(1.38, .004, .038), edge)
 
-func _walls(root: Node3D, room: Dictionary, center: Vector3, depth: float, frame: Material) -> void:
+func _walls(root: Node3D, room: Dictionary, center: Vector3, depth: float, frame: Material, style: String) -> void:
 	var width := float(room.width)
 	var back := center.z - depth * .5
 	var front := center.z + depth * .5
-	var plaster := craft.mat("cfc6b6")
-	var light_plaster := craft.mat("dbd1c2")
+	var plaster := craft.mat("c8baaa" if style == "craft" else "cfc6b6")
+	var light_plaster := craft.mat("e0cbb9" if style == "family" else "dbd1c2")
 	for x in [-.42, width - .58]:
 		craft.box(root, Vector3(x, .13, center.z), Vector3(.22, .26, depth), frame)
 	craft.box(root, Vector3(-.42, 1.28, center.z), Vector3(.24, 2.56, depth), plaster)
@@ -107,7 +128,7 @@ func _walls(root: Node3D, room: Dictionary, center: Vector3, depth: float, frame
 	craft.box(root, Vector3(entry, .025, front + .17), Vector3(1.44, .16, .55), craft.mat("b4ac9b"))
 	craft.box(root, Vector3(entry, -.119, front + .47), Vector3(1.61, .17, .53), craft.mat("a79e8e"))
 
-func _bed(root: Node3D, slot: Dictionary, width: float, shared: bool) -> void:
+func _bed(root: Node3D, slot: Dictionary, width: float, shared: bool, style: String) -> void:
 	var at := Vector3(slot.x - .5, 0, slot.y - 1.5)
 	var wood := craft.painted.get_material("wood")
 	var frame := craft.painted.get_material("timber")
@@ -123,10 +144,16 @@ func _bed(root: Node3D, slot: Dictionary, width: float, shared: bool) -> void:
 	for x in [-.60, -.30, .0, .30, .60]:
 		craft.box(root, at + Vector3(x, .59, .86), Vector3(.108, .30, .094), wood)
 	craft.orb(root, at + Vector3(0, .482, 0), Vector3(2.06, .36, 2.09), craft.painted.get_material("cream_linen"))
-	var quilt := craft.painted.get_material("indigo" if float(slot.x) < width * .5 and shared else "dyed_linen")
+	var dye: String = {"grower":"sage_linen","craft":"indigo","family":"rose_linen"}.get(style,
+		"indigo" if float(slot.x) < width * .5 and shared else "dyed_linen")
+	var quilt := craft.painted.get_material(dye)
 	_quilt(root, at, quilt)
-	craft.orb(root, at + Vector3(.0, .630, .58), Vector3(.88, .24, .43), craft.painted.get_material("cream_linen"))
-	craft.orb(root, at + Vector3(-.26, .636, .585), Vector3(.18, .20, .44), craft.painted.get_material("woven"))
+	for x in ([-.48,.48] if style == "family" else [0.0]):
+		craft.orb(root, at + Vector3(x, .630, .58), Vector3(.80, .24, .43), craft.painted.get_material("cream_linen"))
+		craft.orb(root, at + Vector3(x - .28, .636, .585), Vector3(.15, .20, .44), craft.painted.get_material("woven"))
+	if style == "family":
+		for x in [-.58,-.39,-.2,0,.20,.39,.58]:
+			craft.box(root, at + Vector3(x, .713, -.39 + .052 * cos(x * 9)), Vector3(.054, .013, .13), craft.mat("d8ac8b")).rotation.y = PI * .25
 
 func _quilt(root: Node3D, at: Vector3, color: Material) -> void:
 	var surface := SurfaceTool.new()
@@ -171,11 +198,130 @@ func _table(root: Node3D, slot: Dictionary) -> void:
 	for side in [-1, 1]:
 		craft.box(root, at + Vector3(side * .28, .971, 0), Vector3(.045, .009, 1.81), trim)
 		craft.box(root, at + Vector3(0, .851, side * .906), Vector3(.78, .214, .023), runner)
-		var stool := Vector3(slot.x + side, 0, slot.y)
-		craft.box(root, stool + Vector3(0, .414, 0), Vector3(.74, .13, .64), surface)
-		for x in [-.23, .23]:
-			for z in [-.21, .21]:
-				craft.beam(root, stool + Vector3(x * 1.28, .018, z * 1.24), stool + Vector3(x, .36, z), .10, timber)
+		_stool(root, Vector3(slot.x + side, 0, slot.y))
+
+func _stool(root: Node3D, at: Vector3) -> void:
+	craft.box(root, at + Vector3(0, .414, 0), Vector3(.74, .13, .64), craft.painted.get_material("light_wood"))
+	for x in [-.23, .23]:
+		for z in [-.21, .21]:
+			craft.beam(root, at + Vector3(x * 1.28, .018, z * 1.24), at + Vector3(x, .36, z), .10, craft.painted.get_material("timber"))
+
+func _private_table(root: Node3D, slot: Dictionary, style: String) -> void:
+	var at := Vector3(slot.x - .5, 0, slot.y - 1)
+	var h := .45 if style == "family" else .79
+	var wood := craft.painted.get_material("wood")
+	var frame := craft.painted.get_material("timber")
+	craft.box(root, at + Vector3.UP * h, Vector3(1.92, .13, .83), wood)
+	for dx in [-.75,.75]:
+		for dz in [-.28,.28]:
+			craft.box(root, at + Vector3(dx, h * .5, dz), Vector3(.14, h, .14), frame)
+	var top := at + Vector3.UP * (h + .07)
+	match style:
+		"grower":
+			for dx in [-.55,.03,.58]:
+				_pot(root, top + Vector3(dx, 0, 0), .61 + .24 * (1.0 - absf(dx)))
+		"craft":
+			for i in range(3):
+				var strip := craft.box(root, top + Vector3(-.45, .04 + .033 * i, .14 - i * .14), Vector3(.65, .064, .16), wood)
+				strip.rotation.y = -.24 + i * .11
+			craft.beam(root, top + Vector3(.27,.10,-.25), top + Vector3(.64,.10,.18), .085, frame)
+			craft.box(root, top + Vector3(.28,.137,-.24), Vector3(.29,.17,.094), craft.mat("6c6c62"))
+		"family":
+			craft.box(root, top - Vector3(.05, 0, 0), Vector3(1.53,.023,.58), craft.painted.get_material("woven"))
+			_tea(root, top + Vector3(-.23,.02,0), true)
+			for offset in [.24,.63]:
+				_tea(root, top + Vector3(offset,.014,.09), false)
+
+func _tea(root: Node3D, at: Vector3, serving: bool) -> void:
+	var glaze := craft.mat("8b9c8c" if serving else "c7bda3")
+	craft.orb(root, at + Vector3.UP * (.119 if serving else .067), Vector3(.30,.21,.29) if serving else Vector3(.18,.124,.17), glaze)
+	if serving:
+		craft.rod(root, at + Vector3(.07,.13,0), at + Vector3(.21,.20,0), .044, .53, glaze, 7)
+		craft.orb(root, at + Vector3.UP * .222, Vector3(.095,.076,.095), glaze)
+
+func _pot(root: Node3D, at: Vector3, size: float) -> void:
+	craft.orb(root, at + Vector3.UP * .16 * size, Vector3(.45,.32,.43) * size, craft.mat("aa7c62"))
+	craft.orb(root, at + Vector3.UP * .26 * size, Vector3(.35,.035,.34) * size, craft.mat("796450"))
+	for i in range(4):
+		var angle := i * 2.38
+		var tip := at + Vector3(cos(angle)*.19, .45 + .06 * i, sin(angle)*.19) * size
+		craft.beam(root, at + Vector3.UP * .235 * size, tip, .019 * size, craft.mat("71805a"))
+		craft.orb(root, tip, Vector3(.21,.075,.14) * size, craft.mat("99a174" if i % 2 else "78885f")).rotation.y = angle
+
+func _furnish(root: Node3D, room: Dictionary, style: String) -> void:
+	var wood := craft.painted.get_material("wood")
+	var frame := craft.painted.get_material("timber")
+	var rug_key: String = {"grower":"sage_linen","craft":"indigo","family":"rose_linen","hall":"woven"}[style]
+	var rugs := {"grower":Vector4(7.49,7.27,3.82,2.45), "craft":Vector4(3.51,7.41,3.91,2.63),
+		"family":Vector4(10.58,8.72,3.81,2.68), "hall":Vector4(7.47,7.02,5.96,3.19)}
+	_woven_rug(root, rugs[style], rug_key)
+	var cabinet_x := float(room.width) - 2.46 if style == "family" else (3.2 if style == "hall" else float(room.width) * .57)
+	var cabinet := Vector3(cabinet_x, .55, 3.03)
+	craft.box(root, cabinet, Vector3(2.19,1.10,.52), frame)
+	for x in [-.54, .54]:
+		craft.box(root, cabinet + Vector3(x, .03, .275), Vector3(.96,.72,.080), wood)
+		craft.box(root, cabinet + Vector3(x,.06,.34), Vector3(.145,.052,.067), craft.mat("b8a178"))
+	craft.box(root, cabinet + Vector3.UP * .57, Vector3(2.30,.10,.65), wood)
+	if style == "grower":
+		_pot(root, cabinet + Vector3(-.65,.62,.06), .82)
+		_pot(root, cabinet + Vector3(.58,.62,0), 1.05)
+		var seed_tray := Vector3(cabinet_x - 1.39, .28, 3.18)
+		craft.orb(root, seed_tray, Vector3(.61,.44,.50), craft.painted.get_material("woven"))
+		for knot in [-1,0,1]:
+			craft.orb(root, seed_tray + Vector3(knot*.13,.19,.05), Vector3(.18,.13,.17), craft.mat("a28258"))
+	elif style == "family":
+		_tea(root, cabinet + Vector3(-.67,.62,.06), true)
+		for i in range(4):
+			craft.box(root, cabinet + Vector3(.37,.68+.048*i,.03), Vector3(.64,.060,.40), craft.painted.get_material("rose_linen" if i % 2 else "cream_linen"))
+		_plum_screen(root, 6.75)
+		for x in [9.61, 11.49]:
+			craft.orb(root, Vector3(x,.080,9.31), Vector3(.63,.145,.56), craft.painted.get_material("woven"))
+	else:
+		for i in range(4):
+			var at := cabinet + Vector3(-.70 + .42*i,.73,.055)
+			craft.orb(root, at, Vector3(.31,.27,.28), craft.mat("899084" if i % 2 else "a68b6b"))
+			craft.orb(root, at + Vector3.UP * .132, Vector3(.18,.045,.18), wood)
+	if style == "hall":
+		for x in [6.83, 8.03, 8.77]:
+			_tea(root, Vector3(x,.97,6.45), x == 8.03)
+	if style == "craft":
+		_hanging_tools(root, 5.24)
+
+func _woven_rug(root: Node3D, box: Vector4, dye: String) -> void:
+	var at := Vector3(box.x,.009,box.y)
+	var thread := craft.painted.get_material("cream_linen")
+	craft.box(root, at, Vector3(box.z,.019,box.w), craft.painted.get_material(dye))
+	for direction: int in [-1,1]:
+		craft.box(root, at + Vector3(0,.012,direction * (box.w*.5 - .13)), Vector3(box.z,.008,.062), thread)
+		craft.box(root, at + Vector3(direction * (box.z*.5 - .14),.012,0), Vector3(.053,.007,box.w), thread)
+		for i in range(13):
+			var x := at.x + (float(i) / 12.0 - .5) * (box.z - .14)
+			var z := at.z + direction * (box.w*.5 + .041)
+			craft.box(root, Vector3(x,.017,z), Vector3(.031,.008,.12 + .02 * cos(i * 2)), thread)
+
+func _plum_screen(root: Node3D, x: float) -> void:
+	var at := Vector3(x,1.62,2.72)
+	var wood := craft.painted.get_material("timber")
+	craft.box(root, at, Vector3(2.56,1.38,.087), wood)
+	craft.box(root, at + Vector3(0,0,.059), Vector3(2.36,1.19,.035), craft.mat("e3d1ac"))
+	var origin := at + Vector3(-.92,-.45,.09)
+	var tips := [Vector2(-.31,.23),Vector2(.41,.37),Vector2(.85,.06),Vector2(.16,-.11)]
+	for i in range(tips.size()):
+		var sprig: Vector2 = tips[i]
+		var end := at + Vector3(sprig.x,sprig.y,.095)
+		craft.beam(root, origin + Vector3(.17*i,.075*i,0), end, .027, craft.mat("80634e"))
+		for j in range(4):
+			var flower := end + Vector3(cos(j * 2.41) * .092, sin(j * 2.41) * .078, .012)
+			craft.orb(root, flower, Vector3(.078,.070,.023), craft.mat("be8983" if (i+j)%2 else "d5a692"))
+
+func _hanging_tools(root: Node3D, x: float) -> void:
+	var wood := craft.painted.get_material("wood")
+	craft.box(root, Vector3(x,1.59,2.73), Vector3(2.1,.18,.19), wood)
+	for i in range(4):
+		var at := Vector3(x + (i-1.5)*.46,1.56,2.87)
+		var bottom := at + Vector3(.10*sin(i),-.41 + .045*i,.06)
+		craft.beam(root, at, bottom, .079, wood)
+		craft.box(root, bottom, Vector3(.16,.088,.083), craft.mat("747771"))
 
 func _hearth_position(slot: Dictionary) -> Vector3:
 	return Vector3(slot.x, 0, slot.y - .85)

@@ -1,8 +1,9 @@
 import type {World,Resident} from '../shared/types.js';
+import {isSupportedMvpMap} from '../shared/mvp-hamlet.js';
 import {emitEvent} from './events.js';
 /** Isolated MVP subset of design/world.md: 2 portions/day, no dehydration harm. */
 
-export function isDrinkingMvp(w:World){return w.mode==='validation'&&w.id.startsWith('godot-mvp-')&&w.map.width===32&&w.map.height===24;}
+export function isDrinkingMvp(w:World){return w.mode==='validation'&&w.id.startsWith('godot-mvp-')&&isSupportedMvpMap(w.map);}
 /** Old MVP saves start hydrated at adoption; never invent pre-adoption debt/history. */
 export function adoptMvpDrinking(w:World){
  if(!isDrinkingMvp(w))return;

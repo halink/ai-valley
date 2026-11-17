@@ -1,5 +1,7 @@
 import type {Resident,World} from '../shared/types.js';
-import {residentBed,roomLayout,roomPath,sleepBuilding} from '../shared/rooms.js';
+import {residentBed,roomLayout,roomPath,sleepBuilding,mvpDiningSeat} from '../shared/rooms.js';
+import {hasMvpHamlet} from '../shared/mvp-hamlet.js';
+import {roomExitReason} from './rooms.js';
 import {isDrinkingMvp} from './mvp-drinking.js';
 /** Explicit small-world opt-in; formal worlds retain their existing semantics. */
 export function hasMvpRooms(w:World){return isDrinkingMvp(w)&&w.mvpRooms?.version===1;}
@@ -37,7 +39,11 @@ export function mvpSleepProblem(w:World,r:Resident):string|null{
  const pinned=r.activity.mvpBed;
  if(pinned&&(pinned.buildingId!==b.id||pinned.index!==bed))return '原床位已经改变，须留在当前位置重新决定';
  const from=r.inside===b.id?r.roomAt:layout.entry;
- if(r.inside&&r.inside!==b.id||!from)return '缺少可验证的实际室内位置，不能补造入口';
+ if(!from)return '缺少可验证的实际室内位置，不能补造入口';
+ if(r.inside&&r.inside!==b.id){
+  if(!hasMvpHamlet(w))return '缺少可验证的实际室内位置，不能补造入口';
+  const exit=roomExitReason(w,r);if(exit)return exit;
+ }
  const blocked=(p:{x:number;y:number})=>layout.blocked.some(q=>q.x===p.x&&q.y===p.y);
  if(blocked(from)||blocked(target)||roomPath(layout,from,target)===null)return '实际床位或室内路线已阻断，须留在当前位置重新决定';
  if(w.residents.some(p=>p.id!==r.id&&p.inside===b.id&&p.roomAt?.x===target.x&&p.roomAt.y===target.y))return '真实床位仍被其他居民实际占用，须重新决定';
@@ -50,10 +56,10 @@ export function mvpSleepProblem(w:World,r:Resident):string|null{
 /** Optional MVP meal destination; never grants food or teleports the actor. */
 export function mvpDiningPlace(w:World,r:Resident){
  if(!hasMvpRooms(w))return null;
- const b=w.buildings.find(b=>b.id===r.homeId&&b.condition>0&&b.residents.includes(r.id));
- if(!b)return null;const index=b.residents.indexOf(r.id);if(index>1)return null;
- const layout=roomLayout(w,b),at={x:Math.floor(layout.width/2)-1+index*2,y:8};
- const from=r.inside===b.id?r.roomAt:layout.entry;
- if(!from||r.inside&&r.inside!==b.id||roomPath(layout,from,at)===null)return null;
- return {building:b,at};
+ const seat=mvpDiningSeat(w,r);
+ if(!seat)return null;
+ if(r.inside&&r.inside!==seat.building.id&&(!hasMvpHamlet(w)||roomExitReason(w,r)))return null;
+ const layout=roomLayout(w,seat.building);
+ const from=r.inside===seat.building.id?r.roomAt:layout.entry;
+ return from&&roomPath(layout,from,seat.at)!==null?seat:null;
 }

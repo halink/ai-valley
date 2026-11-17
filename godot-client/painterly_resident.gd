@@ -5,6 +5,7 @@ const ResidentFigure = preload("res://resident_figure.gd")
 static var vessel_meshes := {}
 var figure: ResidentFigure
 var presentation: Node3D
+var body_scale := Vector3.ONE
 var view_offset := Vector3.ZERO
 var offset_goal := Vector3.ZERO
 var activity_pose := "idle"
@@ -66,14 +67,17 @@ func construct(person: Dictionary) -> void:
 	set_meta("resident_id", id)
 	var variant := int(id.sha256_text().substr(62, 2).hex_to_int()) % 2
 	set_meta("silhouette", variant)
-	var wrapped := variant == 0
+	var hair_style: String = {"yan":"tie","tang":"pin"}.get(id, "")
+	var wrapped := variant == 0 and hair_style.is_empty()
 	rotation.y = -2.94 if wrapped else -2.23
 	presentation = Node3D.new()
 	presentation.name = "Presentation"
+	if id == "tang": body_scale = Vector3(.91, .94, .91)
+	if id == "yan": body_scale = Vector3(1.06, 1.02, 1.06)
 	add_child(presentation)
 	figure = ResidentFigure.new()
 	presentation.add_child(figure)
-	figure.construct(wrapped)
+	figure.construct(wrapped, hair_style)
 	update_appearance(person)
 	_build_provisions()
 
@@ -110,7 +114,7 @@ func provision(size: Vector3, color: String) -> MeshInstance3D:
 	props.add_child(node)
 	return node
 
-func update_provisions(person: Dictionary, world: Dictionary) -> void:
+func update_provisions(person: Dictionary, world: Dictionary, room: Dictionary = {}) -> void:
 	var inventory: Dictionary = person.get("inventory", {})
 	carried_food = maxi(0, int(inventory.get("berry", 0)))
 	carried_roots = maxi(0, int(inventory.get("turnip", 0)))
@@ -126,14 +130,20 @@ func update_provisions(person: Dictionary, world: Dictionary) -> void:
 	food_prop.material_override = paint(Color("e9d5a4" if action_item == "turnip" else "b45858"))
 	food_prop.scale = Vector3.ONE * (.089 if action_item == "turnip" else .048)
 	if action.get("type") == "eat" and action.get("mvpAtTable", false) and person.get("inside") != null and onsite_pose(person) == "eat":
-		for b in world.get("buildings", []):
-			if b.id == person.inside and b.id == person.get("homeId"):
-				var index: int = b.residents.find(person.id)
-				var cx := floorf(maxf(16,float(b.width)*2)/2)
-				var at: Variant = person.get("roomAt")
-				if index in [0,1] and at is Dictionary and at.x == cx-1+index*2 and at.y == 8:
+		var at: Variant = person.get("roomAt")
+		if room.get("style") == "hall":
+			for slot in room.slots:
+				if slot.kind == "seat" and slot.at == at:
 					dining = true
-					facing_target = Vector3(at.x,0,at.y-1)
+					facing_target = Vector3(floorf(float(room.width) * .5) - .5,0,6.5)
+		else:
+			for b in world.get("buildings", []):
+				if b.id == person.inside and b.id == person.get("homeId"):
+					var index: int = b.residents.find(person.id)
+					var cx := floorf(maxf(16,float(b.width)*2)/2)
+					if index in [0,1] and at is Dictionary and at.x == cx-1+index*2 and at.y == 8:
+						dining = true
+						facing_target = Vector3(at.x,0,at.y-1)
 	if action.get("type") == "gather":
 		for source in world.get("resources", []):
 			if source.id == action.get("resourceId"):
@@ -215,14 +225,15 @@ static func onsite_pose(person: Dictionary) -> String:
 			if person.get("inside") != null and person.get("roomAt") is Dictionary: return "rest"
 	return "idle"
 
-func set_activity_pose(person: Dictionary, enabled: bool) -> void:
+func set_activity_pose(person: Dictionary, enabled: bool, redraw := true) -> void:
 	var next_pose := onsite_pose(person) if enabled else "idle"
 	if next_pose != activity_pose: activity_phase = 0.0
 	activity_pose = next_pose
-	present_pose(false, activity_phase)
+	if redraw: present_pose(false, activity_phase)
 
 func present_pose(walking: bool, phase: float) -> void:
 	figure.relax()
+	figure.scale = body_scale
 	var eating := not walking and activity_pose == "eat"
 	var drinking := not walking and activity_pose == "drink"
 	var drawing_water := not walking and activity_pose == "gather" and gathering_kind == "spring"
@@ -279,7 +290,9 @@ func _pose_activity(phase: float, resting: bool) -> void:
 		"rest":
 			if resting:
 				# Cancel root yaw while leaving the world anchor at the bedside cell.
-				figure.transform = Transform3D(Basis(Vector3.UP, -rotation.y), Vector3.ZERO) * bed_pose
+				var lying: Transform3D = Transform3D(Basis(Vector3.UP, -rotation.y), Vector3.ZERO) * bed_pose
+				lying.basis = lying.basis.scaled_local(body_scale)
+				figure.transform = lying
 			else:
 				figure.head.rotation.x = -.28
 

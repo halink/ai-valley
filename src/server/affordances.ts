@@ -1,4 +1,5 @@
 import {knownLandChoice} from './known-land-choices.js';
+import {MVP_HALL} from '../shared/mvp-hamlet.js';
 import {isSocialAppointmentStop} from '../shared/social-appointments.js';
 import {socialToneChoices} from './social-tone-choices.js';
 import {barterTerms,validBarterTerms} from '../shared/barter.js';
@@ -69,7 +70,8 @@ export function buildChoices(c:DecisionContext):ActionChoice[]{
  // With at most four eat rows, the following cook row fits within the basic
  // 32 slots even when every other basic category is full (31 preceding rows).
  food.push(...directFoodChoices(c));
- const kitchen=home??c.buildings.find(b=>b.kind==='lodge'&&(!b.observed||b.observed.condition>0)&&b.ownerId==='commons');
+ const hall=c.buildings.find(b=>b.kind==='lodge'&&(!b.observed||b.observed.condition>0)&&b.ownerId==='commons');
+ const kitchen=c.mvpDrinking?(hall?.id===MVP_HALL?hall:home??hall):home??hall;
  if(kitchen&&count(c,'turnip')>=2&&count(c,'water')>=1)add(food,'cook.1',`${kitchen.observed?`去${kitchen.name}的厨房`:`按已知地址尝试去${kitchen.name}的厨房，屋况与工位须核实，`}做1份餐食（2芜菁、1水）`,{type:'cook',quantity:1,buildingId:kitchen.id});
  const gathering=group();
  const nearestResources=[...c.resources].filter(r=>r.amount>0&&!r.waterBlocked&&(!c.formal||c.formal.age>=18||r.kind==='bush'||r.kind==='spring')).sort((a,b)=>manhattan(a.at,c.actor.at)-manhattan(b.at,c.actor.at)||a.id.localeCompare(b.id));

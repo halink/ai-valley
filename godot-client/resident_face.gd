@@ -18,9 +18,11 @@ const QIAO_PROFILE := [
 
 var profile: Array
 var wrapped: bool
+var hair_style: String
 
-func _init(in_headwrap: bool) -> void:
+func _init(in_headwrap: bool, style := "") -> void:
 	wrapped = in_headwrap
+	hair_style = style
 	profile = LIN_PROFILE if wrapped else QIAO_PROFILE
 
 func build() -> ArrayMesh:
@@ -38,8 +40,21 @@ func build() -> ArrayMesh:
 	_mouth(ink)
 	_scalp(ink)
 	if wrapped: _headwrap(ink)
+	elif not hair_style.is_empty(): _low_knot(ink)
 	else: _topknot(ink)
 	return ink.finish()
+
+func _low_knot(ink: MeshBuilder) -> void:
+	var pin := hair_style == "pin"
+	ink.loft(Vector3(.018 if pin else 0.0, .155, .156), [
+		Vector4(0,-.036,0,0),Vector4(.074,-.019,.055,.012),Vector4(.096,.033,.076,.020),
+		Vector4(.088,.086,.064,.013),Vector4(.051,.117,.039,.007),Vector4(0,.131,0,0)
+	], Color(.92,.87,.82), MeshBuilder.HAIR, .23, 31)
+	ink.ribbon([Vector3(.014,.410,-.005),Vector3(-.075,.355,-.097),Vector3(-.128,.257,-.092),
+		Vector3(-.151,.197,-.056)], [.029,.045,.030,.001], .016, Color("dfd1be"), MeshBuilder.HAIR)
+	if pin:
+		ink.ribbon([Vector3(-.115,.185,.178),Vector3(.112,.207,.183),Vector3(.177,.219,.182)],
+			[.012,.018,.008], .007, Color("b58c5c"), MeshBuilder.LINEN)
 
 func _spot(x: float, y: float, width: float, height: float) -> float:
 	return exp(-pow(x / width, 2) - pow(y / height, 2))

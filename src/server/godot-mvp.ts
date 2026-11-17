@@ -1,9 +1,13 @@
 import {serveGodotWeb} from './godot-web.js';
 import {roomObservation} from './room-observation.js';
+import {relationshipObservation} from './relationship-observation.js';
+import {expandMvpHamlet} from '../world/mvp-hamlet.js';
+import {layOutMvpGardens,widenMvpValley} from '../world/mvp-valley.js';
+import {COMPACT_MVP_MAP,hasMvpHamlet,MVP_HALL} from '../shared/mvp-hamlet.js';
 import {adoptMvpRooms} from '../world/mvp-rooms.js';
 import {adoptMvpDrinking,mvpThirst} from '../world/mvp-drinking.js';
 import {mvpObservation} from './mvp-observation.js';
-import {enableCompletedMovement,completedMovementSnapshot} from '../world/completed-movement.js';
+import {enableCompletedMovement,completedMovementSnapshot,residentMovementSnapshot} from '../world/completed-movement.js';
 /** Small, disposable engineering MVP. Rules choose actions; the existing world
  * engine owns pathfinding, needs, elapsed work and resource/food settlement.
  * This is NOT LLM autonomy, a formal save, or a longevity acceptance run. */
@@ -30,7 +34,7 @@ export function mvpPhase(r:Resident):MvpPhase {
 }
 export function createMvpWorld():World {
  const world=createWorld(3414);
- const width=32,height=24,tiles:Tile[]=Array(width*height).fill('grass');
+ const {width,height}=COMPACT_MVP_MAP,tiles:Tile[]=Array(width*height).fill('grass');
  for(let y=0;y<height;y++)for(let x=0;x<width;x++){
   if(x===0||y===0||x===width-1||y===height-1)tiles[y*width+x]='cliff';
   else if(x>=27)tiles[y*width+x]='water';
@@ -39,7 +43,7 @@ export function createMvpWorld():World {
  world.id='godot-mvp-'+randomUUID();
  world.map={width,height,tiles,name:'溪畔小院 · 核心循环',entrance:{x:15,y:22},settlement:{x:15,y:13}};
  world.residents=world.residents.slice(0,2);
- const home={...world.buildings.find(b=>b.id==='lodge')!,id:'mvp-home',name:'共屋',at:{x:11,y:6},width:8,height:6,door:{x:15,y:12},residents:world.residents.map(r=>r.id),capacity:2};
+ const home={...world.buildings.find(b=>b.id==='lodge')!,id:MVP_HALL,name:'共屋',at:{x:11,y:6},width:8,height:6,door:{x:15,y:12},residents:world.residents.map(r=>r.id),capacity:2};
  world.buildings=[home];
  world.resources=[
   ...[{x:7,y:13},{x:22,y:14},{x:8,y:19},{x:21,y:20}].map((at,index)=>({id:'mvp-berry-'+index,kind:'bush' as const,at,amount:12,max:12,regrowthDays:1,lastHarvest:0})),
@@ -59,6 +63,10 @@ export function createMvpWorld():World {
  world.clock={paused:false,reason:null,realMinutesPerDay:12};
  adoptMvpDrinking(world);
  adoptMvpRooms(world);
+ expandMvpHamlet(world);
+ widenMvpValley(world);
+ layOutMvpGardens(world);
+ for(const r of world.residents)r.knownResources=world.resources.map(s=>s.id);
  return world;
 }
 /** A two-portion carried reserve covers the MVP's nominal daily water need.
@@ -144,9 +152,10 @@ export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string
  if(waterTrip)return {action:waterTrip,reason:'当前紧急需求已处理，前往已知泉水补足两份清水储备'};
  // A personal cooked meal uses real roots and water; never reserve scarce drinking water.
  if(r.hunger<35&&r.energy>=70&&(mvpThirst(w,r)??0)<50-1e-9&&(r.inventory.turnip??0)>=2&&(r.inventory.meal??0)<1){
+  const kitchenId=hasMvpHamlet(w)?MVP_HALL:r.homeId??undefined;
   if((r.inventory.water??0)<2){const trip=mvpWaterTrip(w,r);if(trip)return {action:trip,reason:'为自己的根菜餐食取水，并保留一份饮水'};}
-  else if(!w.residents.some(p=>p.id!==r.id&&p.homeId===r.homeId&&(p.activity?.action.type==='cook'||p.plan?.actions.some(a=>a.type==='cook')))){
-   const action:Action={type:'cook',quantity:1,buildingId:r.homeId??undefined};
+  else if(!w.residents.some(p=>p.id!==r.id&&(hasMvpHamlet(w)||p.homeId===r.homeId)&&(p.activity?.action.type==='cook'||p.plan?.actions.some(a=>a.type==='cook')))){
+   const action:Action={type:'cook',quantity:1,buildingId:kitchenId};
    if(mvpCanStart(w,r,action))return {action,reason:'回共屋厨房，用本人两份根菜和一份水做一份餐食'};
   }
  }
@@ -178,8 +187,8 @@ export function createMvpSession(){
  enableCompletedMovement(world);
  let serial=0,fault:string|null=null;
  const decisions:Record<string,number>={};
- const snapshot=():Snapshot&{roomViews:ReturnType<typeof roomObservation>}&{observation:ReturnType<typeof mvpObservation>}&{movement:ReturnType<typeof completedMovementSnapshot>}&{mvp:{driver:'local-rules';notice:string;ephemeral:true;fault:string|null;phases:Record<string,MvpPhase>;decisions:Record<string,number>}}=>({
-  roomViews:roomObservation(world),observation:mvpObservation(world,[],[]),movement:completedMovementSnapshot(world),world:structuredClone(world),serverTime:new Date().toISOString(),version:VALLEY_VERSION,mapRevision:'godot-mvp-map-1',
+ const snapshot=():Snapshot&{roomViews:ReturnType<typeof roomObservation>}&{observation:ReturnType<typeof mvpObservation>;relationshipHistory:ReturnType<typeof relationshipObservation>}&{movement:ReturnType<typeof completedMovementSnapshot>;residentMovement:ReturnType<typeof residentMovementSnapshot>}&{mvp:{driver:'local-rules';notice:string;ephemeral:true;fault:string|null;phases:Record<string,MvpPhase>;decisions:Record<string,number>}}=>({
+  roomViews:roomObservation(world),observation:mvpObservation(world,[],[]),relationshipHistory:relationshipObservation(world),movement:completedMovementSnapshot(world),residentMovement:residentMovementSnapshot(world),world:structuredClone(world),serverTime:new Date().toISOString(),version:VALLEY_VERSION,mapRevision:'godot-mvp-map-4',
   capabilities:{active:['小地图只读观察','本地规则采集/进食/休息闭环','有限面对面规则问候','独立选择的食水交换'],pending:['真实模型决策验收','持久存档','最终绘本素材']},
   mvp:{driver:'local-rules',notice:GODOT_MVP_NOTICE,ephemeral:true,fault,phases:Object.fromEntries(world.residents.map(r=>[r.id,mvpPhase(r)])),decisions:{...decisions}},
  });

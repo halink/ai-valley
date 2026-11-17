@@ -1,4 +1,4 @@
-import {QWEN_MODEL,DEEPSEEK_MODEL,GLM_MODEL,type ModelName,type ModelConnection} from './model-completion.js';
+import {QWEN_MODEL,GLM_FLASH_MODEL,isModelName,type ModelConnection} from './model-completion.js';
 /** Configuration is not evidence of provider pricing or account eligibility. */
 export function readSelfHostedConfig(env:Readonly<Record<string,string|undefined>>):readonly ModelConnection[]{
  if(!env.VALLEY_SELF_HOSTED||env.VALLEY_SELF_HOSTED==='disabled')return [];
@@ -12,12 +12,12 @@ export function readSelfHostedConfig(env:Readonly<Record<string,string|undefined
  if(backup&&!backupProvider)throw Error('self_hosted_backup_provider_required');
  return [{id:primary,provider:primaryProvider},...backup?[{id:backup,provider:backupProvider!}]:[]].map(({id,provider})=>{
   if(provider!=='siliconflow'&&provider!=='dashscope')throw Error('self_hosted_unsupported_provider');
-  if(![QWEN_MODEL,DEEPSEEK_MODEL,GLM_MODEL].includes(id as ModelName))throw Error('self_hosted_unsupported_model');
+  if(!isModelName(id))throw Error('self_hosted_unsupported_model');
   const expected=id===QWEN_MODEL?'dashscope':'siliconflow';
   if(provider!==expected)throw Error('self_hosted_provider_model_mismatch');
-  if(id===QWEN_MODEL&&env.VALLEY_ALLOW_PAID_MODELS!=='yes')throw Error('self_hosted_paid_model_not_enabled');
+  if((id===QWEN_MODEL||id===GLM_FLASH_MODEL)&&env.VALLEY_ALLOW_PAID_MODELS!=='yes')throw Error('self_hosted_paid_model_not_enabled');
   const key=env[provider==='dashscope'?'DASHSCOPE_API_KEY':'SILICONFLOW_API_KEY']?.trim();
   if(!key)throw Error('self_hosted_missing_key');
-  return Object.freeze({model:id as ModelName,key});
+  return Object.freeze({model:id,key});
  });
 }

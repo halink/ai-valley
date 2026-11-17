@@ -105,6 +105,8 @@ static func mode_label(snapshot: Dictionary) -> String:
 	var mode = snapshot.get("mvp")
 	if not mode is Dictionary:
 		return "观察接口 · 客户端尚未验证决策来源"
+	if mode.get("fault") == "unresolved_model_request":
+		return "模型请求待核实 · 原存档已停表"
 	var label := "模型已禁用 · 不自动改用规则"
 	if mode.driver == "local-rules":
 		label = "规则驱动合成演示 · 不调用大模型"
@@ -332,6 +334,17 @@ static func resident_status(person: Dictionary) -> String:
 
 static func resource_name(code: String) -> String:
 	return {"spring": "泉水", "bush": "浆果丛", "tree": "树木", "rock": "岩石"}.get(code, "未知资源")
+
+static func garden_layout(map: Dictionary) -> Dictionary:
+	var layout = map.get("mvpGarden")
+	return layout if layout is Dictionary and layout.get("version") == 1 else {}
+
+static func resource_place_name(map: Dictionary, resource: Dictionary) -> String:
+	var layout := garden_layout(map)
+	if not layout.is_empty():
+		if resource.get("id") == "mvp-spring" and valid_position(layout.get("well")): return "灶堂水井"
+		if resource.get("id") == "mvp-spring-east": return "溪东泉"
+	return resource_name(str(resource.get("kind", "")))
 
 # Only the resident's delivered records; never fill gaps from the world ledger.
 static func memory_summary(person: Dictionary) -> String:

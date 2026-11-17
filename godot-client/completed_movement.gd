@@ -8,8 +8,11 @@ var previous: Dictionary = {}
 func reset() -> void:
 	previous.clear()
 
+static func nonnegative_number(value: Variant) -> bool:
+	return (value is int or value is float) and is_finite(value) and value >= 0 and value <= 9007199254740991.0
+
 static func integer(value: Variant) -> bool:
-	return (value is int or value is float) and is_finite(value) and value == floor(value) and value >= 0 and value <= 9007199254740991.0
+	return nonnegative_number(value) and value == floor(value)
 
 static func point(value: Variant, world: Dictionary) -> bool:
 	return value is Dictionary and integer(value.get("x")) and integer(value.get("y")) and value.x < world.map.width and value.y < world.map.height
@@ -32,7 +35,7 @@ func observe(world: Dictionary, feed: Variant) -> Dictionary:
 	var seq: float = feed.firstSeq
 	var minute := -1.0
 	for step in feed.steps:
-		if not step is Dictionary or not integer(step.get("seq")) or step.seq != seq or not step.get("actorId") is String or not integer(step.get("minute")) or step.minute < minute:
+		if not step is Dictionary or not integer(step.get("seq")) or step.seq != seq or not step.get("actorId") is String or not nonnegative_number(step.get("minute")) or step.minute < minute:
 			return {}
 		if not point(step.get("from"), world) or not point(step.get("to"), world) or absf(step.from.x-step.to.x) + absf(step.from.y-step.to.y) != 1:
 			return {}

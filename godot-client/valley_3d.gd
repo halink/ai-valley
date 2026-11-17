@@ -4,10 +4,12 @@ const Craft = preload("res://valley_craft.gd")
 const Architecture = preload("res://valley_architecture.gd")
 const Botany = preload("res://valley_botany.gd")
 const RoomArt = preload("res://valley_room_art.gd")
+const Ground = preload("res://valley_ground.gd")
 const PainterlyResident = preload("res://painterly_resident.gd")
 # Read-only presentation: every interactive object is anchored to snapshot data.
 const Snapshot = preload("res://snapshot.gd")
 const MIST_BACKDROP = preload("res://art/valley-mists-v1.png")
+const LONG_CREEK_BACKDROP = preload("res://art/long-creek-mists-v1.png")
 const MEADOW = preload("res://art/courtyard-meadow-v1.png")
 const GROUND_SHADER = preload("res://art/courtyard_ground.gdshader")
 const SHADOW_SHADER = preload("res://art/courtyard_shadow.gdshader")
@@ -37,6 +39,7 @@ var outdoor_focus := Vector3.ZERO
 var outdoor_size := 26.0
 var outdoor_span := Vector2.ZERO
 var outdoor_fit := true
+var outdoor_dimensions := Vector2i.ZERO
 var frame_span := Vector2.ZERO
 var fit_view := true
 const CAMERA_BOOM := Vector3(23, 32, 31)
@@ -50,11 +53,12 @@ var room_terrain_key := ""
 var garden_key := 0
 
 const MAX_PLAYBACK_SECONDS := 1.4
+const DOORWAY_PLAYBACK_SECONDS := .82
 # Replay confirmed edges in order, never shortcut a corner or extrapolate.
 func _process(delta: float) -> void:
 	var ease := 1.0 - exp(-10.0 * delta)
 	if fit_view:
-		_fit_camera_size()
+		camera_size = _fitted_size()
 	camera_focus = camera_focus.lerp(focus, ease)
 	camera.size = lerpf(camera.size, camera_size, ease)
 	position_camera()
@@ -100,6 +104,82 @@ func clear_people() -> void:
 	motions.clear()
 	people.clear()
 	clear_children(residents_root)
+
+static func _walk_points(path: Array) -> Array[Vector3]:
+	var points: Array[Vector3] = []
+	for at in path:
+		points.append(Vector3(at.x, 0, at.y))
+	return points
+
+func _start_walk(id: String, points: Array[Vector3], limit: float) -> float:
+	if points.size() < 2 or not people.has(id): return 0.0
+	var actor: PainterlyResident = people[id]
+	if points[0] != actor.position:
+		var playing: Dictionary = motions.get(id, {})
+		if playing.is_empty() or playing.path[-1] != points[0]: return 0.0
+		var next := mini(int(playing.elapsed / playing.duration * (playing.path.size() - 1)) + 1, playing.path.size() - 1)
+		var remainder: Array[Vector3] = [actor.position]
+		remainder.append_array(playing.path.slice(next))
+		remainder.append_array(points.slice(1))
+		points = remainder
+	if points.size() > 18: return 0.0
+	var duration := minf(limit, MOVE_SECONDS * (points.size() - 1))
+	motions[id] = {"path":points, "elapsed":0.0, "duration":duration, "angle":actor.rotation.y}
+	return duration
+
+# The short offset belongs to the rendered threshold, not the resident's grid position.
+func walk_doorway(id: String, path: Array, offset: Vector3, arriving: bool) -> float:
+	if path.is_empty() or not people.has(id): return 0.0
+	var points := _walk_points(path)
+	if arriving:
+		var actor: PainterlyResident = people[id]
+		actor.position = points[0] - offset
+		actor.rotation.y = atan2(-offset.x, -offset.z)
+		points.push_front(actor.position)
+	else:
+		points.append(points[-1] + offset)
+	return _start_walk(id, points, DOORWAY_PLAYBACK_SECONDS)
+
+func match_follow_view(id: String, size: float) -> void:
+	if focus_resident(id):
+		fit_view = false
+		camera_size = size
+		_settle_camera()
+
+func _show_resident(person: Dictionary, target: Vector3, world: Dictionary, path: Array, animate: bool, pose_enabled: bool, room: Dictionary = {}) -> void:
+	var id: String = person.id
+	var actor: PainterlyResident = people.get(id)
+	var created := actor == null
+	if created:
+		actor = create_person(person)
+		residents_root.add_child(actor)
+		people[id] = actor
+		_add_resident_caption(actor, person)
+		actor.position = target
+	if created or actor.get_meta("target", target) != target or not path.is_empty():
+		var points := _walk_points(path)
+		var duration := 0.0
+		if animate and points.size() >= 2 and points[-1] == target:
+			if created: actor.position = points[0]
+			duration = _start_walk(id, points, MAX_PLAYBACK_SECONDS)
+		if duration == 0.0:
+			motions.erase(id)
+			actor.position = target
+	actor.update_appearance(person)
+	actor.update_provisions(person, world, room)
+	if not room.is_empty(): actor.update_bed_pose(person, room)
+	actor.set_activity_pose(person, pose_enabled, not motions.has(id))
+	actor.set_meta("target", target)
+
+func _finish_residents(visible_ids: Dictionary, selected: String, settle_spacing: bool) -> void:
+	for id in people.keys():
+		if not visible_ids.has(id):
+			motions.erase(id)
+			residents_root.remove_child(people[id])
+			people[id].queue_free()
+			people.erase(id)
+	_space_residents(settle_spacing)
+	select_resident(selected)
 
 func _ready() -> void:
 	terrain = Node3D.new()
@@ -170,14 +250,17 @@ func _settle_camera() -> void:
 	camera.size = camera_size
 	position_camera()
 
-func _fit_camera_size() -> void:
+func _fitted_size() -> float:
 	var viewport := get_viewport().get_visible_rect().size
 	var width := maxf(viewport.x - 100, 1)
 	var height := maxf(viewport.y - 154, 1)
 	var scale_factor := maxf(frame_span.x / width, frame_span.y / height)
-	camera_size = clampf(viewport.y * scale_factor, 9, 100)
+	return maxf(viewport.y * scale_factor, 9.0)
 
-func center(world: Dictionary) -> void:
+static func _is_long_valley(world: Dictionary) -> bool:
+	return str(world.id).begins_with("godot-mvp-") and world.map.width == 48 and world.map.height == 36
+
+func center(world: Dictionary, immediate := false) -> void:
 	if world.is_empty(): return
 	fit_view = true
 	var extents: Vector3
@@ -188,12 +271,15 @@ func center(world: Dictionary) -> void:
 	else:
 		focus = Vector3((world.map.width - 1) * .5, .9, (world.map.height - 1) * .5)
 		extents = Vector3(world.map.width + 1.8, 4.7, world.map.height + 1.8)
+		if _is_long_valley(world):
+			focus.y = 1.25
+			extents = Vector3(world.map.width + 3.0, 5.6, world.map.height + 2.4)
 	var back := CAMERA_BOOM.normalized()
 	var right := Vector3.UP.cross(back).normalized()
 	var up := back.cross(right)
 	frame_span = Vector2(extents.dot(right.abs()), extents.dot(up.abs()))
-	_fit_camera_size()
-	if not room_id.is_empty(): _settle_camera()
+	camera_size = _fitted_size()
+	if immediate or not room_id.is_empty(): _settle_camera()
 
 func pan(delta: Vector2) -> void:
 	fit_view = false
@@ -210,7 +296,7 @@ func close_view() -> void:
 
 func zoom(direction: float) -> void:
 	fit_view = false
-	camera_size = clampf(camera_size * direction, 5.0, 100)
+	camera_size = clampf(camera_size * direction, 5.0, maxf(100.0, _fitted_size()))
 
 # Only focus actors already rendered from the current validated snapshot.
 # Do not infer an outdoor location for indoor, absent or unknown residents.
@@ -274,9 +360,11 @@ func show_world(world: Dictionary, selected: String, continuous := true, paths: 
 		map_key = ""
 		center(world)
 	if not room_id.is_empty():
-		show_room(world, selected, continuous)
+		backdrop.texture = MIST_BACKDROP
+		show_room(world, selected, continuous, paths)
 		return
 	if world.is_empty():
+		backdrop.texture = MIST_BACKDROP
 		clear_children(terrain)
 		clear_children(actors)
 		clear_people()
@@ -293,6 +381,7 @@ func show_world(world: Dictionary, selected: String, continuous := true, paths: 
 		room_terrain_key = ""
 		map_key = key
 		clear_children(terrain)
+		backdrop.texture = LONG_CREEK_BACKDROP if _is_long_valley(world) else MIST_BACKDROP
 		build_terrain(world)
 	# The landscape and its props are static across resident-only updates.
 	var names: Array = []
@@ -307,10 +396,9 @@ func show_world(world: Dictionary, selected: String, continuous := true, paths: 
 		draw_resources(world)
 		craft.batch(actors)
 	var revision := int(world.get("revision", 0))
-	var new_snapshot := revision != last_revision or reset
-	var animate: bool = continuous and not reset and revision > last_revision and not world.get("clock", {}).get("paused", false)
-	if not continuous or world.get("clock", {}).get("paused", false):
-		settle_motion()
+	var pose_enabled: bool = continuous and not world.get("clock", {}).get("paused", true)
+	var animate := pose_enabled and not reset and revision > last_revision
+	if not pose_enabled: settle_motion()
 	last_revision = revision
 	var visible_ids := {}
 	for person in world.get("residents", []):
@@ -318,38 +406,8 @@ func show_world(world: Dictionary, selected: String, continuous := true, paths: 
 		var target := Vector3(person.at.x, 0, person.at.y)
 		if target.x < 0 or target.z < 0 or target.x >= world.map.width or target.z >= world.map.height: continue
 		visible_ids[person.id] = true
-		var actor: Node3D = people.get(person.id)
-		if actor == null:
-			actor = create_person(person)
-			_add_resident_caption(actor, person)
-			residents_root.add_child(actor)
-			people[person.id] = actor
-			actor.position = target
-		elif new_snapshot or actor.get_meta("target", target) != target:
-			# Do not accumulate visual lag. A new batch during playback snaps to
-			# its authoritative endpoint rather than append an unbounded queue.
-			var interrupted := motions.has(person.id)
-			motions.erase(person.id)
-			var path: Array = paths.get(person.id, [])
-			var points: Array[Vector3] = []
-			for at in path:
-				points.append(Vector3(at.x, 0, at.y))
-			if animate and not interrupted and points.size() >= 2 and points.size() <= 17 and points[0] == actor.position and points[-1] == target:
-				motions[person.id] = {"path":points, "elapsed":0.0, "duration":minf(MAX_PLAYBACK_SECONDS, MOVE_SECONDS * (points.size()-1)), "angle":actor.rotation.y}
-			else:
-				actor.position = target
-		actor.update_appearance(person)
-		actor.update_provisions(person, world)
-		actor.set_activity_pose(person, continuous and not world.get("clock", {}).get("paused", true))
-		actor.set_meta("target", target)
-	select_resident(selected)
-	for id in people.keys():
-		if not visible_ids.has(id):
-			motions.erase(id)
-			residents_root.remove_child(people[id])
-			people[id].queue_free()
-			people.erase(id)
-	_space_residents()
+		_show_resident(person, target, world, paths.get(person.id, []), animate, pose_enabled)
+	_finish_residents(visible_ids, selected, false)
 
 # Optional detailed annotations, off by default so scenery reads as a place.
 func set_place_labels(enabled: bool) -> void:
@@ -370,7 +428,7 @@ func style_caption(label: Label3D, place := false) -> void:
 		label.add_to_group("valley_place_labels")
 		label.visible = show_place_labels
 
-func create_person(person: Dictionary) -> Node3D:
+func create_person(person: Dictionary) -> PainterlyResident:
 	var actor := PainterlyResident.new()
 	actor.construct(person)
 	var ring := TorusMesh.new()
@@ -386,35 +444,67 @@ func build_terrain(world: Dictionary) -> void:
 	building_doors.clear()
 	var dimensions := Vector2i(map.width, map.height)
 	var map_center := Vector3((dimensions.x - 1) * .5, 0, (dimensions.y - 1) * .5)
-	_build_ground(map, dimensions, map_center)
-	plants.build_rim(terrain, map)
+	var hamlet: bool = world.get("buildings", []).any(func(building): return building.get("id") == "mvp-plum-house")
+	var long_valley := _is_long_valley(world)
+	_build_ground(world, dimensions, map_center, hamlet, long_valley)
+	if long_valley:
+		Ground.build_footbridges(terrain, craft, map)
+		plants.long_valley(terrain, world)
+	else:
+		plants.build_rim(terrain, map)
 	for building in world.get("buildings", []):
 		building_doors[str(building.id)] = architecture.build(terrain, building, map)
 	plants.courtyard(terrain, world)
+	if hamlet and not long_valley: plants.hamlet(terrain, world)
 
-func _build_ground(map: Dictionary, dimensions: Vector2i, center: Vector3) -> void:
+func _build_ground(world: Dictionary, dimensions: Vector2i, center: Vector3, hamlet: bool, long_valley: bool) -> void:
+	var map: Dictionary = world.map
 	var tile_image := Image.create_empty(dimensions.x, dimensions.y, false, Image.FORMAT_R8)
+	var wash_image := Image.create_empty(dimensions.x, dimensions.y, false, Image.FORMAT_RGBA8) if hamlet else null
 	for y in range(dimensions.y):
 		for x in range(dimensions.x):
 			var index: int = TILE_COLORS.get(map.tiles[y * dimensions.x + x], 0)
+			# The two river mouths reach the edge of the diorama. The grid's rim remains closed.
+			if long_valley and y in [0, dimensions.y - 1]:
+				var inner := clampi(y, 1, dimensions.y - 2)
+				if map.tiles[inner * dimensions.x + x] == "water": index = TILE_COLORS.water
 			tile_image.set_pixel(x, y, Color(index / 255.0, 0, 0))
+			if wash_image != null:
+				var water := index == 2 or (long_valley and index == 6)
+				wash_image.set_pixel(x, y, Color(float(index in [1,5]), float(index == 5), float(water), float(index == 4)))
 	var paint := ShaderMaterial.new()
 	paint.shader = GROUND_SHADER
 	paint.set_shader_parameter("tile_map", ImageTexture.create_from_image(tile_image))
 	paint.set_shader_parameter("meadow", MEADOW)
 	paint.set_shader_parameter("map_size", Vector2(dimensions))
-	var ground := PlaneMesh.new()
-	ground.size = Vector2(dimensions)
-	craft.mesh(terrain, ground, center + Vector3(0, .012, 0), paint)
-	craft.box(terrain, center - Vector3.UP * .28, Vector3(dimensions.x, .55, dimensions.y), craft.mat("8e8069"))
-	craft.box(terrain, center - Vector3.UP * .517, Vector3(dimensions.x + .055, .086, dimensions.y + .055), craft.mat("7b6a54"))
-	craft.box(terrain, center + Vector3(0, -.58, 0), Vector3(dimensions.x + .22, .10, dimensions.y + .22), craft.mat("655744"))
+	paint.set_shader_parameter("hamlet", hamlet)
+	paint.set_shader_parameter("long_valley", long_valley)
+	if not Snapshot.garden_layout(map).is_empty():
+		var beds: Array[Vector2] = []
+		for plot in world.get("plots", []):
+			if str(plot.get("id", "")).begins_with("mvp-garden-"):
+				beds.append(Vector2(plot.at.x, plot.at.y) + Vector2.ONE * .5)
+		if beds.size() >= 2:
+			var area := Rect2(beds[0], Vector2.ZERO)
+			for bed in beds: area = area.expand(bed)
+			paint.set_shader_parameter("garden_bounds", Vector4(area.position.x, area.position.y, area.end.x, area.end.y))
+	if wash_image != null: paint.set_shader_parameter("terrain_wash", ImageTexture.create_from_image(wash_image))
+	if hamlet:
+		Ground.hamlet(terrain, craft, dimensions, paint, long_valley)
+	else:
+		var ground := PlaneMesh.new()
+		ground.size = Vector2(dimensions)
+		craft.mesh(terrain, ground, center + Vector3(0, .012, 0), paint)
+		craft.box(terrain, center - Vector3.UP * .28, Vector3(dimensions.x, .55, dimensions.y), craft.mat("8e8069"))
+		craft.box(terrain, center - Vector3.UP * .517, Vector3(dimensions.x + .055, .086, dimensions.y + .055), craft.mat("7b6a54"))
+		craft.box(terrain, center + Vector3(0, -.58, 0), Vector3(dimensions.x + .22, .10, dimensions.y + .22), craft.mat("655744"))
 	var veil := ShaderMaterial.new()
 	veil.shader = SHADOW_SHADER
 	veil.set_shader_parameter("board_size", Vector2(dimensions))
 	var shadow := PlaneMesh.new()
 	shadow.size = Vector2(dimensions) + Vector2(14, 14)
-	var paper_shadow := craft.mesh(terrain, shadow, center - Vector3(0, .66, 0), veil)
+	var depth := 1.12 if long_valley else (.86 if hamlet else .66)
+	var paper_shadow := craft.mesh(terrain, shadow, center - Vector3(0, depth, 0), veil)
 	paper_shadow.name = "PaperShadow"
 	paper_shadow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
@@ -475,6 +565,7 @@ func enter_room(world: Dictionary, id: String) -> bool:
 		outdoor_size = camera_size
 		outdoor_span = frame_span
 		outdoor_fit = fit_view
+		outdoor_dimensions = Vector2i(world.map.width, world.map.height)
 	room_id = id
 	room_world = world.id
 	map_key = ""
@@ -482,23 +573,21 @@ func enter_room(world: Dictionary, id: String) -> bool:
 	center(world)
 	return true
 
-func leave_room(_world: Dictionary) -> void:
+func leave_room(world: Dictionary) -> void:
 	if room_id.is_empty(): return
 	room_id = ""
 	map_key = ""
+	if Vector2i(world.map.width, world.map.height) != outdoor_dimensions:
+		center(world, true)
+		return
 	focus = outdoor_focus
 	camera_size = outdoor_size
 	frame_span = outdoor_span
 	fit_view = outdoor_fit
-	if fit_view: _fit_camera_size()
+	if fit_view: camera_size = _fitted_size()
 	_settle_camera()
 
-func show_room(world: Dictionary, selected: String, continuous := true) -> void:
-	var prior_poses := {}
-	for id in people:
-		prior_poses[id] = {"pose":people[id].activity_pose,"phase":people[id].activity_phase,"angle":people[id].rotation.y}
-	clear_children(actors)
-	clear_people()
+func show_room(world: Dictionary, selected: String, continuous := true, paths: Dictionary = {}) -> void:
 	map_key = ""
 	var room: Dictionary = room_layouts[room_id]
 	var shared := false
@@ -508,28 +597,26 @@ func show_room(world: Dictionary, selected: String, continuous := true) -> void:
 			break
 	var dining: bool = world.get("mvpRooms", {}).get("version", 0) == 1
 	var key := str([world.id, room_id, hash(room), shared, dining])
-	if key != room_terrain_key:
+	var reset := key != room_terrain_key
+	if reset:
+		clear_people()
 		room_terrain_key = key
 		clear_children(terrain)
 		room_art.build(terrain, room, shared, dining)
+	clear_children(actors)
 	room_art.paint_cooking(actors, world, room, room_id)
+	var revision := int(world.revision)
+	var pose_enabled: bool = continuous and not world.clock.paused
+	var animate := pose_enabled and not reset and revision > last_revision
+	if not pose_enabled: settle_motion()
+	last_revision = revision
+	var visible_ids := {}
 	for person in world.residents:
 		if person.get("inside") != room_id or person.get("status") != "alive" or person.get("regionalLocation") != null or person.get("residency") == "outside": continue
 		if not Snapshot.resident_room_position(person.get("roomAt"),room): continue
-		var actor := create_person(person)
-		actor.position = Vector3(person.roomAt.x,0,person.roomAt.y)
-		actor.update_provisions(person, world)
-		actor.update_bed_pose(person, room)
-		actor.set_activity_pose(person, continuous and not world.get("clock", {}).get("paused", true))
-		if prior_poses.has(person.id) and prior_poses[person.id].pose == actor.activity_pose:
-			actor.activity_phase = prior_poses[person.id].phase
-			actor.rotation.y = prior_poses[person.id].angle
-		actor.present_pose(false, actor.activity_phase)
-		residents_root.add_child(actor)
-		people[person.id] = actor
-		_add_resident_caption(actor, person)
-	_space_residents(true)
-	select_resident(selected)
+		visible_ids[person.id] = true
+		_show_resident(person, Vector3(person.roomAt.x, 0, person.roomAt.y), world, paths.get(person.id, []), animate, pose_enabled, room)
+	_finish_residents(visible_ids, selected, reset)
 
 func _add_resident_caption(actor: Node3D, person: Dictionary) -> void:
 	var label := Label3D.new()
@@ -565,6 +652,7 @@ func _space_residents(settle := false) -> void:
 # Each bed is an actual owned plot; growth and moisture come only from snapshots.
 func draw_gardens(world: Dictionary) -> void:
 	plot_positions.clear()
+	var planned := not Snapshot.garden_layout(world.map).is_empty()
 	for plot in world.get("plots", []):
 		if not str(plot.id).begins_with("mvp-garden-"): continue
 		var at := Vector3(plot.at.x,0,plot.at.y)
@@ -582,7 +670,7 @@ func draw_gardens(world: Dictionary) -> void:
 		var bed := Node3D.new()
 		bed.set_meta("plot_id", str(plot.id))
 		actors.add_child(bed)
-		plants.garden(bed, at, wet, growth)
+		plants.garden(bed, at, wet, growth, planned)
 		craft.batch(bed)
 		plot_positions[str(plot.id)] = at
 		var owner := ""
@@ -597,6 +685,7 @@ func draw_gardens(world: Dictionary) -> void:
 
 func draw_resources(world: Dictionary) -> void:
 	resource_positions.clear()
+	var well = Snapshot.garden_layout(world.map).get("well")
 	for resource in world.get("resources", []):
 		var at := Vector3(resource.at.x, 0, resource.at.y)
 		# Batch each source separately: sharing a material must not merge identities.
@@ -606,12 +695,19 @@ func draw_resources(world: Dictionary) -> void:
 			source.set_meta("resource_id", str(resource.id))
 			resource_positions[str(resource.id)] = at
 		match resource.kind:
-			"spring": plants.spring(source, at, float(resource.amount))
+			"spring":
+				if resource.id == "mvp-spring" and Snapshot.valid_position(well):
+					var rim := Vector3(well.x, 0, well.y)
+					plants.well(source, rim, at, float(resource.amount))
+					resource_positions[str(resource.id)] = rim
+					at = rim
+				else:
+					plants.spring(source, at, float(resource.amount))
 			"bush": plants.berry_bush(source, at, float(resource.amount))
 			_: craft.stone(source, at + Vector3.UP * .171, Vector3(.55, .42, .50), craft.mat("a7a397"), int(at.x + at.z))
 		craft.batch(source)
 		var label := Label3D.new()
-		label.text = Snapshot.resource_name(resource.kind) + "：" + str(resource.amount)
+		label.text = Snapshot.resource_place_name(world.map, resource) + "：" + str(resource.amount)
 		label.position = at + Vector3(0, .18, 1.35)
 		style_caption(label, true)
 		actors.add_child(label)

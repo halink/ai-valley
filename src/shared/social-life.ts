@@ -4,3 +4,11 @@ export interface MeetingMember {personId:string;seat:number;joinedAt:number;left
 export interface Meeting {id:string;definition:string;hostId:string;topic:string;at:Vec;roomId:string|null;roomAt:Vec|null;createdAt:number;expiresAt:number;endedAt:number|null;status:'open'|'ended';members:MeetingMember[];}
 export interface SocialLife {meetings:Meeting[];nextSerial:number;totals:{meetings:number;speeches:number;interpretations:number};}
 export interface PersonalInterpretation {sourceEventId:string;source:Memory['source'];recordEventId:string;at:number;text:string;affection:number;trust:number;conflict:number;}
+export interface RecordedInterpretation {
+ observerId:string;
+ targetId:string;
+ sourceEventId:string;
+ source:Memory['source'];
+ text?:string;
+ change?:Pick<PersonalInterpretation,'affection'|'trust'|'conflict'>;
+}

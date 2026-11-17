@@ -17,7 +17,7 @@ static func from_world(world: Dictionary, driver: String) -> Array[Dictionary]:
 		var text: Variant = event.get("text")
 		if not text is String or text.strip_edges().is_empty():
 			continue
-		var time := _world_time(event.get("at"))
+		var time := world_time(event.get("at"))
 		var words := _observer_sentence(event, text, residents, driver, world.id.begins_with("godot-mvp-"))
 		result.append({
 			"id": str(event.get("id", index)),
@@ -29,7 +29,7 @@ static func from_world(world: Dictionary, driver: String) -> Array[Dictionary]:
 		})
 	return result
 
-static func _world_time(value: Variant) -> Dictionary:
+static func world_time(value: Variant) -> Dictionary:
 	if (value is int or value is float) and is_finite(value) and value >= 0 and value <= 9007199254740991:
 		var minute := int(floor(value))
 		return {"day": int(minute / 1440) + 1, "clock": "%02d:%02d" % [int((minute % 1440) / 60), minute % 60]}

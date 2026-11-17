@@ -26,6 +26,7 @@ func build(parent: Node3D, building: Dictionary, map: Dictionary) -> Vector3:
 	parent.add_child(house)
 
 	var kind := str(building.get("kind", ""))
+	var id: String = house.get_meta("building_id")
 	var shared := kind == "lodge"
 	var store := kind in ["store", "workshop", "barn"]
 	var eaves := .67 if shared else (.50 if store else .45)
@@ -33,14 +34,44 @@ func build(parent: Node3D, building: Dictionary, map: Dictionary) -> Vector3:
 	var walls := craft.mat("d7c7ad" if shared else ("bcaa8d" if store else "ded1b4"))
 	var timber := craft.painted.get_material(TIMBER)
 	var clay := craft.painted.get_material("clay_roof" if store else ("roof" if shared else "moss_roof"))
+	match id:
+		"mvp-craft-house":
+			clay = craft.painted.get_material("river_roof")
+			walls = craft.mat("d6cbba")
+		"mvp-plum-house":
+			clay = craft.painted.get_material("plum_roof")
+			walls = craft.mat("dac8af")
+			eaves += .13
 	var entry_x := clampf(relative.dot(tangent), -width * .5, width * .5)
 	_foundation(house, width, depth, shared)
 	_shell(house, width, depth, rise, walls, timber)
 	_roof(house, width, depth, eaves, rise, clay, timber)
 	_entry(house, entry_x, width, depth, shared, store, clay, timber)
+	_porch_details(house, id, entry_x, depth)
 	_approach(house, map, door, normal, tangent)
 	craft.batch(house)
 	return door + Vector3(0, .10, 0)
+
+func _porch_details(house: Node3D, id: String, entry: float, depth: float) -> void:
+	var front := depth * .5 - .07
+	if id == "mvp-plum-house":
+		for side in [-1,1]:
+			var at := Vector3(entry + side * .91, 1.81, front + .26)
+			craft.beam(house, at + Vector3.UP * .25, at + Vector3.UP * .46, .033, craft.mat("655349"))
+			craft.orb(house, at, Vector3(.31, .41, .30), craft.mat("b57262"))
+			craft.box(house, at - Vector3.UP * .203, Vector3(.14, .055, .14), craft.mat("745144"))
+	elif id == "mvp-craft-house":
+		for i in range(3):
+			var timber := craft.painted.get_material("wood" if i % 2 else "timber")
+			craft.box(house, Vector3(entry + 1.25, .36 + i * .092, front + .18), Vector3(.92, .088, .34), timber)
+	elif id == "mvp-herb-house":
+		for offset in [-1.28, 1.21]:
+			var at := Vector3(entry + offset, .25, front + .11)
+			craft.orb(house, at, Vector3(.41, .48, .40), craft.mat("9d7a60"))
+			for i in range(3):
+				var top := at + Vector3((i - 1) * .084, .31 + i * .035, cos(i) * .067)
+				craft.beam(house, at + Vector3.UP * .14, top, .023, craft.mat("748155"))
+				craft.orb(house, top, Vector3(.17, .068, .13), craft.mat("a0a56f"))
 
 func _foundation(house: Node3D, width: float, depth: float, shared: bool) -> void:
 	craft.box(house, Vector3(0, .19, 0), Vector3(width + .22, .38, depth + .22), craft.mat("797668"))

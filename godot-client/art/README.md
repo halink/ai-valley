@@ -134,3 +134,13 @@ real-model autonomy, broad gameplay completeness, or long-term stability.
 2026-11-17。林禾和乔笙的游戏内模型按册页肖像细化。林禾的圆脸、布巾、窄袖和短褂突出年轻的轮廓。乔笙的眉骨、额前发束、束带和较长衣摆形成另一种轮廓。脸部网格含鼻梁、眼窝和颧骨的连续起伏，眼睑、眉线和唇线贴合脸面。衣料采用弧形交领、褶皱、裹腿与布鞋，材质沿曲面显示织纹。
 
 `resident_face.gd` 与 `resident_figure.gd` 定义原生网格，`resident_mesh.gd` 负责曲面生成，`resident_pigment.gdshader` 读取快照中的肤色、发色和衣色。模型每个造型共用网格缓存，每位居民单独着色。手肘和膝盖可弯曲，道具随动作对应的手部定位。世界坐标、通行、房间归属和实际库存仍读取原有快照。近景最大缩放增加，姓名标注维持可读字号。同格居民在格内错开站姿，点选各自的模型仍对应各自身份。此轮模型无新增外部素材。
+
+## 长溪全景
+
+2026-11-17。全景的溪水、浅滩、村道与木桥来自 48×36 世界地块。沿岸芦苇和松石分布在河岸与山谷边缘，院落和田野留出视线。溪面随光照变色，静态笔触表现水纹。木桥由 Godot 依实际桥格拼接木板和护栏。
+
+`long-creek-mists-v1.png` 为内置图像生成工具绘制的 1536×1024 远山背景，保留生成原文件。游戏在长溪室外场景中加载它。地表、植被、房屋和桥使用可观察的 3D 场景。生成提示词如下。
+
+```text
+Paint a landscape-format backplate for the full-map view of 栖谷, a hand-painted East Asian mountainside village game. This image is only the very distant scenery behind an interactive 3D miniature that will occupy the center and lower half. Render an authentic, restrained Chinese ink-wash and gouache illustration on lightly warm xuan paper. Extreme atmospheric depth, blank pale ivory fog from the center of the canvas down to the bottom edge, with empty pale paper in the exact center. A very soft blue-gray mountain ridge rises across the upper left, interrupted by two pockets of warm morning mist, and a lower jade-gray line of distant wooded mountains grazes the upper right. Mountain bases dissolve completely into paper around 38–48% from the top. Keep contrast mild and distant, broad brush washes first, only a few ink-dry ridgeline touches and soft fine paper fibers. Gentle slightly warm early daylight, restrained misty gray-green and pale smoky indigo, no orange sunset. Avoid symmetry and no dark shapes at top center. No town, human figure, house, objects, bridges, near trees, strong details, graphic border, calligraphy, stamp, labels, logos, or interface. The foreground must be quiet enough for readable ink UI text and scenery. 3:2 landscape, intentionally airy. A real illustration asset, not a UI mockup.
+```
