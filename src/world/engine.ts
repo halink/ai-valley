@@ -222,7 +222,8 @@ function kitchenUseReason(world:World,r:Resident,b:Building|undefined,start=worl
  if(!b||b.condition<=0||!(b.id===r.homeId&&b.residents.includes(r.id)||b.kind==='lodge'&&b.ownerId==='commons'||currentPremisesLease(world,b.id,start)?.tenantId===r.id&&currentPremisesLease(world,b.id,start)?.terms.station==='kitchen'))return '这处厨房已损坏或本人没有使用权';
  return premisesWorkReason(world,r.id,b.id,'kitchen',start,end)??publicKitchenReason(world,r,b.id)??employmentKitchenReason(world,r,b.id);
 }
-function targetFor(world:World,r:Resident,a:Action,definition:string,elapsed=0):{target:Vec;adjacent?:boolean;duration:number;error?:string;cargo?:Activity['cargo'];buildingId?:string} {
+type GatherStartDepletion={code:'resource_stock_depleted_before_gather';resourceId:string;quantity:number;available:number};
+function targetFor(world:World,r:Resident,a:Action,definition:string,elapsed=0):{target:Vec;adjacent?:boolean;duration:number;error?:string;cargo?:Activity['cargo'];buildingId?:string;gatherDepletion?:GatherStartDepletion} {
  const preservationTransfer=preservationTransferReason(world,a);if(preservationTransfer)return {target:{...r.at},duration:0,error:preservationTransfer};
  const fail=(error:string)=>({target:r.at,duration:0,error});
  if(selfCareTransportBlocked(world,r,a))return fail('须先实际结束原同行或护送，才能另行本人自理');
@@ -294,7 +295,8 @@ function targetFor(world:World,r:Resident,a:Action,definition:string,elapsed=0):
   // stock must not be probed by preflight errors; verify it on actual contact.
   if(resource.kind==='spring'?canInspectSpring(world,r,resource):resource.kind==='bush'?canInspectBerry(world,r,resource):true){
    if(resource.kind==='spring'&&resource.floodDamage?.clearedAt===null)return fail('泉水已淤塞，须退水后实际清理才可安全取用');
-   if(resource.amount<a.quantity)return fail('资源已不足，须重新决定');
+   if(!Number.isFinite(resource.amount)||resource.amount<0||!['tree','rock','bush','spring'].includes(resource.kind))return fail('采集目标库存或种类无效');
+   if(resource.amount<a.quantity)return {...fail('资源已不足，须重新决定'),gatherDepletion:{code:'resource_stock_depleted_before_gather',resourceId:resource.id,quantity:a.quantity,available:resource.amount}};
   }
   return {target:resource.at,adjacent:true,duration:a.quantity*(resource.kind==='tree'?(world.industry?.tools.some(t=>t.ownerId===r.id&&!t.location&&t.kind==='axe'&&t.durability>0)?5:8):resource.kind==='rock'?12:resource.kind==='bush'?3:2)};
  }
@@ -345,13 +347,16 @@ function targetFor(world:World,r:Resident,a:Action,definition:string,elapsed=0):
  a.observedTarget={id:target.id,at:{...target.at},inside:target.inside,roomAt:target.roomAt?{...target.roomAt}:null,atMinute:world.minute};
  return {target:{...target.at},adjacent:!target.inside,duration:a.type==='care'?30:a.type==='learn'?60:3};
 }
-function begin(world:World,r:Resident,elapsed=0){
+function begin(world:World,r:Resident,elapsed=0,actionFailures?:StepActionFailure[]){
  const plan=r.plan;if(!plan)return;
  const action=plan.actions.shift();if(!action){r.plan=null;r.decisionDue=world.minute;return;}
  if(aboardFerry(world,r.id)&&!allowedAboard(action)){failure(world,r,'本人仍在船上，须靠泊并上岸');return;}
  const definition=definitionFor(world,plan,action);
  if(!world.definitions[definition]){failure(world,r,'行为引用的定义版本不存在');return;}
- const route=targetFor(world,r,action,definition,elapsed);if(route.error){failure(world,r,route.error,action);return;}
+ const route=targetFor(world,r,action,definition,elapsed);if(route.error){
+  if(action.type==='gather'&&route.gatherDepletion)actionFailures?.push({actorId:r.id,planId:plan.id,actionType:'gather',...route.gatherDepletion});
+  failure(world,r,route.error,action);return;
+ }
  if(action.type==='cook'&&route.buildingId)action.buildingId=route.buildingId;
  let path=findPath(world,r.at,route.target,route.adjacent,Infinity,action.type==='frontierHazard'&&(action.operation==='retreat'||action.operation==='shelter')||action.type==='health'&&action.operation==='rescue'&&action.evacuationDangerId?frontierRetreatStepAllowed(world,r):undefined);
  if(route.adjacent&&['talk','offer','accept'].includes(action.type))path=socialApproachPath(world,r.at,route.target);
@@ -536,7 +541,9 @@ function observe(world:World,r:Resident){
   if(other.status==='dead'&&!world.graves.some(g=>g.personId===other.id)&&!deathProof(world,r,other.id,true))emitEvent(world,{kind:'death',actors:[other.id,r.id],place:{...other.at},witnesses:[r.id],text:`${r.name}在这里发现并确认了${other.name}的死亡。`});
  }
 }
-export interface StepActionFailure {actorId:string;planId:string;actionType:Action['type'];code:'room_slot_contended'}
+export type StepActionFailure={actorId:string;planId:string}&(
+ {actionType:Action['type'];code:'room_slot_contended'}|({actionType:'gather'}&GatherStartDepletion)
+);
 function processActivity(world:World,r:Resident,minutes:number,actionFailures?:StepActionFailure[]){
  if(!procurementCapable(world,r)&&(r.plan?.actions??[]).some(a=>a.type==='civic'&&a.operation==='deliverReserve'||a.type==='foreignTrade'&&(a.reserveId||world.foreignTrade?.shipments.some(s=>s.id===a.shipmentId&&s.publicReserveId)))){failure(world,r,'公共采购经办资格失效，旧行动不能自动恢复');return;}
  // An invalid future barter in an already chosen multi-step plan must not
@@ -544,7 +551,7 @@ function processActivity(world:World,r:Resident,minutes:number,actionFailures?:S
  for(const action of r.plan?.actions??[])if(action.type==='offer'||action.type==='accept'){
   const error=barterActionReason(world,r,action,minutes);if(error){failure(world,r,error);return;}
  }
- if(!r.activity)begin(world,r,minutes);
+ if(!r.activity)begin(world,r,minutes,actionFailures);
  const activity=r.activity;if(!activity)return;
  if(selfCareTransportBlocked(world,r,activity.action)){failure(world,r,'须先实际结束原同行或护送，不能执行另行本人自理');return;}
  if(travellingFamily(world,r.id)&&activity.action.type!=='wait'&&!isWaterSupportWithdrawal(activity.action)&&!isPregnancyWithdrawal(activity.action)&&!(activity.action.type==='familyRelocation'&&(activity.action.operation==='withdraw'||activity.action.operation==='decline'))){failure(world,r,'家庭同行期间须先实际停止同行，不能执行另行移动或工作');return;}

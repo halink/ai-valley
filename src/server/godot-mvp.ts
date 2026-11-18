@@ -272,11 +272,18 @@ export function createMvpSession(options:{world?:World;commit?:(world:World,prev
     const draft=structuredClone(current);inheritReceiptHistory(current,draft);forkCompletedMovement(current,draft);
     world=draft;
     try{
+    const newGather=new Map<string,{planId:string;resourceId:string;quantity:number}>();
     for(const r of world.residents){
      if(r.status!=='alive'||r.activity||r.plan)continue;
      const choice=chooseMvpAction(world,r);
-     const result=submitPlan(world,{id:`mvp-rule-${world.id}-${world.revision}-${r.id}-${++serial}`,actorId:r.id,actorRevision:r.revision,createdAt:world.minute,definition:mvpPlanDefinition(world,choice.action),intention:'本地规则：'+choice.reason,actions:[choice.action]});
+     const planId=`mvp-rule-${world.id}-${world.revision}-${r.id}-${++serial}`;
+     const result=submitPlan(world,{id:planId,actorId:r.id,actorRevision:r.revision,createdAt:world.minute,definition:mvpPlanDefinition(world,choice.action),intention:'本地规则：'+choice.reason,actions:[choice.action]});
      if(!result.ok)throw new Error(`MVP plan rejected for ${r.id}: ${result.error}`);
+     if(choice.action.type==='gather'){
+      const {resourceId,quantity}=choice.action;
+      const source=world.resources.find(s=>s.id===resourceId);
+      if(source&&Number.isFinite(source.amount)&&source.amount>=quantity)newGather.set(r.id,{planId,resourceId,quantity});
+     }
      decisions[r.id]=(decisions[r.id]??0)+1;
     }
     // A neighbour may finish harvesting after this resident chose a source.
@@ -289,6 +296,12 @@ export function createMvpSession(options:{world?:World;commit?:(world:World,prev
     stepWorld(world,1,{actionFailures});
     for(const failed of world.residents.filter(r=>r.lastFailure)){
      const action=gathering.get(failed.id);
+     const fresh=newGather.get(failed.id);
+     // A live start rejected only after a same-tick stock change is not a
+     // world fault. Older plans, unverified depletion and malformed targets do not
+     // get recovery from an error message (or any other typed failure).
+     if(fresh&&actionFailures.some(f=>f.code==='resource_stock_depleted_before_gather'&&f.actionType==='gather'&&
+      f.actorId===failed.id&&f.planId===fresh.planId&&f.resourceId===fresh.resourceId&&f.quantity===fresh.quantity&&f.available<fresh.quantity))continue;
      if(action?.type==='talk'&&actionFailures.some(f=>f.actorId===failed.id&&f.planId===activityPlans.get(failed.id)&&f.actionType==='talk'&&f.code==='room_slot_contended'))continue;
      if(action?.type==='mvpAgriculture'||action?.type==='mvpPreservation'||shelterWorkers.has(failed.id))continue;
      if(action&&isMvpSeedAction(action)&&['灶堂有限种源已领完','这处实际工位正在被另一项劳动占用'].includes(failed.lastFailure!))continue;
