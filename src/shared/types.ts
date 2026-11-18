@@ -21,7 +21,7 @@ export interface Memory {speechText?:string;speechTone?:import('./speech-tone.js
 export type PopulationChange = 'visit'|'endVisit'|'settle'|'moveHome'|'depart'|'birth'|'death'|'dating'|'marriage'|'separate'|'adult'|'guardian'|'adoption';
 export interface PersonObservation {id:string;at:Vec;inside:string|null;roomAt:Vec|null;atMinute:number;}
 export type Action = DomainAction & {observedTarget?:PersonObservation};
-type DomainAction =
+type DomainAction = import('./mvp-seasonal.js').SeasonalInspectAction
  | import('./mvp-preservation.js').PreservationAction
  | import('./mvp-seeds.js').MvpSeedAction
  | import('./mvp-agriculture.js').AgricultureAction
@@ -93,7 +93,7 @@ type DomainAction =
 export interface Plan {id:string;actorId:string;actorRevision:number;createdAt:number;definition:string;intention:string;actions:Action[];}
 export interface Activity {mvpPreservationExecutionId?:string;mvpPreservationWorked?:number;mvpAgricultureExecutionId?:string;mvpWaterExecutionId?:string;mvpBed?:{buildingId:string;index:number};appointmentStartedAt?:number;appointmentWork?:{from:number;through:number;minutes:number};foodSourceShareWork?:{from:number;through:number;minutes:number};foodGiftWork?:{from:number;through:number;minutes:number};presenceWork?:{from:number;through:number;minutes:number;provider:PersonObservation;person:PersonObservation};room?:import('./rooms.js').RoomJourney;planId:string;action:Action;startedAt:number;remaining:number;path:Vec[];target:Vec;definition:string;cargo?:{bodyId:string;graveId?:string;storageId?:string;storageSlot?:number;pickedUp:boolean;pickupRemaining?:number};travelProgress?:number;}
 export type CompletedAction = {type:Action['type'];at:number;minutes?:number;energy?:number};
-export interface Resident {foodSourceKnowledge?:import('./food-source-sharing.js').FoodSourceKnowledge;regionalLocation?:RegionalLocation;knownDocks?:string[];physiologyDefinition?:string;
+export interface Resident {mvpSeasonalKnowledge?:import('./mvp-seasonal.js').SeasonalKnowledge;foodSourceKnowledge?:import('./food-source-sharing.js').FoodSourceKnowledge;regionalLocation?:RegionalLocation;knownDocks?:string[];physiologyDefinition?:string;
  decisionProtection?:import('./decision-protection.js').DecisionProtection;
  recentActions?:CompletedAction[];
  adoptiveParents?:string[];
@@ -176,6 +176,7 @@ export interface World {mvpPreservation?:import('./mvp-preservation.js').MvpPres
 export interface ContentDefinition {id:string;version:number;kind:'building'|'recipe'|'action'|'life';dependencies:string[];cost?:Inventory;minutes?:number;data:Record<string,unknown>;}
 export interface FormalOpportunity {id:string;label:string;action:Action;chooseDuration?:boolean;}
 export interface DecisionContext {
+ mvpSeasonal?:import('./mvp-seasonal.js').SeasonalPersonalContext;
  mvpSeeds?:{buildingId:string;stock:number|null;claimed:number;saved:number};
  mvpDrinking?:{thirst:number;canDrink:boolean};
  mvpInterpretations?:FormalOpportunity[];

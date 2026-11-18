@@ -1,3 +1,4 @@
+import {captureSeasonalKnowledge,validateSeasonalKnowledge,validSeasonalInspect,seasonalInspectRoute,completeSeasonalInspect} from './mvp-seasonal-knowledge.js';
 import {validPreservationAction,preservationTransferReason,preservationRoute,preservationReason,completePreservation,allocatePreservationExecution,advanceMvpPreservation,reconcileMvpPreservation} from './mvp-preservation.js';
 import {validAgricultureAction,agriculturePlot,agricultureRoute,agricultureReason,completeAgriculture,allocateAgricultureExecution,registerPlantedCrop,retireCrop} from './mvp-agriculture.js';
 import {allocateSoilWaterExecution,assertSoilWaterUnsettled,settleSoilWater} from './mvp-soil.js';
@@ -119,6 +120,7 @@ export function submitPlan(world:World,plan:Plan):{ok:boolean;error?:string} {
  if(hasReceipt(world,`plan:${plan.id}`))return {ok:true};
  const preservationTransfer=plan.actions.map(a=>preservationTransferReason(world,a)).find(Boolean);if(preservationTransfer)return {ok:false,error:preservationTransfer};
  if(plan.actions.some(a=>a.type==='water'&&Object.prototype.hasOwnProperty.call(a,'expectedInstanceId')&&(typeof a.expectedInstanceId!=='string'||!/^crop:[1-9][0-9]*$/.test(a.expectedInstanceId))))return {ok:false,error:'灌溉实例身份格式无效'};
+ if(plan.actions.some(a=>a.type==='mvpInspect'&&!validSeasonalInspect(a)))return {ok:false,error:'公开观察行动结构无效'};
  if(plan.actions.some(a=>a.type==='mvpPreservation'&&!validPreservationAction(a)))return {ok:false,error:'罐藏行动结构无效'};
  if(plan.actions.some(a=>a.type==='mvpAgriculture'&&!validAgricultureAction(a)))return {ok:false,error:'新农业行动结构或操作无效'};
  const actor=world.residents.find(r=>r.id===plan.actorId);
@@ -269,6 +271,7 @@ function targetFor(world:World,r:Resident,a:Action,definition:string,elapsed=0):
   if(a.type==='sleep'){const b=sleepBuilding(world,r,a);if(!b||!a.buildingId&&world.rooms&&residentBed(world,r,b)===null)return fail('尚未拥有可使用的真实床位，当前住处存在床位缺口');return {target:b.door,duration:a.minutes};}
   return {target:r.at,duration:a.minutes};
  }
+ if(a.type==='mvpInspect')return seasonalInspectRoute(world,r,a);
  if(a.type==='mvpPreservation')return preservationRoute(world,r,a);
  if(a.type==='mvpAgriculture')return agricultureRoute(world,r,a);
  if(isMvpSeedAction(a)){const error=mvpSeedReason(world,r,a);return error?fail(error):{target:{...mvpSeedPlace(world)!.building.door},duration:a.type==='mvpCollectSeed'?10:30};}
@@ -426,6 +429,7 @@ function completeAtomic(world:World,r:Resident,a:Action,definition:string,elapse
  const social=executeSocialAction(world,r,a);if(social.handled)return social.ok?null:social.error??'行为当前无法完成';
  const record=(text:string,kind:'action'|'construction'|'trade'|'production'='action',actors=[r.id])=>emitEvent(world,{kind,actors,place:{...r.at},text});
  if(a.type==='move'||a.type==='wait'||a.type==='sleep')return null;
+ if(a.type==='mvpInspect')return completeSeasonalInspect(world,r,a);
  if(a.type==='mvpPreservation')return completePreservation(world,r,a);
  if(a.type==='mvpAgriculture')return completeAgriculture(world,r,a);
  if(isMvpSeedAction(a))return completeMvpSeed(world,r,a);
@@ -506,6 +510,7 @@ function completeAtomic(world:World,r:Resident,a:Action,definition:string,elapse
  return '该行为尚未开放';
 }
 function observe(world:World,r:Resident){
+ captureSeasonalKnowledge(world,r);
  if(!canObserve(world,r))return;
  if(r.inside){for(const other of world.residents){if(other.id===r.id||!coLocated(world,r,other,10))continue;if(!r.knownPeople.includes(other.id))r.knownPeople.push(other.id);if(other.status==='dead'&&!world.graves.some(g=>g.personId===other.id)&&!deathProof(world,r,other.id,true))emitEvent(world,{kind:'death',actors:[other.id,r.id],place:{...other.at},witnesses:[r.id],text:`${r.name}在室内发现并确认了${other.name}的死亡。`});}return;}
  observeFoodSources(world,r);
@@ -650,6 +655,7 @@ export function stepWorld(world:World,minutes:number,options:{actionFailures?:St
  const exact=options.exactEndMinute;
  if(exact!==undefined&&(!Number.isFinite(exact)||exact<=world.minute||exact-world.minute!==minutes))throw new Error('invalid_exact_step_endpoint');
  if(world.mvpClimate){const end=exact??world.minute+minutes;minuteToClimateUs(end);if(end<=world.minute)throw Error('mvp_climate_clock_not_advancing');}
+ validateSeasonalKnowledge(world);
  // A caller may use large isolated-test steps; real runtime never catches up downtime.
  ensureCensus(world);initializePhysiology(world);
  if(world.mode==='formal'){initializeSocialAppointments(world);initializePersonalFoodGifts(world);initializeAdultPresence(world);initializePregnancyPreparation(world);initializeEconomy(world);initializeCivic(world);initializeCommons(world);initializeWaterSupply(world);initializeProduction(world);initializeEmployment(world);initializeForeignTrade(world);initializeOutsideAid(world);initializeConstruction(world);initializeLandRights(world);initializeRegionSurveys(world);initializeEducation(world);initializeIndustry(world);initializeFerries(world);initializeRooms(world);initializeFood(world);initializeHealth(world);initializeLongCare(world);initializeEmergencyCare(world);initializeFunerary(world);initializeAgency(world);initializeAdoption(world);initializeFamilyRelocation(world);initializeDebt(world);initializeHousehold(world);initializeSocial(world);initializeCulture(world);}

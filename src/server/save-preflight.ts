@@ -1,3 +1,4 @@
+import {validateSeasonalKnowledge} from '../world/mvp-seasonal-knowledge.js';
 import {validateMvpPreservation} from '../world/mvp-preservation.js';
 import {validateMvpClimate} from '../world/mvp-climate-state.js';
 import type {World} from '../shared/types.js';
@@ -28,6 +29,7 @@ export function assertWorldCompatibility(value:unknown):asserts value is Record<
  if(!record(value))fail('save_invalid_world');
  // Reject presence, not a recognized version/truthy value. No upgrade escape.
  if(owns(value,'simulationOnly'))fail('save_simulation_only');
+ try{validateSeasonalKnowledge(value as unknown as World);}catch{fail('save_invalid_mvpSeasonalKnowledge');}
  if(value.schemaVersion!==1)fail('save_unsupported_world_schema');
  try{validateMvpPreservation(value as unknown as World);}catch{fail('save_invalid_mvpPreservation');}
  if(owns(value,'mvpClimate')||owns(value,'mvpSoil')||owns(value,'mvpAgriculture')){try{validateMvpClimate(value as unknown as World);}catch{fail('save_invalid_mvpClimate');}}

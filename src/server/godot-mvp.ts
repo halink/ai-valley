@@ -36,11 +36,12 @@ import type {Action,Resident,Snapshot,Tile,World} from '../shared/types.js';
 
 export const GODOT_MVP_PORT=3414;
 export const GODOT_MVP_NOTICE='隔离核心循环：本地规则驱动，非真实模型；内存世界，退出后重置';
-export type MvpPhase='deciding'|'travelling'|'gathering'|'eating'|'resting'|'waiting'|'stopped'|'drinking'|'talking'|'planting'|'watering'|'harvesting'|'cooking'|'preserving'|'installing';
+export type MvpPhase='deciding'|'travelling'|'gathering'|'eating'|'resting'|'waiting'|'stopped'|'drinking'|'talking'|'planting'|'watering'|'harvesting'|'cooking'|'preserving'|'inspecting'|'installing';
 export function mvpPhase(r:Resident):MvpPhase {
  if(r.status!=='alive')return 'stopped';
  if(!r.activity)return 'deciding';
  if(r.activity.path.length||r.activity.room?.path.length)return 'travelling';
+ if(r.activity.action.type==='mvpInspect')return 'inspecting';
  if(r.activity.action.type==='mvpPreservation')return r.activity.action.operation==='install'?'installing':'preserving';
  return ({cook:'cooking',plant:'planting',water:'watering',harvest:'harvesting',talk:'talking',mvpDrink:'drinking',gather:'gathering',eat:'eating',sleep:'resting',wait:'waiting'} as const)[r.activity.action.type as 'gather'|'eat'|'sleep'|'wait']??'waiting';
 }
@@ -307,11 +308,16 @@ export function createMvpSession(options:{world?:World;commit?:(world:World,prev
  };
  return {get world(){return world;},snapshot,advance};
 }
-export function createMvpServer(session:Pick<ReturnType<typeof createMvpSession>,'snapshot'>,options:{webRoot?:string}={}):Server {
+export function createMvpServer(session:Pick<ReturnType<typeof createMvpSession>,'snapshot'>,options:{webRoot?:string;valleySpiritSource?:(sourceRef:string)=>unknown}={}):Server {
  return createServer((req,res)=>{
   res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');
   if(options.webRoot&&serveGodotWeb(req,res,options.webRoot))return;
   if(req.method!=='GET'){res.writeHead(405,{'Allow':'GET'});res.end('Read-only MVP');return;}
+  if(req.url?.startsWith('/ai-town/api/valley-spirit/source?')){
+   const params=new URL(req.url,'http://localhost').searchParams,ref=params.get('ref');
+   const source=ref&&ref.length<=300&&[...params.keys()].length===1?options.valleySpiritSource?.(ref):null;
+   res.writeHead(source?200:404,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(source??{status:'unavailable'}));return;
+  }
   if(req.url!=='/ai-town/api/world'){res.writeHead(404);res.end('Not found');return;}
   res.writeHead(200,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(session.snapshot()));
  });

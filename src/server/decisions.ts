@@ -1,3 +1,4 @@
+import {seasonalPersonalContext,seasonalPersonalNote} from './mvp-seasonal-context.js';
 import {mvpSeedPlace} from '../world/mvp-seeds.js';
 import {mvpThirst,mvpDrinkReason} from '../world/mvp-drinking.js';
 import {harvestMealEvidence,harvestMealRelevant} from './harvest-food-choices.js';
@@ -132,6 +133,7 @@ export function decisionContext(world:World,actor:Resident):DecisionContext{
  const foodCoverage=world.mode==='formal'?residentFoodCoverage(world,actor):undefined;
  const knownAge=knownAgeYears(actor.bornAt,world.minute);
  const context:DecisionContext={
+  mvpSeasonal:seasonalPersonalContext(world,actor),
   ...(mvpSeedPlace(world)&&actor.knownBuildings.includes('mvp-home')?{mvpSeeds:{buildingId:'mvp-home',stock:actor.inside==='mvp-home'?world.mvpSeeds!.stock:null,claimed:world.mvpSeeds!.claimed[actor.id]??0,saved:world.mvpSeeds!.saved[actor.id]??0}}:{}),
   ...(mvpThirst(world,actor)!==undefined?{mvpDrinking:{thirst:mvpThirst(world,actor)!,canDrink:mvpDrinkReason(world,actor)===null}}:{}),
   ...(world.mode==='formal'?{formal:{personalFoodGiftNotes:personalFoodGiftNotes(world,actor),socialAppointmentNotes:socialAppointmentNotes(world,actor),foodCoverage,personalFoodProcessing:personalFoodProcessing(world,actor),personalFoodFreshness:personalFoodFreshness(world,actor),careWithdrawalOnly:careWithdrawalOnly(world,actor),aboard:!!aboardFerry(world,actor.id),passenger:!!passenger(world,actor.id),expressiveEvacuationOnly:expressiveTransportControl(world,actor),familyTravelling:!!travellingFamily(world,actor.id)||!!familyPassenger(world,actor.id),frontier:world.scenario==='frontier',age:Math.floor(ageYears(actor.bornAt,world.minute)),knownAge:knownAge===null?null:Math.floor(knownAge),productiveFarming:Boolean(world.production),familyNotes,
@@ -210,7 +212,7 @@ ${choices.map(c=>c.id+'. '+c.label).join('\n')}
  // never fall back to zero; this display field is not used by menu gates.
  const displayAge=context.formal&&(Object.hasOwn(context.formal,'knownAge')?context.formal.knownAge:context.formal.age);
  const ageLabel=typeof displayAge==='number'&&Number.isFinite(displayAge)&&displayAge>=0?Math.floor(displayAge)+'岁':'年龄未知';
- const state=`你是居民${a.name}${context.formal?'，'+ageLabel:''}。性格：${a.traits.join('、')}。现在${context.season}季第${t.day}天${t.hour}时${t.minute}分（${daylightLabels[daylight(context.minute).phase]}），${context.weather==='rain'?'下雨':'晴天'}。饥饿${a.hunger}/100（越高越饿），体力${a.energy}/100，健康${a.health}/100。掌握技能：农事${a.skills.farming.toFixed(2)}、建造${a.skills.building.toFixed(2)}、照护${a.skills.care.toFixed(2)}。自有物品${JSON.stringify(a.inventory)}，自己的钱款${a.coins??0}。${foodNote}`;
+ const state=`你是居民${a.name}${context.formal?'，'+ageLabel:''}。性格：${a.traits.join('、')}。现在${context.season}季第${t.day}天${t.hour}时${t.minute}分（${daylightLabels[daylight(context.minute).phase]}），${context.mvpSeasonal?'新气候见下方本人现场观察':context.weather==='rain'?'下雨':'晴天'}。饥饿${a.hunger}/100（越高越饿），体力${a.energy}/100，健康${a.health}/100。掌握技能：农事${a.skills.farming.toFixed(2)}、建造${a.skills.building.toFixed(2)}、照护${a.skills.care.toFixed(2)}。自有物品${JSON.stringify(a.inventory)}，自己的钱款${a.coins??0}。${foodNote}`;
  const goal=a.agency?.goals.find(g=>g.status==='active');
  const ownProgram=goal?'你持续记得自己写下的目标：'+goal.text+'。近期关注'+focusNames[goal.focus]+'。这个目标已经生效，可以直接选行动。你也可以改变目标、拒绝或退出他人的提议。':'';
  const memory=context.memories.slice(model===QWEN_MODEL?-6:-3).map(shortMemory).join('；');
@@ -230,6 +232,7 @@ ${choices.map(c=>c.id+'. '+c.label).join('\n')}
  const berryNotes=visibleBerryObservationNote(context,choices);
  const bodyObservations=context.people.filter(p=>p.bodyObservation?.atMinute===context.minute).map(p=>`${p.name}：${p.bodyObservation!.signs.map(s=>bodySignLabels[s]).join('；')}`).join('。');
  const remaining=`
+${seasonalPersonalNote(context)}
 ${context.mvpDrinking?`本人MVP口渴：${context.mvpDrinking.thirst.toFixed(2)}/100；常温每720分钟增加50，饮用一份清水缓解50。尚无缺水伤害。取水不等于饮水，饮用须自行选择。`:""}
 ${context.formal?.socialAppointmentNotes?'本人持久记得的日常约见（不是远程事实）：\n'+context.formal.socialAppointmentNotes:''}
 ${foodGiftNotes?foodGiftNotes+'\n':''}${berryNotes?berryNotes+'\n':''}${personalFoodFreshnessNote(context,choices)}

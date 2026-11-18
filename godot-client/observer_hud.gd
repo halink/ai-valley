@@ -90,6 +90,7 @@ var directory_back: Button
 var scroll: ScrollContainer
 var panes := {}
 var dock_buttons := {}
+var spirit_text: Label
 var people_list: VBoxContainer
 var places_list: VBoxContainer
 var journal: ValleyJournal
@@ -234,7 +235,7 @@ func _build_navigation() -> void:
 	var overview := _button(dock, "全景", func(): overview_requested.emit(), "WoodButton", 20)
 	overview.custom_minimum_size = Vector2(81, 44)
 	overview.tooltip_text = "回到山谷全景"
-	for item in [["people", "居民"], ["relations", "往来"], ["places", "场所"], ["events", "手记"]]:
+	for item in [["people", "居民"], ["relations", "往来"], ["places", "场所"], ["events", "手记"], ["spirit", "谷灵"]]:
 		var key: String = item[0]
 		var button := _button(dock, item[1], _toggle_pane.bind(key), "WoodButton", 20)
 		button.custom_minimum_size = overview.custom_minimum_size
@@ -314,7 +315,7 @@ func _build_drawer() -> void:
 	var contents := VBoxContainer.new()
 	contents.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(contents)
-	for pane in ["resident", "people", "places", "settings"]:
+	for pane in ["resident", "people", "places", "settings", "spirit"]:
 		var content := VBoxContainer.new()
 		contents.add_child(content)
 		content.hide()
@@ -326,6 +327,9 @@ func _build_drawer() -> void:
 	_label(people_list, "暂无居民记录", 15, Art.FADED)
 	_label(places_list, "暂无场所记录", 15, Art.FADED)
 	_build_settings(panes.settings)
+	spirit_text = _label(panes.spirit, "谷灵记录尚未连接", 15, Art.INK)
+	spirit_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	spirit_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	drawer.hide()
 
 func _build_resident_pane(pane: VBoxContainer) -> void:
@@ -556,7 +560,7 @@ func _visible_pane() -> String:
 
 func _refresh_drawer() -> void:
 	var visible_pane := _visible_pane()
-	var titles := {"people":"居民名录", "places":"场所", "settings":"观察设置"}
+	var titles := {"people":"居民名录", "places":"场所", "settings":"观察设置", "spirit":"谷灵客观手记"}
 	drawer_title.text = titles.get(visible_pane, "")
 	directory_back.visible = visible_pane == "resident"
 	settings_button.set_pressed_no_signal(active_pane == "settings")
@@ -768,3 +772,8 @@ func pass_doorway(departure: float, arrival: float, swap_scene: Callable, finish
 	fade_tween.tween_property(fade, "color:a", 0.0, .24)
 	fade_tween.tween_interval(maxf(arrival - .24, 0.0))
 	fade_tween.tween_callback(finished)
+
+func show_spirit(text: String) -> void:
+	if spirit_text.text != text:
+		spirit_text.text = text
+		_queue_layout()

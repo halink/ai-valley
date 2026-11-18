@@ -8,6 +8,7 @@ const Snapshot = preload("res://snapshot.gd")
 const SeedObservation = preload("res://seed_observation.gd")
 const AgricultureObservation = preload("res://agriculture_observation.gd")
 const PreservationObservation = preload("res://preservation_observation.gd")
+const ValleySpirit = preload("res://valley_spirit.gd")
 const SoilObservation = preload("res://soil_observation.gd")
 const GardenObservation = preload("res://garden_observation.gd")
 const MovementFeed = preload("res://completed_movement.gd")
@@ -25,6 +26,7 @@ var environment_preview: Dictionary = {}
 var soil_observation: Dictionary = {}
 var agriculture_observation: Dictionary = {}
 var preservation_observation: Dictionary = {}
+var valley_spirit_snapshot: Dictionary = {}
 var relationship_history: Variant
 var selected_resident := ""
 var selected_building := ""
@@ -95,6 +97,7 @@ func _connect_server(origin: String) -> void:
 	soil_observation = {}
 	agriculture_observation = {}
 	preservation_observation = {}
+	valley_spirit_snapshot = {}
 	valley.agriculture_observation = {}
 	valley.environment_preview = {}
 	world = {}
@@ -152,6 +155,7 @@ func _apply_snapshot(parsed: Dictionary) -> void:
 	soil_observation = SoilObservation.from_snapshot(parsed)
 	agriculture_observation = AgricultureObservation.from_snapshot(parsed)
 	preservation_observation = PreservationObservation.from_snapshot(parsed)
+	valley_spirit_snapshot = {"world":{"id":world.id,"revision":world.revision,"minute":world.minute},"valleySpirit":parsed.get("valleySpirit")}
 	valley.agriculture_observation = agriculture_observation.get("plots", {})
 	valley.environment_preview = environment_preview
 	source_tag = {"local-rules": "规则演示 · 非模型", "model": "已配置模型", "disabled": "模型禁用"}.get(decision_source, "")
@@ -454,6 +458,7 @@ func _set_follow(enabled: bool) -> void:
 	_update_resident_card()
 
 func _update_hud() -> void:
+	hud.show_spirit(ValleySpirit.text(valley_spirit_snapshot, connected))
 	var people := {}
 	var places := {}
 	for person in world.get("residents", []):

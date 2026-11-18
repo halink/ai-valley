@@ -1,3 +1,5 @@
+import {SqliteValleySpiritPermissions} from './valley-spirit-permissions.js';
+import {ValleySpiritJournal,publicWeatherProjection,valleySpiritUnavailable} from './valley-spirit.js';
 import {adoptMvpAgriculture} from '../world/mvp-agriculture.js';
 import {adoptMvpSoil} from '../world/mvp-soil.js';
 import {lstatSync} from 'node:fs';
@@ -18,8 +20,9 @@ export async function startPersistentRulesMvp(options:{database:string;port:numb
  if(options.webRoot!==undefined)assertGodotWebExport(options.webRoot);
  let owner:RuntimeOwnership|undefined,store:WorldStore|undefined,timer:ReturnType<typeof setInterval>|undefined;
  let server:ReturnType<typeof createMvpServer>|undefined;
+ let valleySpirit:ValleySpiritJournal|undefined;let spiritPermissions:SqliteValleySpiritPermissions|undefined;
  let closing:Promise<void>|undefined;
- const close=():Promise<void>=>closing??=(async()=>{if(timer)clearInterval(timer);timer=undefined;if(server){server.closeAllConnections();await new Promise<void>(resolve=>server!.close(()=>resolve()));server=undefined;}store?.close();store=undefined;owner?.release();owner=undefined;})().catch(error=>{closing=undefined;throw error;});
+ const close=():Promise<void>=>closing??=(async()=>{if(timer)clearInterval(timer);timer=undefined;if(server){server.closeAllConnections();await new Promise<void>(resolve=>server!.close(()=>resolve()));server=undefined;}try{spiritPermissions?.close();}catch{valleySpirit?.isolate();}spiritPermissions=undefined;store?.close();store=undefined;owner?.release();owner=undefined;})().catch(error=>{closing=undefined;throw error;});
  try{
   owner=acquireRuntimeOwnership(options.database);owner.assertOwned();
   try{lstatSync(owner.database+'.self-hosted-session');throw Error('mvp_rules_unresolved_session');}catch(error){if(!(error&&typeof error==='object'&&'code' in error&&error.code==='ENOENT'))throw error;}
@@ -28,7 +31,8 @@ export async function startPersistentRulesMvp(options:{database:string;port:numb
   if(probe){assertMvpWorld(probe as unknown as World);validateMvpClimate(probe as unknown as World);}
   // Bind before any writable SQLite open or adoption.
   let session:ReturnType<typeof createMvpSession>|undefined;
-  server=createMvpServer({snapshot:()=>session!.snapshot()},{webRoot:options.webRoot});
+  const snapshot=()=>({...session!.snapshot(),valleySpirit:valleySpirit?.view()??valleySpiritUnavailable()});
+  server=createMvpServer({snapshot},{webRoot:options.webRoot,valleySpiritSource:ref=>valleySpirit?.resolveSource(ref)??null});
   await new Promise<void>((resolve,reject)=>{server!.once('error',reject);server!.listen(options.port,'127.0.0.1',resolve);});
   store=new WorldStore(owner.database,{allowMvpClimate:true});
   const saved=store.load(),world=structuredClone(saved??createMvpWorld()),previous=saved?.revision??null;
@@ -36,8 +40,10 @@ export async function startPersistentRulesMvp(options:{database:string;port:numb
   const upgraded=upgradeMvpWorld(world),adopted=adoptMvpClimate(world),soilAdopted=adoptMvpSoil(world),agricultureAdopted=adoptMvpAgriculture(world);
   if(adopted||soilAdopted||agricultureAdopted)world.revision++;
   if(!saved||upgraded||adopted||soilAdopted||agricultureAdopted)store.commit(world,previous);
-  session=createMvpSession({world,persistent:true,commit:(draft,revision)=>{owner!.assertOwned();store!.commit(draft,revision);}});
+  session=createMvpSession({world,persistent:true,commit:(draft,revision)=>{owner!.assertOwned();store!.commit(draft,revision);try{valleySpirit?.observe(publicWeatherProjection(draft));}catch{valleySpirit?.isolate();}}});
+  const initialPublicFact=publicWeatherProjection(session.world);
+  if(initialPublicFact){try{spiritPermissions=new SqliteValleySpiritPermissions(owner.database,initialPublicFact.worldId,()=>owner!.assertOwned());valleySpirit=new ValleySpiritJournal(owner.database,initialPublicFact,()=>owner!.assertOwned(),spiritPermissions);valleySpirit.observe(initialPublicFact);}catch{valleySpirit?.isolate();}}
   if(options.autoStart!==false)timer=setInterval(()=>session!.advance(1),tickMs);
-  return {session,server,snapshot:session.snapshot,close};
+  return {session,server,snapshot,close};
  }catch(error){await close();throw error;}
 }

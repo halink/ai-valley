@@ -35,3 +35,7 @@ secrets/
 godot-client/.godot/
 godot-client/export/
 .agents/skills/
+
+# Independent ValleySpirit objective records are private runtime persistence.
+*.valley-spirit.json
+*.valley-spirit.json.*.tmp

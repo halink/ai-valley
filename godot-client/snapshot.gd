@@ -323,9 +323,10 @@ static func resident_room_position(at: Variant, room: Dictionary) -> bool:
 # Central vocabulary for protocol enums; extend here when adding actions/items.
 # Unknown protocol identifiers are not user-facing names.
 static func item_name(code: String) -> String:
-	return {"preserve": "水果罐藏", "meal": "餐食", "seed": "种子", "turnip": "根菜", "berry": "浆果", "fruit": "野果", "water": "水", "wood": "木材", "stone": "石头", "fish": "鱼", "grain": "谷物", "meat": "肉", "bread": "面包"}.get(code, "未知物品")
+	return {"springSeed": "春秋芜菁种", "springRoot": "春秋芜菁", "summerSeed": "夏根种", "summerRoot": "夏根", "winterSeed": "冬根种", "winterRoot": "冬根", "preserve": "水果罐藏", "meal": "餐食", "seed": "种子", "turnip": "根菜", "berry": "浆果", "fruit": "野果", "water": "水", "wood": "木材", "stone": "石头", "fish": "鱼", "grain": "谷物", "meat": "肉", "bread": "面包"}.get(code, "未知物品")
 
 static func action_name(code: String, operation := "") -> String:
+	if code == "mvpInspect": return "查看公共工位"
 	if code == "mvpPreservation":
 		return {"install":"安装罐藏工位", "preserve":"制作水果罐藏"}.get(operation, "未知罐藏劳动")
 	if code == "mvpAgriculture":
