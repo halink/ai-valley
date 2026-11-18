@@ -515,7 +515,8 @@ function observe(world:World,r:Resident){
   if(other.status==='dead'&&!world.graves.some(g=>g.personId===other.id)&&!deathProof(world,r,other.id,true))emitEvent(world,{kind:'death',actors:[other.id,r.id],place:{...other.at},witnesses:[r.id],text:`${r.name}在这里发现并确认了${other.name}的死亡。`});
  }
 }
-function processActivity(world:World,r:Resident,minutes:number){
+export interface StepActionFailure {actorId:string;planId:string;actionType:Action['type'];code:'room_slot_contended'}
+function processActivity(world:World,r:Resident,minutes:number,actionFailures?:StepActionFailure[]){
  if(!procurementCapable(world,r)&&(r.plan?.actions??[]).some(a=>a.type==='civic'&&a.operation==='deliverReserve'||a.type==='foreignTrade'&&(a.reserveId||world.foreignTrade?.shipments.some(s=>s.id===a.shipmentId&&s.publicReserveId)))){failure(world,r,'公共采购经办资格失效，旧行动不能自动恢复');return;}
  // An invalid future barter in an already chosen multi-step plan must not
  // silently resume after age/capacity recovers while an earlier step runs.
@@ -555,7 +556,15 @@ function processActivity(world:World,r:Resident,minutes:number){
  }
  if(activity.action.type==='health'){const error=healthReason(world,r,activity.action);if(error){failure(world,r,error);syncMedicalTransport(world);return;}}
  const mvpBedError=mvpSleepProblem(world,r);if(mvpBedError){failure(world,r,mvpBedError);return;}
- const interior=moveInRoom(world,r,minutes);syncMedicalTransport(world);syncBodies(world);syncFamilyEscorts(world);if(interior.error){failure(world,r,interior.error);syncMedicalTransport(world);return;}
+ const interior=moveInRoom(world,r,minutes);syncMedicalTransport(world);syncBodies(world);syncFamilyEscorts(world);if(interior.error){
+  // Only a live physical claim conflict creates this code; persisted text cannot
+  // grant recovery. This output belongs to this step/draft, never to the save.
+  if(interior.failureCode==='room_slot_contended'){
+   actionFailures?.push({actorId:r.id,planId:activity.planId,actionType:activity.action.type,code:interior.failureCode});
+   if(activity.action.type==='talk')emitEvent(world,{kind:'action',actors:[r.id],place:{...r.at},roomId:r.inside,roomAt:r.roomAt?{...r.roomAt}:null,text:`${r.name}的交谈未完成：${interior.error}。`});
+  }
+  failure(world,r,interior.error);syncMedicalTransport(world);return;
+ }
  if(r.activity!==activity)return;
  if(interior.moving){endDecisionProtection(world,r,'decision');return;}
  if(activity.path.length){
@@ -627,7 +636,7 @@ function processActivity(world:World,r:Resident,minutes:number){
  if(!r.plan?.actions.length){r.plan=null;if(activity.action.type!=='outsideAid'||activity.action.operation!=='carryMail')r.decisionDue=world.minute;}
 }
 /** Advances only committed model arrangements and physical consequences. No intentions are generated here. */
-export function stepWorld(world:World,minutes:number,options:{exactEndMinute?:number;decisionChoices?:(world:World,resident:Resident)=>Action[]}={}):void {
+export function stepWorld(world:World,minutes:number,options:{actionFailures?:StepActionFailure[];exactEndMinute?:number;decisionChoices?:(world:World,resident:Resident)=>Action[]}={}):void {
  if(world.clock.paused||!Number.isFinite(minutes)||minutes<=0)return;
  validateMvpClimate(world);
  const exact=options.exactEndMinute;
@@ -647,7 +656,7 @@ export function stepWorld(world:World,minutes:number,options:{exactEndMinute?:nu
    }if(r.health<=0){recordDeath(world,r);continue;}
    const hadChoice=!!(r.plan||r.activity);
    advanceMvpThirst(world,r,dt);
-   processActivity(world,r,dt);
+   processActivity(world,r,dt,options.actionFailures);
    const bodyRules=physiology(world,r);r.hunger=Math.min(100,r.hunger+bodyRules.hungerPerMinute*dt);
    if(r.activity?.action.type!=='sleep'||r.activity.path.length||r.activity.room?.path.length)r.energy=Math.max(0,r.energy-bodyRules.energyPerMinute*dt);
    const protectedMinutes=options.decisionChoices&&(!hadChoice||r.lastFailure!==null)?protectedNeedMinutes(world,r,dt,()=>hasTimelySelfRescue(world,r,options.decisionChoices!(world,r))):0;

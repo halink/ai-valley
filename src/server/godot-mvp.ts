@@ -256,9 +256,12 @@ export function createMvpSession(options:{world?:World;commit?:(world:World,prev
     // Keep the engine's rejected action (no inventory credit), then let the
     // next tick choose from current stock instead of freezing the whole demo.
     const gathering=new Map(world.residents.map(r=>[r.id,r.activity?.action]));
-    stepWorld(world,1);
+    const activityPlans=new Map(world.residents.map(r=>[r.id,r.activity?.planId]));
+    const actionFailures:import('../world/engine.js').StepActionFailure[]=[];
+    stepWorld(world,1,{actionFailures});
     for(const failed of world.residents.filter(r=>r.lastFailure)){
      const action=gathering.get(failed.id);
+     if(action?.type==='talk'&&actionFailures.some(f=>f.actorId===failed.id&&f.planId===activityPlans.get(failed.id)&&f.actionType==='talk'&&f.code==='room_slot_contended'))continue;
      if(action?.type==='mvpAgriculture')continue;
      if(action&&isMvpSeedAction(action)&&['灶堂有限种源已领完','这处实际工位正在被另一项劳动占用'].includes(failed.lastFailure!))continue;
      const source=action?.type==='gather'?world.resources.find(s=>s.id===action.resourceId):undefined;

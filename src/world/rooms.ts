@@ -17,11 +17,12 @@ export function initializeRooms(w:World){if(w.mode==='formal')w.rooms??={tick:-1
 export function beginRoomTick(w:World){initializeRooms(w);if(!w.rooms)return;w.rooms.tick=w.minute;w.rooms.claims=[];
  for(const r of w.residents.filter(r=>r.status==='alive'&&r.activity&&r.activity.path.length===0&&!r.activity.room?.path.length).sort((a,b)=>a.activity!.startedAt-b.activity!.startedAt||a.id.localeCompare(b.id))){const slot=actionRoom(w,r,r.activity!);if(slot&&r.inside===slot.building.id&&r.roomAt?.x===slot.target.x&&r.roomAt?.y===slot.target.y){claim(w,r,slot.key,slot.group,slot.building.id);if(r.activity!.action.type==='publicDuty'&&r.activity!.action.operation==='receive'&&slot.key==='kitchen')claim(w,r,'table',slot.group,slot.building.id);}}
 }
-function claim(w:World,r:Resident,key:string,group:string,id:string,start=w.minute,end=w.minute+.000001):string|null {
+type RoomClaimFailure={message:string;code?:'room_slot_contended'};
+function claim(w:World,r:Resident,key:string,group:string,id:string,start=w.minute,end=w.minute+.000001):RoomClaimFailure|null {
  const a=r.activity?.action,principal=a?.type==='employment'&&a.operation==='work'?w.employment?.contracts.find(c=>c.id===a.contractId)?.employerId??r.id:r.id;
- if((key==='table'||key==='kitchen'||key.startsWith('station:'))&&!(a?.type==='premises'&&a.operation==='collect')){const error=premisesWorkReason(w,principal,id,key,start,end);if(error)return error;}
- const state=w.rooms!;if(key.startsWith('bed:')&&leasedBed(w,id,Number(key.slice(4)),r.id))return '这张床仍在他人的有限借住期限内';const prior=state.claims.find(c=>c.buildingId===id&&c.key===key);
- if(prior&&prior.group!==group)return '这处实际工位正在被另一项劳动占用';
+ if((key==='table'||key==='kitchen'||key.startsWith('station:'))&&!(a?.type==='premises'&&a.operation==='collect')){const error=premisesWorkReason(w,principal,id,key,start,end);if(error)return {message:error};}
+ const state=w.rooms!;if(key.startsWith('bed:')&&leasedBed(w,id,Number(key.slice(4)),r.id))return {message:'这张床仍在他人的有限借住期限内'};const prior=state.claims.find(c=>c.buildingId===id&&c.key===key);
+ if(prior&&prior.group!==group)return {message:'这处实际工位正在被另一项劳动占用',code:'room_slot_contended'};
  if(prior){if(!prior.people.includes(r.id))prior.people.push(r.id);}else state.claims.push({buildingId:id,key,group,people:[r.id]});return null;
 }
 /** Every interior step must remain physical, including ordinary sleep/work routes.
@@ -69,7 +70,7 @@ function leaveThroughDoor(w:World,r:Resident):void {
  recordResidentMovement(w,r.id,from,r.at,room,null);
 }
 /** Room movement consumes the same world minutes as outdoor walking. Work starts at the actual slot. */
-export function moveInRoom(w:World,r:Resident,dt:number):{moving:boolean;error?:string}{
+export function moveInRoom(w:World,r:Resident,dt:number):{moving:boolean;error?:string;failureCode?:'room_slot_contended'}{
  if(!w.rooms||!r.activity)return {moving:false};const a=r.activity;
  // Older saved activities may lack an exit journey. Reconstruct a real one
  // instead of letting the outdoor path erase the resident's indoor position.
@@ -104,7 +105,7 @@ export function moveInRoom(w:World,r:Resident,dt:number):{moving:boolean;error?:
  if(a.action.type==='sleep'&&!a.action.buildingId){const assignments=w.rooms.beds[b.id]??={};assignments[r.id]=Number(key.slice(4));}
  let error=claim(w,r,key,group,b.id,w.minute-dt,w.minute);
  if(!error&&a.action.type==='publicDuty'&&a.action.operation==='receive'&&key==='kitchen')error=claim(w,r,'table',group,b.id,w.minute-dt,w.minute);
- return error?{moving:false,error}:{moving:false};
+ return error?{moving:false,error:error.message,...(error.code?{failureCode:error.code}:{})}:{moving:false};
 }
 export function prepareRoomExit(w:World,r:Resident,checkOnly=false):string|null{
  if(!w.rooms||!r.activity||!r.inside)return null;const work=actionRoom(w,r,r.activity);
