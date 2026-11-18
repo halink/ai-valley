@@ -1,0 +1,15 @@
+{
+  "SEASONS.md": "aed2af2653b6ec957bc2197cf56d534b33f21cfd7e1c098ef26d4169067bcc53",
+  "GUARDIAN.md": "949a4d250b2b005cefae91bad3fd952c0dd9d4f3d5967e95fc1f196b1c9b442c",
+  "IMPLEMENTATION.md": "eef6f7b7fec2f0efa9bc048fb63248b75b9269aacbbb915ebb65f8cbe3b444f3",
+  "README.md": "ea3c234454f60a19d2b55b8d27180a87dcd52cfd654d07a0a92fcd8eaa41ea31",
+  "GLOSSARY.md": "b5586a0527fb05c179ae2ce36e3d2fbfc383f374508bb75fe0414873a29cedc3",
+  "AGENTS.md": "7ceb1272767356f6cb129787798b4d3e6efb6eecc506469f3344c8ab3f4089aa",
+  "EVIDENCE.md": "e36bf92833acb99842f9f6b14845b69f7525bc3d55ff4481e5a0a7e2aa88b99d",
+  "SPEC.md": "d7848d01d27625d2036c190a697f386fb96c23ca2ebdee1ebdcc9c10b30b49b0",
+  "adr/0002-season-rollout.md": "fc7c3c3cc1a29d57d1fffdf79dd1d5d56df9202fbf50f7ec32e738822d920fc7",
+  "adr/README.md": "958d956b7ff6f5b568205805c9b0ce9ee1f9c21edcb5c459135a569c06a8ee98",
+  "adr/0003-valley-spirit.md": "040ea69535a71a6c80721cc619fa5c7c5842d46168dcd22a0f490652b49676e2",
+  "adr/0001-authority.md": "dfab82b90a76568090b1a8e90d7b1e40c1fdf0abdcd5a2edb151010b1d105c09",
+  "adr/0004-evidence-and-failure.md": "ff32cae7cf45cdaf97640d24c3a0a799c1e4ca7190793a03b140d3bdc290c3db"
+}

@@ -34,3 +34,4 @@ secrets/
 # Godot generated cache and exports (source scenes/scripts remain tracked)
 godot-client/.godot/
 godot-client/export/
+.agents/skills/
