@@ -43,7 +43,7 @@ import {initializeEmployment,employmentDeadline} from '../world/employment.js';
 import {initializeConstruction,constructionDeadline} from '../world/construction.js';
 import {initializeForeignTrade,foreignCandidates,isForeignActor,foreignDecisionContext,applyForeignDecision,foreignDeadline} from '../world/foreign-trade.js';
 import {WorldStore, workingEvents} from './store.js';
-import {callModel,decisionContext,decisionChoices,prepareModelDecision,DecisionError,isInvalidDecision,type ModelResult} from './decisions.js';
+import {callModel,decisionContext,decisionChoices,prepareModelDecision,DecisionError,type ModelResult} from './decisions.js';
 import {GLM_MODEL,QWEN_MODEL,DEEPSEEK_MODEL,modelLimits,type ModelConnection,type ModelName} from './model-completion.js';
 import {ModelBudget} from './model-budget.js';
 import {DecisionWaitEvidence,type DecisionWaitEvidenceOptions} from './decision-wait-evidence.js';
@@ -64,6 +64,7 @@ export type DecisionCommittedEvent=Readonly<{result:ModelResult;actorId:string;a
 export type DecisionAdmissionCancelledEvent=Readonly<ModelAdmissionCancellation&{model:ModelName}>;
 export type AcceptanceLifecycleObserver={stopping?:(status:AcceptanceStopStatus)=>unknown;stopped?:(status:AcceptanceStopStatus)=>unknown};
 type Provider = ModelConnection & {slots:number;maxSlots:number;blockedUntil:number;admitAfter:number;limitCount:number;successesSinceLimit:number;transientFailures:number;rateLimitedAt:number;budget?:ModelBudget};
+const TICK_MS=1000;
 export const capabilities={
  active:['只读像素山谷与昼夜','逐人模型计划与实际寻路','采集、耕作、进食与休息','有限材料加工','现场会话、关系与双向物物交换','持久存档、事件记录与故障停表'],
  pending:['工程材料预留、分阶段施工与取消结算','完整孕育、照护与代际平衡验证','居民岗位、教育与服务排班','公共议事、产权与完整遗产清算','迁入机会、有限外贸与长期生态','全部建筑室内工位及四季美术验收']
@@ -202,8 +203,8 @@ export class ValleyRuntime {
   for(const provider of this.providers)this.saveUsage(this.world,provider);
   // Historical account-level errors do not identify which resident is currently waiting for a retry.
   this.world.lastWallAt=Date.now();
-  this.world.clock.paused=true;
-  this.world.clock.reason=this.world.metrics.configured?'正在等待居民获得自主决策机会':'尚未连接居民模型，世界时间已停表';
+  this.world.clock.paused=!this.world.metrics.configured||!this.persistentMvp;
+  this.world.clock.reason=!this.world.metrics.configured?'尚未连接居民模型，世界时间已停表':this.world.clock.paused?'正在等待居民获得自主决策机会':null;
   this.world.revision++;
   this.store.commit(this.world,previousRevision,{events:this.world.events.slice(originalEvents),processed:this.world.processed.slice(originalReceipts)});
   if(this.world.mode==='formal'){
@@ -276,7 +277,7 @@ export class ValleyRuntime {
   if(this.acceptance){this.acceptance.start(this.world.minute);
    if(this.acceptance.status().phase==='running')this.acceptanceEvidence?.writer.observeAcceptanceControl(this.acceptance.status());
    if(!this.acceptanceReady()||!this.acceptance.validateModels(this.providers.map(p=>p.model))||!this.acceptance.committed(this.world))return;}
-  this.schedule();if(!this.stopped)this.tickTimer=setInterval(()=>this.tick(),1000);
+  this.schedule();if(!this.stopped)this.tickTimer=setInterval(()=>this.tick(),TICK_MS);
   }catch(error){if(!this.acceptance)throw error;this.acceptance.stop(this.acceptanceEvidence?.writer.status().phase==='failed'?'evidence_failed':'runtime_failed');}
  }
  stop(){
@@ -354,12 +355,13 @@ export class ValleyRuntime {
   return !this.stopped&&this.acceptance.check(this.world.minute);
  }
  private ready(actor:Resident){return actor.status==='alive'&&(actor.canDecide||hasCareWithdrawal(this.world,actor)||expressiveTransportControl(this.world,actor))&&actor.canExpress&&actor.residency!=='outside'&&(!actor.plan&&!actor.activity||careWithdrawalOnly(this.world,actor)||expressiveTransportControl(this.world,actor))&&actor.decisionDue<=this.world.minute;}
+ private get persistentMvp(){return this.selfHostedSafety&&this.world.mode==='validation';}
  private get fastClock(){return this.world.mode==='formal'&&this.world.clock.realMinutesPerDay<=FAST_DAY_MINUTES;}
  /** A terminal world transaction can notify subscribers before its async slot
   * leaves inFlight. Reentrant ticks, starts and stops must not revive that
   * already-accounted request. This does not acknowledge any provider journal. */
  private unresolvedRequestIds(){return [...this.inFlight.keys()].filter(id=>!this.requestTokens.get(id)?.terminalCommitted);}
- /** Clock never catches up downtime, and model outages are never simulated as famine. */
+ /** Clock never catches up downtime. The persistent MVP keeps ticking during model waits. */
  tick(now=Date.now()){
   if(this.stopped||this.acceptance&&!this.acceptanceReady())return;
   try{this.tickOnce(now);}catch(error){if(!this.acceptance)throw error;this.acceptance.stop('runtime_failed');}
@@ -396,7 +398,7 @@ export class ValleyRuntime {
   });
   // At the fast clock, personal emergencies and appointments affect decision priority.
   // Their timing still advances while the model is preparing a decision.
-  const overdue=!fast&&ready.some(p=>{
+  const overdue=!this.persistentMvp&&!fast&&ready.some(p=>{
    const waited=now-this.waitingSince.get(p.id)!;
    const deadline=worldDeadline(this.world,p.id);
    const need=p.hunger>80||p.energy<10||p.health<50;
@@ -405,7 +407,7 @@ export class ValleyRuntime {
    const needsHold=need&&(this.world.mode!=='formal'||waited>=30_000);
    return needsHold||p.health<=1||observedChildPressure(this.world,p)>0||this.world.minute-p.decisionDue>=60||deadline-this.world.minute<=15;
   });
-  const noInitialPlan=ready.some(p=>p.lastDecisionAt<0)&&(!fast||!this.world.residents.some(p=>p.lastDecisionAt>=0));
+  const noInitialPlan=!this.persistentMvp&&ready.some(p=>p.lastDecisionAt<0)&&(!fast||!this.world.residents.some(p=>p.lastDecisionAt>=0));
   const failure=ready.some(p=>this.failures.has(p.id));
   const paused=!this.providers.length||noReplies||protectionOutage||overdue||noInitialPlan;
   const reason=!this.providers.length?'尚未连接居民模型，世界时间已停表':noReplies||protectionOutage?'模型持续未提供居民决定，世界时间已保护性停表':paused?(failure?'居民正在等待模型重试，世界时间已保护性停表':'正在等待居民获得自主决策机会'):null;
@@ -481,16 +483,18 @@ export class ValleyRuntime {
   const actor=merchant??traveller??this.world.residents.find(p=>p.id===actorId);if(!actor)return;
   const revision=actor.revision;
   const feedback=this.replyFeedback.get(actorId);
+  const retryDelayMs=this.persistentMvp?TICK_MS:30_000;
+  const replanDelayMs=this.persistentMvp?TICK_MS:5000;
   let context:ReturnType<typeof decisionContext>,prepared:ReturnType<typeof prepareModelDecision>;
   try{
    context=foreign?foreignDecisionContext(this.world,actor):traveller?outsideDecisionContext(this.world,actor):decisionContext(this.world,actor);
    prepared=prepareModelDecision(context,feedback,provider.model);
   }catch(error){
    const reason=error instanceof Error&&error.message==='model_context_limit'?'model_context_limit':'model_request_invalid';
-   this.fallbackPending.delete(actorId);this.retryAt.set(actorId,Date.now()+30_000);this.failures.set(actorId,reason);
+   this.fallbackPending.delete(actorId);this.retryAt.set(actorId,Date.now()+retryDelayMs);this.failures.set(actorId,reason);
    this.commit(w=>{w.metrics.lastError=reason;});
    this.decisionEvidence?.preparationFailed(actorId,provider.model,reason,this.world.minute);
-   this.decisionEvidence?.retry(actorId,30_000,null,this.world.minute);this.acceptanceReady();return;
+   this.decisionEvidence?.retry(actorId,retryDelayMs,null,this.world.minute);this.acceptanceReady();return;
   }
   if(!this.acceptanceReady()||!this.acceptanceAdmissionReady())return;
   const started=Date.now();
@@ -505,6 +509,7 @@ export class ValleyRuntime {
   let evidenceRequest:ReturnType<DecisionWaitEvidence['requestStarted']>=null;
   let requestNumber:number|null=null;
   let modelInvoked=false;
+  let modelReplied=false;
   const admissionReady=()=>{
    if(this.acceptanceAdmissionReady())return true;
    // Only an explicit clean admission rejection qualifies. Stops, thrown
@@ -549,6 +554,7 @@ export class ValleyRuntime {
    const signal=acceptanceRequest?AbortSignal.any([requestToken.controller.signal,acceptanceRequest.signal]):requestToken.controller.signal;
    modelInvoked=true;
    const result=await this.model(provider.key,context,feedback,provider.model,prepared,{signal});
+   modelReplied=true;
    if(!live())return;
    if(this.acceptance&&!this.acceptance.settle(acceptanceRequest!,this.world.minute,result.acceptanceCostUsd))return;
    if(!this.acceptanceReady())return;
@@ -570,14 +576,14 @@ export class ValleyRuntime {
     this.saveUsage(w,provider);w.metrics.model=provider.model;w.metrics.lastLatencyMs=result.latencyMs;w.metrics.inputTokens+=result.inputTokens;w.metrics.outputTokens+=result.outputTokens;
     if(foreign){
      const accepted=applyForeignDecision(w,actorId,revision,result.decision);
-     if(!accepted.ok){rejection='foreign_changed';w.metrics.failures++;w.metrics.lastError=accepted.error??'外贸条件已变化';this.retryAt.set(actorId,Date.now()+5000);return;}
+     if(!accepted.ok){rejection='foreign_changed';w.metrics.failures++;w.metrics.lastError=accepted.error??'外贸条件已变化';this.retryAt.set(actorId,Date.now()+replanDelayMs);return;}
      w.metrics.successes++;this.failures.delete(actorId);this.retryAt.delete(actorId);w.metrics.lastError=this.failures.values().next().value??null;
      return;
     }
     if(traveller){
      const regional=w.migration?.contacts.some(c=>c.id===actorId&&(c.phase==='carryingMail'||!!c.journey?.staged));
      const accepted=applyOutsideDecision(w,actorId,revision,result.decision);
-     if(!accepted.ok){rejection='regional_changed';w.metrics.failures++;w.metrics.lastError=accepted.error??'旅途消息已变化';this.retryAt.set(actorId,Date.now()+5000);return;}
+     if(!accepted.ok){rejection='regional_changed';w.metrics.failures++;w.metrics.lastError=accepted.error??'旅途消息已变化';this.retryAt.set(actorId,Date.now()+replanDelayMs);return;}
      if(regional){this.lastResidentDecision=Date.now();w.metrics.regionalDecisions=(w.metrics.regionalDecisions??0)+1;}
      w.metrics.successes++;this.failures.delete(actorId);this.retryAt.delete(actorId);w.metrics.lastError=this.failures.values().next().value??null;
      return;
@@ -586,7 +592,7 @@ export class ValleyRuntime {
     const plan:Plan={id:`${w.id}:plan:${actorId}:${revision}:${started}`,actorId,actorRevision:revision,createdAt:w.minute,definition:w.activeDefinitions['action/routine']??'action/routine@1',intention:result.decision.intention,actions:result.decision.actions};
     const startError=planStartError(w,plan);
     const accepted=startError?{ok:false,error:startError}:submitPlan(w,plan);
-    if(!accepted.ok){rejection='plan_invalid';w.metrics.failures++;current.lastFailure=accepted.error??'计划不再适用';w.metrics.lastError='居民计划需要重新安排';this.failures.set(actorId,w.metrics.lastError);this.retryAt.set(actorId,Date.now()+5000);return;}
+    if(!accepted.ok){rejection='plan_invalid';w.metrics.failures++;current.lastFailure=accepted.error??'计划不再适用';w.metrics.lastError='居民计划需要重新安排';this.failures.set(actorId,w.metrics.lastError);this.retryAt.set(actorId,Date.now()+replanDelayMs);return;}
     current.lastDecisionAt=w.minute;this.lastResidentDecision=Date.now();w.metrics.successes++;w.metrics.localDecisions=(w.metrics.localDecisions??0)+1;this.failures.delete(actorId);w.metrics.lastError=this.failures.values().next().value??null;this.retryAt.delete(actorId);
    },()=>{
     requestToken.terminalCommitted=true;
@@ -597,7 +603,7 @@ export class ValleyRuntime {
    });
    if(rejection){
     this.decisionEvidence?.rejected(actorId,evidenceRequest,rejection,this.world.minute);
-    if(rejection!=='actor_changed')this.decisionEvidence?.retry(actorId,5000,null,this.world.minute);
+    if(rejection!=='actor_changed')this.decisionEvidence?.retry(actorId,replanDelayMs,null,this.world.minute);
    }else this.decisionEvidence?.accepted(actorId,this.world.minute,evidenceRequest);
   }catch(error){
    if(!live())return;
@@ -605,19 +611,22 @@ export class ValleyRuntime {
    // A post-commit observer error is not a second model outcome. Keep the
    // original error visible without finishing/recounting the response again.
    if(requestToken.terminalCommitted)throw error;
-   if(charge)provider.budget!.finish(charge,Date.now(),error instanceof DecisionError?error.stats:undefined);
+   const stats=error instanceof DecisionError?error.stats:undefined;
+   if(charge)provider.budget!.finish(charge,Date.now(),stats);
    const code=error instanceof Error?error.message:'model_failed';
    const safe=/^(model_http_\d{3}|model_incomplete|model_stream_error|model_context_limit|invalid_decision|unsupported_action|invalid_action)$/.test(code)?code:'model_timeout_or_invalid_response';
    this.decisionEvidence?.requestFinished(evidenceRequest,error instanceof Error&&error.name==='TimeoutError'?'timeout':'failed',safe,this.world.minute);
-   const retryInvalidDecision=this.selfHostedSafety&&this.world.mode==='validation'&&isInvalidDecision(error);
-   if(this.selfHostedSafety&&safe!=='model_http_429'&&!retryInvalidDecision){this.stop();this.commit(w=>{w.metrics.lastError=safe;w.clock.reason='模型请求未核实，世界已停表';});return;}
-   const backup=provider===this.providers[0]&&!retryInvalidDecision?this.providers[1]:undefined;
-   let retryDelay=30_000;
+   // A model attempt can be retried after its local outcome is saved. Keep
+   // failures before dispatch or during result persistence on the stop path.
+   const retryInPlace=this.persistentMvp&&modelInvoked&&!modelReplied&&safe!=='model_http_429';
+   if(this.selfHostedSafety&&safe!=='model_http_429'&&!retryInPlace){this.stop();this.commit(w=>{w.metrics.lastError=safe;w.clock.reason='模型请求未核实，世界已停表';});return;}
+   const backup=provider===this.providers[0]&&!retryInPlace?this.providers[1]:undefined;
+   let retryDelay=retryDelayMs;
    if(!foreign&&!traveller&&error instanceof DecisionError&&error.feedback){
-    if(!this.replyFeedback.has(actorId))retryDelay=5000;
+    if(!retryInPlace&&!this.replyFeedback.has(actorId))retryDelay=replanDelayMs;
     this.replyFeedback.set(actorId,error.feedback);
    }
-   if(/^model_http_(401|402|403|404|429)$/.test(safe)){
+   if(!retryInPlace&&/^model_http_(401|402|403|404|429)$/.test(safe)){
     // Several failures from one already-dispatched wave represent one limit event.
     if(started>=provider.blockedUntil){
      provider.slots=Math.max(1,Math.floor(provider.slots/2));
@@ -641,8 +650,8 @@ export class ValleyRuntime {
    this.retryAt.set(actorId,Date.now()+retryDelay);this.failures.set(actorId,safe);
    this.commit(w=>{
     this.saveUsage(w,provider);w.metrics.failures++;w.metrics.lastError=safe;
-    if(error instanceof DecisionError){w.metrics.inputTokens+=error.stats.inputTokens;w.metrics.outputTokens+=error.stats.outputTokens;w.metrics.lastLatencyMs=error.stats.latencyMs;}
-    else{w.metrics.unmeteredFailures=(w.metrics.unmeteredFailures??0)+1;}
+    if(stats){w.metrics.inputTokens+=stats.inputTokens;w.metrics.outputTokens+=stats.outputTokens;w.metrics.lastLatencyMs=stats.latencyMs;}
+    if(!stats||retryInPlace&&!stats.inputTokens&&!stats.outputTokens)w.metrics.unmeteredFailures=(w.metrics.unmeteredFailures??0)+1;
     // A missing usage report remains explicitly unknown and keeps its budget;
     // only the already-accounted local wait ends. Unsent cancellation is separate.
     if(modelInvoked)w.metrics.inFlight=w.metrics.inFlight.filter(id=>id!==actorId);

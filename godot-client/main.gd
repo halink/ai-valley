@@ -58,7 +58,7 @@ func _ready() -> void:
 	http.request_completed.connect(_received)
 	add_child(http)
 	timer = Timer.new()
-	timer.wait_time = 2.0
+	timer.wait_time = Valley3D.SNAPSHOT_SECONDS
 	timer.timeout.connect(_poll)
 	add_child(timer)
 	if OS.has_feature("web"):

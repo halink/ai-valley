@@ -8,6 +8,7 @@ const Ground = preload("res://valley_ground.gd")
 const PainterlyResident = preload("res://painterly_resident.gd")
 # Read-only presentation: every interactive object is anchored to snapshot data.
 const Snapshot = preload("res://snapshot.gd")
+const Movement = preload("res://completed_movement.gd")
 const MIST_BACKDROP = preload("res://art/valley-mists-v1.png")
 const LONG_CREEK_BACKDROP = preload("res://art/long-creek-mists-v1.png")
 const MEADOW = preload("res://art/courtyard-meadow-v1.png")
@@ -43,7 +44,9 @@ var outdoor_dimensions := Vector2i.ZERO
 var frame_span := Vector2.ZERO
 var fit_view := true
 const CAMERA_BOOM := Vector3(23, 32, 31)
-const MOVE_SECONDS := 0.35
+const SNAPSHOT_SECONDS := 2.0
+const WALK_PLAYBACK_SECONDS := SNAPSHOT_SECONDS + 0.25
+const DOORWAY_SECONDS_PER_TILE := 0.35
 
 var craft := Craft.new()
 var architecture := Architecture.new(craft)
@@ -52,9 +55,8 @@ var room_art := RoomArt.new(craft, architecture)
 var room_terrain_key := ""
 var garden_key := 0
 
-const MAX_PLAYBACK_SECONDS := 1.4
 const DOORWAY_PLAYBACK_SECONDS := .82
-# Replay confirmed edges in order, never shortcut a corner or extrapolate.
+# Replay confirmed travel over the snapshot interval, including partial steps.
 func _process(delta: float) -> void:
 	var ease := 1.0 - exp(-10.0 * delta)
 	if fit_view:
@@ -67,9 +69,14 @@ func _process(delta: float) -> void:
 	for id in motions.keys():
 		var motion: Dictionary = motions[id]
 		motion.elapsed = minf(motion.duration, motion.elapsed + maxf(delta, 0.0))
-		var progress: float = motion.elapsed / motion.duration * (motion.path.size() - 1)
-		var edge := mini(int(progress), motion.path.size() - 2)
-		var weight := clampf(progress - edge, 0.0, 1.0)
+		var offsets: PackedFloat32Array = motion.offsets
+		var distance: float = motion.elapsed / motion.duration * offsets[-1]
+		var edge: int = motion.edge
+		while edge < offsets.size() - 2 and distance >= offsets[edge + 1]:
+			edge += 1
+		motion.edge = edge
+		motion.distance = distance
+		var weight := inverse_lerp(offsets[edge], offsets[edge + 1], distance)
 		var actor: Node3D = people[id]
 		var start: Vector3 = motion.path[edge]
 		var target: Vector3 = motion.path[edge+1]
@@ -81,7 +88,7 @@ func _process(delta: float) -> void:
 			var prior: Vector3 = start - motion.path[edge-1]
 			angle = atan2(-prior.x, -prior.z)
 		actor.rotation.y = lerp_angle(angle, facing, weight)
-		actor.present_pose(true, motion.elapsed * TAU / MOVE_SECONDS)
+		actor.present_pose(true, fposmod(motion.phase + distance * TAU, TAU))
 		if motion.elapsed >= motion.duration:
 			motions.erase(id)
 			actor.present_pose(false, 0.0)
@@ -111,20 +118,37 @@ static func _walk_points(path: Array) -> Array[Vector3]:
 		points.append(Vector3(at.x, 0, at.y))
 	return points
 
-func _start_walk(id: String, points: Array[Vector3], limit: float) -> float:
+func _start_walk(id: String, points: Array[Vector3], doorway := false) -> float:
 	if points.size() < 2 or not people.has(id): return 0.0
 	var actor: PainterlyResident = people[id]
-	if points[0] != actor.position:
-		var playing: Dictionary = motions.get(id, {})
-		if playing.is_empty() or playing.path[-1] != points[0]: return 0.0
-		var next := mini(int(playing.elapsed / playing.duration * (playing.path.size() - 1)) + 1, playing.path.size() - 1)
+	var playing: Dictionary = motions.get(id, {})
+	var anchor: Vector3 = actor.position if playing.is_empty() else playing.path[-1]
+	if not points[0].is_equal_approx(anchor):
+		var first := points[0]
+		var next := points[1]
+		if not is_equal_approx(first.distance_to(anchor) + anchor.distance_to(next), first.distance_to(next)):
+			return 0.0
+		points[0] = anchor
+	var phase := 0.0
+	if not playing.is_empty():
 		var remainder: Array[Vector3] = [actor.position]
-		remainder.append_array(playing.path.slice(next))
+		remainder.append_array(playing.path.slice(playing.edge + 1))
 		remainder.append_array(points.slice(1))
 		points = remainder
-	if points.size() > 18: return 0.0
-	var duration := minf(limit, MOVE_SECONDS * (points.size() - 1))
-	motions[id] = {"path":points, "elapsed":0.0, "duration":duration, "angle":actor.rotation.y}
+		phase = fposmod(playing.phase + playing.distance * TAU, TAU)
+	if points.size() > 2 * (Movement.MAX_ACTOR_STEPS + 2): return 0.0
+	var path: Array[Vector3] = [points[0]]
+	var offsets := PackedFloat32Array([0.0])
+	for point in points.slice(1):
+		var distance := path[-1].distance_to(point)
+		if distance <= 0.00001: continue
+		path.append(point)
+		offsets.append(offsets[-1] + distance)
+	if path.size() < 2: return 0.0
+	var duration := WALK_PLAYBACK_SECONDS
+	if doorway: duration = minf(DOORWAY_PLAYBACK_SECONDS, DOORWAY_SECONDS_PER_TILE * offsets[-1])
+	motions[id] = {"path":path, "offsets":offsets, "elapsed":0.0, "duration":duration,
+		"edge":0, "distance":0.0, "angle":actor.rotation.y, "phase":phase}
 	return duration
 
 # The short offset belongs to the rendered threshold, not the resident's grid position.
@@ -136,9 +160,11 @@ func walk_doorway(id: String, path: Array, offset: Vector3, arriving: bool) -> f
 		actor.position = points[0] - offset
 		actor.rotation.y = atan2(-offset.x, -offset.z)
 		points.push_front(actor.position)
+		var target: Vector3 = actor.get_meta("target", points[-1])
+		if not target.is_equal_approx(points[-1]): points.append(target)
 	else:
 		points.append(points[-1] + offset)
-	return _start_walk(id, points, DOORWAY_PLAYBACK_SECONDS)
+	return _start_walk(id, points, true)
 
 func match_follow_view(id: String, size: float) -> void:
 	if focus_resident(id):
@@ -146,8 +172,26 @@ func match_follow_view(id: String, size: float) -> void:
 		camera_size = size
 		_settle_camera()
 
-func _show_resident(person: Dictionary, target: Vector3, world: Dictionary, path: Array, animate: bool, pose_enabled: bool, room: Dictionary = {}) -> void:
+func _travel_position(person: Dictionary, cell: Vector3, world: Dictionary, room: Dictionary) -> Vector3:
+	var activity: Variant = person.get("activity")
+	if not activity is Dictionary: return cell
+	var route: Variant = activity if room.is_empty() else activity.get("room")
+	if not route is Dictionary or not route.get("path") is Array or route.path.is_empty(): return cell
+	if not room.is_empty() and route.get("buildingId") != room_id: return cell
+	var progress: Variant = route.get("travelProgress" if room.is_empty() else "progress")
+	if not Movement.nonnegative_number(progress) or progress <= 0.0 or progress >= 1.0: return cell
+	var at: Variant = route.path[0]
+	if room.is_empty():
+		if not Movement.point(at, world): return cell
+	elif not Snapshot.resident_room_position(at, room):
+		return cell
+	var next := Vector3(at.x, 0, at.y)
+	if absf(next.x - cell.x) + absf(next.z - cell.z) != 1.0: return cell
+	return cell.lerp(next, float(progress))
+
+func _show_resident(person: Dictionary, cell: Vector3, world: Dictionary, path: Array, animate: bool, pose_enabled: bool, room: Dictionary = {}) -> void:
 	var id: String = person.id
+	var target := _travel_position(person, cell, world, room)
 	var actor: PainterlyResident = people.get(id)
 	var created := actor == null
 	if created:
@@ -159,9 +203,13 @@ func _show_resident(person: Dictionary, target: Vector3, world: Dictionary, path
 	if created or actor.get_meta("target", target) != target or not path.is_empty():
 		var points := _walk_points(path)
 		var duration := 0.0
-		if animate and points.size() >= 2 and points[-1] == target:
-			if created: actor.position = points[0]
-			duration = _start_walk(id, points, MAX_PLAYBACK_SECONDS)
+		if animate:
+			if points.is_empty() and not created and actor.get_meta("cell", cell) == cell:
+				points = [cell]
+			if not points.is_empty() and points[-1] == cell:
+				if not target.is_equal_approx(cell): points.append(target)
+				if created: actor.position = points[0]
+				duration = _start_walk(id, points)
 		if duration == 0.0:
 			motions.erase(id)
 			actor.position = target
@@ -169,6 +217,7 @@ func _show_resident(person: Dictionary, target: Vector3, world: Dictionary, path
 	actor.update_provisions(person, world, room)
 	if not room.is_empty(): actor.update_bed_pose(person, room)
 	actor.set_activity_pose(person, pose_enabled, not motions.has(id))
+	actor.set_meta("cell", cell)
 	actor.set_meta("target", target)
 
 func _finish_residents(visible_ids: Dictionary, selected: String, settle_spacing: bool) -> void:
