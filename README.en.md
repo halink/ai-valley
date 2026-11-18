@@ -6,9 +6,7 @@ An observation-only valley that grows through its residents' lives. The new deli
 
 ## Current engineering MVP
 
-The initial world contains a small map, two residents, a shared home, food and water. The backend owns action execution and world state; the browser observes that state through a read-only interface. Movement traces, room observation, basic poses, Chinese UI and painterly materials are implemented, but implementation is not visual acceptance.
-
-The current Web entry is a **temporary rules-driven demo**. It does not read `.env`, call models or save the world; restarting the server resets it. A separate persistent service and explicit primary/backup model wiring exist, with a separate same-origin persistent Web entry; real-model acceptance remains incomplete. Features in the older simulation are not automatically features of this MVP.
+The preview has four residents in a painterly valley with viewable interiors. The Node backend executes actions and saves the world. The browser provides a read-only view. Local development runs a temporary rules-driven world. A persistent deployment can enable models for resident decisions. [Verified build and upcoming milestones](docs/godot-migration.md#当前版本与证据)
 
 ## Local developer demo
 
@@ -20,7 +18,7 @@ npm run build:godot:web
 npm run demo:godot:web
 ```
 
-Open <http://127.0.0.1:3414> in a browser on the server's computer and click the connect button. This is a local address, not a public deployment. The browser needs WebAssembly and WebGL 2; players do not install Godot. See [Web MVP instructions](docs/godot-web-mvp.md).
+Open <http://127.0.0.1:3414> in a browser on the computer running the local service. The page connects automatically and offers a reconnect button. The browser needs WebAssembly and WebGL 2. See [Web MVP instructions](docs/godot-web-mvp.md).
 
 `npm run dev`, `npm run dev:web` and `npm run demo:godot:web` start the same rules Web service; do not run them together. `npm run build` only checks TypeScript and compiles the backend; `npm start` runs that compiled service. Web assets still require the separate `npm run build:godot:web` command. None of these commands starts the persistent model service.
 
@@ -28,11 +26,9 @@ Open <http://127.0.0.1:3414> in a browser on the server's computer and click the
 
 For each increment, development runs rule mode for **30 actual minutes**. If no issue is found, acceptance applies to the exercised scope. Do not run model-driven tests or add new test suites. Record real start/end times, simulation speed and coverage. Browser visuals are checked separately: accelerated game time, successful builds and segmented browser checks are not a continuous 30-minute browser run or evidence of long-term stability.
 
-## Verification boundaries
+## Operations and verification
 
-Cloud Firefox has displayed the 3D scene and Chinese UI, with limited checks of resident selection, interiors and the newer gardening/cooking state transitions. See the dated evidence in [Web MVP instructions](docs/godot-web-mvp.md); historical loopback problems are not a current blocker. Model-disabled persistent Web checks cover only connection, stale-state display and bounded save recovery, not resumed model actions.
-
-Persistence belongs to the server. The current storage lock is Linux-only, not a restriction on Mac browsers. Public deployment, access control and broader browser compatibility remain incomplete. Real-model behavior remains unverified and is no longer a scheduled acceptance test. This is not a proven long-running 1.0 release.
+The persistent service uses SQLite on a local Linux filesystem. [Runtime and model configuration](docs/configuration.md) · [Deployment, backups and rollback](docs/deployment.md) · [Build, browser and rule-run records](docs/godot-web-mvp.md)
 
 ## Development
 

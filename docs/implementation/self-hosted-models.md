@@ -1,6 +1,6 @@
 # 用户自托管模型入口
 
-这是由部署者自己启动、观察与进行长期验证的独立入口。它不是受监督验收 runner，也没有经过真实模型或长期稳定性验收。当前入口为 Godot 同源持久浏览器服务；默认 `npm run dev` / `npm start` 仍是无模型、无存档的规则演示。旧 formal/self-hosted CLI 包装已退役，共享安全实现与回归测试保留。
+Godot 持久服务由部署者显式配置和启动。已有原存档续跑及真实模型成功决策的观察记录，长期稳定性仍待验证。开发入口 `npm run dev` / `npm start` 使用临时规则世界。独立部署可使用下文的命令，systemd 部署可参考运维示例。[部署手册](../deployment.md) · [当前版本与证据](../godot-migration.md#当前版本与证据)
 
 ## 启动
 
@@ -30,7 +30,7 @@ node --env-file=.env build/server/godot-mvp-persistent-main.js
 
 **SiliconFlow 型号名称、空余额、配置中的声明都不能证明当前免费。** 启动前自行检查官方当日价格、账号免费资格及历史未决用量。服务没有供应商侧零费用保证或自动价格认证，不把 token 上限当费用上限。若只能接受零费用，请仅配置当日已核实免费的型号；免费资格或价格变化时停止服务。不会自动选择未配置的付费替代。
 
-`.env` 由 Node 显式加载；程序不扫描密钥文件。不要提交 `.env`、密钥或运行存档。默认数据库为 `runtime/godot-mvp/world.sqlite`，用 `VALLEY_MVP_DB` 显式选择小世界存档，端口用 `VALLEY_MVP_PORT`（默认 3415）。不使用旧 `PORT` / `VALLEY_DB`；不会把旧大世界存档自动迁入小地图。后台保存仍仅支持 Linux 本地文件系统，这不限制 Mac 浏览器作为显示端。页面、资源及只读快照同源，监听 loopback；远程部署、真实浏览器画面和真实模型尚未验收。
+`.env` 由 Node 显式加载。默认数据库为 `runtime/godot-mvp/world.sqlite`，用 `VALLEY_MVP_DB` 选择专用小世界存档，用 `VALLEY_MVP_PORT` 选择 loopback 端口（默认 3415）。保存要求后台使用 Linux 本地文件系统。线上由 Caddy 为远程浏览器提供同源页面和只读快照；凭据和存档保存在服务端。[线上配置的生效顺序](../configuration.md#线上配置的生效顺序)
 
 ## 运行与错误
 
