@@ -89,3 +89,5 @@ snapshot.mvp.agriculture提供逐田新/旧/空、实例、需求epoch、品种�
 临时证据位于忽略的 `output/agriculture-persistence-verification/`：run.mjs、run.log、status.json、samples.json、final-world.json、reopen-results.json。源指纹算法对src/Godot的.ts/.gd/.tscn/.godot文件按路径排序，逐文件SHA-256后以 `path + NUL + hash` 换行连接再SHA-256；隐藏目录及export_templates排除。不同算法的定向回放指纹不可直接比较。
 
 此结论覆盖隔离新规则存档，不是线上原档或部署验收。浏览器画面、连续全年储备/农业自给、真实模型与新天气压力仍未验证或未启用。下一步先保持原策略做7日吞吐校准及连续112日到次春首收的有界基线，不能先改策略抹去对照，也不降低旧野食供给。
+
+后续[连续全年基线](mvp-year-baseline.md)已在修复真实室内争用故障后实际覆盖同一世界112日。次春首收仍未发生，逐人冬储不足已被记录；这不是农业自给或完整季节供给退出门通过。
