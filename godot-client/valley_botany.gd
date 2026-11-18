@@ -349,7 +349,7 @@ func berry_bush(root: Node3D, at: Vector3, amount: float) -> void:
 		craft.orb(root, point, Vector3(.13, .14, .13), craft.mat("a64e40"))
 		craft.orb(root, point + Vector3(-.04, .026, .01), Vector3(.10, .11, .10), craft.mat("b96a4c"))
 
-func garden(root: Node3D, at: Vector3, wet: bool, growth: float, planned := false) -> void:
+func garden(root: Node3D, at: Vector3, wet: bool, growth: float, planned := false, cultivar := "") -> void:
 	var soil_material := craft.painted.get_material("wet_soil" if wet else "soil")
 	var soil_height := .092 if planned else .132
 	var soil := PlaneMesh.new()
@@ -371,12 +371,12 @@ func garden(root: Node3D, at: Vector3, wet: bool, growth: float, planned := fals
 		for column in [-.54, .0, .54]:
 			var crown := at + Vector3(row + cos(column * 6.0) * .03, soil_height + .028, column)
 			if growth >= 1:
-				craft.orb(root, crown + Vector3.UP * .045, Vector3(.22, .20, .22), craft.mat("decbb2"))
+				craft.orb(root, crown + Vector3.UP * .045, Vector3(.22, .20, .22), craft.mat({"summer":"d39359", "winter":"b9cbd1", "spring":"decbb2"}.get(cultivar, "decbb2")))
 			for i in range(4):
 				var angle: float = i * 2.39 + row * 2.5
 				var spread := .06 + growth * .12
 				var leaf := craft.orb(root, crown + Vector3(cos(angle) * spread, .08 + growth * .11, sin(angle) * spread),
-					Vector3(.16 + growth * .24, .044, .09 + growth * .07), craft.mat("75894f" if i % 2 == 0 else "9a9f5b"))
+					Vector3(.16 + growth * .24, .044, .09 + growth * .07), craft.mat(({"summer":"71934f", "winter":"688e85"}.get(cultivar, "75894f")) if i % 2 == 0 else ({"summer":"a6ae63", "winter":"98b3a0"}.get(cultivar, "9a9f5b"))))
 				leaf.rotation = Vector3(0, angle, .57 - i * .22)
 
 func _stone_edging(root: Node3D, at: Vector3) -> void:

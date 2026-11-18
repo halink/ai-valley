@@ -1,3 +1,4 @@
+import {agricultureRoute,agricultureReason,completeAgriculture,allocateAgricultureExecution,registerPlantedCrop,retireCrop} from './mvp-agriculture.js';
 import {allocateSoilWaterExecution,assertSoilWaterUnsettled,settleSoilWater} from './mvp-soil.js';
 import {minuteToClimateUs} from './mvp-climate.js';
 import {validateMvpClimate,advanceMvpClimate} from './mvp-climate-state.js';
@@ -262,6 +263,7 @@ function targetFor(world:World,r:Resident,a:Action,definition:string,elapsed=0):
   if(a.type==='sleep'){const b=sleepBuilding(world,r,a);if(!b||!a.buildingId&&world.rooms&&residentBed(world,r,b)===null)return fail('尚未拥有可使用的真实床位，当前住处存在床位缺口');return {target:b.door,duration:a.minutes};}
   return {target:r.at,duration:a.minutes};
  }
+ if(a.type==='mvpAgriculture')return agricultureRoute(world,r,a);
  if(isMvpSeedAction(a)){const error=mvpSeedReason(world,r,a);return error?fail(error):{target:{...mvpSeedPlace(world)!.building.door},duration:a.type==='mvpCollectSeed'?10:30};}
  if(a.type==='mvpDrink'){const error=mvpDrinkReason(world,r);return error?fail(error):{target:{...r.at},duration:5};}
  if(a.type==='eat'&&a.mvpAtTable){const place=mvpDiningPlace(world,r);if(!place)return fail('当前没有可到达的本人共屋餐位');if(!Object.hasOwn(goods,a.item)||goods[a.item].food<=0||!has(r.inventory,{[a.item]:1}))return fail('没有这份可以食用的实际食品');return {target:{...place.building.door},duration:5};}
@@ -280,6 +282,7 @@ function targetFor(world:World,r:Resident,a:Action,definition:string,elapsed=0):
  }
  if(a.type==='plant'||a.type==='water'||a.type==='harvest'){
   const p=world.plots.find(p=>p.id===a.plotId);if(!p||p.ownerId!==r.id)return fail('没有这块田的使用权');
+  if(p.crop?.mvpCrop&&(a.type!=='water'||a.expectedInstanceId!==p.crop.mvpCrop.instanceId))return fail('新作物须使用对应实例的新收获或灌溉行动');
   if(a.type==='harvest'&&(!p.crop||!world.definitions[p.crop.definition]||p.crop.growth<Number(world.definitions[p.crop.definition].data.growthDays)))return fail('作物已经不存在或尚未成熟');
   if(a.type==='water'&&(!p.crop||!has(r.inventory,{water:1})))return fail('当前没有作物或本人清水不足');
   if(a.type==='plant'&&(p.crop||!has(r.inventory,world.definitions[definition]?.cost??{seed:1})||!(world.definitions[definition]?.data.seasons as string[]|undefined)?.includes(calendar(world.minute).season)))return fail('当前田地、种子或季节不支持播种');
@@ -345,10 +348,10 @@ function begin(world:World,r:Resident,elapsed=0){
  const spring=springId?world.resources.find(s=>s.id===springId&&s.kind==='spring'):undefined;
  if(path&&spring)path=springApproachPath(world,r.at,spring);
  if(path===null){failure(world,r,'目标目前没有可达路线',action);return;}
- const outdoors=['move','gather','plant','water','harvest','build','construction','landRights','regionSurvey','industry','leave','settle','lodge'].includes(action.type);
+ const outdoors=['mvpAgriculture','move','gather','plant','water','harvest','build','construction','landRights','regionSurvey','industry','leave','settle','lodge'].includes(action.type);
  if((path.length||outdoors)&&!world.rooms){r.inside=null;r.roomAt=null;}
  r.activity={planId:plan.id,action,startedAt:world.minute,remaining:route.duration,path,target:{...route.target},definition,travelProgress:0,...(route.cargo?{cargo:route.cargo}:{})};
- allocateSoilWaterExecution(world,r.activity);
+ allocateSoilWaterExecution(world,r.activity);allocateAgricultureExecution(world,r.activity);
  const mvpBedError=mvpSleepProblem(world,r);if(mvpBedError){failure(world,r,mvpBedError);return;}
  const exitError=prepareRoomExit(world,r,true);if(exitError){failure(world,r,exitError);return;}
  const bodyError=reserveBody(world,r,r.activity);if(bodyError){failure(world,r,bodyError);return;}
@@ -414,6 +417,7 @@ function completeAtomic(world:World,r:Resident,a:Action,definition:string,elapse
  const social=executeSocialAction(world,r,a);if(social.handled)return social.ok?null:social.error??'行为当前无法完成';
  const record=(text:string,kind:'action'|'construction'|'trade'|'production'='action',actors=[r.id])=>emitEvent(world,{kind,actors,place:{...r.at},text});
  if(a.type==='move'||a.type==='wait'||a.type==='sleep')return null;
+ if(a.type==='mvpAgriculture')return completeAgriculture(world,r,a);
  if(isMvpSeedAction(a))return completeMvpSeed(world,r,a);
  if(a.type==='mvpDrink')return completeMvpDrink(world,r);
  if(a.type==='eat'){
@@ -430,10 +434,11 @@ function completeAtomic(world:World,r:Resident,a:Action,definition:string,elapse
  }
  if(a.type==='plant'||a.type==='water'||a.type==='harvest'){
   const p=world.plots.find(v=>v.id===a.plotId);if(!p||p.ownerId!==r.id||distance(p.at,r.at)>1)return '田地位置或使用权已经变化';
+  if(p.crop?.mvpCrop&&(a.type!=='water'||a.expectedInstanceId!==p.crop.mvpCrop.instanceId))return '新作物实例已变化或旧收获入口不支持';
   if(a.type==='plant'){
    if(p.crop)return '田里已有作物';
    if(!(def.data.seasons as string[]).includes(calendar(world.minute).season))return '这个季节不适合种植芜菁';
-   if(!has(r.inventory,def.cost??{seed:1}))return '没有实际种子';consume(r.inventory,def.cost??{seed:1});p.crop={definition,planted:world.minute,growth:0,wateredDay:-1,lastGrowthDay:Math.floor(world.minute/DAY)};r.skills.farming+=0.005;record(`${r.name}播下了芜菁种子。`);return null;
+   if(!has(r.inventory,def.cost??{seed:1}))return '没有实际种子';consume(r.inventory,def.cost??{seed:1});p.crop={definition,planted:world.minute,growth:0,wateredDay:-1,lastGrowthDay:Math.floor(world.minute/DAY)};registerPlantedCrop(world,p,null);r.skills.farming+=0.005;record(`${r.name}播下了芜菁种子。`);return null;
   }
   if(!p.crop)return '田里还没有作物';
   if(a.type==='water'){
@@ -449,7 +454,7 @@ function completeAtomic(world:World,r:Resident,a:Action,definition:string,elapse
   const item=(cropDef.data.output??'turnip') as keyof Inventory;
   const amount=cropYieldAt(world,p,Number(cropDef.data.yield));
   r.inventory[item]=(r.inventory[item]??0)+amount;
-  p.crop=null;r.skills.farming+=.02;recordFieldHarvest(world,p.id,amount);
+  p.crop=null;retireCrop(world,p,'harvest');r.skills.farming+=.02;recordFieldHarvest(world,p.id,amount);
   const event=record(`${r.name}收获了 ${amount} 份${names[item]}。`,world.scenario==='frontier'?'production':'action');
   recordFoodFlow(world,{type:'source_added',action:'harvest',at:world.minute,residentId:r.id,eventId:event.id,planId:r.activity!.planId,container:'person:'+r.id,definition:cropDefinition,sourceId:p.id,output:{[item]:amount}});return null;
  }
@@ -602,6 +607,7 @@ function processActivity(world:World,r:Resident,minutes:number){
   if(activity.action.type==='cook'){const problem=premisesWorkReason(world,r.id,b.id,'kitchen',world.minute-minutes,world.minute)??publicKitchenReason(world,r,b.id)??employmentKitchenReason(world,r,b.id);if(problem){failure(world,r,problem);return;}}
   r.inside=b.id;
  }
+ if(activity.action.type==='mvpAgriculture'){const problem=agricultureReason(world,r,activity.action,true);if(problem){failure(world,r,problem);return;}}
  if(isMvpSeedAction(activity.action)){const problem=mvpSeedReason(world,r,activity.action,true);if(problem){failure(world,r,problem);return;}}
  endDecisionProtection(world,r,'decision');
  if(activity.action.type==='sleep'){recordPregnancyRest(world,r,minutes);const rules=physiology(world,r);r.energy=Math.min(100,r.energy+minutes*rules.sleepEnergy);if(r.hunger<rules.sleepFedThreshold)r.health=Math.min(100,r.health+minutes*rules.sleepHealth);}
@@ -685,7 +691,7 @@ export function stepWorld(world:World,minutes:number,options:{exactEndMinute?:nu
   const day=Math.floor(world.minute/DAY);
   if(day!==previousDay){
    const previousWeather=world.weather;world.weather=((day*17+world.seed)%11)<3?'rain':'sun';
-   for(const p of world.plots){if(!p.crop)continue;const def=world.definitions[p.crop.definition];if((def.data.seasons as string[]).includes(calendar(world.minute-1).season)&&(p.crop.wateredDay===previousDay||previousWeather==='rain'))p.crop.growth=Math.min(Number(def.data.growthDays),p.crop.growth+1);p.crop.lastGrowthDay=day;}
+   for(const p of world.plots){if(!p.crop||p.crop.mvpCrop)continue;const def=world.definitions[p.crop.definition];if((def.data.seasons as string[]).includes(calendar(world.minute-1).season)&&(p.crop.wateredDay===previousDay||previousWeather==='rain'))p.crop.growth=Math.min(Number(def.data.growthDays),p.crop.growth+1);p.crop.lastGrowthDay=day;}
    if(!world.production)for(const res of world.resources)if(!world.mvpResources?.renewal[res.id]&&res.regrowthDays>0&&res.amount<res.max&&world.minute-res.lastHarvest>=res.regrowthDays*DAY){res.amount=Math.min(res.max,res.amount+1);res.lastHarvest=world.minute;}
   }
  }

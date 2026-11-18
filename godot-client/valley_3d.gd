@@ -23,6 +23,7 @@ var camera: Camera3D
 var sun: DirectionalLight3D
 var backdrop: TextureRect
 var environment_preview: Dictionary = {}
+var agriculture_observation: Dictionary = {}
 var sky_environment: Environment
 var building_doors := {}
 var plot_positions := {}
@@ -721,7 +722,15 @@ func draw_gardens(world: Dictionary) -> void:
 		var wet: bool = crop is Dictionary and crop.get("wateredDay",-1) == floorf(float(world.minute)/1440.0)
 		var status := "空田"
 		var growth := -1.0
-		if crop is Dictionary:
+		var cultivar := ""
+		var observed: Dictionary = agriculture_observation.get(str(plot.id), {})
+		if observed.get("kind") == "climate":
+			cultivar = observed.cultivar
+			growth = 1.0 if observed.mature else minf(observed.progressPermille / 1000.0, .999)
+			status = str(observed.name) + (" · 成熟可收" if observed.mature else " · 生长 %.1f%%" % (observed.progressPermille / 10.0))
+		elif crop is Dictionary and crop.has("mvpCrop"):
+			status = "新制作物 · 观测暂缺"
+		elif crop is Dictionary:
 			var definition: Dictionary = world.get("definitions", {}).get(crop.definition, {})
 			var days: float = float(definition.get("data", {}).get("growthDays", 4))
 			growth = clampf(float(crop.growth) / maxf(1, days), 0, 1)
@@ -731,7 +740,7 @@ func draw_gardens(world: Dictionary) -> void:
 		var bed := Node3D.new()
 		bed.set_meta("plot_id", str(plot.id))
 		actors.add_child(bed)
-		plants.garden(bed, at, wet, growth, planned)
+		plants.garden(bed, at, wet, growth, planned, cultivar)
 		craft.batch(bed)
 		plot_positions[str(plot.id)] = at
 		var owner := ""

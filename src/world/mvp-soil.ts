@@ -1,3 +1,5 @@
+import {agriculturePrefix} from './mvp-agriculture-solver.js';
+import {agricultureInput,publishAgricultureGrowth,validateMvpAgriculture,agriculturePlot} from './mvp-agriculture.js';
 import type {Activity,World} from '../shared/types.js';
 import type {MvpSoilObservation,SoilAmounts,SoilPlot,SoilRates} from '../shared/mvp-soil.js';
 import {climateAtUs,climateThermalCuts,minuteToClimateUs,parseClimateUs} from './mvp-climate.js';
@@ -20,10 +22,10 @@ export function soilRatesAt(seed:number,gridUs:string):SoilRates {
  if(rateCache.size>=512)rateCache.delete(rateCache.keys().next().value!);rateCache.set(key,Object.freeze(result));return {...result};
 }
 function initial():SoilAmounts {return {water:(50n*D).toString(),snow:'0',initial:(50n*D).toString(),rainIn:'0',snowIn:'0',melt:'0',irrigation:'0',evaporation:'0',drainage:'0'};}
-function checkAmounts(a:SoilAmounts):void {
- if(!keys(a,SOIL_KEYS))throw Error('soil_invalid_amounts');
+function checkAmounts(a:SoilAmounts,agriculture=false):void {
+ if(!keys(a,agriculture?[...SOIL_KEYS,'cropUse']:SOIL_KEYS))throw Error('soil_invalid_amounts');
  const n=Object.fromEntries(SOIL_KEYS.map(k=>[k,integer(a[k])])) as Record<typeof SOIL_KEYS[number],bigint>;
- if(n.initial!==50n*D||n.water>100n*D||n.snowIn-n.melt!==n.snow||n.initial+n.rainIn+n.melt+n.irrigation-n.evaporation-n.drainage!==n.water)throw Error('soil_balance_mismatch');
+ if(n.initial!==50n*D||n.water>100n*D||n.snowIn-n.melt!==n.snow||n.initial+n.rainIn+n.melt+n.irrigation-n.evaporation-n.drainage-(agriculture?integer(a.cropUse):0n)!==n.water)throw Error('soil_balance_mismatch');
 }
 function cell(seed:number,at:bigint):{gridUs:string;sampleUs:string;cellEndUs:string} {
  const g=grid(at),end=g+GRID;
@@ -33,27 +35,33 @@ function cell(seed:number,at:bigint):{gridUs:string;sampleUs:string;cellEndUs:st
  for(const cut of cuts){if(cut<=at)sample=cut;else{next=cut;break;}}
  return {gridUs:g.toString(),sampleUs:sample.toString(),cellEndUs:next.toString()};
 }
-function newSegment(w:World,p:SoilPlot,at:bigint):void {const c=cell(w.seed,at);p.segment={startUs:at.toString(),endUs:at.toString(),...c,start:{...p.current},rates:soilRatesAt(w.seed,c.sampleUs)};}
+function newSegment(w:World,p:SoilPlot,at:bigint):void {const c=cell(w.seed,at);p.segment={startUs:at.toString(),endUs:at.toString(),...c,start:{...p.current},rates:soilRatesAt(w.seed,c.sampleUs),...(w.mvpSoil?.schemaVersion===2?{crop:agricultureInput(w,p.plotId,c.sampleUs)}:{})};}
+export function resetSoilSegment(w:World,plotId:string):void {if(!w.mvpSoil)return;const p=w.mvpSoil.plots.find(p=>p.plotId===plotId);if(!p)throw Error('soil_missing_plot');newSegment(w,p,parseClimateUs(w.mvpSoil.lastUs));}
+export function upgradeSoilForAgriculture(w:World):void {const s=w.mvpSoil;if(!s||s.schemaVersion!==1)throw Error('soil_invalid_agriculture_upgrade');s.schemaVersion=2;s.integratorVersion=2;for(const p of s.plots){p.current={...p.current,cropUse:'0'};newSegment(w,p,parseClimateUs(s.lastUs));}}
 function executionNumber(id:unknown):bigint {if(typeof id!=='string'||!/^soil-water:[1-9][0-9]{0,17}$/.test(id))throw Error('soil_invalid_execution_id');return seq(id.slice(11));}
 /** Both directions of the persisted dependency are mandatory, including absence. */
 export function validateMvpSoil(w:World,minute=w.minute):void {
  const has=owns(w,'mvpSoil'),climate=w.mvpClimate;
- if(!has){if(climate?.schemaVersion===2||climate?.capability==='soil-water-v1')throw Error('soil_missing_dependency');return;}
- if(!climate||climate.schemaVersion!==2||climate.capability!=='soil-water-v1')throw Error('soil_missing_climate');
+ if(!has){if(climate?.schemaVersion===2||climate?.schemaVersion===3||climate?.capability==='soil-water-v1')throw Error('soil_missing_dependency');return;}
+ if(!climate||!((climate.schemaVersion===2&&climate.capability==='soil-water-v1')||(climate.schemaVersion===3&&climate.capability==='agriculture-v1')))throw Error('soil_missing_climate');
  const s=w.mvpSoil!;
- if(!keys(s,['schemaVersion','integratorVersion','parameterFingerprint','denominator','adoptedMinute','adoptedUs','lastUs','nextWaterExecutionSeq','plots','waterReceipts'])||s.schemaVersion!==1||s.integratorVersion!==1||s.parameterFingerprint!==SOIL_PARAMETER_FINGERPRINT||s.denominator!==D.toString())throw Error('soil_unsupported_state');
+ if(!keys(s,['schemaVersion','integratorVersion','parameterFingerprint','denominator','adoptedMinute','adoptedUs','lastUs','nextWaterExecutionSeq','plots','waterReceipts'])||!((s.schemaVersion===1&&s.integratorVersion===1&&climate.schemaVersion===2)||(s.schemaVersion===2&&s.integratorVersion===2&&climate.schemaVersion===3))||s.parameterFingerprint!==SOIL_PARAMETER_FINGERPRINT||s.denominator!==D.toString())throw Error('soil_unsupported_state');
  const last=parseClimateUs(s.lastUs),adopted=parseClimateUs(s.adoptedUs),next=seq(s.nextWaterExecutionSeq);
  if(minuteToClimateUs(s.adoptedMinute)!==s.adoptedUs||s.lastUs!==minuteToClimateUs(minute)||adopted>last||adopted<parseClimateUs(climate.adoptedUs)||s.adoptedMinute<climate.adoptedMinute||s.adoptedMinute>minute||!Array.isArray(s.plots)||!Array.isArray(w.plots)||s.plots.length!==w.plots.length||!obj(s.waterReceipts))throw Error('soil_invalid_clock_or_plots');
  const ids=new Set<string>();const rates=new Map<string,SoilRates>();
  for(const p of s.plots){
-  if(!keys(p,['plotId','segment','current'])||typeof p.plotId!=='string'||ids.has(p.plotId)||!w.plots.some(plot=>plot.id===p.plotId)||!keys(p.segment,['startUs','endUs','gridUs','sampleUs','cellEndUs','start','rates']))throw Error('soil_invalid_plot');ids.add(p.plotId);
+  if(!keys(p,['plotId','segment','current'])||typeof p.plotId!=='string'||ids.has(p.plotId)||!w.plots.some(plot=>plot.id===p.plotId)||!keys(p.segment,['startUs','endUs','gridUs','sampleUs','cellEndUs','start','rates',...(s.schemaVersion===2?['crop']:[])]))throw Error('soil_invalid_plot');ids.add(p.plotId);
   const g=parseClimateUs(p.segment.gridUs),start=parseClimateUs(p.segment.startUs),end=parseClimateUs(p.segment.endUs);
   const c=cell(w.seed,start);
   if(g!==grid(start)||start<adopted||start>end||end!==last||(end>=parseClimateUs(c.cellEndUs)&&!(start===10000000000000000n&&end===start&&parseClimateUs(c.cellEndUs)===start))||p.segment.sampleUs!==c.sampleUs||p.segment.cellEndUs!==c.cellEndUs)throw Error('soil_invalid_segment');
-  checkAmounts(p.segment.start);checkAmounts(p.current);
+  checkAmounts(p.segment.start,s.schemaVersion===2);checkAmounts(p.current,s.schemaVersion===2);
   let rate=rates.get(p.segment.sampleUs);if(!rate){rate=soilRatesAt(w.seed,p.segment.sampleUs);rates.set(p.segment.sampleUs,rate);}
   if(!keys(p.segment.rates,['rain','snow','melt','evaporation'])||Object.keys(rate).some(k=>p.segment.rates[k as keyof SoilRates]!==rate![k as keyof SoilRates]))throw Error('soil_rate_mismatch');
-  const computed=soilPrefix(p.segment.start,rate,end-start);
+  const coupled=s.schemaVersion===2?agriculturePrefix(p.segment.start as SoilAmounts&{cropUse:string},rate,end-start,p.segment.crop??null):null;
+  const computed=coupled?.amounts??soilPrefix(p.segment.start,rate,end-start);
+  if(s.schemaVersion===2){const input=agricultureInput(w,p.plotId,p.segment.sampleUs),saved=p.segment.crop;
+   if(!!input!==!!saved||input&&saved&&(input.instanceId!==saved.instanceId||input.temperatureFactor!==saved.temperatureFactor||input.target!==saved.target||coupled!.progress!==input.progress)||computed.cropUse!==p.current.cropUse)throw Error('soil_crop_prefix_mismatch');
+  }
   if(SOIL_KEYS.some(k=>computed[k]!==p.current[k]))throw Error('soil_prefix_mismatch');
  }
  for(const event of w.events)if(event.soilWater){const receipt=s.waterReceipts[event.soilWater.executionId];if(!receipt||receipt.eventId!==event.id)throw Error('soil_orphan_water_event');}
@@ -70,6 +78,7 @@ export function validateMvpSoil(w:World,minute=w.minute):void {
   totals.set(receipt.plotId,(totals.get(receipt.plotId)??0n)+30n*D);
  }
  for(const p of s.plots)if(integer(p.current.irrigation)!==(totals.get(p.plotId)??0n))throw Error('soil_irrigation_receipt_mismatch');
+ validateMvpAgriculture(w);
 }
 export function allocateSoilWaterExecution(w:World,a:Activity):void {
  if(!w.mvpSoil||a.action.type!=='water')return;
@@ -79,7 +88,7 @@ export function allocateSoilWaterExecution(w:World,a:Activity):void {
 }
 export function adoptMvpSoil(w:World):boolean {
  if(owns(w,'simulationOnly'))throw Error('soil_simulation_adoption');
- if(owns(w,'mvpSoil')||w.mvpClimate?.schemaVersion===2){validateMvpSoil(w);return false;}
+ if(owns(w,'mvpSoil')||w.mvpClimate?.schemaVersion===2||w.mvpClimate?.schemaVersion===3){validateMvpSoil(w);return false;}
  if(w.mvpClimate?.schemaVersion!==1||w.mvpClimate.capability!=='observation-only')throw Error('soil_adoption_requires_climate');
  const at=minuteToClimateUs(w.minute);
  // Migration begins at the actual adoption time, not its absolute grid's left edge.
@@ -102,8 +111,9 @@ export function advanceMvpSoil(w:World,fromMinute:number):void {
   const c=cell(w.seed,at),boundary=parseClimateUs(c.cellEndUs),end=target<boundary?target:boundary;
   const next=end===boundary?cell(w.seed,end):null,rate=next?soilRatesAt(w.seed,next.sampleUs):null;
   for(const p of s.plots){
-   p.current=soilPrefix(p.segment.start,p.segment.rates,end-parseClimateUs(p.segment.startUs));p.segment.endUs=end.toString();
-   if(next)p.segment={startUs:end.toString(),endUs:end.toString(),...next,start:{...p.current},rates:{...rate!}};
+   if(s.schemaVersion===2){const result=agriculturePrefix(p.segment.start as SoilAmounts&{cropUse:string},p.segment.rates,end-parseClimateUs(p.segment.startUs),p.segment.crop??null);p.current=result.amounts;if(p.segment.crop&&result.progress!==null)publishAgricultureGrowth(w,p.plotId,result.progress,result.matureAtOffset===null?null:(parseClimateUs(p.segment.startUs)+BigInt(result.matureAtOffset)).toString());}
+   else p.current=soilPrefix(p.segment.start,p.segment.rates,end-parseClimateUs(p.segment.startUs));p.segment.endUs=end.toString();
+   if(next)p.segment={startUs:end.toString(),endUs:end.toString(),...next,start:{...p.current},rates:{...rate!},...(s.schemaVersion===2?{crop:agricultureInput(w,p.plotId,next.sampleUs)}:{})};
   }
   at=end;
  }
@@ -124,5 +134,5 @@ export function settleSoilWater(w:World,actorId:string,a:Activity,plotId:string,
 export function soilObservation(w:World):MvpSoilObservation|undefined {
  if(!w.mvpSoil)return;
  const display=(s:string)=>Number((integer(s)*1000n+D/2n)/D)/1000;
- return {schemaVersion:1,denominator:D.toString(),atUs:w.mvpSoil.lastUs,plots:w.mvpSoil.plots.map(p=>({plotId:p.plotId,paw:display(p.current.water),snowWater:display(p.current.snow),initialPaw:50,rainIn:display(p.current.rainIn),snowIn:display(p.current.snowIn),melt:display(p.current.melt),irrigation:display(p.current.irrigation),evaporation:display(p.current.evaporation),drainage:display(p.current.drainage),cropUse:0,exact:{...p.current}}))};
+ return {schemaVersion:w.mvpSoil.schemaVersion,denominator:D.toString(),atUs:w.mvpSoil.lastUs,plots:w.mvpSoil.plots.map(p=>({plotId:p.plotId,paw:display(p.current.water),snowWater:display(p.current.snow),initialPaw:50,rainIn:display(p.current.rainIn),snowIn:display(p.current.snowIn),melt:display(p.current.melt),irrigation:display(p.current.irrigation),evaporation:display(p.current.evaporation),drainage:display(p.current.drainage),cropUse:display(p.current.cropUse??'0'),exact:{...p.current}}))};
 }

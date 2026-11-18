@@ -28,7 +28,7 @@ export function assertWorldCompatibility(value:unknown):asserts value is Record<
  // Reject presence, not a recognized version/truthy value. No upgrade escape.
  if(owns(value,'simulationOnly'))fail('save_simulation_only');
  if(value.schemaVersion!==1)fail('save_unsupported_world_schema');
- if(owns(value,'mvpClimate')||owns(value,'mvpSoil')){try{validateMvpClimate(value as unknown as World);}catch{fail('save_invalid_mvpClimate');}}
+ if(owns(value,'mvpClimate')||owns(value,'mvpSoil')||owns(value,'mvpAgriculture')){try{validateMvpClimate(value as unknown as World);}catch{fail('save_invalid_mvpClimate');}}
  for(const field of unsupportedUpgradeFields)if(owns(value,field))fail('save_unsupported_'+field);
  if(typeof value.id!=='string'||!value.id||!Number.isSafeInteger(value.revision)||Number(value.revision)<0
   ||(value.mode!=='formal'&&value.mode!=='validation'))fail('save_invalid_world_identity');

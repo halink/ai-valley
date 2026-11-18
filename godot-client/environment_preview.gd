@@ -39,11 +39,13 @@ static func valid(value: Variant, adopted := false) -> bool:
 	if adopted:
 		if value.has("previewOnly"): return false
 		if value.get("schemaVersion") == 1:
-			if value.get("observationOnly") != true or value.has("soilWater"): return false
+			if value.get("observationOnly") != true or value.has("soilWater") or value.has("agriculture"): return false
 		elif value.get("schemaVersion") == 2:
-			if value.get("soilWater") != true or value.has("observationOnly"): return false
+			if value.get("soilWater") != true or value.has("observationOnly") or value.has("agriculture"): return false
+		elif value.get("schemaVersion") == 3:
+			if value.get("agriculture") != true or value.has("observationOnly") or value.has("soilWater"): return false
 		else: return false
-	elif value.get("schemaVersion") != 1 or value.get("previewOnly") != true or value.has("observationOnly") or value.has("soilWater"):
+	elif value.get("schemaVersion") != 1 or value.get("previewOnly") != true or value.has("observationOnly") or value.has("soilWater") or value.has("agriculture"):
 		return false
 	if value.get("condition") not in CONDITIONS or not value.get("atUs") is String:
 		return false
@@ -69,7 +71,7 @@ static func from_snapshot(snapshot: Dictionary) -> Dictionary:
 	if world.has("mvpClimate"):
 		var state: Variant = world.mvpClimate
 		if world.get("mode") != "validation" or not state is Dictionary: return {}
-		var supported: bool = (state.get("schemaVersion") == 1 and state.get("capability") == "observation-only") or (state.get("schemaVersion") == 2 and state.get("capability") == "soil-water-v1")
+		var supported: bool = (state.get("schemaVersion") == 1 and state.get("capability") == "observation-only") or (state.get("schemaVersion") == 2 and state.get("capability") == "soil-water-v1") or (state.get("schemaVersion") == 3 and state.get("capability") == "agriculture-v1")
 		if not supported: return {}
 		var sample: Variant = state.get("current")
 		if not valid(sample, true) or sample.schemaVersion != state.schemaVersion or sample.atUs != state.get("lastUs") or state.get("lastMinute") != world.get("minute"): return {}
@@ -102,13 +104,13 @@ func _line(parent: Control, font_size: int, ink: Color) -> Label:
 	return label
 
 func present(value: Dictionary, minute: float, stale: bool) -> void:
-	var adopted: bool = value.get("observationOnly") == true or value.get("soilWater") == true
+	var adopted: bool = value.get("observationOnly") == true or value.get("soilWater") == true or value.get("agriculture") == true
 	visible = valid(value, adopted)
 	if not visible: return
 	var season: String = ["春", "夏", "秋", "冬"][int(floor(minute / 1440.0 / 28.0)) % 4]
 	heading.text = "%s · %s  %.1f℃" % [season, CONDITIONS[value.condition], value.temperatureDeciC / 10.0]
 	readings.text = "湿度 %.1f%%  风 %.2f  日照 %.2f" % [value.relativeHumidityPermille / 10.0, value.windPermille / 1000.0, value.daylightPermille / 1000.0]
-	caution.text = ("气候观测 · 未影响旧制作物" if adopted else "环境预览 · 不影响旧制作物") + (" · 已过期" if stale else "")
+	caution.text = ("气候驱动新作物 · 旧茬仍按旧制" if value.get("agriculture") == true else ("气候观测 · 未影响旧制作物" if adopted else "环境预览 · 不影响旧制作物")) + (" · 已过期" if stale else "")
 	tooltip_text = "只读环境样本；风与日照为 0–1 游戏强度，非现实风速。静态天气图形不随设备时间变化。"
 	sketch.condition = value.condition
 	sketch.queue_redraw()

@@ -399,7 +399,8 @@ func paint_seeds(root: Node3D, world: Dictionary, room: Dictionary, id: String) 
 	for entry in room.get("slots", []):
 		if entry.get("key") == "mvp-seed": slot = entry
 	if slot.is_empty(): return
-	var seeds := SeedObservation.state(world)
+	var agriculture: bool = world.get("mvpClimate", {}).get("schemaVersion") == 3
+	var seeds := {} if agriculture else SeedObservation.state(world)
 	var at := Vector3(slot.at.x, .31, slot.at.y - 1)
 	if not seeds.is_empty():
 		# One paper packet per remaining seed unit, bounded by the finite store.
@@ -407,7 +408,7 @@ func paint_seeds(root: Node3D, world: Dictionary, room: Dictionary, id: String) 
 			var packet := craft.box(root, at + Vector3(.38 + (i % 2) * .16,.99 + (i / 4) * .06,-.12 + ((i / 2) % 2) * .20), Vector3(.13,.045,.15), craft.mat("d8c49a"))
 			packet.rotation.y = .07 * (i % 3 - 1)
 	var label := Label3D.new()
-	label.text = "种台 · " + SeedObservation.stock_label(world)
+	label.text = "种台 · " + ("三季余量见家园卡" if agriculture else SeedObservation.stock_label(world))
 	label.font = FONT
 	label.font_size = 32
 	label.pixel_size = .010

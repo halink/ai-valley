@@ -1,0 +1,98 @@
+import type {World,Resident,Activity,Plot,Action} from '../shared/types.js';
+import {CULTIVARS,cultivarKeys,temperatureFactor,type Cultivar,type AgricultureAction,type AgriculturePlot,type PlantTarget,type AgricultureObservation} from '../shared/mvp-agriculture.js';
+import {SOIL_DENOMINATOR as D} from './mvp-soil-solver.js';
+import {resetSoilSegment,upgradeSoilForAgriculture} from './mvp-soil.js';
+import {minuteToClimateUs,climateAtUs} from './mvp-climate.js';
+import {calendar,DAY,seasons} from './time.js';
+import {findPath,distance} from './navigation.js';
+import {MVP_HALL} from '../shared/mvp-hamlet.js';
+import {roomLayout,roomPath} from '../shared/rooms.js';
+import {emitEvent} from './events.js';
+export const AGRICULTURE_FINGERPRINT='agriculture-v1:3-cultivars;Tf400;growth8000D;crop4day;end-water;evap-first;mature-stop;grant-minP2N;yield3;save1to2;meal2root1water42';
+export const GROWTH_DENOMINATOR=8000n*D;
+const own=(v:object,k:string)=>Object.prototype.hasOwnProperty.call(v,k);
+function integer(x:unknown):bigint {if(typeof x!=='string'||!/^(0|[1-9][0-9]{0,39})$/.test(x))throw Error('agriculture_invalid_integer');return BigInt(x);}
+function next(w:World,prefix:string):string {const s=w.mvpAgriculture!,n=integer(s.nextSequence);if(n<1n||n>=1000000000000000000n)throw Error('agriculture_sequence_exhausted');s.nextSequence=(n+1n).toString();return prefix+':'+n;}
+export function cropTarget(c:Cultivar):bigint {return BigInt(CULTIVARS[c].days*DAY)*1000000n*GROWTH_DENOMINATOR;}
+export function canSow(w:World,c:Cultivar):boolean{return (CULTIVARS[c].seasons as readonly string[]).includes(calendar(w.minute).season);}
+export function agriculturePlot(w:World,id:string):AgriculturePlot|undefined{return w.mvpAgriculture?.plots.find(p=>p.plotId===id);}
+export function plantTarget(w:World,p:Plot,replace=false):PlantTarget {const state=agriculturePlot(w,p.id);if(!state)throw Error('agriculture_missing_plot');return {plotId:p.id,epoch:state.epoch,instanceId:state.instance?.id??null,replace};}
+export function agricultureInput(w:World,plotId:string,sampleUs:string){const c=agriculturePlot(w,plotId)?.instance;if(c?.kind!=='climate'||!c.cultivar)return null;return {instanceId:c.id,temperatureFactor:temperatureFactor(c.cultivar,climateAtUs(w.seed,sampleUs).temperatureDeciC),progress:c.growthNumerator!,target:cropTarget(c.cultivar).toString()};}
+export function publishAgricultureGrowth(w:World,plotId:string,progress:string,maturedUs:string|null):void {const s=agriculturePlot(w,plotId)?.instance,p=w.plots.find(p=>p.id===plotId);if(!s||s.kind!=='climate'||!p?.crop)throw Error('agriculture_missing_growth');s.growthNumerator=progress;if(s.maturedUs===null&&maturedUs!==null)s.maturedUs=maturedUs;p.crop.growth=Number(integer(progress)*1000000n/(GROWTH_DENOMINATOR*1440000000n))/1000000;}
+export function registerPlantedCrop(w:World,p:Plot,cultivar:Cultivar|null):void {
+ if(!w.mvpAgriculture)return;const state=agriculturePlot(w,p.id);if(!state||!p.crop||state.instance)throw Error('agriculture_plant_registry_conflict');
+ const id=next(w,'crop');state.instance={id,kind:cultivar?'climate':'legacy',cultivar,definition:p.crop.definition,planted:p.crop.planted,growthNumerator:cultivar?'0':null,maturedUs:null};
+ if(cultivar)p.crop!.mvpCrop={version:1,instanceId:id,cultivar};resetSoilSegment(w,p.id);
+}
+export function retireCrop(w:World,p:Plot,operation:'harvest'|'clear'):void {
+ if(!w.mvpAgriculture)return;const state=agriculturePlot(w,p.id);if(!state?.instance)throw Error('agriculture_retire_registry_conflict');state.instance=null;if(operation==='harvest')state.epoch=next(w,'demand');resetSoilSegment(w,p.id);
+}
+export function adoptMvpAgriculture(w:World):boolean {
+ if(own(w,'simulationOnly'))throw Error('agriculture_simulation_adoption');
+ if(own(w,'mvpAgriculture')||w.mvpClimate?.schemaVersion===3){validateMvpAgriculture(w);return false;}
+ if(!w.mvpSoil||w.mvpSoil.schemaVersion!==1||w.mvpClimate?.schemaVersion!==2)throw Error('agriculture_requires_soil');
+ if(w.processed.some(x=>x.startsWith('climate-crops-initial:')))throw Error('agriculture_orphan_grant');
+ const state:NonNullable<World['mvpAgriculture']>={schemaVersion:1,parameterFingerprint:AGRICULTURE_FINGERPRINT,adoptedMinute:w.minute,adoptedUs:minuteToClimateUs(w.minute),nextSequence:'1',plots:[],grants:{} as NonNullable<World['mvpAgriculture']>['grants'],claims:{},receipts:{}};w.mvpAgriculture=state;
+ for(const p of w.plots){const entry:AgriculturePlot={plotId:p.id,epoch:next(w,'demand'),instance:null};if(p.crop){if(p.crop!.mvpCrop)throw Error('agriculture_unregistered_crop');entry.instance={id:next(w,'crop'),kind:'legacy',cultivar:null,definition:p.crop.definition,planted:p.crop.planted,growthNumerator:null,maturedUs:null};}state.plots.push(entry);}
+ const valid=w.plots.filter(p=>w.residents.some(r=>r.id===p.ownerId&&r.status==='alive'&&r.residency!=='outside'&&findPath(w,r.at,p.at)!==null)),P=valid.length,N=new Set(valid.map(p=>p.ownerId)).size;
+ for(const c of cultivarKeys){let day=Math.floor(w.minute/DAY);while(!(CULTIVARS[c].seasons as readonly string[]).includes(calendar(day*DAY).season))day++;
+  const grantId=w.id+':climate-crops-initial:'+c;state.grants[c]={grantId,initial:Math.min(P,2*N),stock:Math.min(P,2*N),plotCount:P,residentCount:N,firstWindowDay:day,firstWindowSeason:calendar(day*DAY).season};w.processed.push('climate-crops-initial:'+grantId);
+  const definition='crop/mvp-'+c+'@1';w.definitions[definition]={id:'crop/mvp-'+c,version:1,kind:'action',dependencies:[],cost:{[CULTIVARS[c].seed]:1},data:{name:CULTIVARS[c].name,growthDays:CULTIVARS[c].days,seasons:[...CULTIVARS[c].seasons],yield:3,output:CULTIVARS[c].root}};
+ }
+ const climate=w.mvpClimate!;const {soilWater,...sample}=climate.current as typeof climate.current&{soilWater?:true};w.mvpClimate={...climate,schemaVersion:3,capability:'agriculture-v1',current:{...sample,schemaVersion:3,agriculture:true}};
+ upgradeSoilForAgriculture(w);return true;
+}
+export function allocateAgricultureExecution(w:World,a:Activity):void {if(a.action.type!=='mvpAgriculture')return;if(!w.mvpAgriculture||a.mvpAgricultureExecutionId)throw Error('agriculture_execution_invalid');a.mvpAgricultureExecutionId=next(w,'agri-execution');}
+function targetReason(w:World,r:Resident,t:PlantTarget):string|null {const p=w.plots.find(p=>p.id===t.plotId),s=agriculturePlot(w,t.plotId);return !p||p.ownerId!==r.id||!s||s.epoch!==t.epoch||(s.instance?.id??null)!==t.instanceId||findPath(w,r.at,p.at)===null?'田地权限、实例或路线已变化':null;}
+export function agricultureStation(w:World,r:Resident,operation:string){const b=w.buildings.find(b=>b.id===MVP_HALL);if(!b||b.condition<=0||!r.knownBuildings.includes(b.id))return null;const layout=roomLayout(w,b),key=operation==='cook'?'kitchen':'mvp-seed',slot=layout.slots.find(s=>s.key===key);return slot&&roomPath(layout,r.inside===b.id?r.roomAt??layout.entry:layout.entry,slot.at)!==null?{building:b,at:slot.at}:null;}
+export function agricultureReason(w:World,r:Resident,a:AgricultureAction,onSite=false):string|null {
+ if(!w.mvpAgriculture||!CULTIVARS[a.cultivar]||r.status!=='alive'||r.residency==='outside'||!r.canDecide)return '当前无法进行新作物劳动';const d=CULTIVARS[a.cultivar];
+ if('target'in a){const reason=targetReason(w,r,a.target);if(reason)return reason;const p=w.plots.find(p=>p.id===a.target.plotId)!,s=agriculturePlot(w,p.id)!;
+  if(a.operation!=='collectSeed'&&onSite&&(r.inside||distance(r.at,p.at)>1))return '尚未实际到达本人田地';
+  if(a.operation==='plant'&&(p.crop||s.instance||!canSow(w,a.cultivar)||(r.inventory[d.seed]??0)<1))return '当前田地、独立种子或播种季不支持播种';
+  if(a.operation==='harvest'&&(s.instance?.kind!=='climate'||s.instance.cultivar!==a.cultivar||integer(s.instance.growthNumerator)<cropTarget(a.cultivar)))return '新作物尚未成熟或实例不符';
+  if(a.operation==='clear'&&!s.instance)return '田地已经没有原作物';
+ }
+ if(['collectSeed','saveSeed','cook'].includes(a.operation)){const station=agricultureStation(w,r,a.operation);if(!station)return '没有实际可达的种台或厨房';if(onSite&&(r.inside!==station.building.id||r.at.x!==station.building.door.x||r.at.y!==station.building.door.y||r.roomAt?.x!==station.at.x||r.roomAt?.y!==station.at.y))return '尚未实际到达劳动工位';}
+ if(a.operation==='saveSeed'&&(r.inventory[d.root]??0)<1)return '留种需要本人一份实际同种根菜';
+ if(a.operation==='cook'&&((r.inventory[d.root]??0)<2||(r.inventory.water??0)<1))return '烹饪需要本人两份同种根菜和一份清水';
+ if(a.operation==='collectSeed'){
+  if(!canSow(w,a.cultivar)||!Array.isArray(a.targets)||!a.targets.length||a.targets.length>w.plots.length)return '领取须用于当前合法播季的本人真实田地缺口';
+  const ids=new Set<string>();for(const t of a.targets){if(ids.has(t.plotId)||targetReason(w,r,t)||t.instanceId!==null&&!t.replace)return '领取目标必须逐田有效并明确确认替换原实例';ids.add(t.plotId);}
+  const sorted=[...a.targets].sort((x,y)=>x.plotId.localeCompare(y.plotId)),index=sorted.findIndex(t=>t.plotId===a.target.plotId&&t.epoch===a.target.epoch&&t.instanceId===a.target.instanceId&&t.replace===a.target.replace);
+  if(index<0||index<Math.floor(r.inventory[d.seed]??0)||own(w.mvpAgriculture.claims,a.target.plotId+'|'+a.target.epoch))return '本人已有种子已覆盖该田，或该轮田地已领取过公共种子';
+  if((onSite||r.inside===MVP_HALL)&&w.mvpAgriculture.grants[a.cultivar].stock<1)return '该品种有限公共种源已领完';
+ }
+ return null;
+}
+export function agricultureRoute(w:World,r:Resident,a:AgricultureAction){const error=agricultureReason(w,r,a);if(error)return {error,target:{...r.at},duration:0};if(['saveSeed','collectSeed','cook'].includes(a.operation))return {target:agricultureStation(w,r,a.operation)!.building.door,duration:a.operation==='collectSeed'?10:a.operation==='cook'?20:30};return {target:w.plots.find(p=>p.id===('target'in a?a.target.plotId:''))!.at,duration:a.operation==='plant'?15:a.operation==='harvest'?10:30};}
+export function completeAgriculture(w:World,r:Resident,a:AgricultureAction):string|null {
+ const error=agricultureReason(w,r,a,true);if(error)return error;const s=w.mvpAgriculture!,id=r.activity?.mvpAgricultureExecutionId;if(!id||own(s.receipts,id))throw Error('agriculture_duplicate_execution');const d=CULTIVARS[a.cultivar],plotId='target'in a?a.target.plotId:null,p=plotId?w.plots.find(p=>p.id===plotId)!:null;
+ if(a.operation==='plant'){r.inventory[d.seed]!-=1;p!.crop={definition:'crop/mvp-'+a.cultivar+'@1',planted:w.minute,growth:0,wateredDay:-1,lastGrowthDay:Math.floor(w.minute/DAY)};registerPlantedCrop(w,p!,a.cultivar);}
+ if(a.operation==='harvest'){r.inventory[d.root]=(r.inventory[d.root]??0)+3;p!.crop=null;retireCrop(w,p!,'harvest');}
+ if(a.operation==='clear'){p!.crop=null;retireCrop(w,p!,'clear');}
+ if(a.operation==='saveSeed'){r.inventory[d.root]!-=1;r.inventory[d.seed]=(r.inventory[d.seed]??0)+2;}
+ if(a.operation==='cook'){r.inventory[d.root]!-=2;r.inventory.water!-=1;r.inventory.meal=(r.inventory.meal??0)+1;}
+ if(a.operation==='collectSeed'){s.grants[a.cultivar].stock--;r.inventory[d.seed]=(r.inventory[d.seed]??0)+1;}
+ const labels={plant:'播种',harvest:'收获3份',clear:'清除原作物，无退种或产粮',saveSeed:'用1根留出2份种子',cook:'用2根和1水做成1份餐食',collectSeed:'领取1份有限公共种子'};
+ const event=emitEvent(w,{kind:'production',actors:[r.id],place:{...r.at},text:r.name+'完成'+d.name+'：'+labels[a.operation]+'。',agriculture:{executionId:id,operation:a.operation,cultivar:a.cultivar,plotId}});
+ s.receipts[id]={actorId:r.id,operation:a.operation,cultivar:a.cultivar,plotId,eventId:event.id};
+ if(a.operation==='collectSeed')s.claims[a.target.plotId+'|'+a.target.epoch]={actorId:r.id,plotId:a.target.plotId,epoch:a.target.epoch,cultivar:a.cultivar,executionId:id,eventId:event.id};return null;
+}
+export function validateMvpAgriculture(w:World):void {
+ const s=w.mvpAgriculture;if(!own(w,'mvpAgriculture')){if(w.mvpClimate?.schemaVersion===3||w.mvpSoil?.schemaVersion===2)throw Error('agriculture_missing_dependency');return;}
+ if(!s||s.schemaVersion!==1||s.parameterFingerprint!==AGRICULTURE_FINGERPRINT||w.mvpClimate?.schemaVersion!==3||w.mvpClimate.capability!=='agriculture-v1'||w.mvpSoil?.schemaVersion!==2||s.adoptedUs!==minuteToClimateUs(s.adoptedMinute)||s.adoptedMinute<w.mvpSoil.adoptedMinute||s.adoptedMinute>w.minute)throw Error('agriculture_invalid_state');
+ const sequence=integer(s.nextSequence);if(sequence<1n||sequence>1000000000000000000n||!Array.isArray(s.plots)||s.plots.length!==w.plots.length)throw Error('agriculture_invalid_registry');
+ const used=new Set<string>();const checkId=(id:string,prefix:string)=>{if(typeof id!=='string'||!id.startsWith(prefix+':')||integer(id.slice(prefix.length+1))>=sequence||integer(id.slice(prefix.length+1))<1n||used.has(id))throw Error('agriculture_invalid_identity');used.add(id);};
+ const plots=new Set<string>();for(const entry of s.plots){const p=w.plots.find(p=>p.id===entry.plotId);if(!p||plots.has(p.id))throw Error('agriculture_invalid_plot');plots.add(p.id);checkId(entry.epoch,'demand');const i=entry.instance;if(!!i!==!!p.crop)throw Error('agriculture_registry_orphan');if(!i)continue;checkId(i.id,'crop');if(i.definition!==p.crop!.definition||i.planted!==p.crop!.planted)throw Error('agriculture_registry_mismatch');
+  if(i.kind==='legacy'){if(i.cultivar!==null||i.growthNumerator!==null||i.maturedUs!==null||p.crop!.mvpCrop)throw Error('agriculture_legacy_mismatch');}
+  else{if(i.kind!=='climate'||!i.cultivar||!CULTIVARS[i.cultivar]||p.crop!.mvpCrop?.instanceId!==i.id||p.crop!.mvpCrop.cultivar!==i.cultivar||p.crop!.mvpCrop.version!==1||i.definition!=='crop/mvp-'+i.cultivar+'@1')throw Error('agriculture_crop_mismatch');const progress=integer(i.growthNumerator),target=cropTarget(i.cultivar);if(progress>target||p.crop!.growth!==Number(progress*1000000n/(GROWTH_DENOMINATOR*1440000000n))/1000000||(progress===target)!==(i.maturedUs!==null)||i.maturedUs!==null&&(integer(i.maturedUs)>integer(w.mvpSoil.lastUs)||integer(i.maturedUs)<integer(minuteToClimateUs(i.planted))))throw Error('agriculture_growth_mismatch');}
+ }
+ const receipts=s.receipts,events=new Map(w.events.map(e=>[e.id,e]));if(!receipts||!s.claims||!s.grants)throw Error('agriculture_missing_ledger');
+ for(const [id,receipt]of Object.entries(receipts)){checkId(id,'agri-execution');const e=events.get(receipt.eventId);if(!CULTIVARS[receipt.cultivar]||!e||e.actors[0]!==receipt.actorId||e.agriculture?.executionId!==id||e.agriculture.operation!==receipt.operation||e.agriculture.cultivar!==receipt.cultivar||e.agriculture.plotId!==receipt.plotId)throw Error('agriculture_receipt_mismatch');}
+ for(const e of w.events)if(e.agriculture&&receipts[e.agriculture.executionId]?.eventId!==e.id)throw Error('agriculture_orphan_event');
+ for(const r of w.residents)if(r.activity?.action.type==='mvpAgriculture'){const id=r.activity.mvpAgricultureExecutionId;if(!id||own(receipts,id))throw Error('agriculture_invalid_active_execution');checkId(id,'agri-execution');}
+ for(const [key,c]of Object.entries(s.claims)){if(key!==c.plotId+'|'+c.epoch||!w.plots.some(p=>p.id===c.plotId)||receipts[c.executionId]?.operation!=='collectSeed'||receipts[c.executionId]?.eventId!==c.eventId||receipts[c.executionId]?.actorId!==c.actorId||receipts[c.executionId]?.cultivar!==c.cultivar||receipts[c.executionId]?.plotId!==c.plotId)throw Error('agriculture_claim_mismatch');}
+ for(const c of cultivarKeys){const g=s.grants[c],id=w.id+':climate-crops-initial:'+c,count=Object.values(s.claims).filter(v=>v.cultivar===c).length;if(!g||g.grantId!==id||!Number.isSafeInteger(g.plotCount)||g.plotCount<0||!Number.isSafeInteger(g.residentCount)||g.residentCount<0||g.initial!==Math.min(g.plotCount,2*g.residentCount)||!Number.isSafeInteger(g.stock)||g.stock<0||g.stock+count!==g.initial||w.processed.filter(x=>x==='climate-crops-initial:'+id).length!==1||!Number.isSafeInteger(g.firstWindowDay)||!(CULTIVARS[c].seasons as readonly string[]).includes(g.firstWindowSeason))throw Error('agriculture_grant_mismatch');}
+}
+export function agricultureObservation(w:World):AgricultureObservation|undefined {if(!w.mvpAgriculture)return;return {schemaVersion:1,atUs:minuteToClimateUs(w.minute),seedStock:cultivarKeys.map(c=>({cultivar:c,name:CULTIVARS[c].name,initial:w.mvpAgriculture!.grants[c].initial,stock:w.mvpAgriculture!.grants[c].stock,canSow:canSow(w,c)})),plots:w.mvpAgriculture.plots.map(p=>{const i=p.instance,c=i?.cultivar,progress=c?integer(i!.growthNumerator):0n,target=c?cropTarget(c):1n,soil=w.mvpSoil!.plots.find(s=>s.plotId===p.plotId)!,water=integer(soil.current.water),tf=c?temperatureFactor(c,w.mvpClimate!.current.temperatureDeciC):0,wf=water<=10n*D?0:water>=30n*D?1000:Number((water-10n*D)*1000n/(20n*D)),mature=!!c&&progress>=target;return {plotId:p.plotId,kind:i?.kind??'empty',instanceId:i?.id??null,epoch:p.epoch,cultivar:c??null,name:c?CULTIVARS[c].name:i?'旧制芜菁':null,growthDays:c?Number(progress*1000000n/(GROWTH_DENOMINATOR*1440000000n))/1000000:0,targetDays:c?CULTIVARS[c].days:0,progressPermille:c?Number(progress*1000n/target):0,mature,temperatureFactorPermille:Math.round(tf*2.5),waterFactorPermille:wf,limitedBy:!i?'empty':i.kind==='legacy'?'legacy':mature?'mature':!tf&&!wf?'temperature-and-water':!tf?'temperature':!wf?'water':'none'};})};}

@@ -6,6 +6,7 @@ const ObserverHud = preload("res://observer_hud.gd")
 const JournalRecords = preload("res://journal_records.gd")
 const Snapshot = preload("res://snapshot.gd")
 const SeedObservation = preload("res://seed_observation.gd")
+const AgricultureObservation = preload("res://agriculture_observation.gd")
 const SoilObservation = preload("res://soil_observation.gd")
 const GardenObservation = preload("res://garden_observation.gd")
 const MovementFeed = preload("res://completed_movement.gd")
@@ -21,6 +22,7 @@ var world: Dictionary = {}
 var observation: Dictionary = {}
 var environment_preview: Dictionary = {}
 var soil_observation: Dictionary = {}
+var agriculture_observation: Dictionary = {}
 var relationship_history: Variant
 var selected_resident := ""
 var selected_building := ""
@@ -89,6 +91,8 @@ func _connect_server(origin: String) -> void:
 	_reset_context()
 	environment_preview = {}
 	soil_observation = {}
+	agriculture_observation = {}
+	valley.agriculture_observation = {}
 	valley.environment_preview = {}
 	world = {}
 	observation = {}
@@ -143,8 +147,10 @@ func _apply_snapshot(parsed: Dictionary) -> void:
 	decision_source = str(mode.get("driver", ""))
 	environment_preview = EnvironmentPreview.from_snapshot(parsed)
 	soil_observation = SoilObservation.from_snapshot(parsed)
+	agriculture_observation = AgricultureObservation.from_snapshot(parsed)
+	valley.agriculture_observation = agriculture_observation.get("plots", {})
 	valley.environment_preview = environment_preview
-	source_tag = {"local-rules": "规则演示", "model": "已配置模型", "disabled": "模型禁用"}.get(decision_source, "")
+	source_tag = {"local-rules": "规则演示 · 非模型", "model": "已配置模型", "disabled": "模型禁用"}.get(decision_source, "")
 	if mode.get("fault") == "unresolved_model_request": source_tag = "保护停表"
 	connected = true
 	if not continuous:
@@ -464,7 +470,7 @@ func _update_hud() -> void:
 		places[id] = {"title": _building_name(building), "note": kind, "kind": str(building.get("kind", ""))}
 	for plot in world.get("plots", []):
 		if not plot is Dictionary or not str(plot.get("id", "")).begins_with("mvp-garden-"): continue
-		places[plot.id] = {"title": GardenObservation.title(world, plot), "note": GardenObservation.stage(world, plot) if connected else "状态已过期", "kind": "garden"}
+		places[plot.id] = {"title": GardenObservation.title(world, plot), "note": GardenObservation.stage(world, plot, agriculture_observation.get("plots", {}).get(plot.id, {})) if connected else "状态已过期", "kind": "garden"}
 	for resource in world.get("resources", []):
 		if resource.get("kind") not in ["bush", "spring", "tree", "rock"]: continue
 		places[resource.id] = {"title": _resource_title(resource), "note": _resource_stock(resource) if connected else "状态已过期", "kind": resource.kind}
@@ -514,7 +520,7 @@ func _update_place_card() -> void:
 		hud.show_room("", "")
 	else:
 		var caption := "%s 人在室内" % _occupants(valley.room_id)
-		if valley.room_id == "mvp-home": caption += " · " + SeedObservation.stock_label(world)
+		if valley.room_id == "mvp-home": caption += " · " + ("三季公共种源" if world.get("mvpClimate", {}).get("schemaVersion") == 3 else SeedObservation.stock_label(world))
 		hud.show_room(_building_name(room), caption)
 	if connected and not selected_resource.is_empty():
 		var resource := _resource(selected_resource)
@@ -525,14 +531,14 @@ func _update_place_card() -> void:
 	if connected and not selected_plot.is_empty():
 		var plot := _plot(selected_plot)
 		if not plot.is_empty():
-			hud.show_place(selected_plot, GardenObservation.title(world, plot), GardenObservation.details(world, plot, not environment_preview.is_empty() or (world.get("mode") == "validation" and world.has("mvpClimate"))) + SoilObservation.details(soil_observation.get(selected_plot, {})), false)
+			hud.show_place(selected_plot, GardenObservation.title(world, plot), GardenObservation.details(world, plot, not environment_preview.is_empty() or (world.get("mode") == "validation" and world.has("mvpClimate")), agriculture_observation.get("plots", {}).get(selected_plot, {})) + SoilObservation.details(soil_observation.get(selected_plot, {})), false)
 			return
 	if building.is_empty() or not connected:
 		hud.show_place("", "", "", false)
 		return
 	var can_enter: bool = valley.room_layouts.has(selected_building)
 	var note := "%s 人在室内" % _occupants(selected_building) if can_enter else "室内暂不可观察"
-	if selected_building == "mvp-home": note += "\n" + SeedObservation.details(world)
+	if selected_building == "mvp-home": note += "\n" + (AgricultureObservation.seeds(agriculture_observation) if world.get("mvpClimate", {}).get("schemaVersion") == 3 else SeedObservation.details(world))
 	hud.show_place(selected_building, _building_name(building), note, can_enter)
 
 func _update_history() -> void:
