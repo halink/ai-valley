@@ -90,9 +90,11 @@ function daylight(us:bigint,cloud:number):number {
 
 /** Pure snapshot at the existing world's committed endpoint. No World writes,
  * personal knowledge, persistent rain receipts, soil or production effects. */
-export function climateAt(seed:number,minute:number):MvpClimateSnapshot {
+export function climateAt(seed:number,minute:number):MvpClimateSnapshot {return climateAtUs(seed,minuteToClimateUs(minute));}
+/** Exact canonical time entry for the fixed-grid soil solver. */
+export function climateAtUs(seed:number,atUs:string):MvpClimateSnapshot {
  if(!Number.isInteger(seed)||seed<0||seed>0xffffffff)throw new Error('mvp_climate_invalid_seed');
- const atUs=minuteToClimateUs(minute),us=parseClimateUs(atUs);
+ const us=parseClimateUs(atUs);
  const temperatureDeciC=seasonalTemperature(us)+dailyTemperature(us)+slotValue(seed,us,1,-40,81);
  const rain=precipitation(seed,us),precipitationPermille=rain.intensity;
  const cloudPermille=Math.max(slotValue(seed,us,2,150,751),lerp(0,950,BigInt(rain.saturation),1000n));
@@ -107,4 +109,26 @@ export function climateAt(seed:number,minute:number):MvpClimateSnapshot {
   rhTableFingerprint:MVP_CLIMATE_RH_FINGERPRINT,previewOnly:true,atUs,temperatureDeciC,
   relativeHumidityPermille,cloudPermille,windPermille,daylightPermille:daylight(us,cloudPermille),
   precipitationPermille,condition};
+}
+
+/** Deterministic extra soil quadrature boundaries for quantized temperature.
+ * Every component is monotone within one 0.05-minute absolute cell (its own
+ * turning/slot/season boundaries are aligned). Locate each changed component's
+ * first micro-minute, avoiding assumptions about the SUM being monotone. */
+const thermalCutCache=new Map<string,readonly string[]>();
+export function climateThermalCuts(seed:number,gridUs:string):string[] {
+ const key=seed+':'+gridUs,cached=thermalCutCache.get(key);if(cached)return [...cached];
+ const start=parseClimateUs(gridUs),end=start+50000n;
+ if(start%50000n!==0n||end>BigInt(MVP_CLIMATE_MAX_US))throw Error('mvp_climate_invalid_grid');
+ const cuts=new Set<string>();
+ for(const component of [seasonalTemperature,dailyTemperature,(us:bigint)=>slotValue(seed,us,1,-40,81)]){
+  let from=start;
+  while(from<end-1n){const value=component(from);if(component(end-1n)===value)break;
+   let low=from+1n,high=end-1n;
+   while(low<high){const mid=(low+high)/2n;if(component(mid)===value)low=mid+1n;else high=mid;}
+   cuts.add(low.toString());from=low;
+  }
+ }
+ const result=[...cuts].sort((a,b)=>BigInt(a)<BigInt(b)?-1:1);
+ if(thermalCutCache.size>=512)thermalCutCache.delete(thermalCutCache.keys().next().value!);thermalCutCache.set(key,Object.freeze(result));return [...result];
 }

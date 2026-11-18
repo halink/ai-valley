@@ -165,7 +165,7 @@ export class WorldStore {
   this.db.exec('BEGIN IMMEDIATE');
   try{
    const row=this.db.prepare('SELECT revision,state FROM worlds WHERE id=?').get(world.id) as {revision:number;state:string|Uint8Array}|undefined;
-   if(row){const stored=decodeSavedWorld(row.state);if(!this.allowMvpClimate)rejectMvpClimateForModels(stored);}
+   if(row){const stored=decodeSavedWorld(row.state);if(Object.prototype.hasOwnProperty.call(stored,'mvpSoil')&&(!world.mvpSoil||world.mvpClimate?.schemaVersion!==2))throw Error('soil_dependency_downgrade');if(!this.allowMvpClimate)rejectMvpClimateForModels(stored);}
    if((row?.revision??null)!==previousRevision)throw new Error('stale_world_revision');
    const insert=this.db.prepare('INSERT INTO events(id,world_id,at,body) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body WHERE events.body<>excluded.body');
    // Full-state callers validate every fact. The runtime supplies a transaction-local suffix only after

@@ -6,6 +6,7 @@ const ObserverHud = preload("res://observer_hud.gd")
 const JournalRecords = preload("res://journal_records.gd")
 const Snapshot = preload("res://snapshot.gd")
 const SeedObservation = preload("res://seed_observation.gd")
+const SoilObservation = preload("res://soil_observation.gd")
 const GardenObservation = preload("res://garden_observation.gd")
 const MovementFeed = preload("res://completed_movement.gd")
 const ResidentMovement = preload("res://resident_movement.gd")
@@ -19,6 +20,7 @@ var timer: Timer
 var world: Dictionary = {}
 var observation: Dictionary = {}
 var environment_preview: Dictionary = {}
+var soil_observation: Dictionary = {}
 var relationship_history: Variant
 var selected_resident := ""
 var selected_building := ""
@@ -86,6 +88,7 @@ func _connect_server(origin: String) -> void:
 	_set_follow(false)
 	_reset_context()
 	environment_preview = {}
+	soil_observation = {}
 	valley.environment_preview = {}
 	world = {}
 	observation = {}
@@ -139,6 +142,7 @@ func _apply_snapshot(parsed: Dictionary) -> void:
 	var mode: Dictionary = parsed.get("mvp", {})
 	decision_source = str(mode.get("driver", ""))
 	environment_preview = EnvironmentPreview.from_snapshot(parsed)
+	soil_observation = SoilObservation.from_snapshot(parsed)
 	valley.environment_preview = environment_preview
 	source_tag = {"local-rules": "规则演示", "model": "已配置模型", "disabled": "模型禁用"}.get(decision_source, "")
 	if mode.get("fault") == "unresolved_model_request": source_tag = "保护停表"
@@ -521,7 +525,7 @@ func _update_place_card() -> void:
 	if connected and not selected_plot.is_empty():
 		var plot := _plot(selected_plot)
 		if not plot.is_empty():
-			hud.show_place(selected_plot, GardenObservation.title(world, plot), GardenObservation.details(world, plot, not environment_preview.is_empty() or (world.get("mode") == "validation" and world.has("mvpClimate"))), false)
+			hud.show_place(selected_plot, GardenObservation.title(world, plot), GardenObservation.details(world, plot, not environment_preview.is_empty() or (world.get("mode") == "validation" and world.has("mvpClimate"))) + SoilObservation.details(soil_observation.get(selected_plot, {})), false)
 			return
 	if building.is_empty() or not connected:
 		hud.show_place("", "", "", false)

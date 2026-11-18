@@ -17,9 +17,9 @@ export interface MvpClimateSnapshot {
 }
 
 /** Persisted point observation; deliberately not a numerical integrator. */
-export type MvpClimatePoint=Omit<MvpClimateSnapshot,'previewOnly'>&{observationOnly:true};
+export type MvpClimatePoint=Omit<MvpClimateSnapshot,'previewOnly'|'schemaVersion'>&({schemaVersion:1;observationOnly:true}|{schemaVersion:2;soilWater:true});
 export interface MvpClimateState {
- schemaVersion:1; capability:'observation-only'; seed:number; algorithmVersion:1;
+ schemaVersion:1|2; capability:'observation-only'|'soil-water-v1'; seed:number; algorithmVersion:1;
  parameterFingerprint:string; rhTableFingerprint:string;
  adoptedMinute:number; adoptedUs:string; lastMinute:number; lastUs:string;
  current:MvpClimatePoint;

@@ -1,3 +1,4 @@
+import {adoptMvpSoil} from '../world/mvp-soil.js';
 import {lstatSync} from 'node:fs';
 /** Explicit opt-in durable RULE demonstration. Never reads model configuration or dispatches a model. */
 import {createMvpSession,createMvpServer,createMvpWorld} from './godot-mvp.js';
@@ -31,9 +32,9 @@ export async function startPersistentRulesMvp(options:{database:string;port:numb
   store=new WorldStore(owner.database,{allowMvpClimate:true});
   const saved=store.load(),world=structuredClone(saved??createMvpWorld()),previous=saved?.revision??null;
   assertMvpWorld(world);
-  const upgraded=upgradeMvpWorld(world),adopted=adoptMvpClimate(world);
-  if(adopted)world.revision++;
-  if(!saved||upgraded||adopted)store.commit(world,previous);
+  const upgraded=upgradeMvpWorld(world),adopted=adoptMvpClimate(world),soilAdopted=adoptMvpSoil(world);
+  if(adopted||soilAdopted)world.revision++;
+  if(!saved||upgraded||adopted||soilAdopted)store.commit(world,previous);
   session=createMvpSession({world,persistent:true,commit:(draft,revision)=>{owner!.assertOwned();store!.commit(draft,revision);}});
   if(options.autoStart!==false)timer=setInterval(()=>session!.advance(1),tickMs);
   return {session,server,snapshot:session.snapshot,close};

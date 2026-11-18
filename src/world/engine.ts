@@ -1,3 +1,4 @@
+import {allocateSoilWaterExecution,assertSoilWaterUnsettled,settleSoilWater} from './mvp-soil.js';
 import {minuteToClimateUs} from './mvp-climate.js';
 import {validateMvpClimate,advanceMvpClimate} from './mvp-climate-state.js';
 import {advanceMvpResources,mvpResourceItem} from './mvp-resources.js';
@@ -347,6 +348,7 @@ function begin(world:World,r:Resident,elapsed=0){
  const outdoors=['move','gather','plant','water','harvest','build','construction','landRights','regionSurvey','industry','leave','settle','lodge'].includes(action.type);
  if((path.length||outdoors)&&!world.rooms){r.inside=null;r.roomAt=null;}
  r.activity={planId:plan.id,action,startedAt:world.minute,remaining:route.duration,path,target:{...route.target},definition,travelProgress:0,...(route.cargo?{cargo:route.cargo}:{})};
+ allocateSoilWaterExecution(world,r.activity);
  const mvpBedError=mvpSleepProblem(world,r);if(mvpBedError){failure(world,r,mvpBedError);return;}
  const exitError=prepareRoomExit(world,r,true);if(exitError){failure(world,r,exitError);return;}
  const bodyError=reserveBody(world,r,r.activity);if(bodyError){failure(world,r,bodyError);return;}
@@ -440,7 +442,8 @@ function completeAtomic(world:World,r:Resident,a:Action,definition:string,elapse
    // Legacy or unknown definitions without a display name remain generic.
    const name=world.definitions[p.crop.definition]?.data?.name;
    const cropName=typeof name==='string'&&name.trim()?name.trim():'作物';
-   consume(r.inventory,{water:1});p.crop.wateredDay=Math.floor(world.minute/DAY);record(`${r.name}为田里的${cropName}浇了水。`);return null;
+   assertSoilWaterUnsettled(world,r.id,r.activity!,p.id);
+   consume(r.inventory,{water:1});p.crop.wateredDay=Math.floor(world.minute/DAY);const event=record(`${r.name}为田里的${cropName}浇了水。`);if(world.mvpSoil)event.soilWater={executionId:r.activity!.mvpWaterExecutionId!,plotId:p.id,actorId:r.id,amount:'30'};settleSoilWater(world,r.id,r.activity!,p.id,event.id);return null;
   }
   const cropDefinition=p.crop.definition,cropDef=world.definitions[cropDefinition];if(p.crop.growth<Number(cropDef.data.growthDays))return '作物尚未成熟';
   const item=(cropDef.data.output??'turnip') as keyof Inventory;

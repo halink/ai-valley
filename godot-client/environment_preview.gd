@@ -34,11 +34,16 @@ var readings: Label
 var caution: Label
 
 static func valid(value: Variant, adopted := false) -> bool:
-	if not value is Dictionary or value.get("schemaVersion") != 1 or value.get("algorithmVersion") != 1:
+	if not value is Dictionary or value.get("algorithmVersion") != 1:
 		return false
 	if adopted:
-		if value.get("observationOnly") != true or value.has("previewOnly"): return false
-	elif value.get("previewOnly") != true or value.has("observationOnly"):
+		if value.has("previewOnly"): return false
+		if value.get("schemaVersion") == 1:
+			if value.get("observationOnly") != true or value.has("soilWater"): return false
+		elif value.get("schemaVersion") == 2:
+			if value.get("soilWater") != true or value.has("observationOnly"): return false
+		else: return false
+	elif value.get("schemaVersion") != 1 or value.get("previewOnly") != true or value.has("observationOnly") or value.has("soilWater"):
 		return false
 	if value.get("condition") not in CONDITIONS or not value.get("atUs") is String:
 		return false
@@ -64,9 +69,10 @@ static func from_snapshot(snapshot: Dictionary) -> Dictionary:
 	if world.has("mvpClimate"):
 		var state: Variant = world.mvpClimate
 		if world.get("mode") != "validation" or not state is Dictionary: return {}
-		if state.get("schemaVersion") != 1 or state.get("capability") != "observation-only": return {}
+		var supported: bool = (state.get("schemaVersion") == 1 and state.get("capability") == "observation-only") or (state.get("schemaVersion") == 2 and state.get("capability") == "soil-water-v1")
+		if not supported: return {}
 		var sample: Variant = state.get("current")
-		if not valid(sample, true) or sample.atUs != state.get("lastUs") or state.get("lastMinute") != world.get("minute"): return {}
+		if not valid(sample, true) or sample.schemaVersion != state.schemaVersion or sample.atUs != state.get("lastUs") or state.get("lastMinute") != world.get("minute"): return {}
 		return sample
 	var sample: Variant = mode.get("environmentPreview")
 	return sample if mode.get("ephemeral") == true and valid(sample) else {}
@@ -96,7 +102,7 @@ func _line(parent: Control, font_size: int, ink: Color) -> Label:
 	return label
 
 func present(value: Dictionary, minute: float, stale: bool) -> void:
-	var adopted: bool = value.get("observationOnly") == true
+	var adopted: bool = value.get("observationOnly") == true or value.get("soilWater") == true
 	visible = valid(value, adopted)
 	if not visible: return
 	var season: String = ["春", "夏", "秋", "冬"][int(floor(minute / 1440.0 / 28.0)) % 4]
