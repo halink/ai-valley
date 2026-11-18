@@ -1,3 +1,4 @@
+import {rejectMvpClimateForModels} from '../world/mvp-climate-state.js';
 import type {Biography,HistoryPage,HistoryQuery} from '../shared/history.js';
 import {normalizeHistory,historyKey,readHistoryCursor,makeHistoryCursor} from './history-query.js';
 import {DatabaseSync} from 'node:sqlite';
@@ -37,8 +38,10 @@ export class WorldStore {
  private resourceBases = new Map<string, Resource[]>();
  private readonly exactReceipt;
  private readonly receiptPrefix;
- constructor(path:string,options:{dailySnapshots?:DailySnapshotConfig}={}){
-  preflightWorldSave(path);
+ private readonly allowMvpClimate:boolean;
+ constructor(path:string,options:{dailySnapshots?:DailySnapshotConfig;allowMvpClimate?:boolean}={}){
+  this.allowMvpClimate=options.allowMvpClimate===true;
+  preflightWorldSave(path,{rejectClimate:!this.allowMvpClimate});
   if(path!==':memory:')mkdirSync(dirname(path),{recursive:true,mode:0o700});
   this.db=new DatabaseSync(path);
   this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;
@@ -105,6 +108,7 @@ export class WorldStore {
   const row=this.db.prepare('SELECT state FROM worlds ORDER BY rowid DESC LIMIT 1').get() as {state:string|Uint8Array}|undefined;
   if (!row) return null;
   const saved=decodeSavedWorld(row.state) as unknown as World & {terrainKey?:string;resourceChanges:Array<[number,Resource]>;resourceCount:number;ledgerVersion?:1};
+  if(!this.allowMvpClimate)rejectMvpClimateForModels(saved);
   if (!saved.terrainKey) return saved;
   const {terrainKey,resourceChanges,resourceCount,ledgerVersion,...world}=saved;
   const terrain=this.db.prepare('SELECT body FROM terrain WHERE hash=?').get(terrainKey) as {body:Uint8Array}|undefined;
@@ -157,10 +161,11 @@ export class WorldStore {
  }
  commit(world:World,previousRevision:number|null,appended?:AppendedHistory):void{
   assertWorldCompatibility(world);
+  if(!this.allowMvpClimate)rejectMvpClimateForModels(world);
   this.db.exec('BEGIN IMMEDIATE');
   try{
    const row=this.db.prepare('SELECT revision,state FROM worlds WHERE id=?').get(world.id) as {revision:number;state:string|Uint8Array}|undefined;
-   if(row)decodeSavedWorld(row.state);
+   if(row){const stored=decodeSavedWorld(row.state);if(!this.allowMvpClimate)rejectMvpClimateForModels(stored);}
    if((row?.revision??null)!==previousRevision)throw new Error('stale_world_revision');
    const insert=this.db.prepare('INSERT INTO events(id,world_id,at,body) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body WHERE events.body<>excluded.body');
    // Full-state callers validate every fact. The runtime supplies a transaction-local suffix only after

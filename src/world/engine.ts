@@ -1,3 +1,5 @@
+import {minuteToClimateUs} from './mvp-climate.js';
+import {validateMvpClimate,advanceMvpClimate} from './mvp-climate-state.js';
 import {advanceMvpResources,mvpResourceItem} from './mvp-resources.js';
 import {isMvpSeedAction,mvpSeedReason,mvpSeedPlace,completeMvpSeed} from './mvp-seeds.js';
 import {mvpSleepProblem,mvpDiningPlace} from './mvp-rooms.js';
@@ -614,15 +616,17 @@ function processActivity(world:World,r:Resident,minutes:number){
 /** Advances only committed model arrangements and physical consequences. No intentions are generated here. */
 export function stepWorld(world:World,minutes:number,options:{exactEndMinute?:number;decisionChoices?:(world:World,resident:Resident)=>Action[]}={}):void {
  if(world.clock.paused||!Number.isFinite(minutes)||minutes<=0)return;
+ validateMvpClimate(world);
  const exact=options.exactEndMinute;
  if(exact!==undefined&&(!Number.isFinite(exact)||exact<=world.minute||exact-world.minute!==minutes))throw new Error('invalid_exact_step_endpoint');
+ if(world.mvpClimate){const end=exact??world.minute+minutes;minuteToClimateUs(end);if(end<=world.minute)throw Error('mvp_climate_clock_not_advancing');}
  // A caller may use large isolated-test steps; real runtime never catches up downtime.
  ensureCensus(world);initializePhysiology(world);
  if(world.mode==='formal'){initializeSocialAppointments(world);initializePersonalFoodGifts(world);initializeAdultPresence(world);initializePregnancyPreparation(world);initializeEconomy(world);initializeCivic(world);initializeCommons(world);initializeWaterSupply(world);initializeProduction(world);initializeEmployment(world);initializeForeignTrade(world);initializeOutsideAid(world);initializeConstruction(world);initializeLandRights(world);initializeRegionSurveys(world);initializeEducation(world);initializeIndustry(world);initializeFerries(world);initializeRooms(world);initializeFood(world);initializeHealth(world);initializeLongCare(world);initializeEmergencyCare(world);initializeFunerary(world);initializeAgency(world);initializeAdoption(world);initializeFamilyRelocation(world);initializeDebt(world);initializeHousehold(world);initializeSocial(world);initializeCulture(world);}
  let left=minutes;
  while(exact!==undefined?world.minute<exact:left>0){
   const remaining=exact!==undefined?exact-world.minute:left,dt=Math.min(1,remaining),previousDay=Math.floor(world.minute/DAY);
-  world.minute=exact!==undefined&&dt===remaining?exact:world.minute+dt;left-=dt;advanceFood(world);advanceCommons(world);syncFamilyEscorts(world);advanceFamilyRelocation(world,dt);beginRoomTick(world);syncMedicalTransport(world);
+  const climateStart=world.minute;world.minute=exact!==undefined&&dt===remaining?exact:world.minute+dt;advanceMvpClimate(world,climateStart);left-=dt;advanceFood(world);advanceCommons(world);syncFamilyEscorts(world);advanceFamilyRelocation(world,dt);beginRoomTick(world);syncMedicalTransport(world);
   const beforeRelief=new Map(world.residents.map(r=>[r.id,{hunger:r.hunger,energy:r.energy}]));
   for(const r of world.residents){if(!living(r)){
     if(world.mode==='formal'&&r.residency==='outside'&&(r.activity&&isSelfCareAction(r.activity.action)||r.plan?.actions.some(isSelfCareAction)))failure(world,r,'已经离开谷内，原本人自理安排停止');

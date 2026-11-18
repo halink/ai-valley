@@ -33,8 +33,12 @@ var heading: Label
 var readings: Label
 var caution: Label
 
-static func valid(value: Variant) -> bool:
-	if not value is Dictionary or value.get("previewOnly") != true or value.get("schemaVersion") != 1 or value.get("algorithmVersion") != 1:
+static func valid(value: Variant, adopted := false) -> bool:
+	if not value is Dictionary or value.get("schemaVersion") != 1 or value.get("algorithmVersion") != 1:
+		return false
+	if adopted:
+		if value.get("observationOnly") != true or value.has("previewOnly"): return false
+	elif value.get("previewOnly") != true or value.has("observationOnly"):
 		return false
 	if value.get("condition") not in CONDITIONS or not value.get("atUs") is String:
 		return false
@@ -50,6 +54,22 @@ static func valid(value: Variant) -> bool:
 			if number < -300 or number > 450: return false
 		elif number < 0 or number > 1000: return false
 	return true
+
+# Prefer the committed world state. An invalid adopted state never silently
+# falls back to an ephemeral sample or reinterprets the legacy weather field.
+static func from_snapshot(snapshot: Dictionary) -> Dictionary:
+	var world: Variant = snapshot.get("world")
+	var mode: Variant = snapshot.get("mvp")
+	if not world is Dictionary or not mode is Dictionary or mode.get("driver") != "local-rules": return {}
+	if world.has("mvpClimate"):
+		var state: Variant = world.mvpClimate
+		if world.get("mode") != "validation" or not state is Dictionary: return {}
+		if state.get("schemaVersion") != 1 or state.get("capability") != "observation-only": return {}
+		var sample: Variant = state.get("current")
+		if not valid(sample, true) or sample.atUs != state.get("lastUs") or state.get("lastMinute") != world.get("minute"): return {}
+		return sample
+	var sample: Variant = mode.get("environmentPreview")
+	return sample if mode.get("ephemeral") == true and valid(sample) else {}
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -76,12 +96,13 @@ func _line(parent: Control, font_size: int, ink: Color) -> Label:
 	return label
 
 func present(value: Dictionary, minute: float, stale: bool) -> void:
-	visible = valid(value)
+	var adopted: bool = value.get("observationOnly") == true
+	visible = valid(value, adopted)
 	if not visible: return
 	var season: String = ["春", "夏", "秋", "冬"][int(floor(minute / 1440.0 / 28.0)) % 4]
 	heading.text = "%s · %s  %.1f℃" % [season, CONDITIONS[value.condition], value.temperatureDeciC / 10.0]
 	readings.text = "湿度 %.1f%%  风 %.2f  日照 %.2f" % [value.relativeHumidityPermille / 10.0, value.windPermille / 1000.0, value.daylightPermille / 1000.0]
-	caution.text = "环境预览 · 不影响旧制作物" + (" · 已过期" if stale else "")
+	caution.text = ("气候观测 · 未影响旧制作物" if adopted else "环境预览 · 不影响旧制作物") + (" · 已过期" if stale else "")
 	tooltip_text = "只读环境样本；风与日照为 0–1 游戏强度，非现实风速。静态天气图形不随设备时间变化。"
 	sketch.condition = value.condition
 	sketch.queue_redraw()

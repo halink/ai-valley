@@ -1,3 +1,5 @@
+import {validateMvpClimate} from '../world/mvp-climate-state.js';
+import type {World} from '../shared/types.js';
 /** Read-before-write compatibility gate. No migration or model/runtime dependency.
  * The probe reads private copies so SQLite cannot create/change the source SHM.
  * Persistent callers still own the original save via their existing lifetime lock.
@@ -17,7 +19,7 @@ const record=(v:unknown):v is Record<string,unknown>=>!!v&&typeof v==='object'&&
 const owns=(v:object,key:string)=>Object.prototype.hasOwnProperty.call(v,key);
 // Exact reserved upgrade names only. Unknown legacy extension names are not
 // guessed from prefixes/regex. These modules have no writable format yet.
-const unsupportedUpgradeFields=['mvpClimate','worldUpgrade'] as const;
+const unsupportedUpgradeFields=['worldUpgrade'] as const;
 const MAX_STATE_BYTES=256*1024*1024;
 
 /** Validate only the compatibility envelope, not every game's domain rule. */
@@ -26,6 +28,7 @@ export function assertWorldCompatibility(value:unknown):asserts value is Record<
  // Reject presence, not a recognized version/truthy value. No upgrade escape.
  if(owns(value,'simulationOnly'))fail('save_simulation_only');
  if(value.schemaVersion!==1)fail('save_unsupported_world_schema');
+ if(owns(value,'mvpClimate')){try{validateMvpClimate(value as unknown as World);}catch{fail('save_invalid_mvpClimate');}}
  for(const field of unsupportedUpgradeFields)if(owns(value,field))fail('save_unsupported_'+field);
  if(typeof value.id!=='string'||!value.id||!Number.isSafeInteger(value.revision)||Number(value.revision)<0
   ||(value.mode!=='formal'&&value.mode!=='validation'))fail('save_invalid_world_identity');
@@ -64,13 +67,15 @@ function jsonBlob(body:unknown):unknown {
  try{return JSON.parse(gunzipSync(body,{maxOutputLength:MAX_STATE_BYTES}).toString());}
  catch{fail('save_invalid_landscape_encoding');}
 }
-function inspectDatabase(db:DatabaseSync):Record<string,unknown>|null {
+function inspectDatabase(db:DatabaseSync,rejectClimate:boolean,validateWorld?: (world:Record<string,unknown>)=>void):Record<string,unknown>|null {
  const table=db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='worlds'").get();
  if(!table)fail('save_missing_worlds_table');
  let latest:Record<string,unknown>|null=null;
  for(const row of db.prepare('SELECT id,revision,length(CAST(state AS BLOB)) AS stateBytes, CASE WHEN length(CAST(state AS BLOB))<=? THEN state ELSE NULL END AS state FROM worlds ORDER BY rowid').iterate(MAX_STATE_BYTES)){
   if(typeof row.stateBytes!=='number'||row.stateBytes>MAX_STATE_BYTES)fail('save_state_too_large');
   const world=decodeSavedWorld(row.state);
+  if(rejectClimate&&owns(world,'mvpClimate'))fail('save_mvpClimate_requires_opt_in');
+  validateWorld?.(world);
   if(world.id!==row.id||world.revision!==row.revision)fail('save_world_identity_mismatch');
   if(owns(world,'terrainKey')){
    const terrain=db.prepare('SELECT body FROM terrain WHERE hash=?').get(world.terrainKey as string);
@@ -136,7 +141,7 @@ function unchanged(path:string,files:ReadonlyArray<SourceFile|null>,suffixes:rea
  * checkpoint. WAL is copied alongside the DB and SQLite reads its latest state.
  * This is not a substitute for caller-held ownership against concurrent writers.
  */
-export function preflightWorldSave(path:string,options:{requireWorld?:boolean}={}):Record<string,unknown>|null {
+export function preflightWorldSave(path:string,options:{requireWorld?:boolean;rejectClimate?:boolean;validateWorld?:(world:Record<string,unknown>)=>void}={}):Record<string,unknown>|null {
  if(path===':memory:')return null;
  const suffixes=['','-wal','-journal'] as const;
  const files:Array<SourceFile|null>=[];
@@ -155,7 +160,7 @@ export function preflightWorldSave(path:string,options:{requireWorld?:boolean}={
   unchanged(path,files,suffixes);
   // readOnly may create SHM on this PRIVATE copy, never on the user's save.
   db=new DatabaseSync(copy,{readOnly:true});
-  const result=inspectDatabase(db);
+  const result=inspectDatabase(db,options.rejectClimate===true,options.validateWorld);
   if(!result&&options.requireWorld)fail('save_missing_world');
   unchanged(path,files,suffixes);
   return result;

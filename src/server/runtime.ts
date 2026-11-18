@@ -1,3 +1,4 @@
+import {rejectMvpClimateForModels} from '../world/mvp-climate-state.js';
 import {mvpObservation} from './mvp-observation.js';
 import {forkCompletedMovement} from '../world/completed-movement.js';
 import {readSelfHostedCooldowns,cooldownDelay} from './self-hosted-cooldown.js';
@@ -159,7 +160,7 @@ export class ValleyRuntime {
   if(options.decisionWaitEvidence)this.decisionEvidence=new DecisionWaitEvidence(options.decisionWaitEvidence);
   if(options.directEatingEvidence)this.foodEvidence=new RuntimeFoodEvidence(options.directEatingEvidence);
   try{
-  const saved=store.loadForRuntime();const previousRevision=saved?.revision??null;if(saved && options.mode && saved.mode!==options.mode)throw new Error('world_mode_mismatch');
+  const saved=store.loadForRuntime();rejectMvpClimateForModels(saved);const previousRevision=saved?.revision??null;if(saved && options.mode && saved.mode!==options.mode)throw new Error('world_mode_mismatch');
   this.world=saved??(options.mode==='formal'?createFrontierWorld():createWorld());
   this.admissionBaseline={requests:this.world.metrics.requests,cancellations:this.world.metrics.admissionCancellation?.count??0};
   if(this.acceptanceEvidence){const identity=this.acceptanceEvidence.writer.identity();

@@ -15,3 +15,12 @@ export interface MvpClimateSnapshot {
  precipitationPermille:number;
  condition:'sun'|'cloud'|'rain'|'snow'|'mixed';
 }
+
+/** Persisted point observation; deliberately not a numerical integrator. */
+export type MvpClimatePoint=Omit<MvpClimateSnapshot,'previewOnly'>&{observationOnly:true};
+export interface MvpClimateState {
+ schemaVersion:1; capability:'observation-only'; seed:number; algorithmVersion:1;
+ parameterFingerprint:string; rhTableFingerprint:string;
+ adoptedMinute:number; adoptedUs:string; lastMinute:number; lastUs:string;
+ current:MvpClimatePoint;
+}

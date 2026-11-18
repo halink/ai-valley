@@ -18,7 +18,7 @@ static func stage(world: Dictionary, plot: Dictionary) -> String:
 	if growth >= days: return "已经成熟 · 等待居民收获"
 	return "生长 %s / %s 天" % [str(growth), str(days)]
 
-static func details(world: Dictionary, plot: Dictionary, climate_preview := false) -> String:
+static func details(world: Dictionary, plot: Dictionary, separate_climate := false) -> String:
 	var result := stage(world, plot)
 	var crop: Variant = plot.get("crop")
 	if crop is Dictionary:
@@ -26,8 +26,8 @@ static func details(world: Dictionary, plot: Dictionary, climate_preview := fals
 		if watered is float or watered is int:
 			result += "\n今日已浇水" if watered == floorf(float(world.get("minute", 0)) / 1440.0) else "今日未浇水"
 		else: result += "\n浇水记录未知"
-		result += (" · 旧制雨日" if climate_preview else " · 当前下雨") if world.get("weather") == "rain" else ""
-		if climate_preview: result += "\n旧制作物 · 沿用旧日雨规则，非环境预览"
+		result += (" · 旧制雨日" if separate_climate else " · 当前下雨") if world.get("weather") == "rain" else ""
+		if separate_climate: result += "\n旧制作物 · 沿用独立旧日雨规则，非当前气候"
 		result += "\n生长按季节和每日水分结算"
 	else:
 		result += "\n是否播种由居民自己决定"

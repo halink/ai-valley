@@ -1,5 +1,6 @@
 import {adoptMvpResources} from '../world/mvp-resources.js';
-import {climateAt} from '../world/mvp-climate.js';
+import {adoptMvpClimate,validateMvpClimate} from '../world/mvp-climate-state.js';
+import {inheritReceiptHistory} from '../world/receipts.js';
 import {adoptMvpSeeds,isMvpSeedAction} from '../world/mvp-seeds.js';
 import {serveGodotWeb} from './godot-web.js';
 import {roomObservation} from './room-observation.js';
@@ -10,7 +11,7 @@ import {COMPACT_MVP_MAP,hasMvpHamlet,MVP_HALL} from '../shared/mvp-hamlet.js';
 import {adoptMvpRooms} from '../world/mvp-rooms.js';
 import {adoptMvpDrinking,mvpThirst} from '../world/mvp-drinking.js';
 import {mvpObservation} from './mvp-observation.js';
-import {enableCompletedMovement,completedMovementSnapshot,residentMovementSnapshot} from '../world/completed-movement.js';
+import {enableCompletedMovement,forkCompletedMovement,completedMovementSnapshot,residentMovementSnapshot} from '../world/completed-movement.js';
 /** Small, disposable engineering MVP. Rules choose actions; the existing world
  * engine owns pathfinding, needs, elapsed work and resource/food settlement.
  * This is NOT LLM autonomy, a formal save, or a longevity acceptance run. */
@@ -194,27 +195,34 @@ export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string
  }
  return {action:{type:'wait',minutes:30},reason:'当前没有可执行的规则行动，短暂等待'};
 }
-export function createMvpSession(){
- const world=createMvpWorld();
+export function createMvpSession(options:{world?:World;commit?:(world:World,previousRevision:number)=>void;persistent?:boolean}={}){
+ let world=structuredClone(options.world??createMvpWorld());
+ if(options.world)inheritReceiptHistory(options.world,world);
+ const initialRevision=world.revision;
+ if(adoptMvpClimate(world)){world.revision++;options.commit?.(world,initialRevision);}
  enableCompletedMovement(world);
  let serial=0,fault:string|null=null;
  const decisions:Record<string,number>={};
- const snapshot=():Snapshot&{roomViews:ReturnType<typeof roomObservation>}&{observation:ReturnType<typeof mvpObservation>;relationshipHistory:ReturnType<typeof relationshipObservation>}&{movement:ReturnType<typeof completedMovementSnapshot>;residentMovement:ReturnType<typeof residentMovementSnapshot>}&{mvp:{driver:'local-rules';notice:string;ephemeral:true;fault:string|null;phases:Record<string,MvpPhase>;decisions:Record<string,number>;environmentPreview:ReturnType<typeof climateAt>}}=>({
+ const snapshot=():Snapshot&{roomViews:ReturnType<typeof roomObservation>}&{observation:ReturnType<typeof mvpObservation>;relationshipHistory:ReturnType<typeof relationshipObservation>}&{movement:ReturnType<typeof completedMovementSnapshot>;residentMovement:ReturnType<typeof residentMovementSnapshot>}&{mvp:{driver:'local-rules';notice:string;ephemeral:boolean;fault:string|null;phases:Record<string,MvpPhase>;decisions:Record<string,number>;environment:NonNullable<World['mvpClimate']>['current']}}=>({
   roomViews:roomObservation(world),observation:mvpObservation(world,[],[]),relationshipHistory:relationshipObservation(world),movement:completedMovementSnapshot(world),residentMovement:residentMovementSnapshot(world),world:structuredClone(world),serverTime:new Date().toISOString(),version:VALLEY_VERSION,mapRevision:'godot-mvp-map-4',
-  capabilities:{active:['小地图只读观察','本地规则采集/进食/休息闭环','有限面对面规则问候','独立选择的食水交换'],pending:['真实模型决策验收','持久存档','最终绘本素材']},
-  // Observer-only preview: never stored on World, used by decisions, or
-  // substituted for legacy crop weather. Persistent/model entry is unchanged.
-  mvp:{driver:'local-rules',notice:GODOT_MVP_NOTICE,ephemeral:true,fault,phases:Object.fromEntries(world.residents.map(r=>[r.id,mvpPhase(r)])),decisions:{...decisions},environmentPreview:climateAt(world.seed,world.minute)},
+  capabilities:{active:['小地图只读观察','本地规则采集/进食/休息闭环','有限面对面规则问候','独立选择的食水交换','同源气候点值观察',...(options.persistent?['规则存档与恢复']:[])],pending:['真实模型决策验收','土壤水账与气候农业','最终绘本素材']},
+  // Read the published, validated point state. Legacy crop rain is separate;
+  // no soil integration or model decision consumes this capability yet.
+  mvp:{driver:'local-rules',notice:options.persistent?'持久规则小山谷：本地规则驱动，非真实模型':GODOT_MVP_NOTICE,ephemeral:!options.persistent,fault,phases:Object.fromEntries(world.residents.map(r=>[r.id,mvpPhase(r)])),decisions:{...decisions},environment:structuredClone(world.mvpClimate!.current)},
  });
  const advance=(minutes=1)=>{
   if(!Number.isInteger(minutes)||minutes<1||minutes>60)throw new Error('MVP advances must be 1–60 whole world minutes');
-  if(fault)return;
+  if(fault||world.clock.paused)return;
   try{
    for(let tick=0;tick<minutes;tick++){
+    const current=world,previousSerial=serial,previousDecisions={...decisions};
+    const draft=structuredClone(current);inheritReceiptHistory(current,draft);forkCompletedMovement(current,draft);
+    world=draft;
+    try{
     for(const r of world.residents){
      if(r.status!=='alive'||r.activity||r.plan)continue;
      const choice=chooseMvpAction(world,r);
-     const result=submitPlan(world,{id:`mvp-rule-${++serial}`,actorId:r.id,actorRevision:r.revision,createdAt:world.minute,definition:mvpPlanDefinition(world,choice.action),intention:'本地规则：'+choice.reason,actions:[choice.action]});
+     const result=submitPlan(world,{id:`mvp-rule-${world.id}-${world.revision}-${r.id}-${++serial}`,actorId:r.id,actorRevision:r.revision,createdAt:world.minute,definition:mvpPlanDefinition(world,choice.action),intention:'本地规则：'+choice.reason,actions:[choice.action]});
      if(!result.ok)throw new Error(`MVP plan rejected for ${r.id}: ${result.error}`);
      decisions[r.id]=(decisions[r.id]??0)+1;
     }
@@ -243,12 +251,16 @@ export function createMvpSession(){
      ].includes(failed.lastFailure!))continue;
      throw new Error(`MVP action failed for ${failed.id}: ${failed.lastFailure}`);
     }
+    validateMvpClimate(world);
+    world.revision=Math.max(world.revision,current.revision+1);
+    options.commit?.(world,current.revision);
+    }catch(error){world=current;serial=previousSerial;for(const key of Object.keys(decisions))delete decisions[key];Object.assign(decisions,previousDecisions);throw error;}
    }
   }catch(error){fault=error instanceof Error?error.message:String(error);world.clock.paused=true;world.clock.reason=fault;world.revision++;}
  };
- return {world,snapshot,advance};
+ return {get world(){return world;},snapshot,advance};
 }
-export function createMvpServer(session:ReturnType<typeof createMvpSession>,options:{webRoot?:string}={}):Server {
+export function createMvpServer(session:Pick<ReturnType<typeof createMvpSession>,'snapshot'>,options:{webRoot?:string}={}):Server {
  return createServer((req,res)=>{
   res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');
   if(options.webRoot&&serveGodotWeb(req,res,options.webRoot))return;

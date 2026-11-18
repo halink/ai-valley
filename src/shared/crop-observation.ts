@@ -5,4 +5,6 @@ export interface CropObservation {
  wateredToday:boolean|null;
  inSeason:boolean|null;
  rainingNow:boolean;
+ /** Present only for an adopted MVP climate: old crops still use legacy day rain. */
+ legacyRainDay?:boolean;
 }

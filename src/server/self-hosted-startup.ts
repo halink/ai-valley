@@ -1,3 +1,4 @@
+import {rejectMvpClimateForModels} from '../world/mvp-climate-state.js';
 import {openSync,closeSync,fsyncSync,unlinkSync} from 'node:fs';
 import {dirname} from 'node:path';
 import {createServer} from 'node:http';
@@ -38,7 +39,7 @@ export async function startSelfHostedServer(options:{port:number;database:string
   });
   owner=acquireRuntimeOwnership(options.database);
   owner.assertOwned();
-  preflightWorldSave(owner.database);
+  rejectMvpClimateForModels(preflightWorldSave(owner.database,{rejectClimate:true}));
   const markerPath=owner.database+'.self-hosted-session';
   let fd:number;
   try{fd=openSync(markerPath,'wx',0o600);}catch{throw Error('self_hosted_unresolved_session');}

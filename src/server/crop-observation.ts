@@ -18,7 +18,11 @@ export function cropObservationNote(c:DecisionContext,choices:ActionChoice[]):st
   let state=o.stage==='empty'?'未种田间作物':o.stage==='mature'?'作物已成熟，可另行决定是否收获，无须为继续生长浇水':o.stage==='unknown'?'作物生长阶段尚不能确认':'作物未成熟';
   if(o.stage!=='empty'){
    state+='；'+(o.wateredToday?'今日已浇水':'今日未浇水');
-   if(o.stage==='growing')state+=o.inSeason===false?'；当前季节不适合生长，浇水不改变季节限制':o.inSeason===null?'；季节条件尚不能确认':o.wateredToday?'；今日浇水条件已具备':o.rainingNow?'；眼前正在下雨，雨水可满足生长用水条件，但不是浇水记录或未来保证':'；眼前晴天，继续生长的用水条件尚未具备';
+   const legacy=typeof o.legacyRainDay==='boolean';
+   if(legacy)state+='；旧制作物沿用独立旧日雨规则，不按当前新气候结算';
+   if(o.stage==='growing')state+=o.inSeason===false?'；当前季节不适合生长，浇水不改变季节限制':o.inSeason===null?'；季节条件尚不能确认':o.wateredToday?'；今日浇水条件已具备':legacy
+    ?o.legacyRainDay?'；今日为旧制雨日，可满足旧制生长用水条件；这不是当前降雨或浇水记录':'；今日非旧制雨日，旧制生长用水条件尚未具备；当前新气候不改变此结算'
+    :o.rainingNow?'；眼前正在下雨，雨水可满足生长用水条件，但不是浇水记录或未来保证':'；眼前晴天，继续生长的用水条件尚未具备';
   }
   return `本人田(${p.at.x},${p.at.y})：${state}`;
  });

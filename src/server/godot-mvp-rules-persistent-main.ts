@@ -1,0 +1,11 @@
+import {fileURLToPath} from 'node:url';
+import {resolve} from 'node:path';
+import {startPersistentRulesMvp} from './godot-mvp-rules-persistent.js';
+if(process.argv.length!==2)throw Error('Use explicit environment; no .env is loaded');
+const database=process.env.VALLEY_MVP_RULES_DB;
+if(!database?.trim())throw Error('VALLEY_MVP_RULES_DB is required; use a dedicated rule-demo save');
+const running=await startPersistentRulesMvp({database:resolve(database),port:Number(process.env.VALLEY_MVP_RULES_PORT??3416),webRoot:fileURLToPath(new URL('../../output/godot-web/',import.meta.url))});
+console.log('Persistent RULE demonstration on loopback. No model calls.');
+let stopping=false;
+const stop=()=>{if(stopping)return;stopping=true;running.close().then(()=>process.exit(0),()=>{process.exitCode=1;});};
+process.once('SIGINT',stop);process.once('SIGTERM',stop);

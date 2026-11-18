@@ -1,3 +1,4 @@
+import {rejectMvpClimateForModels} from '../world/mvp-climate-state.js';
 import {adoptMvpResources,validateMvpResources} from '../world/mvp-resources.js';
 import {adoptMvpSeeds,validateMvpSeeds} from '../world/mvp-seeds.js';
 import {assertGodotWebExport,serveGodotWeb} from './godot-web.js';
@@ -21,7 +22,7 @@ import type {World} from '../shared/types.js';
 
 type MvpListenerOptions={database:string;port:number;webRoot?:string};
 
-function assertMvpWorld(world:World){
+export function assertMvpWorld(world:World){
  if(world?.mode!=='validation'||!world.id?.startsWith('godot-mvp-')||!isSupportedMvpMap(world.map)||!Array.isArray(world.residents)||!Array.isArray(world.buildings))throw Error('godot_mvp_save_mismatch');
  assertMvpPopulation(world);
  if(isWideMvpMap(world.map)&&!hasMvpHamlet(world))throw Error('godot_mvp_save_mismatch');
@@ -32,7 +33,8 @@ function assertMvpWorld(world:World){
 }
 /** Reject another project's DB before the WorldStore constructor can migrate its schema. */
 function validateSavedMvp(database:string):void {
- const world=preflightWorldSave(database,{requireWorld:true});
+ const world=preflightWorldSave(database,{requireWorld:true,rejectClimate:true,validateWorld:value=>assertMvpWorld(value as unknown as World)});
+ rejectMvpClimateForModels(world);
  if(world)assertMvpWorld(world as unknown as World);
 }
 
@@ -59,7 +61,7 @@ function serveMvpSnapshot(server:Server,webRoot:string|undefined,snapshot:()=>un
  });
 }
 
-function upgradeMvpWorld(world:World):boolean {
+export function upgradeMvpWorld(world:World):boolean {
  if(world.mvpDrinking&&world.mvpRooms&&world.map.mvpGarden?.version===1){const seeds=adoptMvpSeeds(world),resources=adoptMvpResources(world);return seeds||resources?(world.revision++,true):false;}
  adoptMvpDrinking(world);
  adoptMvpRooms(world);
