@@ -134,18 +134,26 @@ export class WorldStore {
   const terrainKey=terrainRevision(map);
   if(!this.terrainKeys.has(terrainKey))
     this.db.prepare('INSERT OR IGNORE INTO terrain(hash,body) VALUES(?,?)').run(terrainKey,gzipSync(JSON.stringify(map)));
+  // Capture precisely the JSON that can persist, once, before diffing. This
+  // detaches nested extension data from caller-owned objects and ensures an
+  // unchanged legacy field list cannot hide new/removed persistent fields.
+  const resourceJson=JSON.stringify(resources);
+  const persistedResources:Resource[]=JSON.parse(resourceJson);
   let base=this.resourceBase(world.id);
   if(!base) {
-   this.db.prepare('INSERT INTO resource_bases(world_id,body) VALUES(?,?)').run(world.id,gzipSync(JSON.stringify(resources)));
-   base=resources;
+   this.db.prepare('INSERT INTO resource_bases(world_id,body) VALUES(?,?)').run(world.id,gzipSync(resourceJson));
+   // Do not cache an uncommitted base: rollback must leave retry free to create
+   // the base again. Existing caches were read from committed storage.
+   base=persistedResources;
   }
   const resourceChanges:Array<[number,Resource]>=[];
-  for(let i=0;i<resources.length;i++){
-   const r=resources[i],b=base[i];
-   if(!b||r.id!==b.id||r.kind!==b.kind||r.at.x!==b.at.x||r.at.y!==b.at.y||r.amount!==b.amount||r.max!==b.max||r.regrowthDays!==b.regrowthDays||r.lastHarvest!==b.lastHarvest||r.floodDamage?.disasterId!==b.floodDamage?.disasterId||r.floodDamage?.at!==b.floodDamage?.at||r.floodDamage?.clearedAt!==b.floodDamage?.clearedAt)
-    resourceChanges.push([i,r]);
+  for(let i=0;i<persistedResources.length;i++){
+   const r=persistedResources[i],b=base[i];
+   // Object key order can conservatively add a redundant delta, never omit a
+   // changed JSON value. Arrays retain their meaningful order. No field allowlist.
+   if(!b||JSON.stringify(r)!==JSON.stringify(b))resourceChanges.push([i,r]);
   }
-  return gzipSync(JSON.stringify({...state,ledgerVersion:1,terrainKey,resourceCount:resources.length,resourceChanges}),{level:1});
+  return gzipSync(JSON.stringify({...state,ledgerVersion:1,terrainKey,resourceCount:persistedResources.length,resourceChanges}),{level:1});
  }
  commit(world:World,previousRevision:number|null,appended?:AppendedHistory):void{
   assertWorldCompatibility(world);
