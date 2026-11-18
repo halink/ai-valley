@@ -389,3 +389,30 @@ func _stone_edging(root: Node3D, at: Vector3) -> void:
 			craft.stone(root, at + Vector3(step, height * .48, side), Vector3(.44, height, .22), slate[(i + 1) % 3], i + 2)
 		for corner in [-.93, .93]:
 			craft.stone(root, at + Vector3(side, .072, corner), Vector3(.27, .155, .27), slate[0], 3)
+
+# Real resource sites, distinct from non-interactive landscape decoration.
+func resource_tree(root: Node3D, at: Vector3, amount: float) -> void:
+	var bark := craft.painted.get_material("timber")
+	if amount > 0:
+		_deciduous(root, at, .50, int(at.x * 13 + at.z * 7))
+	else:
+		craft.rod(root, at, at + Vector3.UP * .24, .20, .86, bark)
+		craft.rod(root, at + Vector3.UP * .24, at + Vector3.UP * .25, .16, 1.0, craft.mat("c8ac7c"))
+	_grass(root, at + Vector3(.24, .02, -.19), .20, at.x)
+
+func resource_rock(root: Node3D, at: Vector3, amount: float) -> void:
+	# A depleted source retains a low mineral scar, not a fresh full boulder.
+	var scale := 1.0 if amount > 0 else .23
+	craft.stone(root, at + Vector3.UP * (.36 * scale), Vector3(.88, .82 * scale, .82), craft.mat("8d938f" if amount > 0 else "aaa38f"), int(at.x + at.z))
+	if amount > 0:
+		craft.stone(root, at + Vector3(.28, .12, .22), Vector3(.43, .31, .40), craft.mat("b3b0a0"), int(at.x * 2))
+
+func fruit_shrub(root: Node3D, at: Vector3, amount: float) -> void:
+	var bark := craft.painted.get_material("timber")
+	for side in [-.21, .18]:
+		craft.rod(root, at + Vector3(side, 0, 0), at + Vector3(side * 1.8, .70, .07), .045, .48, bark)
+		_crown(root, at + Vector3(side, .67, 0), .85, .63, BROADLEAF, "899d6b", side, side < 0)
+	for i in range(mini(4, int(amount))):
+		var point := at + facing * Vector3(-.26 + i * .18, .55 + .13 * (i % 2), .39)
+		craft.orb(root, point, Vector3(.19, .22, .19), craft.mat("d7ad58"))
+		craft.rod(root, point + Vector3.UP * .09, point + Vector3.UP * .15, .012, .5, bark, 5)

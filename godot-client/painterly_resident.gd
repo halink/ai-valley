@@ -10,6 +10,7 @@ var view_offset := Vector3.ZERO
 var offset_goal := Vector3.ZERO
 var activity_pose := "idle"
 var activity_phase := 0.0
+var carried_fruits := 0
 var carried_food := 0
 var carried_roots := 0
 var carried_meals := 0
@@ -117,6 +118,7 @@ func provision(size: Vector3, color: String) -> MeshInstance3D:
 func update_provisions(person: Dictionary, world: Dictionary, room: Dictionary = {}) -> void:
 	var inventory: Dictionary = person.get("inventory", {})
 	carried_food = maxi(0, int(inventory.get("berry", 0)))
+	carried_fruits = maxi(0, int(inventory.get("fruit", 0)))
 	carried_roots = maxi(0, int(inventory.get("turnip", 0)))
 	carried_meals = maxi(0, int(inventory.get("meal", 0)))
 	carried_water = maxi(0, int(inventory.get("water", 0)))
@@ -127,8 +129,8 @@ func update_provisions(person: Dictionary, world: Dictionary, room: Dictionary =
 	if not activity is Dictionary: return
 	var action: Dictionary = activity.get("action", {})
 	action_item = str(action.get("item", ""))
-	food_prop.material_override = paint(Color("e9d5a4" if action_item == "turnip" else "b45858"))
-	food_prop.scale = Vector3.ONE * (.089 if action_item == "turnip" else .048)
+	food_prop.material_override = paint(Color("e9d5a4" if action_item == "turnip" else "d7ad58" if action_item == "fruit" else "b45858"))
+	food_prop.scale = Vector3.ONE * (.089 if action_item == "turnip" else .074 if action_item == "fruit" else .048)
 	if action.get("type") == "eat" and action.get("mvpAtTable", false) and person.get("inside") != null and onsite_pose(person) == "eat":
 		var at: Variant = person.get("roomAt")
 		if room.get("style") == "hall":
@@ -240,7 +242,7 @@ func present_pose(walking: bool, phase: float) -> void:
 	var drinking := not walking and activity_pose == "drink"
 	var drawing_water := not walking and activity_pose == "gather" and gathering_kind == "spring"
 	var resting := not walking and activity_pose == "rest" and bed_pose is Transform3D
-	food_prop.visible = eating and ((action_item == "berry" and carried_food > 0) or (action_item == "turnip" and carried_roots > 0))
+	food_prop.visible = eating and ((action_item == "berry" and carried_food > 0) or (action_item == "fruit" and carried_fruits > 0) or (action_item == "turnip" and carried_roots > 0))
 	meal_bowl.visible = eating and action_item == "meal" and carried_meals > 0
 	meal_surface.visible = meal_bowl.visible
 	water_prop.visible = not resting and (carried_water > 0 or drawing_water)

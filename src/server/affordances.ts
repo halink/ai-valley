@@ -79,19 +79,19 @@ export function buildChoices(c:DecisionContext):ActionChoice[]{
  // drinking MVP exposes alternate *supplied observations*, not only the nearest
  // source: a model can change its choice after a failed route or competition.
  // No unseen source, guaranteed route, or automatic replacement is introduced.
- const sourceKinds=['tree','rock','bush','spring'] as const;
+ const sourceKinds=['tree','rock','bush','fruit','spring'] as const;
  const sources=sourceKinds.map(kind=>{
-  if(c.formal&&(kind==='bush'||kind==='spring'))return [];
-  const limit=c.mvpDrinking&&(kind==='bush'||kind==='spring')?4:1;
-  return nearestResources.filter(r=>r.kind===kind&&Number.isFinite(r.amount)&&Math.floor(r.amount)>=1).slice(0,limit);
+  if(c.formal&&(kind==='bush'||kind==='fruit'||kind==='spring'))return [];
+  const limit=c.mvpDrinking&&(kind==='bush'||kind==='fruit'||kind==='spring')?4:1;
+  return nearestResources.filter(r=>(kind==='fruit'?r.kind==='bush'&&r.foodItem==='fruit':r.kind===kind&&(kind!=='bush'||r.foodItem!=='fruit'))&&Number.isFinite(r.amount)&&Math.floor(r.amount)>=1).slice(0,limit);
  });
  // Interleave kinds so alternate berries cannot push the first water choice
  // behind every berry within the bounded final category rotation.
  for(let i=0;i<4;i++)for(const [index,kind] of sourceKinds.entries()){
   const r=sources[index][i];if(!r)continue;
   const quantity=Math.min(3,Math.floor(r.amount));
-  if(c.mvpDrinking&&(kind==='bush'||kind==='spring'))gathering.push({id:`gather.${r.id}`,label:`去(${r.at.x},${r.at.y})采集${resourceNames[kind]}，填写本人决定的 quantity（1–${quantity} 整份；路线和余量须执行时核实）`,action:{type:'gather',resourceId:r.id,quantity},chooseQuantity:quantity});
-  else add(gathering,`gather.${r.id}`,`去(${r.at.x},${r.at.y})采集${quantity}份${resourceNames[kind]}（路线和余量须执行时核实）`,{type:'gather',resourceId:r.id,quantity});
+  if(c.mvpDrinking&&(kind==='bush'||kind==='fruit'||kind==='spring'))gathering.push({id:`gather.${r.id}`,label:`去(${r.at.x},${r.at.y})采集${kind==='fruit'||r.foodItem==='fruit'?'水果':resourceNames[kind]}，填写本人决定的 quantity（1–${quantity} 整份；路线和余量须执行时核实）`,action:{type:'gather',resourceId:r.id,quantity},chooseQuantity:quantity});
+  else add(gathering,`gather.${r.id}`,`去(${r.at.x},${r.at.y})采集${quantity}份${kind==='fruit'||r.foodItem==='fruit'?'水果':resourceNames[kind]}（路线和余量须执行时核实）`,{type:'gather',resourceId:r.id,quantity});
  }
  const seedWork=group();
  if(c.mvpSeeds){
@@ -116,7 +116,7 @@ export function buildChoices(c:DecisionContext):ActionChoice[]{
   for(const kind of ['spring','bush'] as const){
    const known=(c.mvpKnownSources??[]).filter(r=>r.kind===kind&&!c.resources.some(v=>v.id===r.id)&&manhattan(r.at,c.actor.at)>0)
     .sort((a,b)=>manhattan(a.at,c.actor.at)-manhattan(b.at,c.actor.at)||a.id.localeCompare(b.id)).slice(0,2);
-   for(const r of known)add(revisit,`revisit.${r.id}`,`重访已知${resourceNames[kind]}来源(${r.at.x},${r.at.y})；当前余量和状态未知，路线须核实，到场后自行决定是否采集`,{type:'move',to:{...r.at}});
+   for(const r of known)add(revisit,`revisit.${r.id}`,`重访已知${r.foodItem==='fruit'?'水果':resourceNames[kind]}来源(${r.at.x},${r.at.y})；当前余量和状态未知，路线须核实，到场后自行决定是否采集`,{type:'move',to:{...r.at}});
   }
  }
  const exploration=group();

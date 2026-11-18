@@ -1,3 +1,4 @@
+import {adoptMvpResources} from '../world/mvp-resources.js';
 import {adoptMvpSeeds,isMvpSeedAction} from '../world/mvp-seeds.js';
 import {serveGodotWeb} from './godot-web.js';
 import {roomObservation} from './room-observation.js';
@@ -68,6 +69,7 @@ export function createMvpWorld():World {
  widenMvpValley(world);
  layOutMvpGardens(world);
  adoptMvpSeeds(world);
+ adoptMvpResources(world,true);
  for(const r of world.residents)r.knownResources=world.resources.map(s=>s.id);
  return world;
 }
@@ -103,9 +105,9 @@ export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string
   }
  }
  const reserveRoot=(r.inventory.seed??0)<1&&(r.inventory.turnip??0)>=1&&r.hunger<80;
- const food=(r.inventory.meal??0)>=1?'meal':(r.inventory.turnip??0)>=(reserveRoot?2:1)?'turnip':'berry';
+ const food=(r.inventory.meal??0)>=1?'meal':(r.inventory.turnip??0)>=(reserveRoot?2:1)?'turnip':(r.inventory.fruit??0)>=1?'fruit':'berry';
  if(r.hunger>=35&&r.hunger<80&&r.energy>=70&&(mvpThirst(w,r)??0)<50-1e-9&&(r.inventory[food]??0)>=1){const action:Action={type:'eat',item:food,mvpAtTable:true};if(mvpCanStart(w,r,action))return {action,reason:'带着自己的食物回共屋餐桌进食，不共享或凭空补充口粮'};}
- if(r.hunger>=35&&(r.inventory[food]??0)>=1)return {action:{type:'eat',item:food},reason:'饥饿且带有一整份自有食物，优先餐食、其次根菜或浆果'};
+ if(r.hunger>=35&&(r.inventory[food]??0)>=1)return {action:{type:'eat',item:food},reason:'饥饿且带有一整份自有食物，优先餐食、其次根菜、水果或浆果'};
  // Immediate needs come before optional stocking: an empty bag must not
  // send a thirsty or exhausted resident on a food-reserve trip.
  if(r.hunger>=35){
@@ -144,11 +146,11 @@ export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string
    if(mvpCanStart(w,r,action))return {action,reason:giveWater?'向眼前熟人提出一份清水换一份浆果，等待对方独立选择；规则示例':'向眼前熟人提出一份浆果换一份清水，等待对方独立选择；规则示例'};
   }
  }
- if((r.inventory.berry??0)<3){
+ if((r.inventory.berry??0)+(r.inventory.fruit??0)<3){
   const source=w.resources.filter(s=>s.kind==='bush'&&s.amount>=1&&r.knownResources.includes(s.id)).sort((a,b)=>distance(r.at,a.at)-distance(r.at,b.at)).find(s=>berryApproachPath(w,r.at,s)!==null);
   // Reserve three portions in total, not three more on every top-up.
   // Gathering uses whole units; never debit stock or credit inventory here.
-  if(source)return {action:{type:'gather',resourceId:source.id,quantity:Math.min(Math.ceil(3-(r.inventory.berry??0)),Math.floor(source.amount))},reason:'前往已知果丛补足三份浆果储备的缺口'};
+  if(source)return {action:{type:'gather',resourceId:source.id,quantity:Math.min(Math.ceil(3-(r.inventory.berry??0)-(r.inventory.fruit??0)),Math.floor(source.amount))},reason:'前往已知果丛补足三份浆果或水果储备的缺口'};
  }
  // Keep the remaining portion; replenish only after the carried supply runs out.
  const waterTrip=(r.inventory.water??0)<1?mvpWaterTrip(w,r):null;
@@ -170,8 +172,8 @@ export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string
  }
  // Garden only after personal needs/reserves; no borrowed seeds or water.
  if(r.hunger<35&&r.energy>=70&&(mvpThirst(w,r)??0)<50-1e-9){
-  const plot=w.plots.find(p=>p.ownerId===r.id&&p.id.startsWith('mvp-garden-'));
-  if(plot){
+  const plots=w.plots.filter(p=>p.ownerId===r.id&&p.id.startsWith('mvp-garden-')).sort((a,b)=>Number(!!b.crop)-Number(!!a.crop));
+  for(const plot of plots){
    const crop=plot.crop,days=crop?Number(w.definitions[crop.definition]?.data.growthDays):0;
    const action:Action|null=crop&&crop.growth>=days?{type:'harvest',plotId:plot.id}:!crop&&(r.inventory.seed??0)>=1?{type:'plant',plotId:plot.id}:crop&&crop.wateredDay!==Math.floor(w.minute/1440)&&(r.inventory.water??0)>=2?{type:'water',plotId:plot.id}:null;
    if(action&&mvpCanStart(w,r,action))return {action,reason:action.type==='plant'?'用自己的有限种子播种小菜园':action.type==='water'?'保留一份饮水，用另一份清水浇灌自己的菜园':'收获自己已经成熟的根菜'};

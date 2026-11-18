@@ -134,22 +134,28 @@ static func world_summary(world: Dictionary) -> String:
 		return clock_text + "\n环境资源：未知"
 	var berries := 0.0
 	var water := 0.0
+	var fruits := 0.0
+	var wood := 0.0
+	var stone := 0.0
 	var stocked_bushes := 0
 	var bush_count := 0
 	for source in resources:
-		if not source is Dictionary or source.get("kind") not in ["bush", "spring"]:
+		if not source is Dictionary or source.get("kind") not in ["bush", "spring", "tree", "rock"]:
 			continue
 		var amount = source.get("amount")
 		if not (amount is int or amount is float) or not is_finite(amount) or amount < 0:
 			return clock_text + "\n环境资源：未知"
-		if source.kind == "bush":
+		if source.kind == "bush" and source.get("foodItem") == "fruit":
+			fruits += amount
+		elif source.kind == "bush":
 			berries += amount
 			bush_count += 1
 			# Match scene nonempty-source coloring; not a harvestability claim.
 			if amount > 0: stocked_bushes += 1
-		else:
-			water += amount
-	return clock_text + "\n环境浆果 %s · 有果果丛 %d/%d\n泉水余量 %s（不含居民库存）" % [number_label(berries), stocked_bushes, bush_count, number_label(water)]
+		elif source.kind == "spring": water += amount
+		elif source.kind == "tree": wood += amount
+		elif source.kind == "rock": stone += amount
+	return clock_text + "\n浆果 %s · 有果浆果丛 %d/%d · 野果 %s\n水 %s · 木材 %s · 石料 %s\n以上为环境余量，不含居民库存" % [number_label(berries), stocked_bushes, bush_count, number_label(fruits), number_label(water), number_label(wood), number_label(stone)]
 
 static func inventory_label(person: Dictionary) -> String:
 	var inventory = person.get("inventory")
@@ -187,7 +193,7 @@ static func life_action(person: Dictionary, world: Dictionary) -> String:
 		verb = "采集"
 		for source in world.get("resources", []):
 			if source.get("id") == action.get("resourceId"):
-				verb = "取水" if source.get("kind") == "spring" else "采浆果" if source.get("kind") == "bush" else "采集" + resource_name(str(source.get("kind")))
+				verb = "取水" if source.get("kind") == "spring" else ("采野果" if source.get("foodItem") == "fruit" else "采浆果") if source.get("kind") == "bush" else "采集" + resource_name(str(source.get("kind")))
 	var path = activity.get("path", [])
 	var room = activity.get("room")
 	var travelling: bool = path is Array and not path.is_empty()
@@ -317,7 +323,7 @@ static func resident_room_position(at: Variant, room: Dictionary) -> bool:
 # Central vocabulary for protocol enums; extend here when adding actions/items.
 # Unknown protocol identifiers are not user-facing names.
 static func item_name(code: String) -> String:
-	return {"meal": "餐食", "seed": "种子", "turnip": "根菜", "berry": "浆果", "water": "水", "wood": "木材", "stone": "石头", "fish": "鱼", "grain": "谷物", "meat": "肉", "bread": "面包"}.get(code, "未知物品")
+	return {"meal": "餐食", "seed": "种子", "turnip": "根菜", "berry": "浆果", "fruit": "野果", "water": "水", "wood": "木材", "stone": "石头", "fish": "鱼", "grain": "谷物", "meat": "肉", "bread": "面包"}.get(code, "未知物品")
 
 static func action_name(code: String) -> String:
 	return {"mvpCollectSeed": "领取种子", "mvpSaveSeed": "留种", "cook": "做饭", "plant": "播种", "water": "浇水", "harvest": "收获", "wait": "等待", "gather": "采集", "eat": "进食", "mvpDrink": "饮水", "rest": "休息", "move": "移动", "sleep": "睡觉", "fish": "钓鱼", "talk": "交谈"}.get(code, "未知行为")
@@ -340,6 +346,7 @@ static func garden_layout(map: Dictionary) -> Dictionary:
 	return layout if layout is Dictionary and layout.get("version") == 1 else {}
 
 static func resource_place_name(map: Dictionary, resource: Dictionary) -> String:
+	if resource.get("kind") == "bush" and resource.get("foodItem") == "fruit": return "野果灌丛"
 	var layout := garden_layout(map)
 	if not layout.is_empty():
 		if resource.get("id") == "mvp-spring" and valid_position(layout.get("well")): return "灶堂水井"
@@ -369,3 +376,17 @@ static func memory_summary(person: Dictionary) -> String:
 	if records.is_empty(): lines.append("当前快照无可显示记录，不代表没有经历。")
 	lines.append("仅为居民收到的记录节选，不是完整记忆、模型思维或事实核验。")
 	return "\n".join(lines)
+
+# Only describes the received definition; it does not predict the next harvest.
+static func resource_renewal(world: Dictionary, resource: Dictionary) -> String:
+	var ecology: Variant = world.get("mvpResources")
+	if ecology is Dictionary and ecology.get("version") == 1:
+		var renewal: Variant = ecology.get("renewal", {}).get(str(resource.get("id", "")))
+		if renewal is Dictionary:
+			var rate: Variant = renewal.get("perDay")
+			if (rate is float or rate is int) and is_finite(float(rate)) and rate > 0:
+				return "\n每日恢复 %.2f 份 · 达容量上限即停止\n按世界时间积累，采集不重置恢复进度" % float(rate)
+	var days: Variant = resource.get("regrowthDays")
+	if not (days is float or days is int) or not is_finite(float(days)) or days < 0: return "\n恢复规则未知"
+	if days == 0: return "\n有限资源 · 耗尽后不自动再生"
+	return "\n恢复周期 %s 游戏日 · 以世界结算为准" % str(days)

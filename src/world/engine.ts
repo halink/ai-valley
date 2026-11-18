@@ -1,3 +1,4 @@
+import {advanceMvpResources,mvpResourceItem} from './mvp-resources.js';
 import {isMvpSeedAction,mvpSeedReason,mvpSeedPlace,completeMvpSeed} from './mvp-seeds.js';
 import {mvpSleepProblem,mvpDiningPlace} from './mvp-rooms.js';
 import {hasMvpHamlet,MVP_HALL} from '../shared/mvp-hamlet.js';
@@ -420,7 +421,7 @@ function completeAtomic(world:World,r:Resident,a:Action,definition:string,elapse
   const resource=world.resources.find(v=>v.id===a.resourceId);if(!resource||distance(resource.at,r.at)>1||resource.kind==='spring'&&!canContactSpring(world,r,resource)||resource.kind==='bush'&&!canContactBerry(world,r,resource)||resource.amount<a.quantity)return '资源或实际位置已经变化';
   if(resource.kind==='spring'&&resource.floodDamage?.clearedAt===null)return '泉水已淤塞，不能取得安全清水';
   if(resource.kind==='tree'){const axe=world.industry?.tools.find(t=>t.ownerId===r.id&&!t.location&&t.kind==='axe'&&t.durability>0);if(axe)axe.durability=Math.max(0,axe.durability-1);}
-  resource.amount-=a.quantity;resource.lastHarvest=world.minute;const item=resource.kind==='tree'?'wood':resource.kind==='rock'?'stone':resource.kind==='bush'?'berry':'water';r.inventory[item]=(r.inventory[item]??0)+a.quantity;r.energy=Math.max(0,r.energy-a.quantity*0.5);const event=record(`${r.name}采集了 ${a.quantity} 份${names[item]}。`);
+  resource.amount-=a.quantity;resource.lastHarvest=world.minute;const item=mvpResourceItem(world,resource);r.inventory[item]=(r.inventory[item]??0)+a.quantity;r.energy=Math.max(0,r.energy-a.quantity*0.5);const event=record(`${r.name}采集了 ${a.quantity} 份${names[item]}。`);
   if(item==='berry')recordFoodFlow(world,{type:'source_added',action:'gather_berry',at:world.minute,residentId:r.id,eventId:event.id,planId:r.activity!.planId,container:'person:'+r.id,definition,sourceId:resource.id,output:{berry:a.quantity}});return null;
  }
  if(a.type==='plant'||a.type==='water'||a.type==='harvest'){
@@ -673,11 +674,12 @@ export function stepWorld(world:World,minutes:number,options:{exactEndMinute?:nu
    ensureCensus(world);
   }
   for(const offer of world.offers)if(offer.status==='open'&&(offer.expiresAt<=world.minute||!world.residents.some(r=>r.id===offer.actorId&&living(r))))offer.status='expired';
+  advanceMvpResources(world);
   const day=Math.floor(world.minute/DAY);
   if(day!==previousDay){
    const previousWeather=world.weather;world.weather=((day*17+world.seed)%11)<3?'rain':'sun';
    for(const p of world.plots){if(!p.crop)continue;const def=world.definitions[p.crop.definition];if((def.data.seasons as string[]).includes(calendar(world.minute-1).season)&&(p.crop.wateredDay===previousDay||previousWeather==='rain'))p.crop.growth=Math.min(Number(def.data.growthDays),p.crop.growth+1);p.crop.lastGrowthDay=day;}
-   if(!world.production)for(const res of world.resources)if(res.regrowthDays>0&&res.amount<res.max&&world.minute-res.lastHarvest>=res.regrowthDays*DAY){res.amount=Math.min(res.max,res.amount+1);res.lastHarvest=world.minute;}
+   if(!world.production)for(const res of world.resources)if(!world.mvpResources?.renewal[res.id]&&res.regrowthDays>0&&res.amount<res.max&&world.minute-res.lastHarvest>=res.regrowthDays*DAY){res.amount=Math.min(res.max,res.amount+1);res.lastHarvest=world.minute;}
   }
  }
  world.revision++;

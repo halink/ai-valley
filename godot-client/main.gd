@@ -270,20 +270,24 @@ func _choose_plot(id: String, locate := true) -> void:
 
 func _resource(id: String) -> Dictionary:
 	for resource in world.get("resources", []):
-		if resource.get("id") == id and resource.get("kind") in ["bush", "spring"]: return resource
+		if resource.get("id") == id and resource.get("kind") in ["bush", "spring", "tree", "rock"]: return resource
 	return {}
 
 func _resource_title(resource: Dictionary) -> String:
 	if resource.is_empty(): return "资源地点"
 	var title := Snapshot.resource_place_name(world.map, resource)
 	if resource.kind == "spring" and title != Snapshot.resource_name(resource.kind): return title
-	return "%s · %s, %s" % [title, str(resource.at.x), str(resource.at.y)]
+	return "%s · %d,%d" % [title, int(resource.at.x), int(resource.at.y)]
 
 func _resource_stock(resource: Dictionary) -> String:
 	var amount: Variant = resource.get("amount")
 	if not (amount is float or amount is int) or not is_finite(float(amount)) or amount < 0:
 		return "当前余量未知"
-	return "当前已耗尽" if amount == 0 else "当前余量 %s 份" % str(amount)
+	var capacity: Variant = resource.get("max")
+	var stock := "当前已耗尽" if amount == 0 else "当前余量 %s 份" % str(amount)
+	if (capacity is float or capacity is int) and is_finite(float(capacity)) and capacity >= amount:
+		stock += " · 容量 %s" % str(capacity)
+	return stock
 
 func _choose_resource(id: String, locate := true) -> void:
 	if not connected or _resource(id).is_empty():
@@ -452,7 +456,7 @@ func _update_hud() -> void:
 		if not plot is Dictionary or not str(plot.get("id", "")).begins_with("mvp-garden-"): continue
 		places[plot.id] = {"title": GardenObservation.title(world, plot), "note": GardenObservation.stage(world, plot) if connected else "状态已过期", "kind": "garden"}
 	for resource in world.get("resources", []):
-		if resource.get("kind") not in ["bush", "spring"]: continue
+		if resource.get("kind") not in ["bush", "spring", "tree", "rock"]: continue
 		places[resource.id] = {"title": _resource_title(resource), "note": _resource_stock(resource) if connected else "状态已过期", "kind": resource.kind}
 	hud.update_directory(people, places)
 	var summary := Snapshot.world_summary(world) if connected else ""
@@ -504,7 +508,7 @@ func _update_place_card() -> void:
 	if connected and not selected_resource.is_empty():
 		var resource := _resource(selected_resource)
 		if not resource.is_empty():
-			var note := _resource_stock(resource) + "\n采集须居民亲自到达并完成行动\n是否前往由居民自己决定\n资源余量不等于随身库存"
+			var note := _resource_stock(resource) + Snapshot.resource_renewal(world, resource) + "\n采集须居民亲自到达并完成行动\n是否前往由居民自己决定\n资源余量不等于随身库存"
 			hud.show_place(selected_resource, _resource_title(resource), note, false)
 			return
 	if connected and not selected_plot.is_empty():

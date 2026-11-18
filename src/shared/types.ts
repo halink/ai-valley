@@ -13,7 +13,7 @@ export interface KnownBuilding {
  id:string;kind:BuildingKind;name:string;door:Vec;ownerId?:string;
  observed?:{atMinute:number;condition:number;capacity?:number;ownResidence?:boolean;ownBed?:boolean};
 }
-export interface Resource {id:string;kind:'tree'|'rock'|'bush'|'spring';at:Vec;amount:number;max:number;regrowthDays:number;lastHarvest:number;floodDamage?:{disasterId:string;at:number;clearedAt:number|null};}
+export interface Resource {foodItem?:'fruit';id:string;kind:'tree'|'rock'|'bush'|'spring';at:Vec;amount:number;max:number;regrowthDays:number;lastHarvest:number;floodDamage?:{disasterId:string;at:number;clearedAt:number|null};}
 export interface Plot {id:string;at:Vec;ownerId:string;crop:null|{definition:string;planted:number;growth:number;wateredDay:number;lastGrowthDay:number};}
 export interface PartnershipEnd {kind:'dating'|'married';startedAt:number|null;marriedAt:number|null;endedAt:number|null;reason:'death';deceasedId:string|null;}
 export interface Relation {partnerSince?:number;marriedAt?:number;pastPartnerships?:Array<PartnershipEnd&{eventId:string}>;targetId:string;affection:number;trust:number;conflict:number;lastInterpretation?:import('./social-life.js').PersonalInterpretation;kin?:'parent'|'child'|'sibling';adoptive?:'parent'|'child'|'sibling';partner?:'dating'|'married';evidence:string[];}
@@ -126,7 +126,7 @@ export interface ModelCharge {startedAt:number;input:number;output:number;finish
 export interface ModelAdmissionCancellation {actorId:string;model:string;requestNumber:number;revision:number;atMs:number;monotonicNs:string;
  count:number;baselineRequests:number;baselineCancellations:number;previousReceiptHash:string|null;}
 export interface ModelMetrics {selfHostedCooldowns?:Record<string,{observedAt:number;blockedUntil:number;limitCount:number}>;admissionCancellation?:ModelAdmissionCancellation;regionalDecisions?:number;localDecisions?:number;requests:number;successes:number;failures:number;inputTokens:number;outputTokens:number;lastLatencyMs:number;unmeteredFailures?:number;lastError:string|null;inFlight:string[];model:string;configured:boolean;lastAttemptModel?:string;usageWindow?:Record<string,ModelCharge[]>;routing?:{primary:string;primaryConfigured:boolean;backup:string;backupConfigured:boolean};}
-export interface World {mvpSeeds?:import('./mvp-seeds.js').MvpSeeds;mvpRooms?:{version:1;adoptedAt:number};mvpDrinking?:import('./mvp-drinking.js').MvpDrinking;ferries?:import('./ferry.js').FerryState;buildingMigrations?:import('./building-migration.js').BuildingUpgrade[];regions?:Array<{id:string;name:string;openedAt:number;width:number;height:number;access:Vec;sourceIds:string[];fishKeys:string[]}>;
+export interface World {mvpResources?:import('./mvp-resources.js').MvpResources;mvpSeeds?:import('./mvp-seeds.js').MvpSeeds;mvpRooms?:{version:1;adoptedAt:number};mvpDrinking?:import('./mvp-drinking.js').MvpDrinking;ferries?:import('./ferry.js').FerryState;buildingMigrations?:import('./building-migration.js').BuildingUpgrade[];regions?:Array<{id:string;name:string;openedAt:number;width:number;height:number;access:Vec;sourceIds:string[];fishKeys:string[]}>;
  pregnancyPreparation?:import('./pregnancy-preparation.js').PregnancyPreparationState;
  regionSurveys?:import('./region-survey.js').RegionSurveyState;
  waterSupply?:import('./water-supply.js').WaterSupplyState;
@@ -184,7 +184,7 @@ export interface DecisionContext {
  actor:Pick<Resident,'id'|'name'|'traits'|'hunger'|'energy'|'health'|'inventory'|'skills'|'intention'|'at'|'homeId'|'lastFailure'|'recentActions'> & {coins?:number;agency?:Resident['agency'];barterEligible?:boolean};
  bounds:{width:number;height:number};minute:number;season:Season;weather:World['weather'];
  people:Array<Pick<Resident,'id'|'name'|'at'|'intention'|'status'> & {inside?:string|null;roomAt?:Vec|null;relation:Relation|null;talkEligible?:boolean;interactionEligible?:boolean;barterEligible?:boolean;talkDistance?:number;bodyObservation?:import('./body-observation.js').BodyObservation}>;
- mvpKnownSources?:Array<{id:string;kind:'bush'|'spring';at:Vec}>;
+ mvpKnownSources?:Array<{id:string;kind:'bush'|'spring';foodItem?:'fruit';at:Vec}>;
  buildings:KnownBuilding[];resources:Array<Omit<Resource,'floodDamage'>&{waterBlocked?:boolean}>;plots:Array<Plot&{observed?:import('./crop-observation.js').CropObservation}>;knownLand:Array<{id:string;at:Vec}>;offers:Offer[];proposals:Proposal[];memories:Memory[];
 }
 export interface ModelDecision {intention:string;actions:Action[];}

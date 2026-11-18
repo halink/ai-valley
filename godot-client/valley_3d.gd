@@ -741,7 +741,7 @@ func draw_resources(world: Dictionary) -> void:
 		# Batch each source separately: sharing a material must not merge identities.
 		var source := Node3D.new()
 		actors.add_child(source)
-		if resource.kind in ["spring", "bush"]:
+		if resource.kind in ["spring", "bush", "tree", "rock"]:
 			source.set_meta("resource_id", str(resource.id))
 			resource_positions[str(resource.id)] = at
 		match resource.kind:
@@ -753,7 +753,11 @@ func draw_resources(world: Dictionary) -> void:
 					at = rim
 				else:
 					plants.spring(source, at, float(resource.amount))
-			"bush": plants.berry_bush(source, at, float(resource.amount))
+			"bush":
+				if resource.get("foodItem") == "fruit": plants.fruit_shrub(source, at, float(resource.amount))
+				else: plants.berry_bush(source, at, float(resource.amount))
+			"tree": plants.resource_tree(source, at, float(resource.amount))
+			"rock": plants.resource_rock(source, at, float(resource.amount))
 			_: craft.stone(source, at + Vector3.UP * .171, Vector3(.55, .42, .50), craft.mat("a7a397"), int(at.x + at.z))
 		craft.batch(source)
 		var label := Label3D.new()
