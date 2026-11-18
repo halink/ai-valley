@@ -15,6 +15,7 @@ signal place_labels_changed(enabled: bool)
 const Art = preload("res://valley_interface_style.gd")
 const ValleyJournal = preload("res://valley_journal.gd")
 const ValleyRelationships = preload("res://valley_relationships.gd")
+const EnvironmentPreview = preload("res://environment_preview.gd")
 const Snapshot = preload("res://snapshot.gd")
 
 # Place-register category sketches, in the palette of the scene meshes.
@@ -68,6 +69,8 @@ class RoofSketch extends Control:
 		draw_colored_polygon(path, color)
 
 var root: Control
+var environment_plate: PanelContainer
+var environment_view: EnvironmentPreview
 var brand: VBoxContainer
 var clock_label: Label
 var dock: HBoxContainer
@@ -218,6 +221,12 @@ func _build_navigation() -> void:
 	for ink in [wordmark, clock_label]:
 		ink.add_theme_color_override("font_outline_color", Color(Art.CREAM, .82))
 		ink.add_theme_constant_override("outline_size", 2)
+
+	environment_plate = _panel(Art.leaf(Vector4(10, 8, 12, 8)))
+	environment_plate.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	environment_view = EnvironmentPreview.new()
+	environment_plate.add_child(environment_view)
+	environment_plate.visible = false
 
 	dock = HBoxContainer.new()
 	dock.add_theme_constant_override("separation", 5)
@@ -491,6 +500,8 @@ func _layout() -> void:
 	layout_queued = false
 	var size := root.size
 	brand.position = Vector2(29, 18)
+	environment_plate.position = Vector2(24, 119)
+	environment_plate.reset_size()
 	tools.position = Vector2(size.x - tools.size.x - 22, 20)
 	dock.position = Vector2((size.x - dock.size.x) * .5, size.y - dock.size.y - 21)
 	lens.position = Vector2(size.x - lens.size.x - 22, size.y - lens.size.y - 22)
@@ -698,6 +709,11 @@ func show_relations(world: Dictionary, history: Variant, connected: bool) -> voi
 func show_history(records: Array[Dictionary], connected: bool) -> void:
 	journal.present(records, connected)
 	recent_label.text = str(records[0].line) if not records.is_empty() else ""
+	_queue_layout()
+
+func show_environment(value: Dictionary, minute: float, stale: bool) -> void:
+	environment_view.present(value, minute, stale)
+	environment_plate.visible = environment_view.visible
 	_queue_layout()
 
 func show_transport(clock: String, mode: String, status_text: String, world_summary: String, diagnostics: String, source: String) -> void:

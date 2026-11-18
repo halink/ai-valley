@@ -22,6 +22,7 @@ var show_place_labels := false
 var camera: Camera3D
 var sun: DirectionalLight3D
 var backdrop: TextureRect
+var environment_preview: Dictionary = {}
 var sky_environment: Environment
 var building_doors := {}
 var plot_positions := {}
@@ -278,6 +279,16 @@ func _ready() -> void:
 func update_daylight(world: Dictionary) -> void:
 	var minute = world.get("minute")
 	if not (minute is int or minute is float) or not is_finite(minute) or minute < 0 or minute > 9007199254740991:
+		return
+	if not environment_preview.is_empty():
+		var level: float = environment_preview.daylightPermille / 1000.0
+		var cloud: float = environment_preview.cloudPermille / 1000.0
+		# Readability exposure is not sunlight or crop energy. No moving particles.
+		sun.light_energy = lerpf(0.29, 0.68, level)
+		sun.light_color = Color("b9c7dd").lerp(Color("fff4e4"), level).lerp(Color("c6d0d4"), cloud * .22)
+		backdrop.modulate = Color("acbbcc").lerp(Color.WHITE, level).lerp(Color("b4bfc2"), cloud * .24)
+		sky_environment.ambient_light_color = Color("a6b5d3").lerp(Color("d8e0d6"), level)
+		sky_environment.ambient_light_energy = lerpf(0.56, 0.51, level)
 		return
 	var hour := fmod(float(minute), 1440.0) / 60.0
 	var elevation := sin((hour - 6.0) / 24.0 * TAU)

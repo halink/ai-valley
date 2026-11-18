@@ -1,6 +1,7 @@
 extends Node3D
 
 const Valley3D = preload("res://valley_3d.gd")
+const EnvironmentPreview = preload("res://environment_preview.gd")
 const ObserverHud = preload("res://observer_hud.gd")
 const JournalRecords = preload("res://journal_records.gd")
 const Snapshot = preload("res://snapshot.gd")
@@ -17,6 +18,7 @@ var http: HTTPRequest
 var timer: Timer
 var world: Dictionary = {}
 var observation: Dictionary = {}
+var environment_preview: Dictionary = {}
 var relationship_history: Variant
 var selected_resident := ""
 var selected_building := ""
@@ -83,6 +85,8 @@ func _connect_server(origin: String) -> void:
 	valley.settle_motion()
 	_set_follow(false)
 	_reset_context()
+	environment_preview = {}
+	valley.environment_preview = {}
 	world = {}
 	observation = {}
 	relationship_history = null
@@ -134,6 +138,9 @@ func _apply_snapshot(parsed: Dictionary) -> void:
 	mode_text = Snapshot.mode_label(parsed)
 	var mode: Dictionary = parsed.get("mvp", {})
 	decision_source = str(mode.get("driver", ""))
+	var sample: Variant = mode.get("environmentPreview")
+	environment_preview = sample if decision_source == "local-rules" and mode.get("ephemeral") == true and EnvironmentPreview.valid(sample) else {}
+	valley.environment_preview = environment_preview
 	source_tag = {"local-rules": "规则演示", "model": "已配置模型", "disabled": "模型禁用"}.get(decision_source, "")
 	if mode.get("fault") == "unresolved_model_request": source_tag = "保护停表"
 	connected = true
@@ -467,6 +474,7 @@ func _update_hud() -> void:
 		transport += " · 快照 " + Snapshot.number_label(world.revision)
 		if world.clock.paused and notice_until == 0: hud.show_feedback("世界已暂停")
 		elif notice_until == 0: hud.show_feedback("")
+	hud.show_environment(environment_preview, float(world.get("minute", 0)), not connected)
 	hud.show_transport(clock, mode_text, transport, summary.get_slice("\n", 1), Snapshot.model_status(observation), source_tag if connected else "")
 	_update_resident_card()
 	_update_place_card()
@@ -514,7 +522,7 @@ func _update_place_card() -> void:
 	if connected and not selected_plot.is_empty():
 		var plot := _plot(selected_plot)
 		if not plot.is_empty():
-			hud.show_place(selected_plot, GardenObservation.title(world, plot), GardenObservation.details(world, plot), false)
+			hud.show_place(selected_plot, GardenObservation.title(world, plot), GardenObservation.details(world, plot, not environment_preview.is_empty()), false)
 			return
 	if building.is_empty() or not connected:
 		hud.show_place("", "", "", false)
