@@ -23,6 +23,8 @@ const MAX_STATE_BYTES=256*1024*1024;
 /** Validate only the compatibility envelope, not every game's domain rule. */
 export function assertWorldCompatibility(value:unknown):asserts value is Record<string,unknown> {
  if(!record(value))fail('save_invalid_world');
+ // Reject presence, not a recognized version/truthy value. No upgrade escape.
+ if(owns(value,'simulationOnly'))fail('save_simulation_only');
  if(value.schemaVersion!==1)fail('save_unsupported_world_schema');
  for(const field of unsupportedUpgradeFields)if(owns(value,field))fail('save_unsupported_'+field);
  if(typeof value.id!=='string'||!value.id||!Number.isSafeInteger(value.revision)||Number(value.revision)<0

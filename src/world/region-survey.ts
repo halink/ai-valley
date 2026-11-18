@@ -1,3 +1,4 @@
+import {copyForSimulation} from './simulation-copy.js';
 import type {FormalOpportunity,Resident,Tile,Vec,World} from '../shared/types.js';
 import type {RegionSurvey,RegionSurveyAction} from '../shared/region-survey.js';
 import {REGION_DEPTH,REGION_HALF_SPAN} from '../shared/region-survey.js';
@@ -6,7 +7,6 @@ import {ageYears,DAY} from './time.js';
 import {distance,findPath,same,walkable} from './navigation.js';
 import {emitEvent,emitLedgerEvent} from './events.js';
 import {openRegion,type RegionPlan} from './region-extension.js';
-import {inheritReceiptHistory} from './receipts.js';
 
 const surveys=(w:World)=>w.regionSurveys?.surveys??[];
 const capable=(r:Resident)=>r.status==='alive'&&r.health>0&&r.residency!=='outside'&&r.canDecide&&r.canExpress;
@@ -84,7 +84,7 @@ function openSurvey(w:World,r:Resident,s:RegionSurvey):string|null {
  for(let depth=1;depth<=REGION_DEPTH;depth++)for(let across=-REGION_HALF_SPAN;across<=REGION_HALF_SPAN;across++){
   const x=s.at.x+(s.edge==='east'?depth:across),y=s.at.y+(s.edge==='south'?depth:across);tiles[y*width+x]='grass';
  }
- const candidate=structuredClone(w);inheritReceiptHistory(w,candidate);
+ const candidate=copyForSimulation(w);
  const actor=candidate.residents.find(p=>p.id===r.id)!;actor.plan=null;actor.activity=null;
  // No other pending hypothetical project may recursively open more geography.
  for(const p of candidate.residents)if(p.id!==r.id){p.plan=null;p.activity=null;}
