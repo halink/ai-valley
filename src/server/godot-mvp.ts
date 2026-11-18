@@ -1,3 +1,5 @@
+import {seasonalPersonalWeather} from './mvp-seasonal-context.js';
+import {personallyFeelsRain,shelterRoomWithinIdleTime,MVP_IDLE_WAIT_MINUTES} from '../world/mvp-shelter.js';
 import {preservationPreparation} from './mvp-preservation-policy.js';
 import {adoptMvpPreservation,preservationObservation,validateMvpPreservation} from '../world/mvp-preservation.js';
 import {mvpNutritionBuffer,mvpEdibleQuantity} from './mvp-nutrition-buffer.js';
@@ -36,11 +38,12 @@ import type {Action,Resident,Snapshot,Tile,World} from '../shared/types.js';
 
 export const GODOT_MVP_PORT=3414;
 export const GODOT_MVP_NOTICE='隔离核心循环：本地规则驱动，非真实模型；内存世界，退出后重置';
-export type MvpPhase='deciding'|'travelling'|'gathering'|'eating'|'resting'|'waiting'|'stopped'|'drinking'|'talking'|'planting'|'watering'|'harvesting'|'cooking'|'preserving'|'inspecting'|'installing';
+export type MvpPhase='deciding'|'travelling'|'gathering'|'eating'|'resting'|'waiting'|'stopped'|'drinking'|'talking'|'planting'|'watering'|'harvesting'|'cooking'|'preserving'|'inspecting'|'installing'|'sheltering';
 export function mvpPhase(r:Resident):MvpPhase {
  if(r.status!=='alive')return 'stopped';
  if(!r.activity)return 'deciding';
  if(r.activity.path.length||r.activity.room?.path.length)return 'travelling';
+ if(r.activity.action.type==='mvpShelter'&&r.inside===MVP_HALL&&r.roomAt&&Number.isFinite(r.activity.mvpShelterEnteredAt))return 'sheltering';
  if(r.activity.action.type==='mvpInspect')return 'inspecting';
  if(r.activity.action.type==='mvpPreservation')return r.activity.action.operation==='install'?'installing':'preserving';
  return ({cook:'cooking',plant:'planting',water:'watering',harvest:'harvesting',talk:'talking',mvpDrink:'drinking',gather:'gathering',eat:'eating',sleep:'resting',wait:'waiting'} as const)[r.activity.action.type as 'gather'|'eat'|'sleep'|'wait']??'waiting';
@@ -218,7 +221,13 @@ export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string
   }
  }
  if(r.hunger<35&&r.energy>=70&&(mvpThirst(w,r)??0)<50-1e-9){const preparation=preservationPreparation(w,r);if(preparation&&mvpCanStart(w,r,preparation.action))return preparation;}
- return {action:{type:'wait',minutes:30},reason:'当前没有可执行的规则行动，短暂等待'};
+ // Replace only the previous outdoor idle fallback. Keep a five-point
+ // margin from urgent needs and limit the real journey, never skip duties.
+ if(r.hunger<=30&&r.energy>=75&&(mvpThirst(w,r)??0)<=45&&personallyFeelsRain(w,r)){
+  if(shelterRoomWithinIdleTime(w,r))
+   return {action:{type:'mvpShelter'},reason:'本人在户外察觉雨水，其他行动已处理，选择步行到共屋前室短候'};
+ }
+ return {action:{type:'wait',minutes:MVP_IDLE_WAIT_MINUTES},reason:'当前没有可执行的规则行动，短暂等待'};
 }
 /** Rule-only farming preference. Engine permissions never enforce these quotas. */
 function chooseAgricultureRule(w:World,r:Resident):{action:Action;reason:string}|null {
@@ -247,12 +256,12 @@ export function createMvpSession(options:{world?:World;commit?:(world:World,prev
  enableCompletedMovement(world);
  let serial=0,fault:string|null=null;
  const decisions:Record<string,number>={};
- const snapshot=():Snapshot&{roomViews:ReturnType<typeof roomObservation>}&{observation:ReturnType<typeof mvpObservation>;relationshipHistory:ReturnType<typeof relationshipObservation>}&{movement:ReturnType<typeof completedMovementSnapshot>;residentMovement:ReturnType<typeof residentMovementSnapshot>}&{mvp:{driver:'local-rules';notice:string;ephemeral:boolean;fault:string|null;phases:Record<string,MvpPhase>;decisions:Record<string,number>;environment:NonNullable<World['mvpClimate']>['current'];soil:ReturnType<typeof soilObservation>;agriculture:ReturnType<typeof agricultureObservation>;preservation:ReturnType<typeof preservationObservation>;nutritionBuffer:ReturnType<typeof mvpNutritionBuffer>[]}}=>({
+ const snapshot=():Snapshot&{roomViews:ReturnType<typeof roomObservation>}&{observation:ReturnType<typeof mvpObservation>;relationshipHistory:ReturnType<typeof relationshipObservation>}&{movement:ReturnType<typeof completedMovementSnapshot>;residentMovement:ReturnType<typeof residentMovementSnapshot>}&{mvp:{driver:'local-rules';notice:string;ephemeral:boolean;fault:string|null;phases:Record<string,MvpPhase>;decisions:Record<string,number>;environment:NonNullable<World['mvpClimate']>['current'];soil:ReturnType<typeof soilObservation>;agriculture:ReturnType<typeof agricultureObservation>;preservation:ReturnType<typeof preservationObservation>;residentWeather:{schemaVersion:1;atMinute:number;resident:Record<string,ReturnType<typeof seasonalPersonalWeather>>};nutritionBuffer:ReturnType<typeof mvpNutritionBuffer>[]}}=>({
   roomViews:roomObservation(world),observation:mvpObservation(world,[],[]),relationshipHistory:relationshipObservation(world),movement:completedMovementSnapshot(world),residentMovement:residentMovementSnapshot(world),world:structuredClone(world),serverTime:new Date().toISOString(),version:VALLEY_VERSION,mapRevision:'godot-mvp-map-4',
-  capabilities:{active:['小地图只读观察','本地规则采集/进食/休息闭环','有限面对面规则问候','独立选择的食水交换','同源气候与田地水账','三品种温水生长与实际耕收','本人名义两日营养缓冲','真实罐藏与批次到期（鲜食腐坏未模拟）',...(options.persistent?['规则存档与恢复']:[])],pending:['真实模型决策验收','全年冬储充分性','最终绘本素材']},
+  capabilities:{active:['小地图只读观察','本地规则采集/进食/休息闭环','有限面对面规则问候','独立选择的食水交换','同源气候与田地水账','三品种温水生长与实际耕收','本人感知与共屋短时避雨','本人名义两日营养缓冲','真实罐藏与批次到期（鲜食腐坏未模拟）',...(options.persistent?['规则存档与恢复']:[])],pending:['真实模型决策验收','全年冬储充分性','最终绘本素材']},
   // Read the published, validated point state. Legacy crop rain is separate;
   // soil water is exact; legacy crops and model decisions do not consume PAW.
-  mvp:{driver:'local-rules',notice:options.persistent?'持久规则小山谷：本地规则驱动，非真实模型':GODOT_MVP_NOTICE,ephemeral:!options.persistent,fault,phases:Object.fromEntries(world.residents.map(r=>[r.id,mvpPhase(r)])),decisions:{...decisions},environment:structuredClone(world.mvpClimate!.current),soil:soilObservation(world),agriculture:agricultureObservation(world),preservation:preservationObservation(world),nutritionBuffer:world.residents.map(r=>mvpNutritionBuffer(world,r))},
+  mvp:{driver:'local-rules',notice:options.persistent?'持久规则小山谷：本地规则驱动，非真实模型':GODOT_MVP_NOTICE,ephemeral:!options.persistent,fault,phases:Object.fromEntries(world.residents.map(r=>[r.id,mvpPhase(r)])),decisions:{...decisions},environment:structuredClone(world.mvpClimate!.current),soil:soilObservation(world),agriculture:agricultureObservation(world),preservation:preservationObservation(world),residentWeather:{schemaVersion:1,atMinute:world.minute,resident:Object.fromEntries(world.residents.map(r=>[r.id,seasonalPersonalWeather(world,r)]))},nutritionBuffer:world.residents.map(r=>mvpNutritionBuffer(world,r))},
  });
  const advance=(minutes=1)=>{
   if(!Number.isInteger(minutes)||minutes<1||minutes>60)throw new Error('MVP advances must be 1–60 whole world minutes');
@@ -274,13 +283,14 @@ export function createMvpSession(options:{world?:World;commit?:(world:World,prev
     // Keep the engine's rejected action (no inventory credit), then let the
     // next tick choose from current stock instead of freezing the whole demo.
     const gathering=new Map(world.residents.map(r=>[r.id,r.activity?.action]));
+    const shelterWorkers=new Set(world.residents.filter(r=>r.activity?.action.type==='mvpShelter'||r.plan?.actions[0]?.type==='mvpShelter').map(r=>r.id));
     const activityPlans=new Map(world.residents.map(r=>[r.id,r.activity?.planId]));
     const actionFailures:import('../world/engine.js').StepActionFailure[]=[];
     stepWorld(world,1,{actionFailures});
     for(const failed of world.residents.filter(r=>r.lastFailure)){
      const action=gathering.get(failed.id);
      if(action?.type==='talk'&&actionFailures.some(f=>f.actorId===failed.id&&f.planId===activityPlans.get(failed.id)&&f.actionType==='talk'&&f.code==='room_slot_contended'))continue;
-     if(action?.type==='mvpAgriculture'||action?.type==='mvpPreservation')continue;
+     if(action?.type==='mvpAgriculture'||action?.type==='mvpPreservation'||shelterWorkers.has(failed.id))continue;
      if(action&&isMvpSeedAction(action)&&['灶堂有限种源已领完','这处实际工位正在被另一项劳动占用'].includes(failed.lastFailure!))continue;
      const source=action?.type==='gather'?world.resources.find(s=>s.id===action.resourceId):undefined;
      const depleted=action?.type==='gather'&&source&&source.amount<action.quantity&&distance(failed.at,source.at)<=1

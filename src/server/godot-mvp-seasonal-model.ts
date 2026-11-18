@@ -36,6 +36,7 @@ export function startLiveSeasonalModel():never {
  throw Error('seasonal_model_live_blocked_previous_request_and_billing_unverified');
 }
 function modelWorld(w:World){
+ if(w.schemaVersion===3)throw Error('seasonal_model_shelter_save_unsupported');
  assertMvpWorld(w);validateMvpClimate(w);validateMvpPreservation(w);validateSeasonalKnowledge(w);
  if(w.mvpClimate?.schemaVersion!==3||!w.mvpSoil||!w.mvpAgriculture||!w.mvpPreservation||w.simulationOnly)throw Error('seasonal_model_world_dependencies');
  const m=w.metrics;

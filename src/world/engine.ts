@@ -1,3 +1,4 @@
+import {completeMvpShelter,personallyFeelsRain,validMvpShelter,MVP_IDLE_WAIT_MINUTES,shelterRoomWithinIdleTime,shelterPlanDeadline,SHELTER_WAIT,SHELTER_UNAVAILABLE} from './mvp-shelter.js';
 import {captureSeasonalKnowledge,validateSeasonalKnowledge,validSeasonalInspect,seasonalInspectRoute,completeSeasonalInspect} from './mvp-seasonal-knowledge.js';
 import {validPreservationAction,preservationTransferReason,preservationRoute,preservationReason,completePreservation,allocatePreservationExecution,advanceMvpPreservation,reconcileMvpPreservation} from './mvp-preservation.js';
 import {validAgricultureAction,agriculturePlot,agricultureRoute,agricultureReason,completeAgriculture,allocateAgricultureExecution,registerPlantedCrop,retireCrop} from './mvp-agriculture.js';
@@ -8,7 +9,7 @@ import {advanceMvpResources,mvpResourceItem} from './mvp-resources.js';
 import {isMvpSeedAction,mvpSeedReason,mvpSeedPlace,completeMvpSeed} from './mvp-seeds.js';
 import {mvpSleepProblem,mvpDiningPlace} from './mvp-rooms.js';
 import {hasMvpHamlet,MVP_HALL} from '../shared/mvp-hamlet.js';
-import {advanceMvpThirst,mvpDrinkReason,completeMvpDrink} from './mvp-drinking.js';
+import {advanceMvpThirst,mvpThirst,mvpDrinkReason,completeMvpDrink} from './mvp-drinking.js';
 import {recordCompletedMovement} from './completed-movement.js';
 import {completedWorkIdentity} from '../shared/work-completion.js';
 import {procurementCapable,publicCargoDeliveryReason} from './public-food-procurement.js';
@@ -64,7 +65,7 @@ import {deathProof,canObserve} from './knowledge.js';
 import {initializeFunerary,advanceFunerary,funeraryTarget,completeFunerary,knownBodyLocation} from './funerary.js';
 import {reserveBody,bodyPickup,syncBodies} from './bodies.js';
 import {initializeLongCare,advanceLongCare,longCareTarget,longCareWorkError,completeLongCare} from './long-care.js';
-import {residentBed,sleepBuilding,cookingBuilding} from '../shared/rooms.js';
+import {residentBed,sleepBuilding,cookingBuilding,mvpShelterRoom} from '../shared/rooms.js';
 import {syncMedicalTransport,transportContinues,passenger,noteGroundTransportStep,expressiveTransportChoice} from './medical-transport.js';
 import {coLocated} from './proximity.js';
 import {canApproachSocialTarget,canContactSocialTarget,socialApproachPath} from './social-observation.js';
@@ -108,7 +109,7 @@ const allowedAboard=(a:Action)=>['wait','eat','talk','ferry'].includes(a.type)||
 const selfCareTransportBlocked=(w:World,r:Resident,a:Action)=>isSelfCareAction(a)&&(aboardFerry(w,r.id)&&!allowedAboard(a)||(travellingFamily(w,r.id)||familyPassenger(w,r.id)||passenger(w,r.id))&&a.type!=='wait');
 const living=(r:Resident)=>r.status==='alive'&&r.residency!=='outside';
 function nearby(a:Resident,b:Resident){return living(a)&&living(b)&&a.inside===b.inside&&distance(a.at,b.at)<=2;}
-function failure(world:World,r:Resident,error:string,failedAction?:Action){const action=failedAction??r.activity?.action??r.plan?.actions[0];if(action&&isMvpSeedAction(action))emitEvent(world,{kind:'action',actors:[r.id],place:{...r.at},roomId:r.inside,roomAt:r.roomAt?{...r.roomAt}:null,text:`${r.name}的${action.type==='mvpCollectSeed'?'取种':'留种'}未完成：${error}，未扣减或增加物资。`});if(action?.type==='socialAppointment')recordSocialAppointmentFailure(world,r,action,error);settleAgencyAction(r,r.activity?.planId??r.plan?.id??'',error);r.activity=null;r.plan=null;if(!world.rooms){r.inside=null;r.roomAt=null;}r.lastFailure=error;r.decisionDue=world.minute;r.revision++;}
+function failure(world:World,r:Resident,error:string,failedAction?:Action){const action=failedAction??r.activity?.action??r.plan?.actions[0];if(action?.type==='mvpShelter')emitEvent(world,{kind:'action',actors:[r.id],place:{...r.at},roomId:r.inside,roomAt:r.roomAt?{...r.roomAt}:null,text:`${r.name}的共屋避雨安排未完成；不计作已完成的室内短候。`});if(action&&isMvpSeedAction(action))emitEvent(world,{kind:'action',actors:[r.id],place:{...r.at},roomId:r.inside,roomAt:r.roomAt?{...r.roomAt}:null,text:`${r.name}的${action.type==='mvpCollectSeed'?'取种':'留种'}未完成：${error}，未扣减或增加物资。`});if(action?.type==='socialAppointment')recordSocialAppointmentFailure(world,r,action,error);settleAgencyAction(r,r.activity?.planId??r.plan?.id??'',error);r.activity=null;r.plan=null;if(!world.rooms){r.inside=null;r.roomAt=null;}r.lastFailure=error;r.decisionDue=world.minute;r.revision++;}
 function definitionFor(world:World,plan:Plan,action:Action):string {
  const key=action.type==='cook'?'recipe/meal':action.type==='plant'||action.type==='harvest'||action.type==='water'?'crop/turnip':action.type==='build'?`building/${action.kind}`:'action/routine';
  if(key==='action/routine')return plan.definition;
@@ -125,6 +126,7 @@ export function submitPlan(world:World,plan:Plan):{ok:boolean;error?:string} {
  if(plan.actions.some(a=>a.type==='mvpAgriculture'&&!validAgricultureAction(a)))return {ok:false,error:'新农业行动结构或操作无效'};
  const actor=world.residents.find(r=>r.id===plan.actorId);
  if(!actor||!living(actor)||(!actor.canDecide||!actor.canExpress)&&!(plan.actions.length===1&&(expressiveTransportChoice(world,actor,plan.actions[0])||!!careSelfWithdrawal(world,actor,plan.actions[0])||careExpressionWait(world,actor,plan.actions[0]))))return {ok:false,error:'人物当前无法提交新决定'};
+ if(plan.actions.some(a=>a.type==='mvpShelter')&&(world.schemaVersion===2||plan.actions.length!==1||!validMvpShelter(plan.actions[0])||!mvpShelterRoom(world,actor)||!personallyFeelsRain(world,actor)))return {ok:false,error:'避雨必须是本人感到雨水后的独立安排'};
  if(actor.revision!==plan.actorRevision)return {ok:false,error:'人物状态已变化，迟到的决定失效'};
  if(plan.actions.some(a=>a.type==='shareFoodSource')&&(plan.actions.length!==1||plan.actions.some(a=>a.type==='shareFoodSource'&&(a.receiptId!==foodSourceShareReceiptId(actor)||foodSourceShareReason(world,actor,a)))))return {ok:false,error:'须本人单独选择尚未使用的亲见地址，并与指定听者合法当面接触'};
  if(plan.actions.some(a=>a.type==='socialAppointment')&&(plan.actions.length!==1||plan.actions.some(a=>a.type==='socialAppointment'&&(socialAppointmentReason(world,actor,a)||a.operation==='offer'&&a.receiptId!==socialAppointmentReceiptId(actor)))))return {ok:false,error:'日常约见须本人单独选择当前有效条款'};
@@ -202,6 +204,7 @@ export function submitPlan(world:World,plan:Plan):{ok:boolean;error?:string} {
   world.processed.push(`plan:${plan.id}`);actor.intention=plan.intention.slice(0,180);actor.lastDecisionAt=world.minute;actor.lastFailure=null;actor.decisionDue=world.minute;actor.revision++;world.revision++;return {ok:true};
  }
  actor.plan=structuredClone(plan);actor.plan.actions=plan.actions.map(a=>structuredClone(a));
+ if(only.type==='mvpShelter'){actor.plan.createdAt=world.minute;world.schemaVersion=3;}
  // Direct API callers bind at submission; final numbered choices already carry
  // their observed terms. Never retrofit evidence onto a loaded pending action.
  for(const action of actor.plan.actions)if(action.type==='accept'&&action.offerTerms===undefined){
@@ -270,6 +273,11 @@ function targetFor(world:World,r:Resident,a:Action,definition:string,elapsed=0):
   if(!Number.isFinite(a.minutes)||a.minutes<1||a.minutes>720)return fail('休息时长须在 1–720 分钟之间');
   if(a.type==='sleep'){const b=sleepBuilding(world,r,a);if(!b||!a.buildingId&&world.rooms&&residentBed(world,r,b)===null)return fail('尚未拥有可使用的真实床位，当前住处存在床位缺口');return {target:b.door,duration:a.minutes};}
   return {target:r.at,duration:a.minutes};
+ }
+ if(a.type==='mvpShelter'){
+  const cutoff=shelterPlanDeadline(world,r);
+  const room=cutoff===null?null:shelterRoomWithinIdleTime(world,r,Math.min(MVP_IDLE_WAIT_MINUTES,cutoff-world.minute+elapsed));
+  return room?{target:{...room.building.door},duration:SHELTER_WAIT}:fail(SHELTER_UNAVAILABLE);
  }
  if(a.type==='mvpInspect')return seasonalInspectRoute(world,r,a);
  if(a.type==='mvpPreservation')return preservationRoute(world,r,a);
@@ -429,6 +437,7 @@ function completeAtomic(world:World,r:Resident,a:Action,definition:string,elapse
  const social=executeSocialAction(world,r,a);if(social.handled)return social.ok?null:social.error??'行为当前无法完成';
  const record=(text:string,kind:'action'|'construction'|'trade'|'production'='action',actors=[r.id])=>emitEvent(world,{kind,actors,place:{...r.at},text});
  if(a.type==='move'||a.type==='wait'||a.type==='sleep')return null;
+ if(a.type==='mvpShelter')return completeMvpShelter(world,r);
  if(a.type==='mvpInspect')return completeSeasonalInspect(world,r,a);
  if(a.type==='mvpPreservation')return completePreservation(world,r,a);
  if(a.type==='mvpAgriculture')return completeAgriculture(world,r,a);
@@ -542,6 +551,22 @@ function processActivity(world:World,r:Resident,minutes:number,actionFailures?:S
  if(world.mode==='formal'&&activity.action.type==='build'){failure(world,r,'旧的一次性建造已停用，请重新决定分阶段工程');return;}
  if(world.mode==='formal'&&(isSelfCareAction(activity.action)||knownAgeYears(r.bornAt,world.minute)===null)&&(!ageAllowsAction(world,r,activity.action)||isSelfCareAction(activity.action)&&!r.canExpress)){failure(world,r,'当前年龄、能力或本人自理权限已不支持继续执行');return;}
  if(r.status!=='alive'||!r.canDecide){failure(world,r,'当前身体或决定能力不支持继续执行');return;}
+ if(activity.action.type==='mvpShelter'){
+  const cutoff=shelterPlanDeadline(world,r);
+  // Even if movement slows after acceptance, never convert a completed
+  // idle-minute budget into extra optional labour or waiting.
+  if(cutoff===null||world.minute>cutoff+1e-8||
+   (world.minute>=cutoff-1e-8&&(activity.mvpShelterEnteredAt===undefined||activity.remaining>minutes+1e-8))){
+   failure(world,r,'已到原短暂等待的时限，结束可选避雨');return;
+  }
+  // Abort optional travel or waiting before the ordinary imminent food/rest
+  // thresholds. Hydration for this tick has already been advanced.
+  const body=physiology(world,r);
+  const urgent=r.hunger+body.hungerPerMinute*minutes>=35||r.energy-body.energyPerMinute*minutes<70||(mvpThirst(world,r)??0)>=50-1e-9;
+  if(urgent){failure(world,r,'已有吃喝或休息需求，停止可选避雨');return;}
+  if(r.inside===null&&!personallyFeelsRain(world,r)){failure(world,r,'本人在户外不再感到降雨，停止可选避雨');return;}
+  if(!mvpShelterRoom(world,r)){failure(world,r,SHELTER_UNAVAILABLE);return;}
+ }
  if(activity.action.type==='offer'||activity.action.type==='accept'){const error=barterActionReason(world,r,activity.action,minutes);if(error){failure(world,r,error);return;}}
  if(activity.action.type==='foreignTrade'){const a=activity.action;if(a.reserveId||world.foreignTrade?.shipments.some(s=>s.id===a.shipmentId&&s.publicReserveId)){const error=foreignReason(world,r,a);if(error){failure(world,r,error);return;}}}
  if(activity.action.type==='civic'&&activity.action.operation==='deliverReserve'){const error=publicCargoDeliveryReason(world,r,activity.action);if(error){failure(world,r,error);return;}}
@@ -631,6 +656,11 @@ function processActivity(world:World,r:Resident,minutes:number,actionFailures?:S
   if(!b||!same(b.door,r.at)){failure(world,r,'没有实际到达可使用的室内位置');return;}
   if(activity.action.type==='cook'){const problem=premisesWorkReason(world,r.id,b.id,'kitchen',world.minute-minutes,world.minute)??publicKitchenReason(world,r,b.id)??employmentKitchenReason(world,r,b.id);if(problem){failure(world,r,problem);return;}}
   r.inside=b.id;
+ }
+ if(activity.action.type==='mvpShelter'&&activity.mvpShelterEnteredAt===undefined){
+  // The room engine has now placed the resident at the real entry. Do
+  // not count this entry step as one of the indoor waiting minutes.
+  activity.mvpShelterEnteredAt=world.minute;endDecisionProtection(world,r,'decision');return;
  }
  if(activity.action.type==='mvpPreservation'){const problem=preservationReason(world,r,activity.action,true);if(problem){failure(world,r,problem);return;}activity.mvpPreservationWorked=(activity.mvpPreservationWorked??0)+Math.min(minutes,activity.remaining);}
  if(activity.action.type==='mvpAgriculture'){const problem=agricultureReason(world,r,activity.action,true);if(problem){failure(world,r,problem);return;}}

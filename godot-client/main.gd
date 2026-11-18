@@ -26,6 +26,7 @@ var environment_preview: Dictionary = {}
 var soil_observation: Dictionary = {}
 var agriculture_observation: Dictionary = {}
 var preservation_observation: Dictionary = {}
+var resident_weather: Dictionary = {}
 var valley_spirit_snapshot: Dictionary = {}
 var relationship_history: Variant
 var selected_resident := ""
@@ -97,6 +98,7 @@ func _connect_server(origin: String) -> void:
 	soil_observation = {}
 	agriculture_observation = {}
 	preservation_observation = {}
+	resident_weather = {}
 	valley_spirit_snapshot = {}
 	valley.agriculture_observation = {}
 	valley.environment_preview = {}
@@ -155,6 +157,8 @@ func _apply_snapshot(parsed: Dictionary) -> void:
 	soil_observation = SoilObservation.from_snapshot(parsed)
 	agriculture_observation = AgricultureObservation.from_snapshot(parsed)
 	preservation_observation = PreservationObservation.from_snapshot(parsed)
+	var perceptions: Variant = mode.get("residentWeather")
+	resident_weather = perceptions if perceptions is Dictionary else {}
 	valley_spirit_snapshot = {"world":{"id":world.id,"revision":world.revision,"minute":world.minute},"valleySpirit":parsed.get("valleySpirit")}
 	valley.agriculture_observation = agriculture_observation.get("plots", {})
 	valley.environment_preview = environment_preview
@@ -510,6 +514,8 @@ func _update_resident_card() -> void:
 		details = Snapshot.inventory_label(person) + "\n"
 		details += "健康 %s  ·  饥饿 %s  ·  精力 %s\n" % [Snapshot.number_label(person.get("health")), Snapshot.number_label(person.get("hunger")), Snapshot.number_label(person.get("energy"))]
 		details += Snapshot.thirst_label(world, person.id) + "\n\n"
+		details += Snapshot.resident_weather_label(resident_weather, person, world.get("minute")) + "\n"
+		if person.get("plan") is Dictionary: details += Snapshot.plan_summary(person) + "\n"
 		details += PreservationObservation.details(preservation_observation, str(person.id)) + "\n\n"
 		details += Snapshot.memory_summary(person)
 	var home_id := str(person.get("homeId", ""))

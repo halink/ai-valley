@@ -8,7 +8,7 @@
 
 ## 当前版本：小世界工程 MVP
 
-当前预览包含四位居民，浏览器可观察山谷全景和建筑内部。Node 后台负责行动与存档。本机开发入口运行临时规则世界，部署后的持久预览可启用模型决策。[版本、验证范围与后续计划](docs/godot-migration.md#当前版本与证据)
+当前预览包含四位居民，浏览器可观察山谷全景和建筑内部。Node 后台负责行动与存档。本机有临时与持久两种规则演示；本轮季节世界、避雨与谷灵客观手记均不需模型，当前不启用季节模型外发。[版本、验证范围与后续计划](docs/godot-migration.md#当前版本与证据)
 
 ## 本机开发演示
 
@@ -21,6 +21,16 @@ npm run demo:godot:web
 ```
 
 在运行后台的同一台电脑上用浏览器打开 <http://127.0.0.1:3414>，页面自动读取同源世界快照；连接失败时可点击“连接／重连”。这是本机演示地址，不是公开部署地址。浏览器需要 WebAssembly 和 WebGL 2；不要求访问者安装 Godot。详细环境、模板、导出和故障边界见 [Web MVP 说明](docs/godot-web-mvp.md)。
+
+### 持久规则小山谷（无模型）
+
+在已导出 Godot Web 的同一台电脑用专用演示存档启动（不要复用正式存档）：
+
+```sh
+VALLEY_MVP_RULES_DB="$PWD/runtime/rules-demo/world.sqlite" npm run dev:web:rules:persistent
+```
+
+浏览器打开 <http://127.0.0.1:3416>，可选居民查看当时本人户外感受、行动及共屋情况。下雨时，部分本来无事且有余力、能在原闲等时间内完成行走和短候的居民可能步行入内避雨。页面仅供观察，不派遣居民；规则演示不是模型决定，室内也不展示臆造的本人户外体感。
 
 `npm run dev`、`npm run dev:web` 与 `npm run demo:godot:web` 是同一规则 Web 服务入口，不必同时启动。`npm run build` 仅做 TypeScript 检查与后台编译，之后 `npm start` 启动编译后的同一服务；Web 资源仍须单独执行 `npm run build:godot:web`。这些命令都不是持久模型启动入口。
 

@@ -183,11 +183,33 @@ static func action_detail(person: Dictionary) -> String:
 	return activity_label(person) + " · 目标位置 " + target_text + " · 剩余工作时间 " + number_label(activity.get("remaining")) + " 世界分钟（不含路程）"
 
 # Plain observer description of the actual action, not inferred intent.
+static func resident_weather_label(sample: Dictionary, person: Dictionary, minute: Variant) -> String:
+	if not (minute is int or minute is float) or not is_finite(minute) or minute < 0:
+		return "本人现场天气观察不可用"
+	if sample.get("schemaVersion") != 1 or sample.get("atMinute") != minute or not sample.get("resident") is Dictionary:
+		return "本人现场天气观察不可用"
+	var readings: Dictionary = sample.resident
+	if not readings.has(person.get("id")): return "本人现场天气观察不可用"
+	var seen: Variant = readings.get(person.get("id"))
+	if seen == null or person.get("inside") != null or person.get("status") != "alive":
+		return "本人未作当前户外天气观察"
+	var weather := {"sun":"晴", "cloud":"阴", "rain":"雨", "snow":"雪", "mixed":"雨雪混合"}
+	var temperatures := {"cold":"偏冷", "mild":"温和", "warm":"偏热"}
+	var humidity := {"dry":"偏干", "ordinary":"无明显干湿感", "humid":"潮湿"}
+	if not seen is Dictionary or not weather.has(seen.get("condition")) or not temperatures.has(seen.get("temperature")) or not humidity.has(seen.get("humidity")):
+		return "本人现场天气观察不可用"
+	return "本人户外所感（游戏分钟 %s）：%s · %s · %s" % [number_label(minute), weather[seen.condition], temperatures[seen.temperature], humidity[seen.humidity]]
+
 static func life_action(person: Dictionary, world: Dictionary) -> String:
 	var activity = person.get("activity")
 	if not activity is Dictionary: return activity_label(person)
 	var action: Dictionary = activity.get("action", {})
 	var kind := str(action.get("type", ""))
+	if kind == "mvpShelter":
+		var entered: Variant = activity.get("mvpShelterEnteredAt")
+		var now: Variant = world.get("minute")
+		var actual: bool = (entered is int or entered is float) and is_finite(entered) and entered >= 0 and (now is int or now is float) and is_finite(now) and now >= entered
+		return "已入共屋前室 · 短候" if actual and person.get("inside") == "mvp-home" and valid_position(person.get("roomAt")) else "前往共屋 · 本人在户外察觉降雨"
 	var verb: String = {"eat":"吃饭", "sleep":"休息", "mvpDrink":"喝水", "talk":"交谈", "plant":"播种", "water":"浇菜", "harvest":"收菜", "cook":"做饭", "mvpCollectSeed":"领种", "mvpSaveSeed":"留种", "wait":"停留"}.get(kind, action_name(kind, str(action.get("operation", ""))))
 	if kind == "gather":
 		verb = "采集"
@@ -326,6 +348,7 @@ static func item_name(code: String) -> String:
 	return {"springSeed": "春秋芜菁种", "springRoot": "春秋芜菁", "summerSeed": "夏根种", "summerRoot": "夏根", "winterSeed": "冬根种", "winterRoot": "冬根", "preserve": "水果罐藏", "meal": "餐食", "seed": "种子", "turnip": "根菜", "berry": "浆果", "fruit": "野果", "water": "水", "wood": "木材", "stone": "石头", "fish": "鱼", "grain": "谷物", "meat": "肉", "bread": "面包"}.get(code, "未知物品")
 
 static func action_name(code: String, operation := "") -> String:
+	if code == "mvpShelter": return "前往共屋避雨"
 	if code == "mvpInspect": return "查看公共工位"
 	if code == "mvpPreservation":
 		return {"install":"安装罐藏工位", "preserve":"制作水果罐藏"}.get(operation, "未知罐藏劳动")

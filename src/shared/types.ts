@@ -22,6 +22,7 @@ export type PopulationChange = 'visit'|'endVisit'|'settle'|'moveHome'|'depart'|'
 export interface PersonObservation {id:string;at:Vec;inside:string|null;roomAt:Vec|null;atMinute:number;}
 export type Action = DomainAction & {observedTarget?:PersonObservation};
 type DomainAction = import('./mvp-seasonal.js').SeasonalInspectAction
+ | {type:'mvpShelter'}
  | import('./mvp-preservation.js').PreservationAction
  | import('./mvp-seeds.js').MvpSeedAction
  | import('./mvp-agriculture.js').AgricultureAction
@@ -91,7 +92,7 @@ type DomainAction = import('./mvp-seasonal.js').SeasonalInspectAction
  | {type:'lodge';buildingId:string}
  | {type:'settle';buildingId:string};
 export interface Plan {id:string;actorId:string;actorRevision:number;createdAt:number;definition:string;intention:string;actions:Action[];}
-export interface Activity {mvpPreservationExecutionId?:string;mvpPreservationWorked?:number;mvpAgricultureExecutionId?:string;mvpWaterExecutionId?:string;mvpBed?:{buildingId:string;index:number};appointmentStartedAt?:number;appointmentWork?:{from:number;through:number;minutes:number};foodSourceShareWork?:{from:number;through:number;minutes:number};foodGiftWork?:{from:number;through:number;minutes:number};presenceWork?:{from:number;through:number;minutes:number;provider:PersonObservation;person:PersonObservation};room?:import('./rooms.js').RoomJourney;planId:string;action:Action;startedAt:number;remaining:number;path:Vec[];target:Vec;definition:string;cargo?:{bodyId:string;graveId?:string;storageId?:string;storageSlot?:number;pickedUp:boolean;pickupRemaining?:number};travelProgress?:number;}
+export interface Activity {mvpPreservationExecutionId?:string;mvpPreservationWorked?:number;mvpShelterEnteredAt?:number;mvpAgricultureExecutionId?:string;mvpWaterExecutionId?:string;mvpBed?:{buildingId:string;index:number};appointmentStartedAt?:number;appointmentWork?:{from:number;through:number;minutes:number};foodSourceShareWork?:{from:number;through:number;minutes:number};foodGiftWork?:{from:number;through:number;minutes:number};presenceWork?:{from:number;through:number;minutes:number;provider:PersonObservation;person:PersonObservation};room?:import('./rooms.js').RoomJourney;planId:string;action:Action;startedAt:number;remaining:number;path:Vec[];target:Vec;definition:string;cargo?:{bodyId:string;graveId?:string;storageId?:string;storageSlot?:number;pickedUp:boolean;pickupRemaining?:number};travelProgress?:number;}
 export type CompletedAction = {type:Action['type'];at:number;minutes?:number;energy?:number};
 export interface Resident {mvpSeasonalKnowledge?:import('./mvp-seasonal.js').SeasonalKnowledge;foodSourceKnowledge?:import('./food-source-sharing.js').FoodSourceKnowledge;regionalLocation?:RegionalLocation;knownDocks?:string[];physiologyDefinition?:string;
  decisionProtection?:import('./decision-protection.js').DecisionProtection;
@@ -166,7 +167,7 @@ export interface World {mvpSeasonalModelVersion?:1;mvpPreservation?:import('./mv
  migration?:import('../world/migration.js').MigrationState;
  duties?:import('./public-duties.js').PublicDuties;
  population?:import('./demography.js').PopulationBook;
- schemaVersion:1|2;id:string;revision:number;seed:number;mode:'validation'|'formal';minute:number;lastWallAt:number;
+ schemaVersion:1|2|3;id:string;revision:number;seed:number;mode:'validation'|'formal';minute:number;lastWallAt:number;
  clock:{paused:boolean;reason:string|null;realMinutesPerDay:number};weather:'sun'|'rain';
  map:{width:number;height:number;tiles:Tile[];name:string;entrance:Vec;settlement?:Vec;mvpGarden?:import('./mvp-hamlet.js').MvpGardenLayout};
  residents:Resident[];buildings:Building[];resources:Resource[];plots:Plot[];graves:Grave[];

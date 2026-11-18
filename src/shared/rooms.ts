@@ -62,8 +62,17 @@ export function roomPath(layout:RoomLayout,from:Vec,to:Vec):Vec[]|null {
   for(const [x,y]of [[1,0],[-1,0],[0,1],[0,-1]]){const q={x:p.x+x,y:p.y+y};if(!inBounds(q)||seen.has(index(q))||blocked.has(index(q)))continue;seen.set(index(q),p);queue.push(q);}
  }return null;
 }
+/** Shared front entry, not a private bed or a competing kitchen/seed slot. */
+export function mvpShelterRoom(w:World,r:Resident){
+ if(w.mode!=='validation'||w.mvpClimate?.schemaVersion!==3||!w.rooms||w.mvpRooms?.version!==1||!hasMvpHamlet(w)||r.status!=='alive'||r.residency==='outside'||!r.canDecide||!r.canExpress||!r.knownBuildings.includes(MVP_HALL))return null;
+ const building=w.buildings.find(b=>b.id===MVP_HALL&&b.kind==='lodge'&&b.ownerId==='commons'&&b.condition>0);
+ if(!building)return null;
+ const layout=roomLayout(w,building);
+ if(layout.blocked.some(p=>p.x===layout.entry.x&&p.y===layout.entry.y))return null;
+ return {building,key:'mvp-shelter-entry',group:'mvp-public-entry',target:{...layout.entry}};
+}
 export function actionRoom(w:World,r:Resident,a:Activity):{building:Building;key:string;group:string;target:Vec}|null {
- const action=a.action;let id:string|undefined,key='table',group=r.id,target:Vec|undefined;
+ const action=a.action;if(action.type==='mvpShelter')return mvpShelterRoom(w,r);let id:string|undefined,key='table',group=r.id,target:Vec|undefined;
  // Unilateral decisions stay where the actor is; they do not approach a partner or chase oneself.
  if(action.type==='separate'||action.type==='respond'&&!action.accept&&w.proposals.find(p=>p.id===action.proposalId)?.actorId===r.id||action.type==='respond'&&!action.accept&&w.proposals.some(p=>p.id===action.proposalId&&p.kind==='care'&&p.targetId===r.id))return null;
  if(action.type==='eat'&&action.mvpAtTable&&w.mvpRooms?.version===1){

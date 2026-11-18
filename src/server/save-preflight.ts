@@ -1,3 +1,4 @@
+import {validateMvpRooms} from '../world/mvp-rooms.js';
 import {readSeasonalLedger,type SeasonalLedger} from './seasonal-model-ledger.js';
 import {validateSeasonalKnowledge} from '../world/mvp-seasonal-knowledge.js';
 import {validateMvpPreservation} from '../world/mvp-preservation.js';
@@ -36,9 +37,41 @@ export function assertWorldCompatibility(value:unknown):asserts value is Record<
  // binaries reject it before their schema-1 rule writer can touch the file.
  if(value.schemaVersion===2){
   if(value.mode!=='validation'||value.mvpSeasonalModelVersion!==1)fail('save_seasonal_model_schema');
+ }else if(value.schemaVersion===3){
+  // Only the already-used shelter rules protocol can own schema 3. The
+  // historical root-v1 binary must stop before attempting an unknown action.
+  if(value.mode!=='validation'||typeof value.id!=='string'||!value.id.startsWith('godot-mvp-')||owns(value,'mvpSeasonalModelVersion')
+   ||!record(value.mvpClimate)||value.mvpClimate.schemaVersion!==3||!record(value.mvpRooms)||value.mvpRooms.version!==1||!record(value.rooms)||!Array.isArray(value.residents))
+   fail('save_shelter_schema');
+  try{validateMvpRooms(value as unknown as World);}catch{fail('save_shelter_room_state');}
  }else if(value.schemaVersion!==1)fail('save_unsupported_world_schema');
  else if(owns(value,'mvpSeasonalModelVersion'))fail('save_seasonal_model_schema');
  try{validateMvpPreservation(value as unknown as World);}catch{fail('save_invalid_mvpPreservation');}
+ if(Array.isArray(value.residents))for(const r of value.residents){
+  if(!record(r))continue;
+  const arrangement=record(r.plan)?r.plan:null;
+  const plan=arrangement&&Array.isArray(arrangement.actions)?arrangement.actions:[];
+  const pending=plan.some(a=>record(a)&&a.type==='mvpShelter');
+  const activity=record(r.activity)?r.activity:null;
+  const shelter=activity&&record(activity.action)&&activity.action.type==='mvpShelter';
+  if(pending||shelter||activity&&owns(activity,'mvpShelterEnteredAt')){
+   if(value.schemaVersion!==3)fail('save_shelter_action_requires_schema');
+   if(pending||shelter){
+    const at=arrangement?.createdAt,id=arrangement?.id;
+    if(!arrangement||arrangement.actorId!==r.id||typeof id!=='string'||!id||typeof at!=='number'||!Number.isFinite(at)||at<0
+     ||typeof value.minute!=='number'||!Number.isFinite(value.minute)||at>value.minute
+     ||!Array.isArray(value.processed)||!value.processed.includes('plan:'+id))fail('save_shelter_plan_time');
+    if(shelter&&(activity.planId!==id||typeof activity.startedAt!=='number'||!Number.isFinite(activity.startedAt)||activity.startedAt<at||activity.startedAt>value.minute))fail('save_shelter_plan_time');
+   }
+   if(plan.some(a=>record(a)&&a.type==='mvpShelter'&&(plan.length!==1||Object.keys(a).length!==1)))fail('save_shelter_action_shape');
+   if(shelter&&(!record(activity.action)||Object.keys(activity.action).length!==1))fail('save_shelter_action_shape');
+   if(activity&&owns(activity,'mvpShelterEnteredAt')){
+    const t=activity.mvpShelterEnteredAt;
+    if(!shelter||typeof t!=='number'||!Number.isFinite(t)||typeof activity.startedAt!=='number'||!Number.isFinite(activity.startedAt)
+     ||typeof value.minute!=='number'||t<0||t<activity.startedAt||t>value.minute)fail('save_shelter_arrival');
+   }
+  }
+ }
  if(owns(value,'mvpClimate')||owns(value,'mvpSoil')||owns(value,'mvpAgriculture')){try{validateMvpClimate(value as unknown as World);}catch{fail('save_invalid_mvpClimate');}}
  for(const field of unsupportedUpgradeFields)if(owns(value,field))fail('save_unsupported_'+field);
  if(typeof value.id!=='string'||!value.id||!Number.isSafeInteger(value.revision)||Number(value.revision)<0

@@ -8,16 +8,22 @@ import {canObserveOutdoors} from '../world/outdoor-observation.js';
 
 import type {SeasonalPersonalContext} from '../shared/mvp-seasonal.js';
 import {visibleSeasonalPlots,validateSeasonalKnowledge} from '../world/mvp-seasonal-knowledge.js';
+/** Same narrowly scoped perception for choice and observer; no indoor forecast. */
+export function seasonalPersonalWeather(w:World,r:Resident):SeasonalPersonalContext['weather'] {
+ if(w.mode!=='validation'||!w.mvpClimate||w.mvpClimate.lastMinute!==w.minute||!canObserveOutdoors(w,r))return null;
+ const weather=w.mvpClimate.current;
+ return {condition:weather.condition,temperature:weather.temperatureDeciC<100?'cold':weather.temperatureDeciC>=240?'warm':'mild',humidity:weather.relativeHumidityPermille>=800?'humid':weather.relativeHumidityPermille<350?'dry':'ordinary'};
+}
 /** Current personal perception only. No initialization, path probe, forecast,
  * other person's ledger, or observer-wide snapshot is called here. */
 export function seasonalPersonalContext(w:World,r:Resident):SeasonalPersonalContext|undefined {
  if(w.mode!=='validation'||!w.mvpAgriculture||!w.mvpClimate||!w.mvpSoil)return;
  validateSeasonalKnowledge({...w,residents:[r]});
- const awake=canObserve(w,r),outdoors=canObserveOutdoors(w,r),weather=w.mvpClimate.current;
+ const awake=canObserve(w,r);
  const hall=w.buildings.find(b=>b.id===MVP_HALL&&r.knownBuildings.includes(b.id));
  const near=(key:string)=>{if(!awake||!hall||r.inside!==hall.id||!r.roomAt)return false;const slot=roomLayout(w,hall).slots.find(s=>s.key===key);return !!slot&&r.roomAt.x===slot.at.x&&r.roomAt.y===slot.at.y;};
  const account=w.mvpPreservation?.accounts[r.id];
- return {schemaVersion:1,atMinute:w.minute,weather:outdoors?{condition:weather.condition,temperature:weather.temperatureDeciC<100?'cold':weather.temperatureDeciC>=240?'warm':'mild',humidity:weather.relativeHumidityPermille>=800?'humid':weather.relativeHumidityPermille<350?'dry':'ordinary'}:null,
+ return {schemaVersion:1,atMinute:w.minute,weather:seasonalPersonalWeather(w,r),
   plots:visibleSeasonalPlots(w,r),
   rememberedPlots:r.mvpSeasonalKnowledge?Object.values(r.mvpSeasonalKnowledge.latest).map(id=>structuredClone(r.mvpSeasonalKnowledge!.receipts[id])):[],
   hall:hall?{id:hall.id,door:{...hall.door},seedStock:near('mvp-seed')?Object.fromEntries(cultivarKeys.map(c=>[c,w.mvpAgriculture!.grants[c].stock])) as Record<Cultivar,number>:null,preserverInstalled:w.mvpPreservation&&near('kitchen')?!!w.mvpPreservation.installed:null}:null,
