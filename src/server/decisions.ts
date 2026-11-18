@@ -269,6 +269,7 @@ function maxPlanSteps(context:DecisionContext){
  // Preserve formal/transport limits. The small MVP may propose a short queue,
  // but only from its current observations; the engine revalidates every step.
  if(formal)return !formal.aboard&&!formal.passenger?formal.planSteps??1:1;
+ if(context.mvpSingleStep)return 1;
  return context.mvpDrinking&&!context.foreign&&!context.outside?3:1;
 }
 export interface ModelResult {decision:ModelDecision;inputTokens:number;outputTokens:number;latencyMs:number;}

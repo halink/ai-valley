@@ -1,3 +1,4 @@
+import {readSeasonalLedger,writeSeasonalLedger,type SeasonalLedger} from './seasonal-model-ledger.js';
 import {assertSeasonalKnowledgeAdvance} from '../world/mvp-seasonal-knowledge.js';
 import {rejectMvpClimateForModels} from '../world/mvp-climate-state.js';
 import type {Biography,HistoryPage,HistoryQuery} from '../shared/history.js';
@@ -40,9 +41,11 @@ export class WorldStore {
  private readonly exactReceipt;
  private readonly receiptPrefix;
  private readonly allowMvpClimate:boolean;
- constructor(path:string,options:{dailySnapshots?:DailySnapshotConfig;allowMvpClimate?:boolean}={}){
+ private readonly seasonalModel:boolean;
+ constructor(path:string,options:{dailySnapshots?:DailySnapshotConfig;allowMvpClimate?:boolean;seasonalModel?:true}={}){
   this.allowMvpClimate=options.allowMvpClimate===true;
-  preflightWorldSave(path,{rejectClimate:!this.allowMvpClimate});
+  this.seasonalModel=options.seasonalModel===true;
+  preflightWorldSave(path,{rejectClimate:!this.allowMvpClimate,allowSeasonalModel:this.seasonalModel});
   if(path!==':memory:')mkdirSync(dirname(path),{recursive:true,mode:0o700});
   this.db=new DatabaseSync(path);
   this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;
@@ -110,6 +113,7 @@ export class WorldStore {
   if (!row) return null;
   const saved=decodeSavedWorld(row.state) as unknown as World & {terrainKey?:string;resourceChanges:Array<[number,Resource]>;resourceCount:number;ledgerVersion?:1};
   if(!this.allowMvpClimate)rejectMvpClimateForModels(saved);
+  if(!this.seasonalModel&&saved.mvpSeasonalModelVersion!==undefined)throw Error('seasonal_model_store_required');
   if (!saved.terrainKey) return saved;
   const {terrainKey,resourceChanges,resourceCount,ledgerVersion,...world}=saved;
   const terrain=this.db.prepare('SELECT body FROM terrain WHERE hash=?').get(terrainKey) as {body:Uint8Array}|undefined;
@@ -160,14 +164,20 @@ export class WorldStore {
   }
   return gzipSync(JSON.stringify({...state,ledgerVersion:1,terrainKey,resourceCount:persistedResources.length,resourceChanges}),{level:1});
  }
- commit(world:World,previousRevision:number|null,appended?:AppendedHistory):void{
+ seasonalLedger(world:World){if(!this.seasonalModel)throw Error('seasonal_model_store_required');return readSeasonalLedger(this.db,world,true);}
+ commit(world:World,previousRevision:number|null,appended?:AppendedHistory,seasonalLedger?:SeasonalLedger):void{
   assertWorldCompatibility(world);
   if(!this.allowMvpClimate)rejectMvpClimateForModels(world);
+  if(!this.seasonalModel&&world.mvpSeasonalModelVersion!==undefined)throw Error('seasonal_model_store_required');
   this.db.exec('BEGIN IMMEDIATE');
   try{
    const row=this.db.prepare('SELECT revision,state FROM worlds WHERE id=?').get(world.id) as {revision:number;state:string|Uint8Array}|undefined;
-   if(row){const stored=decodeSavedWorld(row.state);assertSeasonalKnowledgeAdvance(stored as unknown as World,world);if(Object.prototype.hasOwnProperty.call(stored,'mvpPreservation')&&!world.mvpPreservation)throw Error('preservation_dependency_downgrade');if(Object.prototype.hasOwnProperty.call(stored,'mvpSoil')&&(!world.mvpSoil||(world.mvpClimate?.schemaVersion??0)<2))throw Error('soil_dependency_downgrade');if(Object.prototype.hasOwnProperty.call(stored,'mvpAgriculture')&&(!world.mvpAgriculture||world.mvpClimate?.schemaVersion!==3))throw Error('agriculture_dependency_downgrade');if(!this.allowMvpClimate)rejectMvpClimateForModels(stored);}
+   if(row){const stored=decodeSavedWorld(row.state);if(stored.mvpSeasonalModelVersion===1&&(!this.seasonalModel||world.mvpSeasonalModelVersion!==1))throw Error('seasonal_model_dependency_downgrade');assertSeasonalKnowledgeAdvance(stored as unknown as World,world);if(Object.prototype.hasOwnProperty.call(stored,'mvpPreservation')&&!world.mvpPreservation)throw Error('preservation_dependency_downgrade');if(Object.prototype.hasOwnProperty.call(stored,'mvpSoil')&&(!world.mvpSoil||(world.mvpClimate?.schemaVersion??0)<2))throw Error('soil_dependency_downgrade');if(Object.prototype.hasOwnProperty.call(stored,'mvpAgriculture')&&(!world.mvpAgriculture||world.mvpClimate?.schemaVersion!==3))throw Error('agriculture_dependency_downgrade');if(!this.allowMvpClimate)rejectMvpClimateForModels(stored);}
    if((row?.revision??null)!==previousRevision)throw new Error('stale_world_revision');
+   const prior=this.seasonalModel?readSeasonalLedger(this.db,row?decodeSavedWorld(row.state) as unknown as World:null,true):null;
+   if(!!(seasonalLedger??prior)!==(world.mvpSeasonalModelVersion===1))throw Error('seasonal_model_ledger_marker_mismatch');
+   if(seasonalLedger){if(!this.seasonalModel)throw Error('seasonal_model_store_required');writeSeasonalLedger(this.db,seasonalLedger,prior,world);}
+   else if(prior?.requests.at(-1)?.state==='intent')throw Error('seasonal_model_unresolved_request');
    const insert=this.db.prepare('INSERT INTO events(id,world_id,at,body) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body WHERE events.body<>excluded.body');
    // Full-state callers validate every fact. The runtime supplies a transaction-local suffix only after
    // the first checkpoint in this format. Old inline histories migrate on the first successful commit.

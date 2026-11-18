@@ -1,3 +1,4 @@
+import {readSeasonalLedger,type SeasonalLedger} from './seasonal-model-ledger.js';
 import {validateSeasonalKnowledge} from '../world/mvp-seasonal-knowledge.js';
 import {validateMvpPreservation} from '../world/mvp-preservation.js';
 import {validateMvpClimate} from '../world/mvp-climate-state.js';
@@ -29,8 +30,14 @@ export function assertWorldCompatibility(value:unknown):asserts value is Record<
  if(!record(value))fail('save_invalid_world');
  // Reject presence, not a recognized version/truthy value. No upgrade escape.
  if(owns(value,'simulationOnly'))fail('save_simulation_only');
+ if(owns(value,'mvpSeasonalModelVersion')&&(value.mvpSeasonalModelVersion!==1||value.mode!=='validation'))fail('save_seasonal_model_schema');
  try{validateSeasonalKnowledge(value as unknown as World);}catch{fail('save_invalid_mvpSeasonalKnowledge');}
- if(value.schemaVersion!==1)fail('save_unsupported_world_schema');
+ // Version 2 is exclusively the offline seasonal ledger format. Old
+ // binaries reject it before their schema-1 rule writer can touch the file.
+ if(value.schemaVersion===2){
+  if(value.mode!=='validation'||value.mvpSeasonalModelVersion!==1)fail('save_seasonal_model_schema');
+ }else if(value.schemaVersion!==1)fail('save_unsupported_world_schema');
+ else if(owns(value,'mvpSeasonalModelVersion'))fail('save_seasonal_model_schema');
  try{validateMvpPreservation(value as unknown as World);}catch{fail('save_invalid_mvpPreservation');}
  if(owns(value,'mvpClimate')||owns(value,'mvpSoil')||owns(value,'mvpAgriculture')){try{validateMvpClimate(value as unknown as World);}catch{fail('save_invalid_mvpClimate');}}
  for(const field of unsupportedUpgradeFields)if(owns(value,field))fail('save_unsupported_'+field);
@@ -71,13 +78,14 @@ function jsonBlob(body:unknown):unknown {
  try{return JSON.parse(gunzipSync(body,{maxOutputLength:MAX_STATE_BYTES}).toString());}
  catch{fail('save_invalid_landscape_encoding');}
 }
-function inspectDatabase(db:DatabaseSync,rejectClimate:boolean,validateWorld?: (world:Record<string,unknown>)=>void):Record<string,unknown>|null {
+function inspectDatabase(db:DatabaseSync,rejectClimate:boolean,validateWorld?: (world:Record<string,unknown>)=>void,allowSeasonalModel=false,inspectSeasonalModel?:(s:SeasonalLedger|null)=>void):Record<string,unknown>|null {
  const table=db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='worlds'").get();
  if(!table)fail('save_missing_worlds_table');
  let latest:Record<string,unknown>|null=null;
  for(const row of db.prepare('SELECT id,revision,length(CAST(state AS BLOB)) AS stateBytes, CASE WHEN length(CAST(state AS BLOB))<=? THEN state ELSE NULL END AS state FROM worlds ORDER BY rowid').iterate(MAX_STATE_BYTES)){
   if(typeof row.stateBytes!=='number'||row.stateBytes>MAX_STATE_BYTES)fail('save_state_too_large');
   const world=decodeSavedWorld(row.state);
+  if(!allowSeasonalModel&&world.schemaVersion===2)fail('save_seasonal_model_requires_explicit_entry');
   if(rejectClimate&&owns(world,'mvpClimate'))fail('save_mvpClimate_requires_opt_in');
   validateWorld?.(world);
   if(world.id!==row.id||world.revision!==row.revision)fail('save_world_identity_mismatch');
@@ -100,6 +108,10 @@ function inspectDatabase(db:DatabaseSync,rejectClimate:boolean,validateWorld?: (
   }
   latest=world;
  }
+ if(!allowSeasonalModel&&latest?.mvpSeasonalModelVersion!==undefined)fail('save_seasonal_model_requires_explicit_entry');
+ const seasonal=readSeasonalLedger(db,latest as unknown as World|null,allowSeasonalModel);
+ if(!!seasonal!==(latest?.mvpSeasonalModelVersion===1))fail('save_seasonal_model_ledger_missing');
+ if(allowSeasonalModel)inspectSeasonalModel?.(seasonal);
  return latest;
 }
 interface SourceFile {suffix:string;fd:number;stat:BigIntStats}
@@ -145,7 +157,7 @@ function unchanged(path:string,files:ReadonlyArray<SourceFile|null>,suffixes:rea
  * checkpoint. WAL is copied alongside the DB and SQLite reads its latest state.
  * This is not a substitute for caller-held ownership against concurrent writers.
  */
-export function preflightWorldSave(path:string,options:{requireWorld?:boolean;rejectClimate?:boolean;validateWorld?:(world:Record<string,unknown>)=>void}={}):Record<string,unknown>|null {
+export function preflightWorldSave(path:string,options:{requireWorld?:boolean;rejectClimate?:boolean;allowSeasonalModel?:boolean;inspectSeasonalModel?:(s:SeasonalLedger|null)=>void;validateWorld?:(world:Record<string,unknown>)=>void}={}):Record<string,unknown>|null {
  if(path===':memory:')return null;
  const suffixes=['','-wal','-journal'] as const;
  const files:Array<SourceFile|null>=[];
@@ -164,7 +176,7 @@ export function preflightWorldSave(path:string,options:{requireWorld?:boolean;re
   unchanged(path,files,suffixes);
   // readOnly may create SHM on this PRIVATE copy, never on the user's save.
   db=new DatabaseSync(copy,{readOnly:true});
-  const result=inspectDatabase(db,options.rejectClimate===true,options.validateWorld);
+  const result=inspectDatabase(db,options.rejectClimate===true,options.validateWorld,options.allowSeasonalModel===true,options.inspectSeasonalModel);
   if(!result&&options.requireWorld)fail('save_missing_world');
   unchanged(path,files,suffixes);
   return result;

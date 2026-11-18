@@ -128,7 +128,7 @@ export interface ModelCharge {startedAt:number;input:number;output:number;finish
 export interface ModelAdmissionCancellation {actorId:string;model:string;requestNumber:number;revision:number;atMs:number;monotonicNs:string;
  count:number;baselineRequests:number;baselineCancellations:number;previousReceiptHash:string|null;}
 export interface ModelMetrics {selfHostedCooldowns?:Record<string,{observedAt:number;blockedUntil:number;limitCount:number}>;admissionCancellation?:ModelAdmissionCancellation;regionalDecisions?:number;localDecisions?:number;requests:number;successes:number;failures:number;inputTokens:number;outputTokens:number;lastLatencyMs:number;unmeteredFailures?:number;lastError:string|null;inFlight:string[];model:string;configured:boolean;lastAttemptModel?:string;usageWindow?:Record<string,ModelCharge[]>;routing?:{primary:string;primaryConfigured:boolean;backup:string;backupConfigured:boolean};}
-export interface World {mvpPreservation?:import('./mvp-preservation.js').MvpPreservation;mvpAgriculture?:import('./mvp-agriculture.js').MvpAgriculture;mvpSoil?:import('./mvp-soil.js').MvpSoilState;mvpClimate?:import('./mvp-climate.js').MvpClimateState;/** Disposable hypothesis, never a persistent live world. */simulationOnly?:{version:1};mvpResources?:import('./mvp-resources.js').MvpResources;mvpSeeds?:import('./mvp-seeds.js').MvpSeeds;mvpRooms?:{version:1;adoptedAt:number};mvpDrinking?:import('./mvp-drinking.js').MvpDrinking;ferries?:import('./ferry.js').FerryState;buildingMigrations?:import('./building-migration.js').BuildingUpgrade[];regions?:Array<{id:string;name:string;openedAt:number;width:number;height:number;access:Vec;sourceIds:string[];fishKeys:string[]}>;
+export interface World {mvpSeasonalModelVersion?:1;mvpPreservation?:import('./mvp-preservation.js').MvpPreservation;mvpAgriculture?:import('./mvp-agriculture.js').MvpAgriculture;mvpSoil?:import('./mvp-soil.js').MvpSoilState;mvpClimate?:import('./mvp-climate.js').MvpClimateState;/** Disposable hypothesis, never a persistent live world. */simulationOnly?:{version:1};mvpResources?:import('./mvp-resources.js').MvpResources;mvpSeeds?:import('./mvp-seeds.js').MvpSeeds;mvpRooms?:{version:1;adoptedAt:number};mvpDrinking?:import('./mvp-drinking.js').MvpDrinking;ferries?:import('./ferry.js').FerryState;buildingMigrations?:import('./building-migration.js').BuildingUpgrade[];regions?:Array<{id:string;name:string;openedAt:number;width:number;height:number;access:Vec;sourceIds:string[];fishKeys:string[]}>;
  pregnancyPreparation?:import('./pregnancy-preparation.js').PregnancyPreparationState;
  regionSurveys?:import('./region-survey.js').RegionSurveyState;
  waterSupply?:import('./water-supply.js').WaterSupplyState;
@@ -166,7 +166,7 @@ export interface World {mvpPreservation?:import('./mvp-preservation.js').MvpPres
  migration?:import('../world/migration.js').MigrationState;
  duties?:import('./public-duties.js').PublicDuties;
  population?:import('./demography.js').PopulationBook;
- schemaVersion:1;id:string;revision:number;seed:number;mode:'validation'|'formal';minute:number;lastWallAt:number;
+ schemaVersion:1|2;id:string;revision:number;seed:number;mode:'validation'|'formal';minute:number;lastWallAt:number;
  clock:{paused:boolean;reason:string|null;realMinutesPerDay:number};weather:'sun'|'rain';
  map:{width:number;height:number;tiles:Tile[];name:string;entrance:Vec;settlement?:Vec;mvpGarden?:import('./mvp-hamlet.js').MvpGardenLayout};
  residents:Resident[];buildings:Building[];resources:Resource[];plots:Plot[];graves:Grave[];
@@ -176,6 +176,7 @@ export interface World {mvpPreservation?:import('./mvp-preservation.js').MvpPres
 export interface ContentDefinition {id:string;version:number;kind:'building'|'recipe'|'action'|'life';dependencies:string[];cost?:Inventory;minutes?:number;data:Record<string,unknown>;}
 export interface FormalOpportunity {id:string;label:string;action:Action;chooseDuration?:boolean;}
 export interface DecisionContext {
+ mvpSingleStep?:true;
  mvpSeasonal?:import('./mvp-seasonal.js').SeasonalPersonalContext;
  mvpSeeds?:{buildingId:string;stock:number|null;claimed:number;saved:number};
  mvpDrinking?:{thirst:number;canDrink:boolean};
@@ -187,8 +188,8 @@ export interface DecisionContext {
  actor:Pick<Resident,'id'|'name'|'traits'|'hunger'|'energy'|'health'|'inventory'|'skills'|'intention'|'at'|'homeId'|'lastFailure'|'recentActions'> & {coins?:number;agency?:Resident['agency'];barterEligible?:boolean};
  bounds:{width:number;height:number};minute:number;season:Season;weather:World['weather'];
  people:Array<Pick<Resident,'id'|'name'|'at'|'intention'|'status'> & {inside?:string|null;roomAt?:Vec|null;relation:Relation|null;talkEligible?:boolean;interactionEligible?:boolean;barterEligible?:boolean;talkDistance?:number;bodyObservation?:import('./body-observation.js').BodyObservation}>;
- mvpKnownSources?:Array<{id:string;kind:'bush'|'spring';foodItem?:'fruit';at:Vec}>;
- buildings:KnownBuilding[];resources:Array<Omit<Resource,'floodDamage'>&{waterBlocked?:boolean}>;plots:Array<Plot&{observed?:import('./crop-observation.js').CropObservation}>;knownLand:Array<{id:string;at:Vec}>;offers:Offer[];proposals:Proposal[];memories:Memory[];
+ mvpKnownSources?:Array<{id:string;kind:Resource['kind'];foodItem?:'fruit';at:Vec}>;
+ buildings:KnownBuilding[];resources:Array<Pick<Resource,'id'|'at'|'kind'|'amount'|'foodItem'>&{waterBlocked?:boolean}>;plots:Array<Pick<Plot,'id'|'at'|'ownerId'>&{crop:Pick<NonNullable<Plot['crop']>,'definition'|'growth'|'wateredDay'>|null;observed?:import('./crop-observation.js').CropObservation}>;knownLand:Array<{id:string;at:Vec}>;offers:Offer[];proposals:Proposal[];memories:Memory[];
 }
 export interface ModelDecision {intention:string;actions:Action[];}
 export interface Snapshot {mapRevision?:string;world:World;foodCoverage?:import('./food-coverage.js').SettlementFoodCoverage;serverTime:string;version:string;capabilities:{active:string[];pending:string[]};}

@@ -73,7 +73,8 @@ export function buildChoices(c:DecisionContext):ActionChoice[]{
  food.push(...directFoodChoices(c));
  const hall=c.buildings.find(b=>b.kind==='lodge'&&(!b.observed||b.observed.condition>0)&&b.ownerId==='commons');
  const kitchen=c.mvpDrinking?(hall?.id===MVP_HALL?hall:home??hall):home??hall;
- if(kitchen&&count(c,'turnip')>=2&&count(c,'water')>=1)add(food,'cook.1',`${kitchen.observed?`去${kitchen.name}的厨房`:`按已知地址尝试去${kitchen.name}的厨房，屋况与工位须核实，`}做1份餐食（2芜菁、1水）`,{type:'cook',quantity:1,buildingId:kitchen.id});
+ const seenSeasonalKitchen=c.mvpSingleStep&&c.mvpSeasonal?.hall?.preserverInstalled!=null&&kitchen?.id===c.mvpSeasonal.hall.id;
+ if((!c.mvpSingleStep||seenSeasonalKitchen)&&kitchen&&count(c,'turnip')>=2&&count(c,'water')>=1)add(food,'cook.1',`${kitchen.observed||seenSeasonalKitchen?`去${kitchen.name}的厨房`:`按已知地址尝试去${kitchen.name}的厨房，屋况与工位须核实，`}做1份餐食（2芜菁、1水）`,{type:'cook',quantity:1,buildingId:kitchen.id});
  const gathering=group();
  const nearestResources=[...c.resources].filter(r=>r.amount>0&&!r.waterBlocked&&(!c.formal||c.formal.age>=18||r.kind==='bush'||r.kind==='spring')).sort((a,b)=>manhattan(a.at,c.actor.at)-manhattan(b.at,c.actor.at)||a.id.localeCompare(b.id));
  // Formal sources have their own evidence-based opportunity menu. The small
@@ -114,10 +115,16 @@ export function buildChoices(c:DecisionContext):ActionChoice[]{
  // Remembered addresses never imply current stock or a clear route. Revisit
  // only sources outside the supplied live observations, then decide again.
  if(c.mvpDrinking&&!c.formal){
-  for(const kind of ['spring','bush'] as const){
+  for(const kind of c.mvpSingleStep?(['spring','bush','tree','rock'] as const):(['spring','bush'] as const)){
    const known=(c.mvpKnownSources??[]).filter(r=>r.kind===kind&&!c.resources.some(v=>v.id===r.id)&&manhattan(r.at,c.actor.at)>0)
     .sort((a,b)=>manhattan(a.at,c.actor.at)-manhattan(b.at,c.actor.at)||a.id.localeCompare(b.id)).slice(0,2);
-   for(const r of known)add(revisit,`revisit.${r.id}`,`重访已知${r.foodItem==='fruit'?'水果':resourceNames[kind]}来源(${r.at.x},${r.at.y})；当前余量和状态未知，路线须核实，到场后自行决定是否采集`,{type:'move',to:{...r.at}});
+   for(const r of known){
+    // Remembered wood/stone addresses do not expose live stock, or whether
+    // the target is a solid obstacle today. Try a geometric nearby point.
+    const candidates=[{x:r.at.x-1,y:r.at.y},{x:r.at.x+1,y:r.at.y},{x:r.at.x,y:r.at.y-1},{x:r.at.x,y:r.at.y+1}];
+    const to=kind==='tree'||kind==='rock'?candidates.filter(p=>p.x>=0&&p.x<c.bounds.width&&p.y>=0&&p.y<c.bounds.height&&manhattan(p,c.actor.at)>0).sort((a,b)=>manhattan(a,c.actor.at)-manhattan(b,c.actor.at))[0]:r.at;
+    if(to)add(revisit,`revisit.${r.id}`,`重访已知${r.foodItem==='fruit'?'水果':resourceNames[kind]}来源(${r.at.x},${r.at.y})；当前余量和状态未知，路线须核实，到场后自行决定是否采集`,{type:'move',to:{...to}});
+   }
   }
  }
  const exploration=group();
@@ -133,7 +140,7 @@ export function buildChoices(c:DecisionContext):ActionChoice[]{
   add(trade,`accept.${offer.id}`,`接受${c.people.find(p=>p.id===offer.actorId)?.name??'对方'}的现有报价：交付${format(offer.want)}，换得${format(offer.give)}`,{type:'accept',offerId:offer.id,offerTerms:barterTerms(offer)});
  }
  // A goal is the resident's own memory, never an automatic action policy.
- if(c.mvpDrinking&&!c.formal){
+ if(c.mvpDrinking&&!c.formal&&!c.mvpSingleStep){
   const goals=group();
   if(c.actor.agency?.goals.some(g=>g.status==='active'))add(goals,'goal.conclude','回顾并结束本人当前目标，填写text（1–240字）；回顾是本人看法，不代表世界已实现目标',{type:'agency',operation:'conclude'});
   for(const [focus,label] of [['daily','日常生活'],['social','相处交流'],['exploration','探索']] as const)add(goals,`goal.${focus}`,`写下或修改本人${label}目标，填写text（1–240字）；只记录意图，不自动执行或保证完成`,{type:'agency',operation:'reflect',focus});
