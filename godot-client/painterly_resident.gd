@@ -149,7 +149,7 @@ func update_provisions(person: Dictionary, world: Dictionary, room: Dictionary =
 			if source.id == action.get("resourceId"):
 				gathering_kind = str(source.kind)
 				facing_target = Vector3(source.at.x,0,source.at.y)
-	elif action.get("type") == "cook" and person.get("roomAt") is Dictionary:
+	elif action.get("type") in ["cook", "mvpCollectSeed", "mvpSaveSeed"] and person.get("roomAt") is Dictionary:
 		facing_target = Vector3(person.roomAt.x,0,person.roomAt.y-1)
 	elif action.get("type") in ["plant", "water", "harvest"]:
 		for plot in world.get("plots", []):
@@ -189,7 +189,7 @@ func update_bed_pose(person: Dictionary, room: Dictionary) -> void:
 func advance_activity(delta: float) -> void:
 	if activity_pose != "idle":
 		activity_phase += maxf(delta, 0.0) * 2.8
-		if facing_target is Vector3 and activity_pose in ["gather", "talk", "eat", "plant", "water", "harvest", "cook"]:
+		if facing_target is Vector3 and activity_pose in ["gather", "talk", "eat", "plant", "water", "harvest", "cook", "seed_collect", "seed_save"]:
 			var direction: Vector3 = facing_target - position
 			if direction.length_squared() > .01:
 				rotation.y = lerp_angle(rotation.y, atan2(-direction.x,-direction.z), minf(delta*6.0,1.0))
@@ -215,6 +215,8 @@ static func onsite_pose(person: Dictionary) -> String:
 	match action.get("type"):
 		"gather": return "gather"
 		"cook": return "cook"
+		"mvpCollectSeed": return "seed_collect"
+		"mvpSaveSeed": return "seed_save"
 		"plant": return "plant"
 		"water": return "water"
 		"harvest": return "harvest"
@@ -267,6 +269,12 @@ func _pose_activity(phase: float, resting: bool) -> void:
 			figure.head.rotation.x = -.16 if water else -.11
 			figure.reach(0, .24 + sin(phase) * .10, .38, .12)
 			figure.reach(1, .39 + sin(phase + .3) * .26, .44, .21)
+		"seed_collect", "seed_save":
+			figure.torso.rotation.x = -.22
+			figure.head.rotation.x = -.24
+			var sweep := .12 if activity_pose == "seed_save" else .05
+			figure.reach(0, .47 + sin(phase) * sweep, .69, .24)
+			figure.reach(1, .55 + sin(phase + 1.2) * sweep, .73, .21)
 		"cook":
 			figure.torso.rotation.x = -.12
 			figure.head.rotation.x = -.16

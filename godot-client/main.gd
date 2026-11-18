@@ -4,6 +4,7 @@ const Valley3D = preload("res://valley_3d.gd")
 const ObserverHud = preload("res://observer_hud.gd")
 const JournalRecords = preload("res://journal_records.gd")
 const Snapshot = preload("res://snapshot.gd")
+const SeedObservation = preload("res://seed_observation.gd")
 const GardenObservation = preload("res://garden_observation.gd")
 const MovementFeed = preload("res://completed_movement.gd")
 const ResidentMovement = preload("res://resident_movement.gd")
@@ -497,7 +498,9 @@ func _update_place_card() -> void:
 	if room.is_empty():
 		hud.show_room("", "")
 	else:
-		hud.show_room(_building_name(room), "%s 人在室内" % _occupants(valley.room_id))
+		var caption := "%s 人在室内" % _occupants(valley.room_id)
+		if valley.room_id == "mvp-home": caption += " · " + SeedObservation.stock_label(world)
+		hud.show_room(_building_name(room), caption)
 	if connected and not selected_resource.is_empty():
 		var resource := _resource(selected_resource)
 		if not resource.is_empty():
@@ -514,6 +517,7 @@ func _update_place_card() -> void:
 		return
 	var can_enter: bool = valley.room_layouts.has(selected_building)
 	var note := "%s 人在室内" % _occupants(selected_building) if can_enter else "室内暂不可观察"
+	if selected_building == "mvp-home": note += "\n" + SeedObservation.details(world)
 	hud.show_place(selected_building, _building_name(building), note, can_enter)
 
 func _update_history() -> void:

@@ -2,6 +2,8 @@ extends RefCounted
 
 const Craft = preload("res://valley_craft.gd")
 const Architecture = preload("res://valley_architecture.gd")
+const SeedObservation = preload("res://seed_observation.gd")
+const FONT = preload("res://art/fonts/ValleyCJK-Regular.otf")
 const SHADOW = preload("res://art/courtyard_shadow.gdshader")
 
 var craft: Craft
@@ -62,6 +64,9 @@ func build(terrain: Node3D, room: Dictionary, shared: bool, dining: bool) -> voi
 					for x in range(int(slot.at.x) - 2, int(slot.at.x) + 2):
 						for z in range(int(slot.at.y) - 2, int(slot.at.y)):
 							furnished[Vector2i(x, z)] = true
+			"station":
+				if slot.get("key") == "mvp-seed":
+					_seed_bench(terrain, slot.at)
 			"seat":
 				if style == "hall" and slot.at.y != 8:
 					_stool(terrain, Vector3(slot.at.x, 0, slot.at.y))
@@ -276,7 +281,7 @@ func _furnish(root: Node3D, room: Dictionary, style: String) -> void:
 		_plum_screen(root, 6.75)
 		for x in [9.61, 11.49]:
 			craft.orb(root, Vector3(x,.080,9.31), Vector3(.63,.145,.56), craft.painted.get_material("woven"))
-	else:
+	elif style != "hall" or not room.get("slots", []).any(func(slot): return slot.get("key") == "mvp-seed"):
 		for i in range(4):
 			var at := cabinet + Vector3(-.70 + .42*i,.73,.055)
 			craft.orb(root, at, Vector3(.31,.27,.28), craft.mat("899084" if i % 2 else "a68b6b"))
@@ -373,3 +378,53 @@ func _steam(root: Node3D, at: Vector3, minute: float) -> void:
 		var wisp := craft.orb(root, at + Vector3(-.24 + sin(i * 2.1 + drift * 2.0) * .18, 1.18 + drift * .55, .095),
 			Vector3(.14 + drift * .13, .04, .075), craft.mat("e3e0cc"))
 		wisp.rotation.z = .35 - drift * .65
+
+# The station is furnished only when the server supplies its real room slot.
+func _seed_bench(root: Node3D, slot: Dictionary) -> void:
+	# The existing hall cabinet occupies the nonwalkable wall strip (y=3).
+	# Use its top; do not add furniture/blockers to saved walking routes.
+	var at := Vector3(slot.x, .31, slot.y - 1)
+	var wood := craft.painted.get_material("light_wood")
+	craft.box(root, at + Vector3(-.37,.874,0), Vector3(.84,.025,.45), craft.painted.get_material("woven"))
+	# Empty tray remains after stock is exhausted; no decorative seed pile.
+	craft.box(root, at + Vector3(.49,.89,0), Vector3(.43,.065,.46), craft.mat("a58c66"))
+	for dx in [-.23,.23]:
+		craft.box(root, at + Vector3(.49+dx,.95,0), Vector3(.035,.12,.47), wood)
+	for dz in [-.23,.23]:
+		craft.box(root, at + Vector3(.49,.95,dz), Vector3(.48,.12,.035), wood)
+
+func paint_seeds(root: Node3D, world: Dictionary, room: Dictionary, id: String) -> void:
+	if id != "mvp-home": return
+	var slot: Dictionary = {}
+	for entry in room.get("slots", []):
+		if entry.get("key") == "mvp-seed": slot = entry
+	if slot.is_empty(): return
+	var seeds := SeedObservation.state(world)
+	var at := Vector3(slot.at.x, .31, slot.at.y - 1)
+	if not seeds.is_empty():
+		# One paper packet per remaining seed unit, bounded by the finite store.
+		for i in range(mini(int(seeds.stock), 8)):
+			var packet := craft.box(root, at + Vector3(.38 + (i % 2) * .16,.99 + (i / 4) * .06,-.12 + ((i / 2) % 2) * .20), Vector3(.13,.045,.15), craft.mat("d8c49a"))
+			packet.rotation.y = .07 * (i % 3 - 1)
+	var label := Label3D.new()
+	label.text = "种台 · " + SeedObservation.stock_label(world)
+	label.font = FONT
+	label.font_size = 32
+	label.pixel_size = .010
+	label.modulate = Color("554c3b")
+	label.outline_modulate = Color("f1e2bf")
+	label.outline_size = 7
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.position = at + Vector3(0,1.50,.48)
+	root.add_child(label)
+	for person in world.get("residents", []):
+		if person.get("inside") != id or person.get("roomAt") != slot.at: continue
+		var activity: Variant = person.get("activity")
+		if not activity is Dictionary or activity.get("action", {}).get("type") != "mvpSaveSeed": continue
+		if not activity.get("path", []).is_empty() or float(activity.get("remaining", 0)) <= 0: continue
+		var journey: Variant = activity.get("room")
+		if journey is Dictionary and (journey.get("mode") == "exit" or not journey.get("path", []).is_empty()): continue
+		if float(person.get("inventory", {}).get("turnip", 0)) < 1: continue
+		craft.orb(root, at + Vector3(-.27,.95,.03), Vector3(.19,.16,.22), craft.mat("ddcda6"))
+		craft.rod(root, at + Vector3(-.27,1.00,.03), at + Vector3(-.24,1.17,.04), .025,.6,craft.mat("7a8b60"))
+		break

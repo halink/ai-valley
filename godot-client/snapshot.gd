@@ -182,7 +182,7 @@ static func life_action(person: Dictionary, world: Dictionary) -> String:
 	if not activity is Dictionary: return activity_label(person)
 	var action: Dictionary = activity.get("action", {})
 	var kind := str(action.get("type", ""))
-	var verb: String = {"eat":"吃饭", "sleep":"休息", "mvpDrink":"喝水", "talk":"交谈", "plant":"播种", "water":"浇菜", "harvest":"收菜", "cook":"做饭", "wait":"停留"}.get(kind, action_name(kind))
+	var verb: String = {"eat":"吃饭", "sleep":"休息", "mvpDrink":"喝水", "talk":"交谈", "plant":"播种", "water":"浇菜", "harvest":"收菜", "cook":"做饭", "mvpCollectSeed":"领种", "mvpSaveSeed":"留种", "wait":"停留"}.get(kind, action_name(kind))
 	if kind == "gather":
 		verb = "采集"
 		for source in world.get("resources", []):
@@ -320,7 +320,7 @@ static func item_name(code: String) -> String:
 	return {"meal": "餐食", "seed": "种子", "turnip": "根菜", "berry": "浆果", "water": "水", "wood": "木材", "stone": "石头", "fish": "鱼", "grain": "谷物", "meat": "肉", "bread": "面包"}.get(code, "未知物品")
 
 static func action_name(code: String) -> String:
-	return {"cook": "做饭", "plant": "播种", "water": "浇水", "harvest": "收获", "wait": "等待", "gather": "采集", "eat": "进食", "mvpDrink": "饮水", "rest": "休息", "move": "移动", "sleep": "睡觉", "fish": "钓鱼", "talk": "交谈"}.get(code, "未知行为")
+	return {"mvpCollectSeed": "领取种子", "mvpSaveSeed": "留种", "cook": "做饭", "plant": "播种", "water": "浇水", "harvest": "收获", "wait": "等待", "gather": "采集", "eat": "进食", "mvpDrink": "饮水", "rest": "休息", "move": "移动", "sleep": "睡觉", "fish": "钓鱼", "talk": "交谈"}.get(code, "未知行为")
 
 static func error_name(code: String) -> String:
 	return {"http_429": "请求受限（HTTP 429）", "http_error": "服务响应错误", "invalid_response": "响应格式无效", "unresolved_request": "请求未完成", "other_failure": "其他错误"}.get(code, "未知")

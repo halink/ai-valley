@@ -1,3 +1,4 @@
+import {isMvpSeedAction,mvpSeedReason,mvpSeedPlace,completeMvpSeed} from './mvp-seeds.js';
 import {mvpSleepProblem,mvpDiningPlace} from './mvp-rooms.js';
 import {hasMvpHamlet,MVP_HALL} from '../shared/mvp-hamlet.js';
 import {advanceMvpThirst,mvpDrinkReason,completeMvpDrink} from './mvp-drinking.js';
@@ -100,7 +101,7 @@ const allowedAboard=(a:Action)=>['wait','eat','talk','ferry'].includes(a.type)||
 const selfCareTransportBlocked=(w:World,r:Resident,a:Action)=>isSelfCareAction(a)&&(aboardFerry(w,r.id)&&!allowedAboard(a)||(travellingFamily(w,r.id)||familyPassenger(w,r.id)||passenger(w,r.id))&&a.type!=='wait');
 const living=(r:Resident)=>r.status==='alive'&&r.residency!=='outside';
 function nearby(a:Resident,b:Resident){return living(a)&&living(b)&&a.inside===b.inside&&distance(a.at,b.at)<=2;}
-function failure(world:World,r:Resident,error:string,failedAction?:Action){const action=failedAction??r.activity?.action??r.plan?.actions[0];if(action?.type==='socialAppointment')recordSocialAppointmentFailure(world,r,action,error);settleAgencyAction(r,r.activity?.planId??r.plan?.id??'',error);r.activity=null;r.plan=null;if(!world.rooms){r.inside=null;r.roomAt=null;}r.lastFailure=error;r.decisionDue=world.minute;r.revision++;}
+function failure(world:World,r:Resident,error:string,failedAction?:Action){const action=failedAction??r.activity?.action??r.plan?.actions[0];if(action&&isMvpSeedAction(action))emitEvent(world,{kind:'action',actors:[r.id],place:{...r.at},roomId:r.inside,roomAt:r.roomAt?{...r.roomAt}:null,text:`${r.name}的${action.type==='mvpCollectSeed'?'取种':'留种'}未完成：${error}，未扣减或增加物资。`});if(action?.type==='socialAppointment')recordSocialAppointmentFailure(world,r,action,error);settleAgencyAction(r,r.activity?.planId??r.plan?.id??'',error);r.activity=null;r.plan=null;if(!world.rooms){r.inside=null;r.roomAt=null;}r.lastFailure=error;r.decisionDue=world.minute;r.revision++;}
 function definitionFor(world:World,plan:Plan,action:Action):string {
  const key=action.type==='cook'?'recipe/meal':action.type==='plant'||action.type==='harvest'||action.type==='water'?'crop/turnip':action.type==='build'?`building/${action.kind}`:'action/routine';
  if(key==='action/routine')return plan.definition;
@@ -257,6 +258,7 @@ function targetFor(world:World,r:Resident,a:Action,definition:string,elapsed=0):
   if(a.type==='sleep'){const b=sleepBuilding(world,r,a);if(!b||!a.buildingId&&world.rooms&&residentBed(world,r,b)===null)return fail('尚未拥有可使用的真实床位，当前住处存在床位缺口');return {target:b.door,duration:a.minutes};}
   return {target:r.at,duration:a.minutes};
  }
+ if(isMvpSeedAction(a)){const error=mvpSeedReason(world,r,a);return error?fail(error):{target:{...mvpSeedPlace(world)!.building.door},duration:a.type==='mvpCollectSeed'?10:30};}
  if(a.type==='mvpDrink'){const error=mvpDrinkReason(world,r);return error?fail(error):{target:{...r.at},duration:5};}
  if(a.type==='eat'&&a.mvpAtTable){const place=mvpDiningPlace(world,r);if(!place)return fail('当前没有可到达的本人共屋餐位');if(!Object.hasOwn(goods,a.item)||goods[a.item].food<=0||!has(r.inventory,{[a.item]:1}))return fail('没有这份可以食用的实际食品');return {target:{...place.building.door},duration:5};}
  if(a.type==='eat')return Object.hasOwn(goods,a.item)&&goods[a.item].food>0&&has(r.inventory,{[a.item]:1})?{target:r.at,duration:5}:fail('没有这份可以食用的实际食品');
@@ -407,6 +409,7 @@ function completeAtomic(world:World,r:Resident,a:Action,definition:string,elapse
  const social=executeSocialAction(world,r,a);if(social.handled)return social.ok?null:social.error??'行为当前无法完成';
  const record=(text:string,kind:'action'|'construction'|'trade'|'production'='action',actors=[r.id])=>emitEvent(world,{kind,actors,place:{...r.at},text});
  if(a.type==='move'||a.type==='wait'||a.type==='sleep')return null;
+ if(isMvpSeedAction(a))return completeMvpSeed(world,r,a);
  if(a.type==='mvpDrink')return completeMvpDrink(world,r);
  if(a.type==='eat'){
   if(a.mvpAtTable){const place=mvpDiningPlace(world,r);if(!place||r.inside!==place.building.id||r.roomAt?.x!==place.at.x||r.roomAt.y!==place.at.y)return '尚未到达本人实际餐位';}
@@ -593,6 +596,7 @@ function processActivity(world:World,r:Resident,minutes:number){
   if(activity.action.type==='cook'){const problem=premisesWorkReason(world,r.id,b.id,'kitchen',world.minute-minutes,world.minute)??publicKitchenReason(world,r,b.id)??employmentKitchenReason(world,r,b.id);if(problem){failure(world,r,problem);return;}}
   r.inside=b.id;
  }
+ if(isMvpSeedAction(activity.action)){const problem=mvpSeedReason(world,r,activity.action,true);if(problem){failure(world,r,problem);return;}}
  endDecisionProtection(world,r,'decision');
  if(activity.action.type==='sleep'){recordPregnancyRest(world,r,minutes);const rules=physiology(world,r);r.energy=Math.min(100,r.energy+minutes*rules.sleepEnergy);if(r.hunger<rules.sleepFedThreshold)r.health=Math.min(100,r.health+minutes*rules.sleepHealth);}
  activity.remaining-=minutes;if(activity.remaining>0)return;

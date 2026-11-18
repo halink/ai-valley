@@ -22,6 +22,7 @@ export type PopulationChange = 'visit'|'endVisit'|'settle'|'moveHome'|'depart'|'
 export interface PersonObservation {id:string;at:Vec;inside:string|null;roomAt:Vec|null;atMinute:number;}
 export type Action = DomainAction & {observedTarget?:PersonObservation};
 type DomainAction =
+ | import('./mvp-seeds.js').MvpSeedAction
  | import('./social-appointments.js').SocialAppointmentAction
  | import('./food-source-sharing.js').ShareFoodSourceAction
  | import('./personal-food-gifts.js').PersonalFoodGiftAction
@@ -125,7 +126,7 @@ export interface ModelCharge {startedAt:number;input:number;output:number;finish
 export interface ModelAdmissionCancellation {actorId:string;model:string;requestNumber:number;revision:number;atMs:number;monotonicNs:string;
  count:number;baselineRequests:number;baselineCancellations:number;previousReceiptHash:string|null;}
 export interface ModelMetrics {selfHostedCooldowns?:Record<string,{observedAt:number;blockedUntil:number;limitCount:number}>;admissionCancellation?:ModelAdmissionCancellation;regionalDecisions?:number;localDecisions?:number;requests:number;successes:number;failures:number;inputTokens:number;outputTokens:number;lastLatencyMs:number;unmeteredFailures?:number;lastError:string|null;inFlight:string[];model:string;configured:boolean;lastAttemptModel?:string;usageWindow?:Record<string,ModelCharge[]>;routing?:{primary:string;primaryConfigured:boolean;backup:string;backupConfigured:boolean};}
-export interface World {mvpRooms?:{version:1;adoptedAt:number};mvpDrinking?:import('./mvp-drinking.js').MvpDrinking;ferries?:import('./ferry.js').FerryState;buildingMigrations?:import('./building-migration.js').BuildingUpgrade[];regions?:Array<{id:string;name:string;openedAt:number;width:number;height:number;access:Vec;sourceIds:string[];fishKeys:string[]}>;
+export interface World {mvpSeeds?:import('./mvp-seeds.js').MvpSeeds;mvpRooms?:{version:1;adoptedAt:number};mvpDrinking?:import('./mvp-drinking.js').MvpDrinking;ferries?:import('./ferry.js').FerryState;buildingMigrations?:import('./building-migration.js').BuildingUpgrade[];regions?:Array<{id:string;name:string;openedAt:number;width:number;height:number;access:Vec;sourceIds:string[];fishKeys:string[]}>;
  pregnancyPreparation?:import('./pregnancy-preparation.js').PregnancyPreparationState;
  regionSurveys?:import('./region-survey.js').RegionSurveyState;
  waterSupply?:import('./water-supply.js').WaterSupplyState;
@@ -173,6 +174,7 @@ export interface World {mvpRooms?:{version:1;adoptedAt:number};mvpDrinking?:impo
 export interface ContentDefinition {id:string;version:number;kind:'building'|'recipe'|'action'|'life';dependencies:string[];cost?:Inventory;minutes?:number;data:Record<string,unknown>;}
 export interface FormalOpportunity {id:string;label:string;action:Action;chooseDuration?:boolean;}
 export interface DecisionContext {
+ mvpSeeds?:{buildingId:string;stock:number|null;claimed:number;saved:number};
  mvpDrinking?:{thirst:number;canDrink:boolean};
  mvpInterpretations?:FormalOpportunity[];
  relationshipMemories?:import('./relationship-memory.js').RelationshipMemories;

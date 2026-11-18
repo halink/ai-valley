@@ -1,3 +1,4 @@
+import {adoptMvpSeeds,validateMvpSeeds} from '../world/mvp-seeds.js';
 import {assertGodotWebExport,serveGodotWeb} from './godot-web.js';
 import {roomObservation} from './room-observation.js';
 import {relationshipObservation} from './relationship-observation.js';
@@ -27,6 +28,7 @@ function assertMvpWorld(world:World){
  if(isWideMvpMap(world.map)&&!hasMvpHamlet(world))throw Error('godot_mvp_save_mismatch');
  validateMvpDrinking(world);
  validateMvpRooms(world);
+ validateMvpSeeds(world);
 }
 /** Reject another project's DB before the WorldStore constructor can migrate its schema. */
 function validateSavedMvp(database:string):void {
@@ -64,12 +66,13 @@ function serveMvpSnapshot(server:Server,webRoot:string|undefined,snapshot:()=>un
 }
 
 function upgradeMvpWorld(world:World):boolean {
- if(world.mvpDrinking&&world.mvpRooms&&world.map.mvpGarden?.version===1)return false;
+ if(world.mvpDrinking&&world.mvpRooms&&world.map.mvpGarden?.version===1){return adoptMvpSeeds(world)?(world.revision++,true):false;}
  adoptMvpDrinking(world);
  adoptMvpRooms(world);
  expandMvpHamlet(world);
  widenMvpValley(world);
  layOutMvpGardens(world);
+ adoptMvpSeeds(world);
  assertMvpWorld(world);
  world.revision++;
  return true;

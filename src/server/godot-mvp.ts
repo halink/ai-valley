@@ -1,3 +1,4 @@
+import {adoptMvpSeeds,isMvpSeedAction} from '../world/mvp-seeds.js';
 import {serveGodotWeb} from './godot-web.js';
 import {roomObservation} from './room-observation.js';
 import {relationshipObservation} from './relationship-observation.js';
@@ -66,6 +67,7 @@ export function createMvpWorld():World {
  expandMvpHamlet(world);
  widenMvpValley(world);
  layOutMvpGardens(world);
+ adoptMvpSeeds(world);
  for(const r of world.residents)r.knownResources=world.resources.map(s=>s.id);
  return world;
 }
@@ -100,7 +102,8 @@ export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string
    if(mvpCanStart(w,r,action))return {action,reason:wantsFood?'本地规则独立接受当面报价：用一份富余清水换一份浆果，交付后再决定进食':'本地规则独立接受当面报价：用一份富余浆果换一份清水，交付后再决定饮用'};
   }
  }
- const food=(r.inventory.meal??0)>=1?'meal':(r.inventory.turnip??0)>=1?'turnip':'berry';
+ const reserveRoot=(r.inventory.seed??0)<1&&(r.inventory.turnip??0)>=1&&r.hunger<80;
+ const food=(r.inventory.meal??0)>=1?'meal':(r.inventory.turnip??0)>=(reserveRoot?2:1)?'turnip':'berry';
  if(r.hunger>=35&&r.hunger<80&&r.energy>=70&&(mvpThirst(w,r)??0)<50-1e-9&&(r.inventory[food]??0)>=1){const action:Action={type:'eat',item:food,mvpAtTable:true};if(mvpCanStart(w,r,action))return {action,reason:'带着自己的食物回共屋餐桌进食，不共享或凭空补充口粮'};}
  if(r.hunger>=35&&(r.inventory[food]??0)>=1)return {action:{type:'eat',item:food},reason:'饥饿且带有一整份自有食物，优先餐食、其次根菜或浆果'};
  // Immediate needs come before optional stocking: an empty bag must not
@@ -150,8 +153,14 @@ export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string
  // Keep the remaining portion; replenish only after the carried supply runs out.
  const waterTrip=(r.inventory.water??0)<1?mvpWaterTrip(w,r):null;
  if(waterTrip)return {action:waterTrip,reason:'当前紧急需求已处理，前往已知泉水补足两份清水储备'};
+ // Preserve a route back into planting before cooking away the final root.
+ if(r.hunger<35&&r.energy>=70&&(mvpThirst(w,r)??0)<50-1e-9&&(r.inventory.seed??0)<1&&w.mvpSeeds){
+  const action:Action|null=(r.inventory.turnip??0)>=1?{type:'mvpSaveSeed'}:w.mvpSeeds.stock>=1&&w.plots.some(p=>p.ownerId===r.id&&p.id.startsWith('mvp-garden-')&&!p.crop)?{type:'mvpCollectSeed'}:null;
+  const busy=w.residents.some(p=>p.id!==r.id&&p.activity&&isMvpSeedAction(p.activity.action));
+  if(action&&!busy&&mvpCanStart(w,r,action))return {action,reason:action.type==='mvpSaveSeed'?'用自己一份根菜留出两份下轮种子':'到灶堂领取一份有限种子，实际到场扣减种源'};
+ }
  // A personal cooked meal uses real roots and water; never reserve scarce drinking water.
- if(r.hunger<35&&r.energy>=70&&(mvpThirst(w,r)??0)<50-1e-9&&(r.inventory.turnip??0)>=2&&(r.inventory.meal??0)<1){
+ if(r.hunger<35&&r.energy>=70&&(mvpThirst(w,r)??0)<50-1e-9&&(r.inventory.turnip??0)>=((r.inventory.seed??0)<1?3:2)&&(r.inventory.meal??0)<1){
   const kitchenId=hasMvpHamlet(w)?MVP_HALL:r.homeId??undefined;
   if((r.inventory.water??0)<2){const trip=mvpWaterTrip(w,r);if(trip)return {action:trip,reason:'为自己的根菜餐食取水，并保留一份饮水'};}
   else if(!w.residents.some(p=>p.id!==r.id&&(hasMvpHamlet(w)||p.homeId===r.homeId)&&(p.activity?.action.type==='cook'||p.plan?.actions.some(a=>a.type==='cook')))){
@@ -211,6 +220,7 @@ export function createMvpSession(){
     stepWorld(world,1);
     for(const failed of world.residents.filter(r=>r.lastFailure)){
      const action=gathering.get(failed.id);
+     if(action&&isMvpSeedAction(action)&&['灶堂有限种源已领完','这处实际工位正在被另一项劳动占用'].includes(failed.lastFailure!))continue;
      const source=action?.type==='gather'?world.resources.find(s=>s.id===action.resourceId):undefined;
      const depleted=action?.type==='gather'&&source&&source.amount<action.quantity&&distance(failed.at,source.at)<=1
       &&(source.kind!=='bush'||canContactBerry(world,failed,source))

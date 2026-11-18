@@ -1,3 +1,4 @@
+import {mvpSeedPlace} from '../world/mvp-seeds.js';
 import {mvpThirst,mvpDrinkReason} from '../world/mvp-drinking.js';
 import {harvestMealEvidence,harvestMealRelevant} from './harvest-food-choices.js';
 import {socialAppointmentOpportunities,socialAppointmentNotes} from '../world/social-appointments.js';
@@ -131,6 +132,7 @@ export function decisionContext(world:World,actor:Resident):DecisionContext{
  const foodCoverage=world.mode==='formal'?residentFoodCoverage(world,actor):undefined;
  const knownAge=knownAgeYears(actor.bornAt,world.minute);
  const context:DecisionContext={
+  ...(mvpSeedPlace(world)&&actor.knownBuildings.includes('mvp-home')?{mvpSeeds:{buildingId:'mvp-home',stock:actor.inside==='mvp-home'?world.mvpSeeds!.stock:null,claimed:world.mvpSeeds!.claimed[actor.id]??0,saved:world.mvpSeeds!.saved[actor.id]??0}}:{}),
   ...(mvpThirst(world,actor)!==undefined?{mvpDrinking:{thirst:mvpThirst(world,actor)!,canDrink:mvpDrinkReason(world,actor)===null}}:{}),
   ...(world.mode==='formal'?{formal:{personalFoodGiftNotes:personalFoodGiftNotes(world,actor),socialAppointmentNotes:socialAppointmentNotes(world,actor),foodCoverage,personalFoodProcessing:personalFoodProcessing(world,actor),personalFoodFreshness:personalFoodFreshness(world,actor),careWithdrawalOnly:careWithdrawalOnly(world,actor),aboard:!!aboardFerry(world,actor.id),passenger:!!passenger(world,actor.id),expressiveEvacuationOnly:expressiveTransportControl(world,actor),familyTravelling:!!travellingFamily(world,actor.id)||!!familyPassenger(world,actor.id),frontier:world.scenario==='frontier',age:Math.floor(ageYears(actor.bornAt,world.minute)),knownAge:knownAge===null?null:Math.floor(knownAge),productiveFarming:Boolean(world.production),familyNotes,
     unknownAgeSelfCare:unknownAgeSelfCare(world,actor),hasBed:actor.homeId===null?false:home?.observed?.ownBed,sleepRecoveryPerHour:60*bodyRules.sleepEnergy*sleepFactor,

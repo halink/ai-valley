@@ -37,6 +37,7 @@ export function roomLayout(w:World,b:Building):RoomLayout {
  for(let i=0;i<animals;i++)slots.push({key:'pen:'+i,kind:'pen',at:{x:i%2?cols-5:4,y:7+Math.floor(i/2)*4}});
  if(b.kind==='greenhouse')for(let i=0;i<4;i++)slots.push({key:'crop:'+i,kind:'crop',at:{x:i%2?10:4,y:i<2?8:12}});
  const hall=hamlet&&b.id===MVP_HALL;
+ if(hall&&w.mvpSeeds)slots.push({key:'mvp-seed',kind:'station',at:{x:3,y:4}});
  if(hall)for(const [i,at] of [{x:center-1,y:8},{x:center+1,y:8},{x:center-3,y:7},{x:center+2,y:7}].entries())slots.push({key:'mvp-dining:'+i,kind:'seat',at});
  const blocked:Vec[]=[];if(!['barn','greenhouse'].includes(b.kind))for(let x=center-2;x<=center+1;x++)for(let y=6;y<=7;y++)blocked.push({x,y});
  blocked.push(...bedFootprint(slots));
@@ -68,6 +69,8 @@ export function actionRoom(w:World,r:Resident,a:Activity):{building:Building;key
  if(action.type==='eat'&&action.mvpAtTable&&w.mvpRooms?.version===1){
   const seat=mvpDiningSeat(w,r);if(!seat)return null;
   return {building:seat.building,key:seat.key,group,target:seat.at};
+ }else if((action.type==='mvpCollectSeed'||action.type==='mvpSaveSeed')&&hasMvpHamlet(w)&&w.mvpSeeds){
+  id=MVP_HALL;key='mvp-seed';
  }else if(action.type==='personalFoodGift'){
   if(action.operation!=='deliver'&&action.operation!=='return')return null;const c=w.personalFoodGifts?.gifts.find(c=>c.id===action.giftId);if(!c?.location.inside||!c.location.roomAt)return null;id=c.location.inside;target={...c.location.roomAt};key='personal-food-gift:'+c.id;
  }else if(action.type==='pregnancyPreparation'&&action.operation==='attend'){

@@ -93,6 +93,11 @@ export function buildChoices(c:DecisionContext):ActionChoice[]{
   if(c.mvpDrinking&&(kind==='bush'||kind==='spring'))gathering.push({id:`gather.${r.id}`,label:`去(${r.at.x},${r.at.y})采集${resourceNames[kind]}，填写本人决定的 quantity（1–${quantity} 整份；路线和余量须执行时核实）`,action:{type:'gather',resourceId:r.id,quantity},chooseQuantity:quantity});
   else add(gathering,`gather.${r.id}`,`去(${r.at.x},${r.at.y})采集${quantity}份${resourceNames[kind]}（路线和余量须执行时核实）`,{type:'gather',resourceId:r.id,quantity});
  }
+ const seedWork=group();
+ if(c.mvpSeeds){
+  if(c.mvpSeeds.stock===null||c.mvpSeeds.stock>0)add(seedWork,'mvp.seed.collect','去灶堂种台领取1份有限种子（10分钟，余量到场核实，不自动补充）',{type:'mvpCollectSeed'});
+  if(count(c,'turnip')>=1)add(seedWork,'mvp.seed.save','去灶堂种台把本人1份芜菁留成2份种子（30分钟，实际扣根菜）',{type:'mvpSaveSeed'});
+ }
  const farming=group();
  const plots=[...c.plots].filter(p=>p.ownerId===c.actor.id).sort((a,b)=>manhattan(a.at,c.actor.at)-manhattan(b.at,c.actor.at)||a.id.localeCompare(b.id));
  const empty=plots.find(p=>!p.crop),dry=plots.find(p=>p.crop?.definition==='crop/turnip@1'&&p.crop.wateredDay!==Math.floor(c.minute/DAY)&&(p.observed?p.observed.atMinute===c.minute&&p.observed.stage==='growing':p.crop.growth<4)),ripe=plots.find(p=>p.crop?.definition==='crop/turnip@1'&&(p.observed?p.observed.atMinute===c.minute&&p.observed.stage==='mature':p.crop.growth>=4));

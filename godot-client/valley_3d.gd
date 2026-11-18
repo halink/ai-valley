@@ -654,6 +654,7 @@ func show_room(world: Dictionary, selected: String, continuous := true, paths: D
 		room_art.build(terrain, room, shared, dining)
 	clear_children(actors)
 	room_art.paint_cooking(actors, world, room, room_id)
+	room_art.paint_seeds(actors, world, room, room_id)
 	var revision := int(world.revision)
 	var pose_enabled: bool = continuous and not world.clock.paused
 	var animate := pose_enabled and not reset and revision > last_revision
