@@ -46,5 +46,5 @@ export function advanceMvpClimate(w:World,previousMinute:number):void {
  w.mvpClimate={...s,lastMinute:w.minute,lastUs:current.atUs,current};
 }
 export function rejectMvpClimateForModels(w:unknown):void {
- if(w&&typeof w==='object'&&owns(w,'mvpClimate'))throw Error('mvp_climate_model_entry_unsupported');
+ if(w&&typeof w==='object'&&(owns(w,'mvpClimate')||owns(w,'mvpSoil')||owns(w,'mvpAgriculture')))throw Error('mvp_climate_model_entry_unsupported');
 }

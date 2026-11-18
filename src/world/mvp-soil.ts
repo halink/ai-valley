@@ -42,7 +42,7 @@ function executionNumber(id:unknown):bigint {if(typeof id!=='string'||!/^soil-wa
 /** Both directions of the persisted dependency are mandatory, including absence. */
 export function validateMvpSoil(w:World,minute=w.minute):void {
  const has=owns(w,'mvpSoil'),climate=w.mvpClimate;
- if(!has){if(climate?.schemaVersion===2||climate?.schemaVersion===3||climate?.capability==='soil-water-v1')throw Error('soil_missing_dependency');return;}
+ if(!has){if(owns(w,'mvpAgriculture'))throw Error('agriculture_missing_soil');if(climate?.schemaVersion===2||climate?.schemaVersion===3||climate?.capability==='soil-water-v1')throw Error('soil_missing_dependency');return;}
  if(!climate||!((climate.schemaVersion===2&&climate.capability==='soil-water-v1')||(climate.schemaVersion===3&&climate.capability==='agriculture-v1')))throw Error('soil_missing_climate');
  const s=w.mvpSoil!;
  if(!keys(s,['schemaVersion','integratorVersion','parameterFingerprint','denominator','adoptedMinute','adoptedUs','lastUs','nextWaterExecutionSeq','plots','waterReceipts'])||!((s.schemaVersion===1&&s.integratorVersion===1&&climate.schemaVersion===2)||(s.schemaVersion===2&&s.integratorVersion===2&&climate.schemaVersion===3))||s.parameterFingerprint!==SOIL_PARAMETER_FINGERPRINT||s.denominator!==D.toString())throw Error('soil_unsupported_state');
@@ -60,7 +60,8 @@ export function validateMvpSoil(w:World,minute=w.minute):void {
   const coupled=s.schemaVersion===2?agriculturePrefix(p.segment.start as SoilAmounts&{cropUse:string},rate,end-start,p.segment.crop??null):null;
   const computed=coupled?.amounts??soilPrefix(p.segment.start,rate,end-start);
   if(s.schemaVersion===2){const input=agricultureInput(w,p.plotId,p.segment.sampleUs),saved=p.segment.crop;
-   if(!!input!==!!saved||input&&saved&&(input.instanceId!==saved.instanceId||input.temperatureFactor!==saved.temperatureFactor||input.target!==saved.target||coupled!.progress!==input.progress)||computed.cropUse!==p.current.cropUse)throw Error('soil_crop_prefix_mismatch');
+   if((input===null?saved!==null:!keys(saved,['instanceId','temperatureFactor','progress','target']))||!!input!==!!saved||input&&saved&&(input.instanceId!==saved.instanceId||input.temperatureFactor!==saved.temperatureFactor||input.target!==saved.target||coupled!.progress!==input.progress)||computed.cropUse!==p.current.cropUse)throw Error('soil_crop_prefix_mismatch');
+   if(input&&saved&&coupled!.matureAtOffset!==null){const mature=agriculturePlot(w,p.plotId)!.instance!.maturedUs;if(mature===null||(coupled!.matureAtOffset==='0'?integer(mature)>start:integer(mature)!==start+integer(coupled!.matureAtOffset)))throw Error('agriculture_maturity_time_mismatch');}
   }
   if(SOIL_KEYS.some(k=>computed[k]!==p.current[k]))throw Error('soil_prefix_mismatch');
  }
@@ -136,3 +137,6 @@ export function soilObservation(w:World):MvpSoilObservation|undefined {
  const display=(s:string)=>Number((integer(s)*1000n+D/2n)/D)/1000;
  return {schemaVersion:w.mvpSoil.schemaVersion,denominator:D.toString(),atUs:w.mvpSoil.lastUs,plots:w.mvpSoil.plots.map(p=>({plotId:p.plotId,paw:display(p.current.water),snowWater:display(p.current.snow),initialPaw:50,rainIn:display(p.current.rainIn),snowIn:display(p.current.snowIn),melt:display(p.current.melt),irrigation:display(p.current.irrigation),evaporation:display(p.current.evaporation),drainage:display(p.current.drainage),cropUse:display(p.current.cropUse??'0'),exact:{...p.current}}))};
 }
+
+/** Historical maturity proof uses the same deterministic cell and conserved units. */
+export {cell as soilWeatherCell,checkAmounts as validateSoilAmounts};

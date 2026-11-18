@@ -1,4 +1,4 @@
-import {agricultureRoute,agricultureReason,completeAgriculture,allocateAgricultureExecution,registerPlantedCrop,retireCrop} from './mvp-agriculture.js';
+import {validAgricultureAction,agriculturePlot,agricultureRoute,agricultureReason,completeAgriculture,allocateAgricultureExecution,registerPlantedCrop,retireCrop} from './mvp-agriculture.js';
 import {allocateSoilWaterExecution,assertSoilWaterUnsettled,settleSoilWater} from './mvp-soil.js';
 import {minuteToClimateUs} from './mvp-climate.js';
 import {validateMvpClimate,advanceMvpClimate} from './mvp-climate-state.js';
@@ -116,6 +116,8 @@ function definitionFor(world:World,plan:Plan,action:Action):string {
 /** A submitted plan represents one individual's choice; it never authorizes another person's choice. */
 export function submitPlan(world:World,plan:Plan):{ok:boolean;error?:string} {
  if(hasReceipt(world,`plan:${plan.id}`))return {ok:true};
+ if(plan.actions.some(a=>a.type==='water'&&Object.prototype.hasOwnProperty.call(a,'expectedInstanceId')&&(typeof a.expectedInstanceId!=='string'||!/^crop:[1-9][0-9]*$/.test(a.expectedInstanceId))))return {ok:false,error:'灌溉实例身份格式无效'};
+ if(plan.actions.some(a=>a.type==='mvpAgriculture'&&!validAgricultureAction(a)))return {ok:false,error:'新农业行动结构或操作无效'};
  const actor=world.residents.find(r=>r.id===plan.actorId);
  if(!actor||!living(actor)||(!actor.canDecide||!actor.canExpress)&&!(plan.actions.length===1&&(expressiveTransportChoice(world,actor,plan.actions[0])||!!careSelfWithdrawal(world,actor,plan.actions[0])||careExpressionWait(world,actor,plan.actions[0]))))return {ok:false,error:'人物当前无法提交新决定'};
  if(actor.revision!==plan.actorRevision)return {ok:false,error:'人物状态已变化，迟到的决定失效'};
@@ -282,6 +284,7 @@ function targetFor(world:World,r:Resident,a:Action,definition:string,elapsed=0):
  }
  if(a.type==='plant'||a.type==='water'||a.type==='harvest'){
   const p=world.plots.find(p=>p.id===a.plotId);if(!p||p.ownerId!==r.id)return fail('没有这块田的使用权');
+  if(a.type==='water'&&Object.prototype.hasOwnProperty.call(a,'expectedInstanceId')&&(typeof a.expectedInstanceId!=='string'||a.expectedInstanceId!==agriculturePlot(world,p.id)?.instance?.id))return fail('所选灌溉实例已经变化');
   if(p.crop?.mvpCrop&&(a.type!=='water'||a.expectedInstanceId!==p.crop.mvpCrop.instanceId))return fail('新作物须使用对应实例的新收获或灌溉行动');
   if(a.type==='harvest'&&(!p.crop||!world.definitions[p.crop.definition]||p.crop.growth<Number(world.definitions[p.crop.definition].data.growthDays)))return fail('作物已经不存在或尚未成熟');
   if(a.type==='water'&&(!p.crop||!has(r.inventory,{water:1})))return fail('当前没有作物或本人清水不足');
@@ -434,6 +437,7 @@ function completeAtomic(world:World,r:Resident,a:Action,definition:string,elapse
  }
  if(a.type==='plant'||a.type==='water'||a.type==='harvest'){
   const p=world.plots.find(v=>v.id===a.plotId);if(!p||p.ownerId!==r.id||distance(p.at,r.at)>1)return '田地位置或使用权已经变化';
+  if(a.type==='water'&&Object.prototype.hasOwnProperty.call(a,'expectedInstanceId')&&(typeof a.expectedInstanceId!=='string'||a.expectedInstanceId!==agriculturePlot(world,p.id)?.instance?.id))return '所选灌溉实例已经变化';
   if(p.crop?.mvpCrop&&(a.type!=='water'||a.expectedInstanceId!==p.crop.mvpCrop.instanceId))return '新作物实例已变化或旧收获入口不支持';
   if(a.type==='plant'){
    if(p.crop)return '田里已有作物';

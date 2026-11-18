@@ -16,6 +16,7 @@ export function cropObservationNote(c:DecisionContext,choices:ActionChoice[]):st
  const descriptions=rows.map(p=>{
   const o=p.observed!;
   let state=o.stage==='empty'?'未种田间作物':o.stage==='mature'?'作物已成熟，可另行决定是否收获，无须为继续生长浇水':o.stage==='unknown'?'作物生长阶段尚不能确认':'作物未成熟';
+  if(o.growthSystem==='climate')return `本人田(${p.at.x},${p.at.y})：${state}；新作物按实际气温和PAW积算，不使用旧雨日或今日浇水次数；过季不自动消失。`;
   if(o.stage!=='empty'){
    state+='；'+(o.wateredToday?'今日已浇水':'今日未浇水');
    const legacy=typeof o.legacyRainDay==='boolean';

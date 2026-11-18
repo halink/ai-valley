@@ -14,10 +14,11 @@ export function visibleOwnPlots(w:World,r:Resident):Plot[]{
 export function cropObservation(w:World,p:Plot):CropObservation {
  const observation:CropObservation={atMinute:w.minute,stage:'empty',wateredToday:null,inSeason:null,rainingNow:w.weather==='rain'};
  if(w.mode==='validation'&&w.mvpClimate){
-  observation.legacyRainDay=w.weather==='rain';
+  if(!p.crop?.mvpCrop)observation.legacyRainDay=w.weather==='rain';
   observation.rainingNow=['rain','mixed'].includes(w.mvpClimate.current.condition);
  }
  if(!p.crop)return observation;
+ if(p.crop.mvpCrop){const d=w.definitions[p.crop.definition];observation.growthSystem='climate';observation.stage=p.crop.growth>=Number(d?.data.growthDays)?'mature':'growing';return observation;}
  const d=w.definitions[p.crop.definition],days=Number(d?.data.growthDays),seasons=d?.data.seasons;
  observation.stage=Number.isFinite(days)&&days>0&&Number.isFinite(p.crop.growth)?p.crop.growth>=days?'mature':'growing':'unknown';
  observation.wateredToday=p.crop.wateredDay===Math.floor(w.minute/DAY);

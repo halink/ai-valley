@@ -1,5 +1,6 @@
 /** A momentary field observation, not a growth forecast or permission to act. */
 export interface CropObservation {
+ growthSystem?:'climate';
  atMinute:number;
  stage:'empty'|'growing'|'mature'|'unknown';
  wateredToday:boolean|null;

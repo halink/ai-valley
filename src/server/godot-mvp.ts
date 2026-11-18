@@ -1,5 +1,5 @@
-import {adoptMvpAgriculture,agricultureObservation,agricultureReason,plantTarget,canSow} from '../world/mvp-agriculture.js';
-import {CULTIVARS,cultivarKeys} from '../shared/mvp-agriculture.js';
+import {adoptMvpAgriculture,agricultureObservation,agricultureReason,plantTarget,canSow,agriculturePlot} from '../world/mvp-agriculture.js';
+import {CULTIVARS,cultivarKeys,temperatureFactor} from '../shared/mvp-agriculture.js';
 import {adoptMvpSoil,soilObservation} from '../world/mvp-soil.js';
 import {adoptMvpResources} from '../world/mvp-resources.js';
 import {adoptMvpClimate,validateMvpClimate} from '../world/mvp-climate-state.js';
@@ -110,13 +110,16 @@ export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string
   }
  }
  const reserveRoot=(r.inventory.seed??0)<1&&(r.inventory.turnip??0)>=1&&r.hunger<80;
- const food=(r.inventory.meal??0)>=1?'meal':(r.inventory.turnip??0)>=(reserveRoot?2:1)?'turnip':(r.inventory.fruit??0)>=1?'fruit':'berry';
+ const newFood=cultivarKeys.map(c=>CULTIVARS[c]).find(d=>(r.inventory[d.root]??0)>=((r.inventory[d.seed]??0)<1&&r.hunger<80?2:1))?.root;
+ const food=(r.inventory.meal??0)>=1?'meal':newFood??((r.inventory.turnip??0)>=(reserveRoot?2:1)?'turnip':(r.inventory.fruit??0)>=1?'fruit':'berry');
  if(r.hunger>=35&&r.hunger<80&&r.energy>=70&&(mvpThirst(w,r)??0)<50-1e-9&&(r.inventory[food]??0)>=1){const action:Action={type:'eat',item:food,mvpAtTable:true};if(mvpCanStart(w,r,action))return {action,reason:'带着自己的食物回共屋餐桌进食，不共享或凭空补充口粮'};}
  if(r.hunger>=35&&(r.inventory[food]??0)>=1)return {action:{type:'eat',item:food},reason:'饥饿且带有一整份自有食物，优先餐食、其次根菜、水果或浆果'};
  // Immediate needs come before optional stocking: an empty bag must not
  // send a thirsty or exhausted resident on a food-reserve trip.
  if(r.hunger>=35){
-  const ripe=w.plots.find(p=>p.ownerId===r.id&&p.id.startsWith('mvp-garden-')&&p.crop&&p.crop.growth>=Number(w.definitions[p.crop.definition]?.data.growthDays));
+  const newRipe=w.plots.find(p=>p.ownerId===r.id&&p.crop?.mvpCrop&&p.crop.growth>=CULTIVARS[p.crop.mvpCrop.cultivar].days);
+  if(newRipe?.crop?.mvpCrop){const action:Action={type:'mvpAgriculture',operation:'harvest',cultivar:newRipe.crop.mvpCrop.cultivar,target:plantTarget(w,newRipe)};if(mvpCanStart(w,r,action))return {action,reason:'饥饿且没有口粮，先收获本人已成熟的新根菜'};}
+  const ripe=w.plots.find(p=>p.ownerId===r.id&&p.id.startsWith('mvp-garden-')&&p.crop&&!p.crop.mvpCrop&&p.crop.growth>=Number(w.definitions[p.crop.definition]?.data.growthDays));
   if(ripe){const action:Action={type:'harvest',plotId:ripe.id};if(mvpCanStart(w,r,action))return {action,reason:'饥饿且没有随身食物，收获自己的成熟根菜'};}
   const source=w.resources.filter(s=>s.kind==='bush'&&s.amount>=1&&r.knownResources.includes(s.id)).sort((a,b)=>distance(r.at,a.at)-distance(r.at,b.at)).find(s=>berryApproachPath(w,r.at,s)!==null);
   if(source)return {action:{type:'gather',resourceId:source.id,quantity:Math.min(3,Math.floor(source.amount))},reason:'前往已知果丛，采集有限整份食物'};
@@ -160,8 +163,9 @@ export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string
  // Keep the remaining portion; replenish only after the carried supply runs out.
  const waterTrip=(r.inventory.water??0)<1?mvpWaterTrip(w,r):null;
  if(waterTrip)return {action:waterTrip,reason:'当前紧急需求已处理，前往已知泉水补足两份清水储备'};
+ const agriculture=chooseAgricultureRule(w,r);if(agriculture)return agriculture;
  // Preserve a route back into planting before cooking away the final root.
- if(r.hunger<35&&r.energy>=70&&(mvpThirst(w,r)??0)<50-1e-9&&(r.inventory.seed??0)<1&&w.mvpSeeds){
+ if(r.hunger<35&&r.energy>=70&&(mvpThirst(w,r)??0)<50-1e-9&&(r.inventory.seed??0)<1&&w.mvpSeeds&&!w.mvpAgriculture){
   const action:Action|null=(r.inventory.turnip??0)>=1?{type:'mvpSaveSeed'}:w.mvpSeeds.stock>=1&&w.plots.some(p=>p.ownerId===r.id&&p.id.startsWith('mvp-garden-')&&!p.crop)?{type:'mvpCollectSeed'}:null;
   const busy=w.residents.some(p=>p.id!==r.id&&p.activity&&isMvpSeedAction(p.activity.action));
   if(action&&!busy&&mvpCanStart(w,r,action))return {action,reason:action.type==='mvpSaveSeed'?'用自己一份根菜留出两份下轮种子':'到灶堂领取一份有限种子，实际到场扣减种源'};
@@ -177,7 +181,7 @@ export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string
  }
  // Garden only after personal needs/reserves; no borrowed seeds or water.
  if(r.hunger<35&&r.energy>=70&&(mvpThirst(w,r)??0)<50-1e-9){
-  const plots=w.plots.filter(p=>p.ownerId===r.id&&p.id.startsWith('mvp-garden-')).sort((a,b)=>Number(!!b.crop)-Number(!!a.crop));
+  const plots=w.plots.filter(p=>p.ownerId===r.id&&p.id.startsWith('mvp-garden-')&&!p.crop?.mvpCrop&&(p.crop||!w.mvpAgriculture)).sort((a,b)=>Number(!!b.crop)-Number(!!a.crop));
   for(const plot of plots){
    const crop=plot.crop,days=crop?Number(w.definitions[crop.definition]?.data.growthDays):0;
    const action:Action|null=crop&&crop.growth>=days?{type:'harvest',plotId:plot.id}:!crop&&(r.inventory.seed??0)>=1?{type:'plant',plotId:plot.id}:crop&&crop.wateredDay!==Math.floor(w.minute/1440)&&(r.inventory.water??0)>=2?{type:'water',plotId:plot.id}:null;
@@ -198,6 +202,24 @@ export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string
  }
  return {action:{type:'wait',minutes:30},reason:'当前没有可执行的规则行动，短暂等待'};
 }
+/** Rule-only farming preference. Engine permissions never enforce these quotas. */
+function chooseAgricultureRule(w:World,r:Resident):{action:Action;reason:string}|null {
+ if(!w.mvpAgriculture||r.hunger>=35||r.energy<70||(mvpThirst(w,r)??0)>=50)return null;
+ const active=cultivarKeys.find(c=>canSow(w,c));if(!active)return null;
+ const d=CULTIVARS[active],plots=w.plots.filter(p=>p.ownerId===r.id).sort((a,b)=>a.id.localeCompare(b.id));
+ const attempt=(action:Action,reason:string)=>mvpCanStart(w,r,action)?{action,reason}:null;
+ for(const p of plots)if(p.crop?.mvpCrop&&p.crop.growth>=CULTIVARS[p.crop.mvpCrop.cultivar].days){const out=attempt({type:'mvpAgriculture',operation:'harvest',cultivar:p.crop.mvpCrop.cultivar,target:plantTarget(w,p)},'收获本人已成熟的新根菜，保留有限种源闭环');if(out)return out;}
+ const goal=plots.length+1;
+ if((r.inventory[d.seed]??0)<goal&&(r.inventory[d.root]??0)>=1){const out=attempt({type:'mvpAgriculture',operation:'saveSeed',cultivar:active},'用本人一根留种，为下一轮每田一份及一份私人备种；不是引擎上限');if(out)return out;}
+ for(const c of cultivarKeys){const def=CULTIVARS[c],reserve=c===active&&(r.inventory[def.seed]??0)<goal?1:0;if((r.inventory[def.root]??0)>=2+reserve&&(r.inventory.meal??0)<1){if((r.inventory.water??0)<2){const a=mvpWaterTrip(w,r);if(a)return {action:a,reason:'烹饪前补足本人用水，并保留饮用水'};}else{const out=attempt({type:'mvpAgriculture',operation:'cook',cultivar:c},'用本人两份同种根菜和一水烹饪餐食');if(out)return out;}}}
+ const candidates=plots.filter(p=>!p.crop||p.crop.mvpCrop?(!p.crop||temperatureFactor(p.crop.mvpCrop!.cultivar,w.mvpClimate!.current.temperatureDeciC)===0):(w.definitions[p.crop.definition]?.data.seasons as string[]).includes(calendarSeason(w))===false);
+ const targets=candidates.map(p=>plantTarget(w,p,!!p.crop));
+ if(w.mvpAgriculture.grants[active].stock>0){for(const target of targets){const a:Action={type:'mvpAgriculture',operation:'collectSeed',cultivar:active,target,targets};if(!agricultureReason(w,r,a)){const out=attempt(a,'只领取当前合法田地实际缺口的有限种子，已有种子逐田抵扣');if(out)return out;}}}
+ for(const p of candidates){if((r.inventory[d.seed]??0)<1)break;const a:Action=p.crop?{type:'mvpAgriculture',operation:'clear',cultivar:active,target:plantTarget(w,p,true)}:{type:'mvpAgriculture',operation:'plant',cultivar:active,target:plantTarget(w,p)};const out=attempt(a,p.crop?'已备本人替代种，再自主清除停长作物；清田不返种产粮':'用本人有限新种子在合法季节播种');if(out)return out;}
+ for(const p of plots)if(p.crop?.mvpCrop&&p.crop.growth<CULTIVARS[p.crop.mvpCrop.cultivar].days){const soil=w.mvpSoil!.plots.find(s=>s.plotId===p.id)!;if(BigInt(soil.current.water)<35n*1440000000000000n){if((r.inventory.water??0)<2){const a=mvpWaterTrip(w,r);if(a)return {action:a,reason:'为新作物取水，并保留本人饮水'};}else{const out=attempt({type:'water',plotId:p.id,expectedInstanceId:p.crop.mvpCrop.instanceId},'按实际PAW选择灌溉，不按旧雨日或今日已浇判断');if(out)return out;}}}
+ return null;
+}
+function calendarSeason(w:World){return ['spring','summer','autumn','winter'][Math.floor(w.minute/1440/28)%4];}
 export function createMvpSession(options:{world?:World;commit?:(world:World,previousRevision:number)=>void;persistent?:boolean}={}){
  let world=structuredClone(options.world??createMvpWorld());
  if(options.world)inheritReceiptHistory(options.world,world);
@@ -237,6 +259,7 @@ export function createMvpSession(options:{world?:World;commit?:(world:World,prev
     stepWorld(world,1);
     for(const failed of world.residents.filter(r=>r.lastFailure)){
      const action=gathering.get(failed.id);
+     if(action?.type==='mvpAgriculture')continue;
      if(action&&isMvpSeedAction(action)&&['灶堂有限种源已领完','这处实际工位正在被另一项劳动占用'].includes(failed.lastFailure!))continue;
      const source=action?.type==='gather'?world.resources.find(s=>s.id===action.resourceId):undefined;
      const depleted=action?.type==='gather'&&source&&source.amount<action.quantity&&distance(failed.at,source.at)<=1

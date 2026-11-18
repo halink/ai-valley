@@ -88,7 +88,7 @@ static func activity_label(person: Dictionary) -> String:
 	if not activity is Dictionary:
 		return "暂无进行中行为 · 决策状态未知"
 	var action_type = activity.get("action", {}).get("type", "unknown")
-	var purpose := action_name(str(action_type))
+	var purpose := action_name(str(action_type), str(activity.get("action", {}).get("operation", "")))
 	if not activity.get("path", []).is_empty() or (activity.get("room") is Dictionary and not activity.room.get("path", []).is_empty()):
 		return "移动中 · 接下来：" + purpose
 	return "到达现场：" + purpose
@@ -188,7 +188,7 @@ static func life_action(person: Dictionary, world: Dictionary) -> String:
 	if not activity is Dictionary: return activity_label(person)
 	var action: Dictionary = activity.get("action", {})
 	var kind := str(action.get("type", ""))
-	var verb: String = {"eat":"吃饭", "sleep":"休息", "mvpDrink":"喝水", "talk":"交谈", "plant":"播种", "water":"浇菜", "harvest":"收菜", "cook":"做饭", "mvpCollectSeed":"领种", "mvpSaveSeed":"留种", "wait":"停留"}.get(kind, action_name(kind))
+	var verb: String = {"eat":"吃饭", "sleep":"休息", "mvpDrink":"喝水", "talk":"交谈", "plant":"播种", "water":"浇菜", "harvest":"收菜", "cook":"做饭", "mvpCollectSeed":"领种", "mvpSaveSeed":"留种", "wait":"停留"}.get(kind, action_name(kind, str(action.get("operation", ""))))
 	if kind == "gather":
 		verb = "采集"
 		for source in world.get("resources", []):
@@ -218,7 +218,7 @@ static func plan_summary(person: Dictionary) -> String:
 		if intention.length() > 240: declared += "…"
 	var queued: Array[String] = []
 	for action in plan.actions.slice(0, 5):
-		queued.append(action_name(str(action.get("type", ""))) if action is Dictionary else "未知行为")
+		queued.append(action_name(str(action.get("type", "")), str(action.get("operation", ""))) if action is Dictionary else "未知行为")
 	var next := "无后续动作"
 	if not queued.is_empty():
 		next = " → ".join(queued)
@@ -325,7 +325,9 @@ static func resident_room_position(at: Variant, room: Dictionary) -> bool:
 static func item_name(code: String) -> String:
 	return {"meal": "餐食", "seed": "种子", "turnip": "根菜", "berry": "浆果", "fruit": "野果", "water": "水", "wood": "木材", "stone": "石头", "fish": "鱼", "grain": "谷物", "meat": "肉", "bread": "面包"}.get(code, "未知物品")
 
-static func action_name(code: String) -> String:
+static func action_name(code: String, operation := "") -> String:
+	if code == "mvpAgriculture":
+		return {"collectSeed":"领取三季种子", "plant":"播种根菜", "harvest":"收获根菜", "clear":"清理作物", "saveSeed":"根菜留种", "cook":"烹饪根菜"}.get(operation, "未知新作物劳动")
 	return {"mvpCollectSeed": "领取种子", "mvpSaveSeed": "留种", "cook": "做饭", "plant": "播种", "water": "浇水", "harvest": "收获", "wait": "等待", "gather": "采集", "eat": "进食", "mvpDrink": "饮水", "rest": "休息", "move": "移动", "sleep": "睡觉", "fish": "钓鱼", "talk": "交谈"}.get(code, "未知行为")
 
 static func error_name(code: String) -> String:
