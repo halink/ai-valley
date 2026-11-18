@@ -69,6 +69,8 @@ export function actionRoom(w:World,r:Resident,a:Activity):{building:Building;key
  if(action.type==='eat'&&action.mvpAtTable&&w.mvpRooms?.version===1){
   const seat=mvpDiningSeat(w,r);if(!seat)return null;
   return {building:seat.building,key:seat.key,group,target:seat.at};
+ }else if(action.type==='mvpPreservation'&&w.mvpPreservation){
+  id=MVP_HALL;key='kitchen';
  }else if(action.type==='mvpAgriculture'&&['collectSeed','saveSeed','cook'].includes(action.operation)){
   id=MVP_HALL;key=action.operation==='cook'?'kitchen':'mvp-seed';
  }else if((action.type==='mvpCollectSeed'||action.type==='mvpSaveSeed')&&hasMvpHamlet(w)&&w.mvpSeeds){

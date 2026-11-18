@@ -1,3 +1,5 @@
+import {preservationPreparation} from './mvp-preservation-policy.js';
+import {adoptMvpPreservation,preservationObservation,validateMvpPreservation} from '../world/mvp-preservation.js';
 import {mvpNutritionBuffer,mvpEdibleQuantity} from './mvp-nutrition-buffer.js';
 import {goods} from '../shared/items.js';
 import {adoptMvpAgriculture,agricultureObservation,agricultureReason,plantTarget,canSow,agriculturePlot} from '../world/mvp-agriculture.js';
@@ -34,11 +36,12 @@ import type {Action,Resident,Snapshot,Tile,World} from '../shared/types.js';
 
 export const GODOT_MVP_PORT=3414;
 export const GODOT_MVP_NOTICE='隔离核心循环：本地规则驱动，非真实模型；内存世界，退出后重置';
-export type MvpPhase='deciding'|'travelling'|'gathering'|'eating'|'resting'|'waiting'|'stopped'|'drinking'|'talking'|'planting'|'watering'|'harvesting'|'cooking';
+export type MvpPhase='deciding'|'travelling'|'gathering'|'eating'|'resting'|'waiting'|'stopped'|'drinking'|'talking'|'planting'|'watering'|'harvesting'|'cooking'|'preserving'|'installing';
 export function mvpPhase(r:Resident):MvpPhase {
  if(r.status!=='alive')return 'stopped';
  if(!r.activity)return 'deciding';
  if(r.activity.path.length||r.activity.room?.path.length)return 'travelling';
+ if(r.activity.action.type==='mvpPreservation')return r.activity.action.operation==='install'?'installing':'preserving';
  return ({cook:'cooking',plant:'planting',water:'watering',harvest:'harvesting',talk:'talking',mvpDrink:'drinking',gather:'gathering',eat:'eating',sleep:'resting',wait:'waiting'} as const)[r.activity.action.type as 'gather'|'eat'|'sleep'|'wait']??'waiting';
 }
 export function createMvpWorld():World {
@@ -92,7 +95,7 @@ function mvpWaterTrip(w:World,r:Resident):Action|null {
 }
 /** No global information is claimed to be a resident's model knowledge. This
  * deliberately bounded engineering policy is visibly labelled in snapshots. */
-function mvpPlanDefinition(w:World,action:Action){return action.type==='cook'?'action/mvp-cooking@1':['plant','water','harvest'].includes(action.type)?'action/mvp-garden@1':w.activeDefinitions['action/routine'];}
+function mvpPlanDefinition(w:World,action:Action){return action.type==='mvpPreservation'?'action/mvp-preservation@1':action.type==='cook'?'action/mvp-cooking@1':['plant','water','harvest'].includes(action.type)?'action/mvp-garden@1':w.activeDefinitions['action/routine'];}
 function mvpCanStart(w:World,r:Resident,action:Action):boolean {
  return planStartError(w,{id:'mvp-exchange-preview',actorId:r.id,actorRevision:r.revision,createdAt:w.minute,definition:mvpPlanDefinition(w,action),intention:'本地规则：行动预检',actions:[action]})===null;
 }
@@ -116,9 +119,9 @@ export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string
  // hunger can use even that root. Cooking/buffer estimates use fuller goals.
  const reserveRoot=(r.inventory.seed??0)<1&&(r.inventory.turnip??0)>=1&&r.hunger<80;
  const newFood=cultivarKeys.map(c=>CULTIVARS[c]).find(d=>(r.inventory[d.root]??0)>=((r.inventory[d.seed]??0)<1&&r.hunger<80?2:1))?.root;
- const food=(r.inventory.meal??0)>=1?'meal':newFood??((r.inventory.turnip??0)>=(reserveRoot?2:1)?'turnip':(r.inventory.fruit??0)>=1?'fruit':'berry');
+ const food=(r.inventory.meal??0)>=1?'meal':newFood??((r.inventory.turnip??0)>=(reserveRoot?2:1)?'turnip':(r.inventory.fruit??0)>=1?'fruit':(r.inventory.berry??0)>=1?'berry':'preserve');
  if(r.hunger>=35&&r.hunger<80&&r.energy>=70&&(mvpThirst(w,r)??0)<50-1e-9&&(r.inventory[food]??0)>=1){const action:Action={type:'eat',item:food,mvpAtTable:true};if(mvpCanStart(w,r,action))return {action,reason:'带着自己的食物回共屋餐桌进食，不共享或凭空补充口粮'};}
- if(r.hunger>=35&&(r.inventory[food]??0)>=1)return {action:{type:'eat',item:food},reason:'饥饿且带有一整份自有食物，优先餐食、其次根菜、水果或浆果'};
+ if(r.hunger>=35&&(r.inventory[food]??0)>=1)return {action:{type:'eat',item:food},reason:'饥饿且带有一整份自有食物，优先餐食、根菜和鲜果，缺少鲜食时可吃本人罐藏'};
  // Immediate needs come before optional stocking: an empty bag must not
  // send a thirsty or exhausted resident on a food-reserve trip.
  if(r.hunger>=35){
@@ -213,6 +216,7 @@ export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string
    if(error===null)return {action,reason:'基本需求已处理，向眼前空闲熟人问候；固定规则示例，不是模型对话'};
   }
  }
+ if(r.hunger<35&&r.energy>=70&&(mvpThirst(w,r)??0)<50-1e-9){const preparation=preservationPreparation(w,r);if(preparation&&mvpCanStart(w,r,preparation.action))return preparation;}
  return {action:{type:'wait',minutes:30},reason:'当前没有可执行的规则行动，短暂等待'};
 }
 /** Rule-only farming preference. Engine permissions never enforce these quotas. */
@@ -237,17 +241,17 @@ export function createMvpSession(options:{world?:World;commit?:(world:World,prev
  let world=structuredClone(options.world??createMvpWorld());
  if(options.world)inheritReceiptHistory(options.world,world);
  const initialRevision=world.revision;
- const climateAdopted=adoptMvpClimate(world),soilAdopted=adoptMvpSoil(world),agricultureAdopted=adoptMvpAgriculture(world);
- if(climateAdopted||soilAdopted||agricultureAdopted){world.revision++;options.commit?.(world,initialRevision);}
+ const climateAdopted=adoptMvpClimate(world),soilAdopted=adoptMvpSoil(world),agricultureAdopted=adoptMvpAgriculture(world),preservationAdopted=adoptMvpPreservation(world);
+ if(climateAdopted||soilAdopted||agricultureAdopted||preservationAdopted){world.revision++;options.commit?.(world,initialRevision);}
  enableCompletedMovement(world);
  let serial=0,fault:string|null=null;
  const decisions:Record<string,number>={};
- const snapshot=():Snapshot&{roomViews:ReturnType<typeof roomObservation>}&{observation:ReturnType<typeof mvpObservation>;relationshipHistory:ReturnType<typeof relationshipObservation>}&{movement:ReturnType<typeof completedMovementSnapshot>;residentMovement:ReturnType<typeof residentMovementSnapshot>}&{mvp:{driver:'local-rules';notice:string;ephemeral:boolean;fault:string|null;phases:Record<string,MvpPhase>;decisions:Record<string,number>;environment:NonNullable<World['mvpClimate']>['current'];soil:ReturnType<typeof soilObservation>;agriculture:ReturnType<typeof agricultureObservation>;nutritionBuffer:ReturnType<typeof mvpNutritionBuffer>[]}}=>({
+ const snapshot=():Snapshot&{roomViews:ReturnType<typeof roomObservation>}&{observation:ReturnType<typeof mvpObservation>;relationshipHistory:ReturnType<typeof relationshipObservation>}&{movement:ReturnType<typeof completedMovementSnapshot>;residentMovement:ReturnType<typeof residentMovementSnapshot>}&{mvp:{driver:'local-rules';notice:string;ephemeral:boolean;fault:string|null;phases:Record<string,MvpPhase>;decisions:Record<string,number>;environment:NonNullable<World['mvpClimate']>['current'];soil:ReturnType<typeof soilObservation>;agriculture:ReturnType<typeof agricultureObservation>;preservation:ReturnType<typeof preservationObservation>;nutritionBuffer:ReturnType<typeof mvpNutritionBuffer>[]}}=>({
   roomViews:roomObservation(world),observation:mvpObservation(world,[],[]),relationshipHistory:relationshipObservation(world),movement:completedMovementSnapshot(world),residentMovement:residentMovementSnapshot(world),world:structuredClone(world),serverTime:new Date().toISOString(),version:VALLEY_VERSION,mapRevision:'godot-mvp-map-4',
-  capabilities:{active:['小地图只读观察','本地规则采集/进食/休息闭环','有限面对面规则问候','独立选择的食水交换','同源气候与田地水账','三品种温水生长与实际耕收','本人名义两日营养缓冲',...(options.persistent?['规则存档与恢复']:[])],pending:['真实模型决策验收','全年冬储充分性','最终绘本素材']},
+  capabilities:{active:['小地图只读观察','本地规则采集/进食/休息闭环','有限面对面规则问候','独立选择的食水交换','同源气候与田地水账','三品种温水生长与实际耕收','本人名义两日营养缓冲','真实罐藏与批次到期（鲜食腐坏未模拟）',...(options.persistent?['规则存档与恢复']:[])],pending:['真实模型决策验收','全年冬储充分性','最终绘本素材']},
   // Read the published, validated point state. Legacy crop rain is separate;
   // soil water is exact; legacy crops and model decisions do not consume PAW.
-  mvp:{driver:'local-rules',notice:options.persistent?'持久规则小山谷：本地规则驱动，非真实模型':GODOT_MVP_NOTICE,ephemeral:!options.persistent,fault,phases:Object.fromEntries(world.residents.map(r=>[r.id,mvpPhase(r)])),decisions:{...decisions},environment:structuredClone(world.mvpClimate!.current),soil:soilObservation(world),agriculture:agricultureObservation(world),nutritionBuffer:world.residents.map(r=>mvpNutritionBuffer(world,r))},
+  mvp:{driver:'local-rules',notice:options.persistent?'持久规则小山谷：本地规则驱动，非真实模型':GODOT_MVP_NOTICE,ephemeral:!options.persistent,fault,phases:Object.fromEntries(world.residents.map(r=>[r.id,mvpPhase(r)])),decisions:{...decisions},environment:structuredClone(world.mvpClimate!.current),soil:soilObservation(world),agriculture:agricultureObservation(world),preservation:preservationObservation(world),nutritionBuffer:world.residents.map(r=>mvpNutritionBuffer(world,r))},
  });
  const advance=(minutes=1)=>{
   if(!Number.isInteger(minutes)||minutes<1||minutes>60)throw new Error('MVP advances must be 1–60 whole world minutes');
@@ -275,7 +279,7 @@ export function createMvpSession(options:{world?:World;commit?:(world:World,prev
     for(const failed of world.residents.filter(r=>r.lastFailure)){
      const action=gathering.get(failed.id);
      if(action?.type==='talk'&&actionFailures.some(f=>f.actorId===failed.id&&f.planId===activityPlans.get(failed.id)&&f.actionType==='talk'&&f.code==='room_slot_contended'))continue;
-     if(action?.type==='mvpAgriculture')continue;
+     if(action?.type==='mvpAgriculture'||action?.type==='mvpPreservation')continue;
      if(action&&isMvpSeedAction(action)&&['灶堂有限种源已领完','这处实际工位正在被另一项劳动占用'].includes(failed.lastFailure!))continue;
      const source=action?.type==='gather'?world.resources.find(s=>s.id===action.resourceId):undefined;
      const depleted=action?.type==='gather'&&source&&source.amount<action.quantity&&distance(failed.at,source.at)<=1
@@ -294,7 +298,7 @@ export function createMvpSession(options:{world?:World;commit?:(world:World,prev
      ].includes(failed.lastFailure!))continue;
      throw new Error(`MVP action failed for ${failed.id}: ${failed.lastFailure}`);
     }
-    validateMvpClimate(world);
+    validateMvpClimate(world);validateMvpPreservation(world);
     world.revision=Math.max(world.revision,current.revision+1);
     options.commit?.(world,current.revision);
     }catch(error){world=current;serial=previousSerial;for(const key of Object.keys(decisions))delete decisions[key];Object.assign(decisions,previousDecisions);throw error;}

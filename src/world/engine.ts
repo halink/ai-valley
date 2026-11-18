@@ -1,3 +1,4 @@
+import {validPreservationAction,preservationTransferReason,preservationRoute,preservationReason,completePreservation,allocatePreservationExecution,advanceMvpPreservation,reconcileMvpPreservation} from './mvp-preservation.js';
 import {validAgricultureAction,agriculturePlot,agricultureRoute,agricultureReason,completeAgriculture,allocateAgricultureExecution,registerPlantedCrop,retireCrop} from './mvp-agriculture.js';
 import {allocateSoilWaterExecution,assertSoilWaterUnsettled,settleSoilWater} from './mvp-soil.js';
 import {minuteToClimateUs} from './mvp-climate.js';
@@ -116,7 +117,9 @@ function definitionFor(world:World,plan:Plan,action:Action):string {
 /** A submitted plan represents one individual's choice; it never authorizes another person's choice. */
 export function submitPlan(world:World,plan:Plan):{ok:boolean;error?:string} {
  if(hasReceipt(world,`plan:${plan.id}`))return {ok:true};
+ const preservationTransfer=plan.actions.map(a=>preservationTransferReason(world,a)).find(Boolean);if(preservationTransfer)return {ok:false,error:preservationTransfer};
  if(plan.actions.some(a=>a.type==='water'&&Object.prototype.hasOwnProperty.call(a,'expectedInstanceId')&&(typeof a.expectedInstanceId!=='string'||!/^crop:[1-9][0-9]*$/.test(a.expectedInstanceId))))return {ok:false,error:'灌溉实例身份格式无效'};
+ if(plan.actions.some(a=>a.type==='mvpPreservation'&&!validPreservationAction(a)))return {ok:false,error:'罐藏行动结构无效'};
  if(plan.actions.some(a=>a.type==='mvpAgriculture'&&!validAgricultureAction(a)))return {ok:false,error:'新农业行动结构或操作无效'};
  const actor=world.residents.find(r=>r.id===plan.actorId);
  if(!actor||!living(actor)||(!actor.canDecide||!actor.canExpress)&&!(plan.actions.length===1&&(expressiveTransportChoice(world,actor,plan.actions[0])||!!careSelfWithdrawal(world,actor,plan.actions[0])||careExpressionWait(world,actor,plan.actions[0]))))return {ok:false,error:'人物当前无法提交新决定'};
@@ -215,6 +218,7 @@ function kitchenUseReason(world:World,r:Resident,b:Building|undefined,start=worl
  return premisesWorkReason(world,r.id,b.id,'kitchen',start,end)??publicKitchenReason(world,r,b.id)??employmentKitchenReason(world,r,b.id);
 }
 function targetFor(world:World,r:Resident,a:Action,definition:string,elapsed=0):{target:Vec;adjacent?:boolean;duration:number;error?:string;cargo?:Activity['cargo'];buildingId?:string} {
+ const preservationTransfer=preservationTransferReason(world,a);if(preservationTransfer)return {target:{...r.at},duration:0,error:preservationTransfer};
  const fail=(error:string)=>({target:r.at,duration:0,error});
  if(selfCareTransportBlocked(world,r,a))return fail('须先实际结束原同行或护送，才能另行本人自理');
  if(world.mode==='formal'&&(isSelfCareAction(a)||knownAgeYears(r.bornAt,world.minute)===null)&&(!ageAllowsAction(world,r,a)||isSelfCareAction(a)&&!r.canExpress))return fail('当前年龄、能力或本人自理权限已不支持这项行动');
@@ -265,6 +269,7 @@ function targetFor(world:World,r:Resident,a:Action,definition:string,elapsed=0):
   if(a.type==='sleep'){const b=sleepBuilding(world,r,a);if(!b||!a.buildingId&&world.rooms&&residentBed(world,r,b)===null)return fail('尚未拥有可使用的真实床位，当前住处存在床位缺口');return {target:b.door,duration:a.minutes};}
   return {target:r.at,duration:a.minutes};
  }
+ if(a.type==='mvpPreservation')return preservationRoute(world,r,a);
  if(a.type==='mvpAgriculture')return agricultureRoute(world,r,a);
  if(isMvpSeedAction(a)){const error=mvpSeedReason(world,r,a);return error?fail(error):{target:{...mvpSeedPlace(world)!.building.door},duration:a.type==='mvpCollectSeed'?10:30};}
  if(a.type==='mvpDrink'){const error=mvpDrinkReason(world,r);return error?fail(error):{target:{...r.at},duration:5};}
@@ -354,7 +359,7 @@ function begin(world:World,r:Resident,elapsed=0){
  const outdoors=['mvpAgriculture','move','gather','plant','water','harvest','build','construction','landRights','regionSurvey','industry','leave','settle','lodge'].includes(action.type);
  if((path.length||outdoors)&&!world.rooms){r.inside=null;r.roomAt=null;}
  r.activity={planId:plan.id,action,startedAt:world.minute,remaining:route.duration,path,target:{...route.target},definition,travelProgress:0,...(route.cargo?{cargo:route.cargo}:{})};
- allocateSoilWaterExecution(world,r.activity);allocateAgricultureExecution(world,r.activity);
+ allocateSoilWaterExecution(world,r.activity);allocateAgricultureExecution(world,r.activity);allocatePreservationExecution(world,r,r.activity);
  const mvpBedError=mvpSleepProblem(world,r);if(mvpBedError){failure(world,r,mvpBedError);return;}
  const exitError=prepareRoomExit(world,r,true);if(exitError){failure(world,r,exitError);return;}
  const bodyError=reserveBody(world,r,r.activity);if(bodyError){failure(world,r,bodyError);return;}
@@ -378,6 +383,7 @@ export function buildAllowed(world:World,r:Resident,a:Extract<Action,{type:'buil
  return {ok:true,building};
 }
 function completeAtomic(world:World,r:Resident,a:Action,definition:string,elapsed=0):string|null {
+ const preservationTransfer=preservationTransferReason(world,a);if(preservationTransfer)return preservationTransfer;
  if(a.type==='frontierHazard')return completeFrontierHazard(world,r,a);
  if(a.type==='design')return completeDesign(world,r,a);
  if(a.type==='lastWish')return completeLastWish(world,r,a);
@@ -420,6 +426,7 @@ function completeAtomic(world:World,r:Resident,a:Action,definition:string,elapse
  const social=executeSocialAction(world,r,a);if(social.handled)return social.ok?null:social.error??'行为当前无法完成';
  const record=(text:string,kind:'action'|'construction'|'trade'|'production'='action',actors=[r.id])=>emitEvent(world,{kind,actors,place:{...r.at},text});
  if(a.type==='move'||a.type==='wait'||a.type==='sleep')return null;
+ if(a.type==='mvpPreservation')return completePreservation(world,r,a);
  if(a.type==='mvpAgriculture')return completeAgriculture(world,r,a);
  if(isMvpSeedAction(a))return completeMvpSeed(world,r,a);
  if(a.type==='mvpDrink')return completeMvpDrink(world,r);
@@ -620,6 +627,7 @@ function processActivity(world:World,r:Resident,minutes:number,actionFailures?:S
   if(activity.action.type==='cook'){const problem=premisesWorkReason(world,r.id,b.id,'kitchen',world.minute-minutes,world.minute)??publicKitchenReason(world,r,b.id)??employmentKitchenReason(world,r,b.id);if(problem){failure(world,r,problem);return;}}
   r.inside=b.id;
  }
+ if(activity.action.type==='mvpPreservation'){const problem=preservationReason(world,r,activity.action,true);if(problem){failure(world,r,problem);return;}activity.mvpPreservationWorked=(activity.mvpPreservationWorked??0)+Math.min(minutes,activity.remaining);}
  if(activity.action.type==='mvpAgriculture'){const problem=agricultureReason(world,r,activity.action,true);if(problem){failure(world,r,problem);return;}}
  if(isMvpSeedAction(activity.action)){const problem=mvpSeedReason(world,r,activity.action,true);if(problem){failure(world,r,problem);return;}}
  endDecisionProtection(world,r,'decision');
@@ -648,7 +656,7 @@ export function stepWorld(world:World,minutes:number,options:{actionFailures?:St
  let left=minutes;
  while(exact!==undefined?world.minute<exact:left>0){
   const remaining=exact!==undefined?exact-world.minute:left,dt=Math.min(1,remaining),previousDay=Math.floor(world.minute/DAY);
-  const climateStart=world.minute;world.minute=exact!==undefined&&dt===remaining?exact:world.minute+dt;advanceMvpClimate(world,climateStart);left-=dt;advanceFood(world);advanceCommons(world);syncFamilyEscorts(world);advanceFamilyRelocation(world,dt);beginRoomTick(world);syncMedicalTransport(world);
+  const climateStart=world.minute;world.minute=exact!==undefined&&dt===remaining?exact:world.minute+dt;advanceMvpClimate(world,climateStart);advanceMvpPreservation(world,climateStart);left-=dt;advanceFood(world);advanceCommons(world);syncFamilyEscorts(world);advanceFamilyRelocation(world,dt);beginRoomTick(world);syncMedicalTransport(world);
   const beforeRelief=new Map(world.residents.map(r=>[r.id,{hunger:r.hunger,energy:r.energy}]));
   for(const r of world.residents){if(!living(r)){
     if(world.mode==='formal'&&r.residency==='outside'&&(r.activity&&isSelfCareAction(r.activity.action)||r.plan?.actions.some(isSelfCareAction)))failure(world,r,'已经离开谷内，原本人自理安排停止');
@@ -707,6 +715,7 @@ export function stepWorld(world:World,minutes:number,options:{actionFailures?:St
    for(const p of world.plots){if(!p.crop||p.crop.mvpCrop)continue;const def=world.definitions[p.crop.definition];if((def.data.seasons as string[]).includes(calendar(world.minute-1).season)&&(p.crop.wateredDay===previousDay||previousWeather==='rain'))p.crop.growth=Math.min(Number(def.data.growthDays),p.crop.growth+1);p.crop.lastGrowthDay=day;}
    if(!world.production)for(const res of world.resources)if(!world.mvpResources?.renewal[res.id]&&res.regrowthDays>0&&res.amount<res.max&&world.minute-res.lastHarvest>=res.regrowthDays*DAY){res.amount=Math.min(res.max,res.amount+1);res.lastHarvest=world.minute;}
   }
+  reconcileMvpPreservation(world);
  }
  world.revision++;
 }
@@ -813,6 +822,7 @@ function complete(world:World,r:Resident,a:Action,definition:string,elapsed=0):s
  const before=identity?new Set(world.events.map(e=>e.id)):null;
  try{
   const error=foodTransaction(world,()=>completeAtomic(world,r,a,definition,elapsed));
+  reconcileMvpPreservation(world);
   if(!error&&identity&&before){
    // These supported branches emit one success fact. Ambiguous/no-event results stay silent.
    const facts=world.events.filter(e=>!before.has(e.id)&&(e.kind==='action'||e.kind==='production')&&e.actors.length===1&&e.actors[0]===r.id);

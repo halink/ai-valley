@@ -323,9 +323,11 @@ static func resident_room_position(at: Variant, room: Dictionary) -> bool:
 # Central vocabulary for protocol enums; extend here when adding actions/items.
 # Unknown protocol identifiers are not user-facing names.
 static func item_name(code: String) -> String:
-	return {"meal": "餐食", "seed": "种子", "turnip": "根菜", "berry": "浆果", "fruit": "野果", "water": "水", "wood": "木材", "stone": "石头", "fish": "鱼", "grain": "谷物", "meat": "肉", "bread": "面包"}.get(code, "未知物品")
+	return {"preserve": "水果罐藏", "meal": "餐食", "seed": "种子", "turnip": "根菜", "berry": "浆果", "fruit": "野果", "water": "水", "wood": "木材", "stone": "石头", "fish": "鱼", "grain": "谷物", "meat": "肉", "bread": "面包"}.get(code, "未知物品")
 
 static func action_name(code: String, operation := "") -> String:
+	if code == "mvpPreservation":
+		return {"install":"安装罐藏工位", "preserve":"制作水果罐藏"}.get(operation, "未知罐藏劳动")
 	if code == "mvpAgriculture":
 		return {"collectSeed":"领取三季种子", "plant":"播种根菜", "harvest":"收获根菜", "clear":"清理作物", "saveSeed":"根菜留种", "cook":"烹饪根菜"}.get(operation, "未知新作物劳动")
 	return {"mvpCollectSeed": "领取种子", "mvpSaveSeed": "留种", "cook": "做饭", "plant": "播种", "water": "浇水", "harvest": "收获", "wait": "等待", "gather": "采集", "eat": "进食", "mvpDrink": "饮水", "rest": "休息", "move": "移动", "sleep": "睡觉", "fish": "钓鱼", "talk": "交谈"}.get(code, "未知行为")
