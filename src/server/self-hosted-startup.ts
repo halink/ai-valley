@@ -7,6 +7,7 @@ import {createObserverServer} from './http.js';
 import {acquireRuntimeOwnership,type RuntimeOwnership} from './runtime-lock.js';
 import {callModel} from './decisions.js';
 import {readSelfHostedConfig} from './self-hosted-config.js';
+import {preflightWorldSave} from './save-preflight.js';
 
 export async function startSelfHostedServer(options:{port:number;database:string;root:string;dayMinutes:number;env:Readonly<Record<string,string|undefined>>;model?:ConstructorParameters<typeof ValleyRuntime>[2]}){
  if(!Number.isInteger(options.port)||options.port<0||options.port>65535)throw new Error('Invalid observer port');
@@ -37,6 +38,7 @@ export async function startSelfHostedServer(options:{port:number;database:string
   });
   owner=acquireRuntimeOwnership(options.database);
   owner.assertOwned();
+  preflightWorldSave(owner.database);
   const markerPath=owner.database+'.self-hosted-session';
   let fd:number;
   try{fd=openSync(markerPath,'wx',0o600);}catch{throw Error('self_hosted_unresolved_session');}

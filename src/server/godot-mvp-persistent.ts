@@ -11,9 +11,7 @@ import {adoptMvpDrinking,validateMvpDrinking} from '../world/mvp-drinking.js';
 import {enableCompletedMovement,completedMovementSnapshot,residentMovementSnapshot} from '../world/completed-movement.js';
 /** Opt-in persistent small world. No local-rules fallback, no environment-file loader. */
 import {createServer,type Server} from 'node:http';
-import {existsSync,statSync} from 'node:fs';
-import {DatabaseSync} from 'node:sqlite';
-import {gunzipSync} from 'node:zlib';
+import {preflightWorldSave} from './save-preflight.js';
 import {WorldStore} from './store.js';
 import {ValleyRuntime} from './runtime.js';
 import {acquireRuntimeOwnership,type RuntimeOwnership} from './runtime-lock.js';
@@ -34,14 +32,8 @@ function assertMvpWorld(world:World){
 }
 /** Reject another project's DB before the WorldStore constructor can migrate its schema. */
 function validateSavedMvp(database:string):void {
- if(!existsSync(database)||statSync(database).size===0)return;
- const db=new DatabaseSync(database,{readOnly:true});
- try{
-  const row=db.prepare('SELECT state FROM worlds ORDER BY rowid DESC LIMIT 1').get() as {state:string|Uint8Array}|undefined;
-  if(!row)throw Error('godot_mvp_save_mismatch');
-  const world=JSON.parse(typeof row.state==='string'?row.state:gunzipSync(row.state).toString()) as World;
-  assertMvpWorld(world);
- }catch{throw Error('godot_mvp_save_mismatch');}finally{db.close();}
+ const world=preflightWorldSave(database,{requireWorld:true});
+ if(world)assertMvpWorld(world as unknown as World);
 }
 
 function checkListener(options:MvpListenerOptions){

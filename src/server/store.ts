@@ -9,6 +9,7 @@ import type {World,WorldEvent,Resource} from '../shared/types.js';
 import {AtomicDailySnapshots} from './acceptance-daily-store.js';
 import type {DailySnapshotConfig} from './acceptance-daily-snapshots.js';
 import {attachReceiptHistory} from '../world/receipts.js';
+import {assertWorldCompatibility,decodeSavedWorld,preflightWorldSave} from './save-preflight.js';
 export interface AppendedHistory {
  events: WorldEvent[];
  processed: string[];
@@ -37,6 +38,7 @@ export class WorldStore {
  private readonly exactReceipt;
  private readonly receiptPrefix;
  constructor(path:string,options:{dailySnapshots?:DailySnapshotConfig}={}){
+  preflightWorldSave(path);
   if(path!==':memory:')mkdirSync(dirname(path),{recursive:true,mode:0o700});
   this.db=new DatabaseSync(path);
   this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;
@@ -102,7 +104,7 @@ export class WorldStore {
  private readWorld(working:boolean,indexedReceipts:boolean):World|null {
   const row=this.db.prepare('SELECT state FROM worlds ORDER BY rowid DESC LIMIT 1').get() as {state:string|Uint8Array}|undefined;
   if (!row) return null;
-  const saved=JSON.parse(typeof row.state==='string'?row.state:gunzipSync(row.state).toString());
+  const saved=decodeSavedWorld(row.state) as unknown as World & {terrainKey?:string;resourceChanges:Array<[number,Resource]>;resourceCount:number;ledgerVersion?:1};
   if (!saved.terrainKey) return saved;
   const {terrainKey,resourceChanges,resourceCount,ledgerVersion,...world}=saved;
   const terrain=this.db.prepare('SELECT body FROM terrain WHERE hash=?').get(terrainKey) as {body:Uint8Array}|undefined;
@@ -146,9 +148,11 @@ export class WorldStore {
   return gzipSync(JSON.stringify({...state,ledgerVersion:1,terrainKey,resourceCount:resources.length,resourceChanges}),{level:1});
  }
  commit(world:World,previousRevision:number|null,appended?:AppendedHistory):void{
+  assertWorldCompatibility(world);
   this.db.exec('BEGIN IMMEDIATE');
   try{
-   const row=this.db.prepare('SELECT revision FROM worlds WHERE id=?').get(world.id) as {revision:number}|undefined;
+   const row=this.db.prepare('SELECT revision,state FROM worlds WHERE id=?').get(world.id) as {revision:number;state:string|Uint8Array}|undefined;
+   if(row)decodeSavedWorld(row.state);
    if((row?.revision??null)!==previousRevision)throw new Error('stale_world_revision');
    const insert=this.db.prepare('INSERT INTO events(id,world_id,at,body) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body WHERE events.body<>excluded.body');
    // Full-state callers validate every fact. The runtime supplies a transaction-local suffix only after
