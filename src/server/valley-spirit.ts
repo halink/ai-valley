@@ -79,6 +79,22 @@ function validJournal(v:unknown,head:PublicWeatherFact):v is Journal {
  for(const e of j.entries){if(!exact(e,['entryId','sourceRef','permissionVersion','fromMinute','toMinute','fact','text'])||!validFact(e.fact)||e.fact.worldId!==head.worldId||e.fact.minute>head.minute||e.fact.worldRevision>head.worldRevision||e.fact.minute<minute||e.fact.worldRevision<revision||!integer(e.permissionVersion)||e.permissionVersion<1||e.permissionVersion<permission||e.permissionVersion>j.permission.version||e.entryId!==entryId(e.fact,e.permissionVersion)||ids.has(e.entryId)||e.sourceRef!==`${j.worldId}/${e.entryId}`||e.fromMinute!==e.fact.minute||e.toMinute!==e.fact.minute||e.text!==describe(e.fact))return false;ids.add(e.entryId);minute=e.fact.minute;revision=e.fact.worldRevision;permission=e.permissionVersion;}
  return true;
 }
+function readWeatherJournal(path:string):string|null {
+  let stat;try{stat=lstatSync(path);}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return null;throw e;}
+  if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1||stat.size>LIMIT)throw Error('unsafe_journal_path');
+  const fd=openSync(path,constants.O_RDONLY|constants.O_NOFOLLOW);try{const opened=fstatSync(fd);if(opened.ino!==stat.ino||opened.dev!==stat.dev||opened.size>LIMIT)throw Error('journal_changed');const bytes=readFileSync(fd);if(bytes.length>LIMIT)throw Error('journal_too_large');return bytes.toString('utf8');}finally{closeSync(fd);}
+ }
+/** Private exact weather extraction; never initializes or writes a journal.
+ * Caller owns the runtime lock and supplies the committed projection and SQL
+ * permission. Monitor the returned bytes against the prior accepted prefix. */
+export function readExistingPublicWeatherJournal(database:string,head:PublicWeatherFact,grant:{version:number;publicWeather:boolean}|null){
+ if(!validFact(head)||!grant?.publicWeather)return null;
+ const raw=readWeatherJournal(resolve(database)+'.valley-spirit.json');
+ if(raw===null)return null;
+ const parsed:unknown=JSON.parse(raw);
+ if(!validJournal(parsed,head)||parsed.permission.version!==grant.version||!parsed.permission.publicWeather)return null;
+ return {raw,entries:parsed.entries};
+}
 export const valleySpiritUnavailable=()=>({schemaVersion:1 as const,status:'unavailable' as const,mode:'objective-weather-records' as const,generatedBy:'fixed-factual-template' as const,modelNarration:'disabled-pending-shared-admission-and-request-recovery' as const,records:[] as PublicWeatherEntry[]});
 /** Caller owns the existing world runtime lock for this complete lifetime.
  * Independent failures isolate this module, never roll back/stop the world.
@@ -94,11 +110,7 @@ export class ValleySpiritJournal {
   try{if(!validFact(head))throw Error('invalid_public_fact');assertOwned();const text=this.read(),authority=permissions.read();if(text===null){if(authority)throw Error('initialized_journal_missing');this.state={schemaVersion:1,worldId:head.worldId,permission:permissions.initialize(),entries:[]};}else{const parsed:unknown=JSON.parse(text);if(!authority||!validJournal(parsed,head)||parsed.permission.version!==authority.version||parsed.permission.publicWeather!==authority.publicWeather)throw Error('incompatible_journal');this.state=parsed;}this.diskText=text;}catch{this.isolated=true;}
  }
  isolate():void {this.isolated=true;}
- private read():string|null {
-  let stat;try{stat=lstatSync(this.path);}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return null;throw e;}
-  if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1||stat.size>LIMIT)throw Error('unsafe_journal_path');
-  const fd=openSync(this.path,constants.O_RDONLY|constants.O_NOFOLLOW);try{const opened=fstatSync(fd);if(opened.ino!==stat.ino||opened.dev!==stat.dev||opened.size>LIMIT)throw Error('journal_changed');const bytes=readFileSync(fd);if(bytes.length>LIMIT)throw Error('journal_too_large');return bytes.toString('utf8');}finally{closeSync(fd);}
- }
+ private read():string|null{return readWeatherJournal(this.path);}
  private current():Journal|null {
   if(this.isolated||!this.state)return null;
   try{this.assertOwned();if(this.read()!==this.diskText)throw Error('external_journal_change');const authority=this.permissions.read();if(!authority||authority.version!==this.state.permission.version||authority.publicWeather!==this.state.permission.publicWeather)throw Error('stale_journal_permission');return this.state;}catch{this.isolated=true;return null;}
