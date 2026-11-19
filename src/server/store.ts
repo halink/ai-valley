@@ -119,6 +119,7 @@ export class WorldStore {
  private readonly developerSpiritFixtureOwner?:DeveloperMvpSpiritFixtureOwner;
  private agedG1ObservedEpoch:number|undefined;
  private agedG1EpochIsolated=false;
+ private armedFormalDue:FormalDueIntent|undefined;
  constructor(path:string,options:{formalRainProvenance?:true;formalAppointmentChoiceCustody?:true;dailySnapshots?:DailySnapshotConfig;allowMvpClimate?:boolean;seasonalModel?:true;mvpSpiritEffectFixture?:MvpGroundFruitCapacity;developerSpiritFixtureOwner?:DeveloperMvpSpiritFixtureOwner;nativeWeatherCredit?:true;sealedAgedBirthExecution?:true}={}){
   this.allowMvpClimate=options.allowMvpClimate===true;
   this.allowFormalRainProvenance=options.formalRainProvenance===true&&!this.allowMvpClimate&&!options.seasonalModel;
@@ -458,18 +459,33 @@ export class WorldStore {
    }catch(error){this.db.exec('ROLLBACK');throw error;}
   }catch{return {status:'unavailable'} as const;}
  }
+ /** This handle may arm one pre-existing, still pending, signed-review
+  * schedule. No startup recovery or world mutation is done by arming. */
+ armDeveloperFormalDueCheckpoint(worldId:string,id:string):boolean{
+  if(!this.developerSpiritFixtureOwner?.formalShadowKeyPem||!/^valley-formal-[a-zA-Z0-9_-]{1,180}$/u.test(worldId)||
+   !/^formal-due:[a-f0-9]{64}$/u.test(id)||this.armedFormalDue)return false;
+  try{
+   const info=this.readDeveloperFormalDueIntent(worldId,id);
+   if(info.status!=='pending'||info.lastCheckpoint||info.intent.worldId!==worldId||info.intent.id!==id)return false;
+   this.armedFormalDue=Object.freeze({...info.intent});
+   return true;
+  }catch{return false;}
+ }
  /** Revalidate from the actual current formal head under one SQLite lock.
   * Returns evidence only. Even a successful checkpoint cannot execute v3. */
  stepDeveloperFormalDueCheckpoint(worldId:string,id:string){
+  return this.checkpointFormalDue(worldId,id);
+ }
+ private checkpointFormalDue(worldId:string,id:string,expected?:Readonly<{headRevision:number;headMinute:number;intent:FormalDueIntent}>){
   const owner=this.developerSpiritFixtureOwner;
   if(!owner?.formalShadowKeyPem)return {status:'disabled'} as const;
   owner.assertOwned();this.db.exec('BEGIN IMMEDIATE');
   try{
    const w=this.readWorld(false,false);
-   if(!w||w.id!==worldId){this.db.exec('COMMIT');return {status:'unavailable'} as const;}
+   if(!w||w.id!==worldId||expected&&(expected.headRevision!==w.revision||expected.headMinute!==w.minute)){this.db.exec('COMMIT');return {status:'unavailable'} as const;}
    const shadow=readFormalShadowRows(this.db,owner,w),current=shadow.at(-1);
    const row=readFormalDueRows(this.db,w,shadow).find(r=>r.intent.id===id);
-   if(!row){this.db.exec('COMMIT');return {status:'unavailable'} as const;}
+   if(!row||expected&&(JSON.stringify(row.intent)!==JSON.stringify(expected.intent)||row.checkpoint)){this.db.exec('COMMIT');return {status:'unavailable'} as const;}
    const effects=this.readFormalBerryArchive(w),state=formalDueCurrent(w,row.intent,current,effects);
    if(state!=='due'){this.db.exec('COMMIT');return {status:state} as const;}
    const p=current!.proposal!,review=current!.permission.terms;
@@ -701,15 +717,36 @@ export class WorldStore {
  private commitTransaction(world:World,previousRevision:number|null,appended?:AppendedHistory,seasonalLedger?:SeasonalLedger,
   proof?:AddressedSpeechObservation,mealWitnesses?:readonly ValleySpiritMvpMealWitness[]):readonly ValleySpiritLifeReceipt[]{
   this.assertWritable(world);
+  const armed=this.armedFormalDue;
+  let exactDueCrossing=false;
+  let reachedArmedTime=false;
+  let speech:readonly ValleySpiritLifeReceipt[];
   this.db.exec('BEGIN IMMEDIATE');
   try{
-   const speech=this.writeDraftWithCustody(world,previousRevision,appended,seasonalLedger,proof,
+   if(armed&&previousRevision!==null&&world.id===armed.worldId&&world.mode==='formal'&&world.minute>=armed.notBefore){
+    reachedArmedTime=true;
+    // Only an exact ordinary advancing minute. writeCommit also requires its
+    // genuine native rain-step witness; adoption/static edits cannot qualify.
+    try{
+     const before=this.readWorld(false,false);
+     exactDueCrossing=!!before&&before.id===world.id&&before.revision===previousRevision&&!!before.formalRainProvenance&&
+      !before.clock.paused&&!world.clock.paused&&world.minute===before.minute+1&&before.minute<armed.notBefore&&
+      world.minute<armed.expiresAt&&world.revision>before.revision;
+    }catch{/* Optional checkpoint must not affect a valid world transaction. */}
+   }
+   speech=this.writeDraftWithCustody(world,previousRevision,appended,seasonalLedger,proof,
     !!this.developerSpiritFixtureOwner?.rulesSpeechWorldId,mealWitnesses);
    this.db.exec('COMMIT');
-   forgetFormalRainStep(world);
-   if(world.mode==='formal'){this.terrainKeys.add(terrainRevision(world.map));this.separateLedgers.add(world.id);}
-   return speech;
   }catch(error){this.db.exec('ROLLBACK');throw error;}
+  forgetFormalRainStep(world);
+  if(world.mode==='formal'){this.terrainKeys.add(terrainRevision(world.map));this.separateLedgers.add(world.id);}
+  if(armed&&reachedArmedTime){
+   this.armedFormalDue=undefined;
+   if(exactDueCrossing)try{
+    this.checkpointFormalDue(world.id,armed.id,{headRevision:world.revision,headMinute:world.minute,intent:armed});
+   }catch{/* Committed world must not be reported as rolled back. Explicit manual recovery remains separate. */}
+  }
+  return speech;
  }
  /** Same write and receipt custody for normal and sealed-internal transactions. */
  private writeDraftWithCustody(world:World,previousRevision:number|null,appended?:AppendedHistory,seasonalLedger?:SeasonalLedger,
