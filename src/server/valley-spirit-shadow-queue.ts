@@ -1,3 +1,4 @@
+import type {ValleySpiritProposalDirectionFact} from '../shared/valley-spirit-fairness.js';
 import {randomUUID} from "node:crypto";
 import {closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, readSync, renameSync, unlinkSync, writeFileSync} from "node:fs";
 import {dirname, resolve} from "node:path";
@@ -145,6 +146,22 @@ export class ValleySpiritShadowQueue {
     if (!this.current()) return blocked("queue_isolated");
     const entry = this.state.entries.find(e => e.proposal.proposalId === proposalId);
     return entry ? {status: "found", entry: structuredClone(entry)} : blocked("not_found");
+  }
+
+  /** Narrow private audit metadata from a present, stable sidecar only.
+   * No reasons, source references, permissions, or assessment become facts. */
+  readPrivateProposalDirections(nowMicroMinute:number):readonly ValleySpiritProposalDirectionFact[]|null {
+    if(!natural(nowMicroMinute)||this.disk===null||!this.current())return null;
+    try{
+      const stat=lstatSync(this.path);
+      if(!stat.isFile()||stat.uid!==process.getuid?.()||(stat.mode&0o077)!==0)return null;
+    }catch{return null;}
+    if(this.state.entries.some(e=>e.appendedAtMicroMinute>nowMicroMinute))return null;
+    const rows=this.state.entries.map(({proposal:p,appendedAtMicroMinute})=>({
+      schemaVersion:1 as const,worldId:p.worldId,proposalId:p.proposalId,opportunityId:p.opportunityId,
+      targetId:p.targetId,proposedAtMicroMinute:appendedAtMicroMinute,
+    }));
+    return this.current()?rows:null;
   }
 
   /** Bounded cumulative attempts, including terminal rows; no contents leave the queue. */

@@ -1,3 +1,6 @@
+import {projectSealedMvpFairness} from './valley-spirit-mvp-fairness-read.js';
+import {ValleySpiritShadowQueue} from './valley-spirit-shadow-queue.js';
+import {minuteToClimateUs} from '../world/mvp-climate.js';
 import {makeSealedMvpSourceAgeTerms,verifySealedMvpSourceAge} from './valley-spirit-mvp-source-age.js';
 import {readCurrentSealedMvpSourceCommitment,readCurrentSealedMvpSourceCredit,writeSealedMvpSourceCredit} from './valley-spirit-mvp-source-credit.js';
 import {prepareSealedMvpAdjacentMinute,prepareSealedMvpFruitCreditMinute} from './godot-mvp.js';
@@ -673,6 +676,28 @@ export class WorldStore {
    }
   }
   return speech;
+ }
+ /** Sealed-only audit, no publication and no active resident knowledge.
+  * A stable private sidecar under the same owner is not a cross-file ACID
+  * snapshot or proof of historically complete/signed proposal coverage. */
+ readDeveloperMvpFruitFairness(worldId:string){
+  if(!this.developerSpiritFixtureOwner||this.developerSpiritFixtureOwner.formalApprovalKeyPem)return {status:'unavailable',code:'not-a-sealed-mvp-fixture'} as const;
+  try{
+   const port=this.developerMvpSpiritShadowReadPort()!;
+   this.db.exec('BEGIN');
+   try{
+    const w=this.readWorld(false,false);
+    if(!w||w.id!==worldId){this.db.exec('COMMIT');return {status:'unavailable',code:'no-matching-mvp-head'} as const;}
+    assertDeveloperMvpEffectArchive(this.db,w);
+    let proposals=null;
+    try{
+     proposals=new ValleySpiritShadowQueue(port.database,w.id,port.assertOwned)
+      .readPrivateProposalDirections(Number(minuteToClimateUs(w.minute)));
+    }catch{/* a missing or unreadable separate queue does not undo actual receipts */}
+    const result=projectSealedMvpFairness(w,proposals);
+    this.db.exec('COMMIT');return result;
+   }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }catch{return {status:'unavailable',code:'invalid-mvp-custody'} as const;}
  }
  /** Internal read-only seam. Memory fixtures and ordinary/production saves
   * cannot attest an installed private shadow capability. */
