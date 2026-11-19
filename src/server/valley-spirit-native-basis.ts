@@ -19,7 +19,7 @@ export function checkedPin(options:NativePin){
  if(!/^godot-mvp-[A-Za-z0-9_-]{1,160}$/.test(pin.worldId)||!/^valley-almanac-[a-f0-9]{64}$/.test(pin.weatherEntryId)||!/^valley-life-section-[a-f0-9]{64}$/.test(pin.lifeSectionId))throw Error('native_yearbook_pin_invalid');
  return pin;
 }
-function readWorldHead(db:DatabaseSync,worldId:string){
+export function readNativeValidationWeatherHead(db:DatabaseSync,worldId:string){
    const rows=db.prepare('SELECT id,revision,state FROM worlds LIMIT 2').all();
    if(rows.length!==1||rows[0].id!==worldId)return null;
    const w=decodeSavedWorld(rows[0].state) as unknown as World;
@@ -44,7 +44,7 @@ export function openPrivateNativeYearbookBasis(database:string,options:NativePin
   db.exec('PRAGMA trusted_schema=OFF; PRAGMA query_only=ON');
   const head=()=>{
    owner.assertOwned();
-   return readWorldHead(db,pin.worldId);
+   return readNativeValidationWeatherHead(db,pin.worldId);
   };
   if(!head())throw Error('native_yearbook_world_invalid');
   const perm=new SqliteValleySpiritPermissions(owner.database,pin.worldId,owner.assertOwned,true);handles.push(perm);
@@ -96,7 +96,7 @@ export function openPrivateNativeYearbookBasis(database:string,options:NativePin
 /** Internal borrowing seam; the host owns the transaction. All evidence is
  * derived from the pinned DB and JSON witness, never caller source callbacks. */
 export function nativeYearbookCaptureOnConnection(sqlite:DatabaseSync,database:string,worldId:string,assertOwned:()=>void){
-  let head:ReturnType<typeof readWorldHead>=null;
+  let head:ReturnType<typeof readNativeValidationWeatherHead>=null;
   let priorRevision=-1,priorTime=-1n,priorEpoch=0;
   let priorEntries:PublicWeatherEntry[]=[];
   const authority=valleySpiritLifeAuthorityOnConnection(sqlite,worldId,assertOwned,
@@ -104,7 +104,7 @@ export function nativeYearbookCaptureOnConnection(sqlite:DatabaseSync,database:s
    receipt=>receipt.kind==='conversation-completed'&&verifyValleySpiritSpeechCustody(sqlite,receipt));
   const latestLife=valleySpiritLifeViewOnConnection(sqlite,worldId,assertOwned,authority);
   const capture=(pin:Readonly<NativePin>):OfflineYearbookBasis|null=>{
-   const h=head=readWorldHead(sqlite,worldId);
+   const h=head=readNativeValidationWeatherHead(sqlite,worldId);
    const grant=readValleySpiritWeatherPermission(sqlite,worldId);
    if(!h||!grant)return null;
    if(h.worldRevision<priorRevision||BigInt(h.atUs)<priorTime||grant.version<priorEpoch)

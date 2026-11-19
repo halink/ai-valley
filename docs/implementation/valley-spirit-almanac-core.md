@@ -105,3 +105,13 @@ Within an open reviewed-edition handle, all pins share one monotonic source
 reader, and the signed approval log must extend its exact previously observed
 prefix. A detected rewind isolates the handle; newly written log state is
 remembered only after COMMIT. The in-memory floors do not survive a reopen.
+
+A private sealed development weather packet reader can assemble the canonical
+outbound projection without a released almanac or life input. Its internal
+`readCurrent` binds all selected sources to the exact persisted validation
+head, current SQLite weather grant, and native credits in a single physically
+read-only snapshot. The JSON archive is only a candidate payload; a missing
+or mismatching credit for any point rejects the entire packet. Only the
+canonical allowlisted packet leaves the reader, not the source rows or World.
+This is a read-only evidence pilot, not an account/purpose grant, a dry send,
+or a production/runtime activation.

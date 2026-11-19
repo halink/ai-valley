@@ -39,18 +39,27 @@ export function appendNativeWeatherCredit(db:DatabaseSync,previous:World|null,wo
  db.prepare(`INSERT INTO ${table} VALUES (?,?,1,?,?,?,?) ON CONFLICT(world_id,source_id) DO NOTHING`)
   .run(f.worldId,id,grant.version,f.worldRevision,f.atUs,digest(f));
 }
-/** Caller can use the same SQLite snapshot as head, almanac and life readers.
- * Credit authenticates the supplied typed projection against stored custody,
- * not JSON publication, whole-database rollback resistance, or current head. */
-export function verifiesNativeWeatherCredit(db:DatabaseSync,sourceRef:string,expected:PublicWeatherFact):boolean {
+/** Borrow the caller's snapshot; every selected source needs one exact credit.
+ * This checks the current SQLite grant once and does not accept one from callers. */
+export function verifyNativeWeatherCreditBatch(db:DatabaseSync,worldId:string,
+ sources:readonly {sourceRef:string;fact:PublicWeatherFact}[]):boolean {
  try{
-  if(!validPublicWeatherFact(expected))return false;
-  const g=readValleySpiritWeatherPermission(db,expected.worldId);
+  if(!sources.length||sources.length>48)return false;
+  const g=readValleySpiritWeatherPermission(db,worldId);
   if(!g?.publicWeather||!exists(db))return false;
-  const id=publicWeatherEntryId(expected,g.version);
-  if(sourceRef!==expected.worldId+'/'+id)return false;
-  const row=db.prepare(`SELECT schema_version,permission_version,world_revision,at_us,projection_digest FROM ${table} WHERE world_id=? AND source_id=?`).get(expected.worldId,id);
-  return !!row&&row.schema_version===1&&row.permission_version===g.version&&row.world_revision===expected.worldRevision&&
-   row.at_us===expected.atUs&&row.projection_digest===digest(expected);
+  const stmt=db.prepare(`SELECT schema_version,permission_version,world_revision,at_us,projection_digest FROM ${table} WHERE world_id=? AND source_id=?`);
+  return sources.every(({sourceRef,fact})=>{
+   if(!validPublicWeatherFact(fact)||fact.worldId!==worldId)return false;
+   const id=publicWeatherEntryId(fact,g.version);
+   if(sourceRef!==worldId+'/'+id)return false;
+   const row=stmt.get(worldId,id);
+   return !!row&&row.schema_version===1&&row.permission_version===g.version&&row.world_revision===fact.worldRevision&&
+    row.at_us===fact.atUs&&row.projection_digest===digest(fact);
+  });
  }catch{return false;}
+}
+/** Credit authenticates the supplied typed projection, not JSON publication,
+ * whole-database rollback resistance, or the current world head. */
+export function verifiesNativeWeatherCredit(db:DatabaseSync,sourceRef:string,expected:PublicWeatherFact):boolean {
+ return verifyNativeWeatherCreditBatch(db,expected?.worldId,[{sourceRef,fact:expected}]);
 }
