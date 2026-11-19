@@ -133,31 +133,54 @@ export function openRulesGeographyQueue(database:string,config:RulesGeographyQue
    if(temp!==undefined)try{unlinkSync(temp);}catch{/* do not adopt partial files */}
   }
  };
- return (beforeMinute:number,committed:Readonly<{id:string;revision:number;minute:number}>)=>{
+ type Head=Readonly<{id:string;revision:number;minute:number}>;
+ // Identical authority/basis construction on write and on review. This
+ // deliberately does not refresh old queue bytes against a newer world head.
+ const current=(committed:Head)=>{
+  if(committed.id!==config.worldId)return null;
+  check();
+  const world=readCommittedWorld();
+  if(!world||world.id!==committed.id||world.revision!==committed.revision||world.minute!==committed.minute||world.clock.paused)return null;
+  const rain=currentClosedRain(world,config.maxAgeGameMinutes);
+  if(!rain)return null;
+  const packet=journal.currentObservedRainPacket(BigInt(rain.firstRainUs),BigInt(rain.endedUs));
+  if(!packet||packet.worldId!==world.id||packet.records.some(r=>r.fact.worldRevision>world.revision)||!journal.isCurrentPublicInput(packet))return null;
+  const geo=inspectMvpGroundFruitGeography(world,config.site.sourceId,config.site.target);
+  if(!geo)return null;
+  const now=Number(minuteToClimateUs(world.minute)),until=Number(BigInt(rain.endedUs)+BigInt(config.maxAgeGameMinutes)*BigInt(unit));
+  if(until<=now||packet.sourceRefs.length!==1)return null;
+  const opportunity=valleySpiritFruitFallOpportunityId(world.id,rain.rainEventId,geo.source.resourceInstanceId);
+  const entry:GeographyEntry={
+   status:'proposed',worldId:world.id,proposalId:'g1-geography:'+hash(opportunity),opportunityId:opportunity,
+   atUs:now,untilUs:until,headRevision:world.revision,permissionVersion:packet.permissionVersion,rainEventId:rain.rainEventId,
+   sourceRef:packet.sourceRefs[0],sourceResourceInstanceId:geo.source.resourceInstanceId,targetId:geo.targetId,
+   inputSnapshotId:VALLEY_SPIRIT_GEOGRAPHY_ONLY_PIN+hash([VALLEY_SPIRIT_GEOGRAPHY_ONLY_MENU,world.id,world.revision,now,until,rain,
+    packet,config.site,geo,config.maxAgeGameMinutes]),executionAuthorized:false,
+  };
+  return validEntry(entry,config.worldId)?{entry,packet}:null;
+ };
+ const onCommitted=(beforeMinute:number,committed:Head)=>{
   try{
-   if(committed.id!==config.worldId||!nativeWeatherHourTransition(beforeMinute,committed.minute))return;
-   check();
-   const world=readCommittedWorld();
-   if(!world||world.id!==committed.id||world.revision!==committed.revision||world.minute!==committed.minute||world.clock.paused)return;
-   const rain=currentClosedRain(world,config.maxAgeGameMinutes);
-   if(!rain)return;
-   const packet=journal.currentObservedRainPacket(BigInt(rain.firstRainUs),BigInt(rain.endedUs));
-   if(!packet||packet.worldId!==world.id||packet.records.some(r=>r.fact.worldRevision>world.revision)||!journal.isCurrentPublicInput(packet))return;
-   const geo=inspectMvpGroundFruitGeography(world,config.site.sourceId,config.site.target);
-   if(!geo)return;
-   const now=Number(minuteToClimateUs(world.minute)),until=Number(BigInt(rain.endedUs)+BigInt(config.maxAgeGameMinutes)*BigInt(unit));
-   if(isolated||entries.length>=config.maxCandidates||until<=now||packet.sourceRefs.length!==1)return;
-   // Stable across all permissions, coordinates/config revisions and restarts;
-   // the input pin separately commits the actual current source and public fact.
-   const opportunity=valleySpiritFruitFallOpportunityId(world.id,rain.rainEventId,geo.source.resourceInstanceId);
-   const proposalId='g1-geography:'+hash(opportunity);
-   const inputSnapshotId=VALLEY_SPIRIT_GEOGRAPHY_ONLY_PIN+hash([VALLEY_SPIRIT_GEOGRAPHY_ONLY_MENU,world.id,world.revision,now,until,rain,
-    packet,config.site,geo,config.maxAgeGameMinutes]);
-   if(journal.isCurrentPublicInput(packet))append({
-    status:'proposed',worldId:world.id,proposalId,opportunityId:opportunity,atUs:now,untilUs:until,headRevision:world.revision,
-    permissionVersion:packet.permissionVersion,rainEventId:rain.rainEventId,sourceRef:packet.sourceRefs[0],
-    sourceResourceInstanceId:geo.source.resourceInstanceId,targetId:geo.targetId,inputSnapshotId,executionAuthorized:false,
-   });
+   if(isolated||entries.length>=config.maxCandidates||!nativeWeatherHourTransition(beforeMinute,committed.minute))return;
+   const found=current(committed);
+   if(found&&journal.isCurrentPublicInput(found.packet))append(found.entry);
   }catch{/* Private G1 failure never propagates after a committed world minute. */}
  };
+ const review=(committed:Head)=>{
+  const unavailable={status:'unavailable'} as const;
+  if(isolated||entries.length===0||entries.length>config.maxCandidates)return unavailable;
+  try{
+   if(!unchanged()){isolated=true;return unavailable;}
+   const last=entries.at(-1)!;
+   if(last.worldId!==committed.id||last.headRevision!==committed.revision||
+    last.atUs!==Number(minuteToClimateUs(committed.minute)))return unavailable;
+   const found=current(committed);
+   if(!found||JSON.stringify(found.entry)!==JSON.stringify(last)||!unchanged()||
+    !journal.isCurrentPublicInput(found.packet))return unavailable;
+   return Object.freeze({status:'geography_only' as const,availability:'missing_ground_capabilities' as const,
+    optionNumber:1 as const,publicationAuthorized:false as const,modelDispatchAuthorized:false as const,
+    recordedProposal:Object.freeze({...last})});
+  }catch{return unavailable;}
+ };
+ return {onCommitted,review};
 }

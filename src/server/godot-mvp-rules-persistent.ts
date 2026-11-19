@@ -51,12 +51,12 @@ export async function startPersistentRulesMvp(options:{database:string;port:numb
  let valleySpirit:ValleySpiritJournal|undefined;let spiritPermissions:SqliteValleySpiritPermissions|undefined;
  let geographyCustody:PersistentGeographyCustody|undefined;
  let shadow:ReturnType<typeof createPersistentRulesShadow>|undefined;
- let observeGeographicProposal:ReturnType<typeof openRulesGeographyQueue>|undefined;
+ let geographicProposalQueue:ReturnType<typeof openRulesGeographyQueue>|undefined;
  let viewers:ValleySpiritPublicReaders|undefined,almanacReader:SqliteValleySpiritAlmanacReader|undefined;
  const lifePin=pinPersistentRulesLifeFixture(options.privateLifeFixture);
  let life:ReturnType<typeof openPersistentRulesLifeFixture>|undefined,lifeReadable=false;
  let closing:Promise<void>|undefined;
- const close=():Promise<void>=>closing??=(async()=>{if(timer)clearInterval(timer);timer=undefined;if(server){server.closeAllConnections();await new Promise<void>(resolve=>server!.close(()=>resolve()));server=undefined;}try{life?.close();}catch{/* optional isolated life reader */}life=undefined;try{almanacReader?.close();}catch{/* optional isolated reader */}almanacReader=undefined;viewers=undefined;shadow=undefined;try{geographyCustody?.close();}catch{/* optional isolated custody */}geographyCustody=undefined;try{spiritPermissions?.close();}catch{valleySpirit?.isolate();}spiritPermissions=undefined;store?.close();store=undefined;owner?.release();owner=undefined;})().catch(error=>{closing=undefined;throw error;});
+ const close=():Promise<void>=>closing??=(async()=>{if(timer)clearInterval(timer);timer=undefined;if(server){server.closeAllConnections();await new Promise<void>(resolve=>server!.close(()=>resolve()));server=undefined;}try{life?.close();}catch{/* optional isolated life reader */}life=undefined;try{almanacReader?.close();}catch{/* optional isolated reader */}almanacReader=undefined;viewers=undefined;shadow=undefined;geographicProposalQueue=undefined;try{geographyCustody?.close();}catch{/* optional isolated custody */}geographyCustody=undefined;try{spiritPermissions?.close();}catch{valleySpirit?.isolate();}spiritPermissions=undefined;store?.close();store=undefined;owner?.release();owner=undefined;})().catch(error=>{closing=undefined;throw error;});
  try{
   if(custodyPin){
    owner=privateOwner=acquireDeveloperMvpSpiritFixtureOwner(custodyPin.fixture);
@@ -100,12 +100,12 @@ export async function startPersistentRulesMvp(options:{database:string;port:numb
    lastCommittedMinute=draft.minute;
    try{valleySpirit?.observe(publicWeatherProjection(draft),sample);}catch{valleySpirit?.isolate();}
    shadow?.onCommitted(draft);
-   if(exactHour&&!draft.clock.paused)observeGeographicProposal?.(beforeMinute,draft);}});
+   if(exactHour&&!draft.clock.paused)geographicProposalQueue?.onCommitted(beforeMinute,draft);}});
   const initialPublicFact=publicWeatherProjection(session.world);
   if(initialPublicFact){try{spiritPermissions=new SqliteValleySpiritPermissions(owner.database,initialPublicFact.worldId,()=>owner!.assertOwned());valleySpirit=new ValleySpiritJournal(owner.database,initialPublicFact,()=>owner!.assertOwned(),spiritPermissions,weatherCredit?{persistEmpty:true}:undefined);if(!weatherCredit)valleySpirit.observe(initialPublicFact);}catch{valleySpirit?.isolate();}}
   if(valleySpirit){
    if(queuePin?.worldId===world.id)try{
-    observeGeographicProposal=openRulesGeographyQueue(owner.database,queuePin,valleySpirit,()=>owner!.assertOwned(),()=>store!.load());
+    geographicProposalQueue=openRulesGeographyQueue(owner.database,queuePin,valleySpirit,()=>owner!.assertOwned(),()=>store!.load());
    }catch{/* independent private G1 queue does not block starting normal rules */}
    if(shadowOptions)try{
     if(shadowOptions.durableObservation)geographyCustody=openPersistentGeographyCustody(owner.database,world.id,()=>owner!.assertOwned());
@@ -124,6 +124,11 @@ export async function startPersistentRulesMvp(options:{database:string;port:numb
     return head?shadow.read(head):{status:'unavailable'} as const;
    }catch{return {status:'unavailable'} as const;}
   };
-  return {session,server,snapshot,readPrivateSpiritCandidate,close};
+  const readPrivateSpiritGeographicProposal=()=>{
+   if(!queuePin)return {status:'disabled'} as const;
+   if(!geographicProposalQueue||!session||session.world.clock.paused)return {status:'unavailable'} as const;
+   return geographicProposalQueue.review(session.world);
+  };
+  return {session,server,snapshot,readPrivateSpiritCandidate,readPrivateSpiritGeographicProposal,close};
  }catch(error){await close();throw error;}
 }
