@@ -79,7 +79,7 @@ export function writeSealedMvpSourceCredit(
 }
 
 /** Single latest checkpoint only; an advanced world means no current proof. */
-export function readCurrentSealedMvpSourceCredit(db:DatabaseSync,seal:string,world:World):SealedMvpSourceCredit|null {
+function currentCredit(db:DatabaseSync,seal:string,world:World):StoredCredit|null {
  const credit=stored(db);
  if(!credit||credit.worldId!==world.id||credit.sealDigest!==digest(seal)||credit.revision!==world.revision||
   credit.bornUs!==world.mvpClimate?.lastUs||credit.bornUs!==minuteToClimateUs(world.minute)||
@@ -87,5 +87,17 @@ export function readCurrentSealedMvpSourceCredit(db:DatabaseSync,seal:string,wor
  const source=world.resources.filter(r=>r.id===credit.sourceId);
  if(source.length!==1||source[0].kind!=='bush'||source[0].foodItem!=='fruit'||
   source[0].at.x!==credit.x||source[0].at.y!==credit.y||source[0].amount!==credit.amountAfter)return null;
- return publicShape(credit);
+ return credit;
+}
+export function readCurrentSealedMvpSourceCredit(db:DatabaseSync,seal:string,world:World):SealedMvpSourceCredit|null {
+ const c=currentCredit(db,seal,world);
+ return c?publicShape(c):null;
+}
+/** The commitment includes the private database scope and exact persisted head;
+ * the signing input never reveals the raw seal or raw head hash. */
+export function readCurrentSealedMvpSourceCommitment(db:DatabaseSync,seal:string,world:World){
+ const c=currentCredit(db,seal,world);
+ if(!c)return null;
+ const creditId=digest(JSON.stringify(['valley-spirit-sealed-source-credit/v1',...fields.map(field=>c[field])]));
+ return {worldId:c.worldId,creditId,bornUs:c.bornUs};
 }

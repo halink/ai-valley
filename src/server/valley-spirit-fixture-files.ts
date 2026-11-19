@@ -1,3 +1,4 @@
+import {validSealedMvpSourceAgePolicy,type SealedMvpSourceAgePolicy} from './valley-spirit-mvp-source-age.js';
 import {createHash,createHmac,createPublicKey,randomBytes,timingSafeEqual} from 'node:crypto';
 import {closeSync,constants,fstatSync,fsyncSync,lstatSync,mkdtempSync,openSync,readSync,realpathSync,statSync,writeFileSync,type BigIntStats} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -12,6 +13,7 @@ const databaseName='fixture.sqlite';
 const shape='valley-spirit-private-developer-fixture/v1';
 const formalShape='valley-spirit-private-formal-fixture/v1';
 const formalShadowShape='valley-spirit-private-formal-fixture/v2';
+const sourceAgeShape='valley-spirit-private-source-age-fixture/v1';
 const reviewedShape='valley-spirit-private-yearbook-review-fixture/v1';
 const active=new WeakSet<DeveloperMvpSpiritFixtureOwner>();
 const attached=new WeakSet<DeveloperMvpSpiritFixtureOwner>();
@@ -28,9 +30,10 @@ function root():string {
  return realpathSync(tmpdir());
 }
 interface Manifest {
- readonly schema:typeof shape|typeof formalShape|typeof formalShadowShape|typeof reviewedShape;
+ readonly schema:typeof shape|typeof formalShape|typeof formalShadowShape|typeof reviewedShape|typeof sourceAgeShape;
  readonly approvalKeyPem?:string;
  readonly yearbookReviewerKeyPem?:string;
+ readonly sourceAge?:Readonly<{keyPem:string;policy:SealedMvpSourceAgePolicy}>;
  readonly shadowKeyPem?:string;
  readonly directoryIdentity:string;
  readonly databaseIdentity:string;
@@ -46,6 +49,7 @@ export interface DeveloperMvpSpiritFixtureOwner {
  readonly database:string;
  readonly formalApprovalKeyPem?:string;
  readonly yearbookReviewerKeyPem?:string;
+ readonly sourceAge?:Readonly<{keyPem:string;policy:SealedMvpSourceAgePolicy}>;
  readonly formalShadowKeyPem?:string;
  readonly seal:string;
  readonly capacity:MvpGroundFruitCapacity;
@@ -85,7 +89,13 @@ export function createDeveloperReviewedYearbookFixtureKey(capacity:MvpGroundFrui
  if(!formalApprovalKey(reviewerKeyPem))return invalid();
  return createKey(capacity,undefined,undefined,reviewerKeyPem);
 }
-function createKey(capacity:MvpGroundFruitCapacity,approvalKeyPem?:string,shadowKeyPem?:string,yearbookReviewerKeyPem?:string):DeveloperMvpSpiritFixtureKey {
+export function createDeveloperMvpSourceAgeFixtureKey(
+ capacity:MvpGroundFruitCapacity,keyPem:string,policy:SealedMvpSourceAgePolicy,
+):DeveloperMvpSpiritFixtureKey {
+ if(!formalApprovalKey(keyPem)||!validSealedMvpSourceAgePolicy(policy))return invalid();
+ return createKey(capacity,undefined,undefined,undefined,{keyPem,policy:{...policy}});
+}
+function createKey(capacity:MvpGroundFruitCapacity,approvalKeyPem?:string,shadowKeyPem?:string,yearbookReviewerKeyPem?:string,sourceAge?:Manifest['sourceAge']):DeveloperMvpSpiritFixtureKey {
  if(!validMvpSpiritFixtureCapacity(capacity))return invalid();
  const directory=mkdtempSync(join(root(),prefix));
  const initial=lstatSync(directory,{bigint:true});if(!privateDirectory(initial))return invalid();
@@ -96,7 +106,7 @@ function createKey(capacity:MvpGroundFruitCapacity,approvalKeyPem?:string,shadow
   const s=fstatSync(fd,{bigint:true});if(!privateFile(s)||s.size!==0n)return invalid();
   databaseIdentity=identity(s);fsyncSync(fd);
  }finally{closeSync(fd);}
- const manifest:Manifest={schema:yearbookReviewerKeyPem?reviewedShape:shadowKeyPem?formalShadowShape:approvalKeyPem?formalShape:shape,directoryIdentity:identity(initial),databaseIdentity,tokenHash:digest(token),capacity:{...capacity},...(approvalKeyPem?{approvalKeyPem}:{}),...(shadowKeyPem?{shadowKeyPem}:{}),...(yearbookReviewerKeyPem?{yearbookReviewerKeyPem}:{})};
+ const manifest:Manifest={schema:sourceAge?sourceAgeShape:yearbookReviewerKeyPem?reviewedShape:shadowKeyPem?formalShadowShape:approvalKeyPem?formalShape:shape,directoryIdentity:identity(initial),databaseIdentity,tokenHash:digest(token),capacity:{...capacity},...(approvalKeyPem?{approvalKeyPem}:{}),...(shadowKeyPem?{shadowKeyPem}:{}),...(yearbookReviewerKeyPem?{yearbookReviewerKeyPem}:{}),...(sourceAge?{sourceAge}:{})};
  const metadata=openSync(join(directory,manifestName),constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600);
  try{writeFileSync(metadata,JSON.stringify(manifest),'utf8');fsyncSync(metadata);}finally{closeSync(metadata);}
  const parent=openSync(directory,constants.O_RDONLY|constants.O_DIRECTORY|constants.O_NOFOLLOW);
@@ -124,6 +134,8 @@ function readManifest(path:string):{identity:string;value:Manifest} {
   try{v=JSON.parse(body.toString('utf8')) as Manifest;}catch{return invalid();}
   const base=['schema','directoryIdentity','databaseIdentity','tokenHash','capacity'];
   if(!(v?.schema===shape&&exact(v,base)||v?.schema===formalShape&&exact(v,[...base,'approvalKeyPem'])&&formalApprovalKey(v.approvalKeyPem)||
+   v?.schema===sourceAgeShape&&exact(v,[...base,'sourceAge'])&&exact(v.sourceAge,['keyPem','policy'])&&
+    formalApprovalKey(v.sourceAge!.keyPem)&&validSealedMvpSourceAgePolicy(v.sourceAge!.policy)||
    v?.schema===reviewedShape&&exact(v,[...base,'yearbookReviewerKeyPem'])&&formalApprovalKey(v.yearbookReviewerKeyPem)||
    v?.schema===formalShadowShape&&exact(v,[...base,'approvalKeyPem','shadowKeyPem'])&&
     independentKeys(v.approvalKeyPem!,v.shadowKeyPem))||!hex(v.tokenHash)||
@@ -156,6 +168,7 @@ export function acquireDeveloperMvpSpiritFixtureOwner(key:DeveloperMvpSpiritFixt
    capacity:Object.freeze({...manifest.capacity}),
    ...(manifest.approvalKeyPem?{formalApprovalKeyPem:manifest.approvalKeyPem}:{}),
    ...(manifest.yearbookReviewerKeyPem?{yearbookReviewerKeyPem:manifest.yearbookReviewerKeyPem}:{}),
+   ...(manifest.sourceAge?{sourceAge:Object.freeze({keyPem:manifest.sourceAge.keyPem,policy:Object.freeze({...manifest.sourceAge.policy})})}:{}),
    ...(manifest.shadowKeyPem?{formalShadowKeyPem:manifest.shadowKeyPem}:{}),
    assertOwned(){
     if(!active.has(owner))return invalid();

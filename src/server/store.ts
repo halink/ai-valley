@@ -1,4 +1,5 @@
-import {readCurrentSealedMvpSourceCredit,writeSealedMvpSourceCredit} from './valley-spirit-mvp-source-credit.js';
+import {makeSealedMvpSourceAgeTerms,verifySealedMvpSourceAge} from './valley-spirit-mvp-source-age.js';
+import {readCurrentSealedMvpSourceCommitment,readCurrentSealedMvpSourceCredit,writeSealedMvpSourceCredit} from './valley-spirit-mvp-source-credit.js';
 import {prepareSealedMvpAdjacentMinute,prepareSealedMvpFruitCreditMinute} from './godot-mvp.js';
 import {appendNativeWeatherCredit} from './valley-spirit-weather-credit.js';
 import {probeMvpFallenFruitAdjacentEngineEdge} from './valley-spirit-mvp-fallen-fruit-approach.js';
@@ -747,6 +748,21 @@ export class WorldStore {
   try{
    const w=this.readWorld(false,false);
    const result=w&&w.id===worldId?readCurrentSealedMvpSourceCredit(this.db,owner.seal,w):null;
+   this.db.exec('COMMIT');return result;
+  }catch(error){this.db.exec('ROLLBACK');throw error;}
+ }
+ /** A read of the canonical signing input or verification of detached age
+  * metadata. Neither result authorizes any effect or modifies the world. */
+ readDeveloperMvpFruitSourceAge(worldId:string,proof?:unknown){
+  const owner=this.developerSpiritFixtureOwner;
+  if(!owner?.sourceAge||owner.formalApprovalKeyPem)return null;
+  owner.assertOwned();this.assertDeveloperSpiritSeal();this.db.exec('BEGIN');
+  try{
+   const w=this.readWorld(false,false);
+   const credit=w&&w.id===worldId?readCurrentSealedMvpSourceCommitment(this.db,owner.seal,w):null;
+   const terms=credit?makeSealedMvpSourceAgeTerms(credit.worldId,credit.creditId,credit.bornUs,owner.sourceAge.policy):null;
+   const result=terms?(proof===undefined?{status:'signing-input' as const,terms}:
+    verifySealedMvpSourceAge(owner.sourceAge.keyPem,terms,proof)?{status:'verified-age-metadata' as const,terms}:null):null;
    this.db.exec('COMMIT');return result;
   }catch(error){this.db.exec('ROLLBACK');throw error;}
  }
