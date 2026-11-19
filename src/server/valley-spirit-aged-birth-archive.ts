@@ -1,3 +1,5 @@
+import type {NativeAgedPickupSelection} from '../world/mvp-aged-fruit-native-pickup.js';
+import {same} from '../world/navigation.js';
 import {mvpFallenFruitDiscoveryId} from '../shared/valley-spirit-fairness.js';
 import type {NativeMvpFruitObservation} from '../world/mvp-native-observation-phase.js';
 import {prepareSealedMvpEcologyMinute} from './godot-mvp.js';
@@ -25,6 +27,8 @@ const expiryTable='sealed_mvp_aged_expiry_v2';
 const expirySql='CREATE TABLE sealed_mvp_aged_expiry_v2(slot INTEGER PRIMARY KEY NOT NULL CHECK(slot=1),body TEXT NOT NULL)';
 const tickTable='sealed_mvp_aged_tick_v2';
 const tickSql='CREATE TABLE sealed_mvp_aged_tick_v2(sequence INTEGER PRIMARY KEY NOT NULL,body TEXT NOT NULL)';
+const heldTable='sealed_mvp_aged_held_v2';
+const heldSql='CREATE TABLE sealed_mvp_aged_held_v2(slot INTEGER PRIMARY KEY NOT NULL CHECK(slot=1),body TEXT NOT NULL)';
 const maxTicks=8; // Fixture replay bound; not an expiry policy or gameplay limit.
 const maxState=32*1024*1024;
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
@@ -41,12 +45,12 @@ const signedTerms=(v:unknown)=>obj(v)&&obj(v.terms)?v.terms:null;
 const equalBytes=(a:Uint8Array,b:Uint8Array)=>Buffer.from(a).equals(b);
 const equal=(a:unknown,b:unknown)=>JSON.stringify(a)===JSON.stringify(b);
 const hasTable=(db:DatabaseSync)=>db.prepare('SELECT type,sql FROM sqlite_schema WHERE name=? COLLATE NOCASE').get(table);
-const typedRows=(db:DatabaseSync,field:'mvpAgedFruitBirth'|'mvpAgedFruitExpiry')=>db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='events'").get()?db.prepare(`SELECT id,world_id,at,body,rowid AS archiveSeq FROM events WHERE CASE WHEN json_valid(body) THEN json_type(body,'$.${field}') IS NOT NULL ELSE 0 END LIMIT 2`).all():[];
+const typedRows=(db:DatabaseSync,field:'mvpAgedFruitBirth'|'mvpAgedFruitExpiry'|'mvpAgedFruitPickup')=>db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='events'").get()?db.prepare(`SELECT id,world_id,at,body,rowid AS archiveSeq FROM events WHERE CASE WHEN json_valid(body) THEN json_type(body,'$.${field}') IS NOT NULL ELSE 0 END LIMIT 2`).all():[];
 
 /** The parked archive never follows TEMP shadow tables, and the dedicated
  * direct CAS may not execute unknown trigger code. */
 export function assertAgedBirthSqlAuthority(db:DatabaseSync):void {
- const names=['worlds','events','event_people','event_animals','mvp_spirit_developer_fixture',table,expiryTable,tickTable,'valley_spirit_sealed_source_credit',
+ const names=['worlds','events','event_people','event_animals','mvp_spirit_developer_fixture',table,expiryTable,tickTable,heldTable,'valley_spirit_sealed_source_credit',
   'sealed_aged_g1_review_epoch','valley_spirit_permissions'];
  const slots=names.map(()=>'?').join(',');
  if(db.prepare(`SELECT 1 FROM sqlite_temp_schema WHERE lower(name) IN (${slots}) OR lower(tbl_name) IN (${slots})`).get(...names,...names))fail();
@@ -60,7 +64,7 @@ export function rejectSealedAgedBirthOnGenericPath(db:DatabaseSync,scanSealedArc
  // Normal runtime can cheaply reject a present sidecar, and its world
  // decoder separately rejects inline markers. Only sealed save preflight
  // checks detached archived orphans (the owner holds an exclusive lock).
- if(hasTable(db)||expirySchema(db)||tickSchema(db)||scanSealedArchive&&(typedRows(db,'mvpAgedFruitBirth').length||typedRows(db,'mvpAgedFruitExpiry').length))throw Error('sealed_aged_birth_requires_private_archive');
+ if(hasTable(db)||expirySchema(db)||tickSchema(db)||heldSchema(db)||scanSealedArchive&&(typedRows(db,'mvpAgedFruitBirth').length||typedRows(db,'mvpAgedFruitExpiry').length||typedRows(db,'mvpAgedFruitPickup').length))throw Error('sealed_aged_birth_requires_private_archive');
 }
 
 function reconstruct(
@@ -114,6 +118,7 @@ function rawHead(db:DatabaseSync){
  return {id:rows[0].id,revision:rows[0].revision,state:rows[0].state};
 }
 
+const heldSchema=(db:DatabaseSync)=>db.prepare('SELECT type,sql FROM sqlite_schema WHERE name=? COLLATE NOCASE').get(heldTable);
 const tickSchema=(db:DatabaseSync)=>db.prepare('SELECT type,sql FROM sqlite_schema WHERE name=? COLLATE NOCASE').get(tickTable);
 const expirySchema=(db:DatabaseSync)=>db.prepare('SELECT type,sql FROM sqlite_schema WHERE name=? COLLATE NOCASE').get(expiryTable);
 
@@ -123,12 +128,12 @@ interface AgedFruitExpiry {
  readonly bornUs:string;readonly expiresUs:string;readonly beforeUs:string;readonly settledUs:string;
  readonly fromRevision:number;readonly worldRevision:number;readonly groundDebit:1;
 }
-function detachedNativeMinute(head:World,prior:World,privateFruitPoint?:Vec) {
+function detachedNativeMinute(head:World,prior:World,privateFruitPoint?:Vec,pickup?:ReadonlyMap<string,NativeAgedPickupSelection>) {
  const before=parseClimateUs(head.mvpClimate!.lastUs);
  const substrate=structuredClone(head);
  // Restore the verified original empty envelope, never a V1 lot.
  substrate.mvpClimate!.spiritEffects=structuredClone(prior.mvpClimate!.spiritEffects);
- const next=prepareSealedMvpEcologyMinute(substrate,true,privateFruitPoint);
+ const next=prepareSealedMvpEcologyMinute(substrate,true,privateFruitPoint,pickup);
  if(!next)return null;
  const {draft,speech,mealWitnesses}=next;
  if(!draft.mvpClimate||draft.id!==head.id||draft.minute!==head.minute+1||
@@ -139,7 +144,7 @@ function detachedNativeMinute(head:World,prior:World,privateFruitPoint?:Vec) {
  if(ordinary.length>255||speech?.receipts.length||mealWitnesses.length||
   ordinary.some(e=>e.speechText!==undefined||e.mvpMeal||e.socialAppointmentArrival||e.mvpFruitFall)||
   !equal(draft.events.slice(0,head.events.length),head.events))return null;
- return {draft,ordinary,observed:next.observed};
+ return {draft,ordinary,observed:next.observed,movement:next.movement,completion:next.completion};
 }
 function settleNativeExpiry(birth:ParkedBirth,head:World,draft:World){
  const receipt=birth.receipt,marker=head.mvpClimate!.spiritEffects;
@@ -191,10 +196,73 @@ function nativeContinuationDraft(birth:ParkedBirth,head:World,prior:World,sequen
   beforeUs,afterUs,fromRevision:head.revision,toRevision:native.draft.revision,
   beforeDigest:hash(JSON.stringify(head)),afterDigest:hash(JSON.stringify(native.draft)),
   eventIds:Object.freeze(events.map(e=>e.id)),discoveries,expiry:terminal?.fact??null});
- return {world:native.draft,events,fact};
+ return {world:native.draft,events,fact,movement:native.movement};
+}
+interface AgedGroundArrival {readonly step:number;readonly atUs:string;readonly planId:string;readonly from:Vec;readonly to:Vec}
+function keepNativeArrivals(
+ arrived:Map<string,AgedGroundArrival>,from:World,next:NonNullable<ReturnType<typeof nativeContinuationDraft>>,point:Vec,
+){
+ for(const r of next.world.residents){
+  if(r.inside!==null||r.status!=='alive'||!same(r.at,point)){arrived.delete(r.id);continue;}
+  const previous=from.residents.find(o=>o.id===r.id);
+  const action=previous?.activity?.action??previous?.plan?.actions[0],planId=previous?.activity?.planId??previous?.plan?.id;
+  if(!previous||!planId||action?.type!=='move'||!same(action.to,point))continue;
+  const step=next.movement.filter(edge=>edge.actorId===r.id).at(-1);
+  if(step&&step.planId===planId&&step.minute===next.world.minute&&same(step.to,point))arrived.set(r.id,
+   {step:next.fact.sequence,atUs:next.fact.afterUs,planId,from:step.from,to:step.to});
+ }
+}
+interface AgedHeldItem {
+ readonly version:2;readonly kind:'held-aged-fruit';readonly worldId:string;readonly residentId:string;
+ readonly effectId:string;readonly creditId:string;readonly sourceInstanceId:string;
+ readonly bornUs:string;readonly expiresUs:string;readonly ownerId:string;readonly quantity:1;
+ readonly groundDebit:1;readonly settledUs:string;readonly actionStartedUs:string;readonly birthEventId:string;readonly birthProofDigest:string;readonly pickupEventId:string;
+ readonly discoveryId:string;readonly arrival:AgedGroundArrival;readonly nativePlanId:string;
+ readonly fromRevision:number;readonly revision:number;
+}
+function nativeHeldDraft(
+ birth:ParkedBirth,head:World,prior:World,residentId:string,known:ReadonlyMap<string,AgedFruitDiscovery>,arrived:ReadonlyMap<string,AgedGroundArrival>,
+){
+ const receipt=birth.receipt,now=head.mvpClimate!.lastUs;
+ // No holding at or after the original expiry boundary.
+ if(parseClimateUs(now)+1_000_000n>=parseClimateUs(receipt.expiresUs))return null;
+ const intents=new Map<string,NativeAgedPickupSelection>();
+ for(const actor of head.residents){
+  const discovery=known.get(actor.id),arrival=arrived.get(actor.id);
+  if(!discovery||!arrival||actor.status!=='alive'||actor.plan||actor.activity||actor.inside!==null||
+   !same(actor.at,birth.event.place)||discovery.step>arrival.step)continue;
+  intents.set(actor.id,{residentId:actor.id,residentRevision:actor.revision,effectId:receipt.effectId,discoveryId:discovery.discoveryId,
+   point:birth.event.place,fromUs:now,expiresUs:receipt.expiresUs});
+ }
+ if(!intents.size)return null;
+ const native=detachedNativeMinute(head,prior,undefined,intents);
+ // The host supplies only an assertion, never a selector. Even replay must
+ // run every eligible resident through ordinary native roster order.
+ if(!native||native.completion?.residentId!==residentId||native.completion.startedAt!==native.draft.minute)return null;
+ const actor=head.residents.find(r=>r.id===residentId)!,discovery=known.get(residentId)!,arrival=arrived.get(residentId)!;
+ const {draft,ordinary,completion}=native;
+ const current=draft.residents.find(r=>r.id===residentId);
+ if(!current||current.status!=='alive'||current.plan||current.activity||current.inside!==null||
+  !same(current.at,birth.event.place)||!equal(current.inventory,actor.inventory)||
+  !draft.processed.includes('plan:'+completion.planId)||completion.settledUs!==draft.mvpClimate!.lastUs||
+  parseClimateUs(completion.settledUs)>=parseClimateUs(receipt.expiresUs))return null;
+ const marker=head.mvpClimate!.spiritEffects;
+ const event=emitLedgerEvent(draft,{kind:'system',actors:[],place:birth.event.place,text:'公共地面的一份落果被实际拾取。'}) as
+  WorldEvent&{mvpAgedFruitPickup:{version:2;effectId:string}};
+ if(!Number.isSafeInteger(draft.revision)||draft.revision<=head.revision)return null;
+ const held:AgedHeldItem=Object.freeze({version:2,kind:'held-aged-fruit',worldId:head.id,residentId,effectId:receipt.effectId,
+  creditId:receipt.creditId,sourceInstanceId:receipt.sourceInstanceId,bornUs:receipt.bornUs,expiresUs:receipt.expiresUs,
+  ownerId:residentId,quantity:1,groundDebit:1,settledUs:completion.settledUs,actionStartedUs:completion.settledUs,
+  birthEventId:receipt.eventId,birthProofDigest:receipt.proofDigest,pickupEventId:event.id,
+  discoveryId:discovery.discoveryId,arrival,nativePlanId:completion.planId,fromRevision:head.revision,revision:draft.revision});
+ // The actor and native proof are private; the observer-only world event
+ // links by effect identity without claiming someone heard the event.
+ event.mvpAgedFruitPickup={version:2,effectId:held.effectId};
+ Object.assign(draft.mvpClimate!,{spiritEffects:{...marker,ground:{items:[]},held}});
+ return {world:draft,events:[...ordinary,event],event,held};
 }
 function exactExpiryArchiveSuffix(db:DatabaseSync,worldId:string,birthSeq:unknown,expected:readonly WorldEvent[]):boolean {
- if(typeof birthSeq!=='number'||!Number.isSafeInteger(birthSeq)||birthSeq<1||expected.length>256*maxTicks)return false;
+ if(typeof birthSeq!=='number'||!Number.isSafeInteger(birthSeq)||birthSeq<1||expected.length>256*(maxTicks+1))return false;
  const rows=db.prepare('SELECT rowid AS archiveSeq,id,world_id,at,body FROM events WHERE rowid>? ORDER BY rowid LIMIT ?')
   .all(birthSeq,expected.length+1);
  if(rows.length!==expected.length)return false;
@@ -216,9 +284,9 @@ function readVerifiedSealedAgedBirth(
 ){
  assertAgedBirthSqlAuthority(db);
  const schema=hasTable(db);
- const events=typedRows(db,'mvpAgedFruitBirth'),expiryEvents=typedRows(db,'mvpAgedFruitExpiry'),expiryHeader=expirySchema(db),tickHeader=tickSchema(db);
+ const events=typedRows(db,'mvpAgedFruitBirth'),expiryEvents=typedRows(db,'mvpAgedFruitExpiry'),expiryHeader=expirySchema(db),tickHeader=tickSchema(db),heldHeader=heldSchema(db),pickupEvents=typedRows(db,'mvpAgedFruitPickup');
  if(!schema){
-  if(events.length||expiryEvents.length||expiryHeader||tickHeader)return fail();
+  if(events.length||expiryEvents.length||expiryHeader||tickHeader||heldHeader||pickupEvents.length)return fail();
   // A deleted table cannot turn a parked V2 head into an absent receipt.
   if(db.prepare('SELECT 1 FROM worlds LIMIT 1').get())decode(rawHead(db).state);
   return null;
@@ -237,8 +305,9 @@ function readVerifiedSealedAgedBirth(
  const current=rawHead(db),actual=events[0];
  if(actual.id!==derived.event.id||actual.world_id!==derived.world.id||actual.at!==derived.event.at||actual.body!==JSON.stringify(derived.event))return fail();
  let world=derived.world,expiry:AgedFruitExpiry|null=null,tickCount=0;
- const discoveries=new Map<string,AgedFruitDiscovery>();
- if(expiryHeader&&tickHeader)return fail();
+ const discoveries=new Map<string,AgedFruitDiscovery>(),arrivals=new Map<string,AgedGroundArrival>();
+ let held:AgedHeldItem|null=null;
+ if(expiryHeader&&tickHeader||heldHeader&&!tickHeader||!heldHeader&&pickupEvents.length)return fail();
  if(tickHeader){
   if(tickHeader.type!=='table'||tickHeader.sql!==tickSql||
    db.prepare("SELECT 1 FROM sqlite_schema WHERE tbl_name=? COLLATE NOCASE AND type IN ('trigger','index')").get(tickTable))return fail();
@@ -250,8 +319,20 @@ function readVerifiedSealedAgedBirth(
    if(expiry||step.sequence!==++tickCount)return fail();
    const next=nativeContinuationDraft(derived,world,prior,tickCount,discoveries);
    if(!next||step.body!==JSON.stringify(next.fact))return fail();
+   keepNativeArrivals(arrivals,world,next,derived.event.place);
    world=next.world;expiry=next.fact.expiry;replayEvents.push(...next.events);
    for(const entry of next.fact.discoveries)discoveries.set(entry.residentId,entry);
+  }
+  if(heldHeader){
+   if(expiry||pickupEvents.length!==1||heldHeader.type!=='table'||heldHeader.sql!==heldSql||
+    db.prepare("SELECT 1 FROM sqlite_schema WHERE tbl_name=? COLLATE NOCASE AND type IN ('trigger','index')").get(heldTable))return fail();
+   const rows=db.prepare('SELECT slot,CASE WHEN length(body)<=4096 THEN body ELSE NULL END AS body FROM sealed_mvp_aged_held_v2 LIMIT 2').all();
+   if(rows.length!==1||rows[0].slot!==1||typeof rows[0].body!=='string')return fail();
+   const proof=JSON.parse(rows[0].body);
+   if(!obj(proof)||typeof proof.residentId!=='string'||proof.residentId.length>200)return fail();
+   const pickup=nativeHeldDraft(derived,world,prior,proof.residentId,discoveries,arrivals);
+   if(!pickup||rows[0].body!==JSON.stringify(pickup.held)||pickupEvents[0].id!==pickup.event.id)return fail();
+   world=pickup.world;held=pickup.held;replayEvents.push(...pickup.events);
   }
   if(expiryEvents.length!==(expiry?1:0)||expiry&&expiryEvents[0].id!==expiry.expiryEventId||
    !exactExpiryArchiveSuffix(db,derived.world.id,actual.archiveSeq,replayEvents))return fail();
@@ -266,7 +347,7 @@ function readVerifiedSealedAgedBirth(
  }else if(expiryEvents.length||!exactExpiryArchiveSuffix(db,derived.world.id,actual.archiveSeq,[]))return fail();
  if(current.id!==world.id||current.revision!==world.revision||
   !equalBytes(current.state,gzipSync(JSON.stringify(world),{level:1})))return fail();
- return {world,prior,birth:derived,expiry,tickCount,discoveries,point:derived.event.place,receipt:derived.receipt,proofs:stored as unknown as AgedBirthProofs};
+ return {world,prior,birth:derived,expiry,held,tickCount,discoveries,arrivals,point:derived.event.place,receipt:derived.receipt,proofs:stored as unknown as AgedBirthProofs};
 }
 
 export function readSealedAgedBirthArchive(db:DatabaseSync,owner:DeveloperMvpSpiritFixtureOwner,decode:DecodePredecessor){
@@ -331,7 +412,7 @@ export function advanceSealedAgedFruitMinute(
  db:DatabaseSync,owner:DeveloperMvpSpiritFixtureOwner,decode:DecodePredecessor,worldId:string,expectedRevision:number,
 ){
  const prior=readVerifiedSealedAgedBirth(db,owner,decode);
- if(!prior||prior.world.id!==worldId||prior.world.revision!==expectedRevision||prior.expiry||prior.tickCount>=maxTicks)return null;
+ if(!prior||prior.world.id!==worldId||prior.world.revision!==expectedRevision||prior.expiry||prior.held||prior.tickCount>=maxTicks)return null;
  const next=nativeContinuationDraft(prior.birth,prior.world,prior.prior,prior.tickCount+1,prior.discoveries);
  if(!next)return null;
  const before=rawHead(db),state=gzipSync(JSON.stringify(next.world),{level:1}),body=JSON.stringify(next.fact);
@@ -345,6 +426,27 @@ export function advanceSealedAgedFruitMinute(
  if(!verified||verified.tickCount!==next.fact.sequence||!equal(verified.expiry,next.fact.expiry))return fail();
  const {discoveries:_private,...summary}=next.fact;
  return Object.freeze(summary);
+}
+export function pickUpSealedAgedFruit(
+ db:DatabaseSync,owner:DeveloperMvpSpiritFixtureOwner,decode:DecodePredecessor,worldId:string,expectedRevision:number,residentId:string,
+){
+ const prior=readVerifiedSealedAgedBirth(db,owner,decode);
+ if(!prior||prior.world.id!==worldId||prior.expiry||!prior.tickCount)return null;
+ if(prior.held)return prior.held.residentId===residentId&&prior.held.fromRevision===expectedRevision?
+  {status:'held' as const,replay:true,held:prior.held}:null;
+ if(prior.world.revision!==expectedRevision)return null;
+ const pickup=nativeHeldDraft(prior.birth,prior.world,prior.prior,residentId,prior.discoveries,prior.arrivals);
+ if(!pickup)return null;
+ const before=rawHead(db),state=gzipSync(JSON.stringify(pickup.world),{level:1}),body=JSON.stringify(pickup.held);
+ if(before.id!==worldId||before.revision!==expectedRevision||state.length>maxState||Buffer.byteLength(body)>4096)return fail();
+ db.exec(heldSql);
+ db.prepare('INSERT INTO sealed_mvp_aged_held_v2 VALUES (1,?)').run(body);
+ appendNativeAgedEvents(db,worldId,pickup.events);
+ if(db.prepare('UPDATE worlds SET revision=?,state=? WHERE id=? AND revision=? AND state=?')
+  .run(pickup.world.revision,state,worldId,before.revision,before.state).changes!==1)return fail();
+ const verified=readVerifiedSealedAgedBirth(db,owner,decode);
+ if(!verified||!equal(verified.held,pickup.held))return fail();
+ return {status:'held' as const,replay:false,held:pickup.held};
 }
 export function sameAgedBirthProofs(a:AgedBirthProofs,b:AgedBirthProofs):boolean {
  function sameProof(left:unknown,right:unknown,canonical?:(v:unknown)=>Buffer|null):boolean {
@@ -383,8 +485,8 @@ export function readOwnedSealedAgedFruitSight(
 ){
  if(typeof worldId!=='string'||typeof residentId!=='string'||worldId.length>200||residentId.length>200)return null;
  try{
-  return readOwnedSealedAgedBirth(owner,decode,({world,point,receipt,expiry})=>{
-   if(expiry||world.id!==worldId||!world.mvpClimate)return null;
+  return readOwnedSealedAgedBirth(owner,decode,({world,point,receipt,expiry,held})=>{
+   if(expiry||held||world.id!==worldId||!world.mvpClimate)return null;
    const now=parseClimateUs(world.mvpClimate.lastUs);
    if(now<parseClimateUs(receipt.bornUs)||now>=parseClimateUs(receipt.expiresUs)||
     !canPerceiveMvpCommonFruitPoint(world,residentId,point))return null;
@@ -399,4 +501,10 @@ export function readOwnedSealedAgedFruitDiscovery(
 ){
  if(typeof worldId!=='string'||typeof residentId!=='string'||worldId.length>200||residentId.length>200)return null;
  return readOwnedSealedAgedBirth(owner,decode,value=>value.world.id===worldId?value.discoveries.get(residentId)??null:null);
+}
+export function readOwnedSealedAgedHeldFruit(
+ owner:DeveloperMvpSpiritFixtureOwner,decode:DecodePredecessor,worldId:string,residentId:string,
+){
+ if(typeof worldId!=='string'||typeof residentId!=='string'||worldId.length>200||residentId.length>200)return null;
+ return readOwnedSealedAgedBirth(owner,decode,p=>p.world.id===worldId&&p.held?.residentId===residentId?p.held:null);
 }

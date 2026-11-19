@@ -1,4 +1,5 @@
-import {noteMvpNativeObservationPhase} from './mvp-native-observation-phase.js';
+import {canRunMvpNativeAgedPickup,completeMvpNativeAgedPickup} from './mvp-aged-fruit-native-pickup.js';
+import {noteMvpNativeMovePhase,noteMvpNativeObservationPhase} from './mvp-native-observation-phase.js';
 import {beginFormalRainStep,observeFormalRainEdge} from './formal-rain-provenance.js';
 import {completeMvpShelter,personallyFeelsRain,validMvpShelter,MVP_IDLE_WAIT_MINUTES,shelterRoomWithinIdleTime,shelterPlanDeadline,SHELTER_WAIT,SHELTER_UNAVAILABLE} from './mvp-shelter.js';
 import {captureSeasonalKnowledge,validateSeasonalKnowledge,validSeasonalInspect,seasonalInspectRoute,completeSeasonalInspect} from './mvp-seasonal-knowledge.js';
@@ -120,6 +121,7 @@ function definitionFor(world:World,plan:Plan,action:Action):string {
 }
 /** A submitted plan represents one individual's choice; it never authorizes another person's choice. */
 export function submitPlan(world:World,plan:Plan):{ok:boolean;error?:string} {
+ if(plan.actions.some(a=>a.type==='mvpAgedFruitPickup'&&(plan.actions.length!==1||!canRunMvpNativeAgedPickup(world,plan.actorId,a))))return {ok:false,error:'仅封存的本人实际拾取行动可执行'};
  if(hasReceipt(world,`plan:${plan.id}`))return {ok:true};
  const preservationTransfer=plan.actions.map(a=>preservationTransferReason(world,a)).find(Boolean);if(preservationTransfer)return {ok:false,error:preservationTransfer};
  if(plan.actions.some(a=>a.type==='water'&&Object.prototype.hasOwnProperty.call(a,'expectedInstanceId')&&(typeof a.expectedInstanceId!=='string'||!/^crop:[1-9][0-9]*$/.test(a.expectedInstanceId))))return {ok:false,error:'灌溉实例身份格式无效'};
@@ -231,6 +233,7 @@ function targetFor(world:World,r:Resident,a:Action,definition:string,elapsed=0):
  if(selfCareTransportBlocked(world,r,a))return fail('须先实际结束原同行或护送，才能另行本人自理');
  if(world.mode==='formal'&&(isSelfCareAction(a)||knownAgeYears(r.bornAt,world.minute)===null)&&(!ageAllowsAction(world,r,a)||isSelfCareAction(a)&&!r.canExpress))return fail('当前年龄、能力或本人自理权限已不支持这项行动');
  if(a.type==='offer'||a.type==='accept'){const error=barterActionReason(world,r,a,elapsed);if(error)return fail(error);}
+ if(a.type==='mvpAgedFruitPickup')return canRunMvpNativeAgedPickup(world,r.id,a)?{target:{...r.at},duration:1}:fail('没有实际可拾取的本人地面果实');
  if(a.type==='pregnancyPreparation')return pregnancyTarget(world,r,a);
  if(a.type==='regionSurvey')return regionSurveyTarget(world,r,a);
  if(a.type==='waterSupply')return waterSupplyTarget(world,r,a);
@@ -402,6 +405,7 @@ export function buildAllowed(world:World,r:Resident,a:Extract<Action,{type:'buil
 }
 function completeAtomic(world:World,r:Resident,a:Action,definition:string,elapsed=0):string|null {
  const preservationTransfer=preservationTransferReason(world,a);if(preservationTransfer)return preservationTransfer;
+ if(a.type==='mvpAgedFruitPickup')return completeMvpNativeAgedPickup(world,r,a,elapsed);
  if(a.type==='frontierHazard')return completeFrontierHazard(world,r,a);
  if(a.type==='design')return completeDesign(world,r,a);
  if(a.type==='lastWish')return completeLastWish(world,r,a);
@@ -618,6 +622,7 @@ function processActivity(world:World,r:Resident,minutes:number,actionFailures?:S
    if(available+1e-9<needed){progress+=available/duration;available=0;break;}
    const completedFrom={...r.at};
    available-=needed;progress=0;r.at=activity.path.shift()!;r.inside=null;recordCompletedMovement(world,r.id,completedFrom,r.at);noteGroundTransportStep(world,r);
+   if(activity.action.type==='move')noteMvpNativeMovePhase(world,r,completedFrom,activity.planId,activity.action.to);
    if(activity.cargo?.pickedUp){const body=world.residents.find(v=>v.id===activity.cargo!.bodyId);if(body){body.at={...r.at};body.inside=null;}}
    observe(world,r);
   }

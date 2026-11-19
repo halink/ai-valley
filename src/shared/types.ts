@@ -23,6 +23,7 @@ export interface PersonObservation {id:string;at:Vec;inside:string|null;roomAt:V
 export type Action = DomainAction & {observedTarget?:PersonObservation};
 type DomainAction = import('./mvp-seasonal.js').SeasonalInspectAction
  | {type:'mvpShelter'}
+ | {type:'mvpAgedFruitPickup';effectId:string;discoveryId:string}
  | import('./mvp-preservation.js').PreservationAction
  | import('./mvp-seeds.js').MvpSeedAction
  | import('./mvp-agriculture.js').AgricultureAction

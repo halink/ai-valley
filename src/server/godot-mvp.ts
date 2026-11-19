@@ -1,3 +1,4 @@
+import {captureMvpNativeAgedPickup,selectMvpNativeAgedPickup,type NativeAgedPickupSelection} from '../world/mvp-aged-fruit-native-pickup.js';
 import {captureMvpNativeObservationPhase} from '../world/mvp-native-observation-phase.js';
 import {planMvpFallenFruitAdjacentApproach,unsafeMvpApproachEndpoint} from './valley-spirit-mvp-fallen-fruit-approach.js';
 import {observeMvpFallenFruit} from '../world/mvp-fallen-fruit-resident.js';
@@ -275,6 +276,10 @@ function advanceMvpRuleMinuteDraft(world:World,current:World,serial:number,decis
     throw Error('mvp_adjacent_idle_or_basis_changed');
    choice={action:{type:'move',to:{...approach.to}},reason:'本人已发现一格外的落果，闲候前走到同一地面'};
   }
+  if(choice.idleFallback){
+   const nativePickup=selectMvpNativeAgedPickup(world,r);
+   if(nativePickup)choice={action:nativePickup,reason:'本人的原生观察已发现此果，闲候前亲手拾起'};
+  }
   const planId=`mvp-rule-${world.id}-${world.revision}-${r.id}-${++serial}`;
   const result=submitPlan(world,{id:planId,actorId:r.id,actorRevision:r.revision,createdAt:world.minute,definition:mvpPlanDefinition(world,choice.action),intention:'本地规则：'+choice.reason,actions:[choice.action]});
   if(!result.ok)throw new Error(`MVP plan rejected for ${r.id}: ${result.error}`);
@@ -381,19 +386,20 @@ export function prepareSealedMvpAdjacentMinute(current:World){
 
 /** One detached ordinary ecology minute without any supplied resident action.
  * Only the sealed store may commit it with custody. */
-export function prepareSealedMvpEcologyMinute(current:World,captureMeals=false,privateFruitPoint?:Vec){
+export function prepareSealedMvpEcologyMinute(current:World,captureMeals=false,privateFruitPoint?:Vec,privatePickup?:ReadonlyMap<string,NativeAgedPickupSelection>){
  if(current.mode!=='validation'||current.clock.paused||!current.mvpClimate?.rainProvenance)return null;
  const draft=structuredClone(current);
  inheritReceiptHistory(current,draft);enableCompletedMovement(draft);
  try{
   const advance=()=>advanceMvpRuleMinuteDraft(draft,current,0,{},{meals:captureMeals,fruitFlow:false,fruitRenewal:true,addressedSpeech:true});
-  const capture=privateFruitPoint?captureMvpNativeObservationPhase(draft,privateFruitPoint,advance):{result:advance(),observed:[]};
-  if(!capture)return null;
-  const {result,observed}=capture;
+  const observe=()=>privateFruitPoint?captureMvpNativeObservationPhase(draft,privateFruitPoint,advance):{result:advance(),observed:[],arrivals:[]};
+  const scoped=privatePickup?captureMvpNativeAgedPickup(draft,privatePickup,observe):{result:observe(),completion:null};
+  if(!scoped?.result)return null;
+  const {result,observed,arrivals}=scoped.result;
   if(draft.minute!==current.minute+1||
    JSON.stringify(draft.mvpClimate?.spiritEffects)!==JSON.stringify(current.mvpClimate?.spiritEffects)||
    JSON.stringify(draft.mvpClimate?.spiritFruitSettlement)!==JSON.stringify(current.mvpClimate?.spiritFruitSettlement))return null;
-  return {draft,renewal:result.renewal,mealWitnesses:result.witnesses,speech:result.speech,observed};
+  return {draft,renewal:result.renewal,mealWitnesses:result.witnesses,speech:result.speech,observed,completion:scoped.completion,movement:arrivals};
  }catch{return null;}
 }
 
