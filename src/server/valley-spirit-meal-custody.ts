@@ -14,7 +14,7 @@ const WORLD=/^godot-mvp-[a-zA-Z0-9_-]{1,180}$/;
 const ID=/^[A-Za-z0-9][A-Za-z0-9:._-]{0,319}$/;
 const positive=(n:unknown):n is number=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=1;
 const minute=(n:unknown):n is number=>typeof n==='number'&&Number.isFinite(n)&&n>=0&&n<=1e9;
-const known=new WeakSet<ValleySpiritMvpMealWitness>();
+const known=new WeakMap<ValleySpiritMvpMealWitness,World>();
 /** Private engine evidence, never a projection, disclosure grant or public path. */
 export interface ValleySpiritMvpMealWitness {
  readonly worldId:string;
@@ -47,7 +47,7 @@ function stageValleySpiritMvpMealWitnesses(w:World,o:DirectEatingObservation,fro
     e.actors[0]!==r.residentId||readMvpMealFact(e.mvpMeal)?.kind!=='ate')return [];
   const witness=Object.freeze({worldId:w.id,revision:w.revision,eventId:r.eventId,exactPlanId:r.planId,actorId:r.residentId,
      atUs:minuteToClimateUs(r.at)});
-  known.add(witness);seen.add(r.eventId);out.push(witness);
+  known.set(witness,w);seen.add(r.eventId);out.push(witness);
  }
  return Object.freeze(out);
 }
@@ -200,4 +200,58 @@ export class SqliteValleySpiritMealCustody{
   }catch{this.isolated=true;return false;}
  }
  close(){this.db.close();}
+}
+
+const V2='valley_spirit_native_meal_custody_v2';
+const V2_DDL=`CREATE TABLE ${V2}(event_id TEXT PRIMARY KEY NOT NULL,world_id TEXT NOT NULL,schema_version INTEGER NOT NULL,plan_id TEXT NOT NULL,actor_id TEXT NOT NULL,at_us TEXT NOT NULL,committed_revision INTEGER NOT NULL,receipt_id TEXT UNIQUE NOT NULL)`;
+function nativeRows(db:DatabaseSync,worldId:string):CustodyRow[]|null{
+ const t=db.prepare('SELECT type,sql FROM sqlite_master WHERE name=?').get(V2);
+ if(!t)return null;
+ if(t.type!=='table'||t.sql!==V2_DDL||
+  db.prepare("SELECT 1 FROM sqlite_master WHERE tbl_name=? AND (type='trigger' OR (type='index' AND sql IS NOT NULL))").get(V2))
+  throw Error('unknown_native_meal_v2_schema');
+ const all=db.prepare(`SELECT * FROM ${V2} LIMIT ?`).all(LIMIT+1) as unknown as CustodyRow[];
+ const events=new Set<string>(),receipts=new Set<string>();
+ for(const r of all){
+  if(r.world_id!==worldId||r.schema_version!==2||!ID.test(r.event_id)||!ID.test(r.plan_id)||!ID.test(r.actor_id)||
+     !positive(r.committed_revision)||!isValleySpiritLifeReceipt(asReceipt(r))||events.has(r.event_id)||receipts.has(r.receipt_id))
+   throw Error('invalid_native_meal_v2_row');
+  events.add(r.event_id);receipts.add(r.receipt_id);
+ }
+ if(all.length>LIMIT)throw Error('native_meal_v2_capacity');
+ return all;
+}
+/** V2 is event-level. Only the actual draft-bound witnesses can mint UUIDs;
+ * the caller owns the surrounding same-world transaction and strict rollback. */
+export function appendNativeMvpMealCustodyV2(db:DatabaseSync,w:World,witnesses:readonly ValleySpiritMvpMealWitness[]){
+ if(db.isTransaction===false||!WORLD.test(w.id)||w.mode!=='validation'||Object.hasOwn(w,'simulationOnly')||
+    !Array.isArray(witnesses)||!witnesses.length||witnesses.length>w.residents.length)
+  throw Error('invalid_native_meal_v2_transaction');
+ const unique=new Set<string>();
+ for(const r of witnesses){
+  if(known.get(r)!==w||r.worldId!==w.id||r.revision!==w.revision||r.atUs!==minuteToClimateUs(w.minute)||
+     unique.has(r.eventId)||!persistedMeal(db,w.id,r,true))throw Error('invalid_native_meal_v2_witness');
+  unique.add(r.eventId);
+ }
+ const old=nativeRows(db,w.id);
+ if((old?.length??0)+witnesses.length>LIMIT||old?.some(r=>unique.has(r.event_id)||r.committed_revision>=w.revision))
+  throw Error('native_meal_v2_duplicate_or_capacity');
+ if(!old)db.exec(V2_DDL);
+ const insert=db.prepare(`INSERT INTO ${V2} VALUES(?,?,2,?,?,?,?,?)`);
+ const result=new Map<string,ValleySpiritLifeReceipt>();
+ for(const r of witnesses){
+  const receiptId=randomUUID();
+  insert.run(r.eventId,r.worldId,r.exactPlanId,r.actorId,r.atUs,r.revision,receiptId);
+  result.set(r.eventId,Object.freeze({schemaVersion:1,worldId:w.id,receiptId,receiptVersion:1,atUs:r.atUs,kind:'meal-consumed'}));
+ }
+ return result;
+}
+/** Exact known event only, no legacy fallback or permission. */
+export function readNativeMvpMealV2Receipt(db:DatabaseSync,worldId:string,eventId:string):ValleySpiritLifeReceipt|null{
+ try{
+  if(!WORLD.test(worldId)||!ID.test(eventId))return null;
+  const r=nativeRows(db,worldId)?.find(x=>x.event_id===eventId);
+  return r&&persistedMeal(db,worldId,{revision:r.committed_revision,eventId:r.event_id,actorId:r.actor_id,atUs:r.at_us},false)?
+   asReceipt(r):null;
+ }catch{return null;}
 }

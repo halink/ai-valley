@@ -431,6 +431,7 @@ export function followsPostCommitMvpFruitFlow(previous:MvpFruitFlowBatch,next:Mv
  const before=postCommitFruitFlows.get(previous),after=postCommitFruitFlows.get(next);
  return !!before&&!!after&&before.sessionToken===after.sessionToken&&after.deliveredSequence===before.deliveredSequence+1;
 }
+const atomicNativeMealMinutes=new WeakMap<World,Readonly<{before:string;after:string}>>();
 const sameSaveNativeWeatherMinutes=new WeakMap<World,Readonly<{before:string;after:string}>>();
 // Validation saves persist the complete JSON World. Bind to that exact
 // serialized content (including private state, order, and all arrays), using
@@ -448,7 +449,11 @@ export function isSameSaveNativeWeatherMinute(previous:World,draft:World):boolea
  const observed=sameSaveNativeWeatherMinutes.get(draft);
  return !!observed&&observed.before===sameSaveWorldFingerprint(previous)&&observed.after===sameSaveWorldFingerprint(draft);
 }
-export function createMvpSession(options:{observeSessionWeather?:true;world?:World;commit?:(world:World,previousRevision:number,speech?:AddressedSpeechObservation)=>void;persistent?:boolean;captureAddressedSpeechCustody?:true;captureSameSaveNativeWeather?:true;observeCommittedMeals?:(witnesses:readonly ValleySpiritMvpMealWitness[])=>void;observeCommittedFruitRenewal?:(witnesses:readonly MvpFruitRenewalWitness[])=>void;observeCommittedFruitFlow?:(flow:MvpFruitFlowBatch)=>void}={}){
+export function isAtomicNativeMealMinute(previous:World,draft:World):boolean{
+ const observed=atomicNativeMealMinutes.get(draft);
+ return !!observed&&observed.before===sameSaveWorldFingerprint(previous)&&observed.after===sameSaveWorldFingerprint(draft);
+}
+export function createMvpSession(options:{observeSessionWeather?:true;world?:World;commit?:(world:World,previousRevision:number,speech?:AddressedSpeechObservation,atomicMeals?:readonly ValleySpiritMvpMealWitness[])=>void;persistent?:boolean;captureAddressedSpeechCustody?:true;captureSameSaveNativeWeather?:true;captureAtomicNativeMeals?:true;observeCommittedMeals?:(witnesses:readonly ValleySpiritMvpMealWitness[])=>void;observeCommittedFruitRenewal?:(witnesses:readonly MvpFruitRenewalWitness[])=>void;observeCommittedFruitFlow?:(flow:MvpFruitFlowBatch)=>void}={}){
  const fruitFlowSessionToken=Symbol();let deliveredFruitFlowSequence=0;
  let world=structuredClone(options.world??createMvpWorld());
  if(options.world)inheritReceiptHistory(options.world,world);
@@ -494,7 +499,7 @@ export function createMvpSession(options:{observeSessionWeather?:true;world?:Wor
     world=draft;
     try{
     const minute=advanceMvpRuleMinuteDraft(world,current,serial,decisions,{
-     meals:!!(options.persistent&&options.commit&&options.observeCommittedMeals),
+     meals:!!(options.persistent&&options.commit&&(options.captureAtomicNativeMeals||options.observeCommittedMeals)),
      fruitFlow:!!(options.persistent&&options.commit&&options.observeCommittedFruitFlow),
      fruitRenewal:!!(options.persistent&&options.commit&&options.observeCommittedFruitRenewal),
      addressedSpeech:!!(options.persistent&&options.commit&&options.captureAddressedSpeechCustody),
@@ -502,10 +507,17 @@ export function createMvpSession(options:{observeSessionWeather?:true;world?:Wor
     serial=minute.serial;
     const {speech,witnesses,renewal,fruitFlow}=minute;
     if(options.persistent&&options.commit&&options.captureSameSaveNativeWeather)sealNativeWeatherMinute(current,world);
+    const atomic=options.persistent&&options.commit&&options.captureAtomicNativeMeals;
+    if(atomic&&witnesses.length&&world.minute===current.minute+1)
+     atomicNativeMealMinutes.set(world,Object.freeze({before:sameSaveWorldFingerprint(current),after:sameSaveWorldFingerprint(world)}));
     try{
-     if(speech?.receipts.length)options.commit?.(world,current.revision,speech);
+     if(atomic)options.commit?.(world,current.revision,speech,witnesses);
+     else if(speech?.receipts.length)options.commit?.(world,current.revision,speech);
      else options.commit?.(world,current.revision);
-    }finally{if(options.captureSameSaveNativeWeather)sameSaveNativeWeatherMinutes.delete(draft);}
+    }finally{
+     if(options.captureSameSaveNativeWeather)sameSaveNativeWeatherMinutes.delete(draft);
+     if(options.captureAtomicNativeMeals)atomicNativeMealMinutes.delete(draft);
+    }
     try{observeCommittedWeather();}catch{sessionWeather=undefined;}
     if(witnesses.length)try{options.observeCommittedMeals?.(witnesses);}catch{/* committed world is independent */}
     if(renewal.length)try{options.observeCommittedFruitRenewal?.(renewal);}catch{/* committed world is independent */}

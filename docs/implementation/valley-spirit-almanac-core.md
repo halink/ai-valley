@@ -229,3 +229,15 @@ or actual meal custody. Cooking, allocation, or event prose cannot mint the
 meal receipt; only the existing native consumed-meal witness can corroborate
 it. This is read-side support only; there is no new publisher, grant writer,
 auto-collection, public display default or CLI switch.
+
+A disjoint zero-effect temporary rules fixture can explicitly opt into private
+atomic meal custody. Only actual native consumption of an owned prepared meal
+qualifies; cooking or serving does not. The exact draft-bound witnesses must
+match every newly appended typed meal-consumption event, and the corresponding
+receipts are read back inside the same SQLite transaction before the world can
+commit. A distinct V2 custody table is unique per event, so one plan can contain
+multiple actual meals; the external receipt shape and version, legacy V1
+schema/reader, and existing optional post-commit callback are unchanged.
+The fixture has an exact world pin and the restricted weather-only listener;
+meal receipts grant no disclosure and are not exposed through a new reader
+route or joined to the ordinary life publisher.

@@ -21,7 +21,7 @@ import {WorldStore} from './store.js';
 import {acquireRuntimeOwnership,type RuntimeOwnership} from './runtime-lock.js';
 import {assertGodotWebExport} from './godot-web.js';
 import type {World} from '../shared/types.js';
-export async function startPersistentRulesMvp(options:{database:string;port:number;webRoot?:string;autoStart?:boolean;tickMs?:number;privateSpiritShadow?:PersistentRulesShadowOptions;privateLifeFixture?:PersistentRulesLifeFixture;privateSpeechCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string;nativeWeatherCredit?:true}>}){
+export async function startPersistentRulesMvp(options:{database:string;port:number;webRoot?:string;autoStart?:boolean;tickMs?:number;privateSpiritShadow?:PersistentRulesShadowOptions;privateLifeFixture?:PersistentRulesLifeFixture;privateSpeechCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string;nativeWeatherCredit?:true}>;privateMealCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string}>}){
  if(typeof options.database!=='string'||!options.database.trim())throw Error('mvp_rules_database_required');
  if(!Number.isInteger(options.port)||options.port<0||options.port>65535)throw Error('godot_mvp_invalid_port');
  const tickMs=options.tickMs??500,shadowOptions=pinPersistentRulesShadowOptions(options.privateSpiritShadow);
@@ -32,6 +32,13 @@ export async function startPersistentRulesMvp(options:{database:string;port:numb
     options.database!==join(speechPin.fixture.directory,'fixture.sqlite')||
     options.privateLifeFixture!==undefined||options.privateSpiritShadow!==undefined||options.webRoot!==undefined))
   throw Error('mvp_rules_private_speech_scope');
+ const mealPin=options.privateMealCustody===undefined?undefined:structuredClone(options.privateMealCustody);
+ if(options.privateMealCustody!==undefined&&(!mealPin||!mealPin.fixture||typeof mealPin.worldId!=='string'||
+    !/^godot-mvp-[A-Za-z0-9_-]{1,160}$/.test(mealPin.worldId)||Object.keys(mealPin).length!==2||
+    typeof mealPin.fixture.directory!=='string'||options.database!==join(mealPin.fixture.directory,'fixture.sqlite')||
+    options.privateSpeechCustody!==undefined||options.privateLifeFixture!==undefined||
+    options.privateSpiritShadow!==undefined||options.webRoot!==undefined))throw Error('mvp_rules_private_meal_scope');
+ const custodyPin=speechPin??mealPin;
  const weatherCredit=speechPin?.nativeWeatherCredit===true;
  if(!Number.isFinite(tickMs)||tickMs<100)throw Error('mvp_rules_invalid_tick');
  if(options.webRoot!==undefined)assertGodotWebExport(options.webRoot);
@@ -46,9 +53,10 @@ export async function startPersistentRulesMvp(options:{database:string;port:numb
  let closing:Promise<void>|undefined;
  const close=():Promise<void>=>closing??=(async()=>{if(timer)clearInterval(timer);timer=undefined;if(server){server.closeAllConnections();await new Promise<void>(resolve=>server!.close(()=>resolve()));server=undefined;}try{life?.close();}catch{/* optional isolated life reader */}life=undefined;try{almanacReader?.close();}catch{/* optional isolated reader */}almanacReader=undefined;viewers=undefined;shadow=undefined;try{geographyCustody?.close();}catch{/* optional isolated custody */}geographyCustody=undefined;try{spiritPermissions?.close();}catch{valleySpirit?.isolate();}spiritPermissions=undefined;store?.close();store=undefined;owner?.release();owner=undefined;})().catch(error=>{closing=undefined;throw error;});
  try{
-  if(speechPin){
-   owner=privateOwner=acquireDeveloperMvpSpiritFixtureOwner(speechPin.fixture);
-   if(privateOwner.rulesSpeechWorldId!==speechPin.worldId)throw Error('mvp_rules_private_speech_world');
+  if(custodyPin){
+   owner=privateOwner=acquireDeveloperMvpSpiritFixtureOwner(custodyPin.fixture);
+   if(mealPin?privateOwner.rulesMealWorldId!==mealPin.worldId:privateOwner.rulesSpeechWorldId!==speechPin?.worldId)
+    throw Error(mealPin?'mvp_rules_private_meal_world':'mvp_rules_private_speech_world');
    if((privateOwner.rulesWeatherHourCredit===true)!==weatherCredit)throw Error('mvp_rules_private_weather_scope');
   }else owner=acquireRuntimeOwnership(options.database);
   owner.assertOwned();
@@ -56,25 +64,28 @@ export async function startPersistentRulesMvp(options:{database:string;port:numb
   let almanacReadable=true;
   const probe=preflightWorldSave(owner.database,{requireWorld:true,developerSpiritFixtureOwner:privateOwner,inspectOptionalAlmanac:(db,w)=>{try{inspectValleySpiritAlmanac(db,(w as unknown as World).id);}catch{almanacReadable=false;}if(lifePin)try{inspectPersistentRulesLifeFixture(db,w,lifePin);lifeReadable=true;}catch{/* isolate optional life */}},validateWorld:value=>{const w=value as unknown as World;assertMvpWorld(w);assertMvpClimateWorld(w);const m=w.metrics;
    if(!m||!Array.isArray(m.inFlight)||m.inFlight.length||m.configured!==false||[m.requests,m.successes,m.failures,m.inputTokens,m.outputTokens].some(n=>n!==0)||m.lastAttemptModel!==undefined||m.admissionCancellation!==undefined||m.routing!==undefined||Object.keys(m.usageWindow??{}).length||Object.keys(m.selfHostedCooldowns??{}).length||m.unmeteredFailures)throw Error('mvp_rules_model_history_unsupported');}});
-  if(speechPin&&probe?.id!==speechPin.worldId)throw Error('mvp_rules_private_speech_world');
+  if(custodyPin&&probe?.id!==custodyPin.worldId)throw Error(mealPin?'mvp_rules_private_meal_world':'mvp_rules_private_speech_world');
   if(probe){assertMvpWorld(probe as unknown as World);validateMvpClimate(probe as unknown as World);}
   // Bind before any writable SQLite open or adoption.
   let session:ReturnType<typeof createMvpSession>|undefined;
   const snapshot=()=>({...session!.snapshot(),valleySpirit:valleySpirit?.view()??valleySpiritUnavailable()});
-  server=createMvpServer({snapshot,get world(){return session?.world;}},{webRoot:options.webRoot,privateSpeechWeatherOnly:speechPin?true:undefined,valleySpiritLifeViewer:lifePin?{latest:id=>life?.latest(id)??null}:undefined,valleySpiritSource:ref=>valleySpirit?.resolveSource(ref)??null,valleySpiritArchive:query=>valleySpirit?.archive(query)??{status:'unavailable'},valleySpiritReaders:{almanac:id=>viewers?.almanac(id)??null,latestAlmanac:()=>viewers?.latestAlmanac()??{status:'unavailable'},topics:range=>viewers?.topics(range)??{status:'unavailable'}}});
+  server=createMvpServer({snapshot,get world(){return session?.world;}},{webRoot:options.webRoot,privateSpeechWeatherOnly:custodyPin?true:undefined,valleySpiritLifeViewer:lifePin?{latest:id=>life?.latest(id)??null}:undefined,valleySpiritSource:ref=>valleySpirit?.resolveSource(ref)??null,valleySpiritArchive:query=>valleySpirit?.archive(query)??{status:'unavailable'},valleySpiritReaders:{almanac:id=>viewers?.almanac(id)??null,latestAlmanac:()=>viewers?.latestAlmanac()??{status:'unavailable'},topics:range=>viewers?.topics(range)??{status:'unavailable'}}});
   await new Promise<void>((resolve,reject)=>{server!.once('error',reject);server!.listen(options.port,'127.0.0.1',resolve);});
   store=new WorldStore(owner.database,{allowMvpClimate:true,developerSpiritFixtureOwner:privateOwner,nativeWeatherCredit:weatherCredit?true:undefined});
   const saved=store.load(),world=structuredClone(saved??createMvpWorld()),previous=saved?.revision??null;
-  if(speechPin&&world.id!==speechPin.worldId)throw Error('mvp_rules_private_speech_world');
+  if(custodyPin&&world.id!==custodyPin.worldId)throw Error(mealPin?'mvp_rules_private_meal_world':'mvp_rules_private_speech_world');
   assertMvpWorld(world);
   const upgraded=upgradeMvpWorld(world),adopted=adoptMvpClimate(world),soilAdopted=adoptMvpSoil(world),agricultureAdopted=adoptMvpAgriculture(world);
   const rainAdopted=adoptMvpRainProvenance(world);
   if(adopted||soilAdopted||agricultureAdopted||rainAdopted)world.revision++;
   if(!saved||upgraded||adopted||soilAdopted||agricultureAdopted||rainAdopted)store.commit(world,previous);
   let lastCommittedMinute=world.minute;
-  session=createMvpSession({world,persistent:true,captureAddressedSpeechCustody:speechPin?true:undefined,captureSameSaveNativeWeather:privateOwner?.rulesWeatherAccountScope?true:undefined,commit:(draft,revision,speech)=>{
+  session=createMvpSession({world,persistent:true,captureAddressedSpeechCustody:speechPin?true:undefined,captureSameSaveNativeWeather:privateOwner?.rulesWeatherAccountScope?true:undefined,captureAtomicNativeMeals:mealPin?true:undefined,commit:(draft,revision,speech,meals)=>{
    owner!.assertOwned();
-   if(speechPin){
+   if(mealPin){
+    if(draft.id!==mealPin.worldId)throw Error('mvp_rules_private_meal_world');
+    store!.commitMvpWithAtomicMealCustody(draft,revision,meals??[]);
+   }else if(speechPin){
     if(draft.id!==speechPin.worldId)throw Error('mvp_rules_private_speech_world');
     store!.commitMvpWithAddressedSpeech(draft,revision,speech);
    }else store!.commit(draft,revision);
