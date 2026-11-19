@@ -56,13 +56,18 @@ export interface MvpGroundFruitCapacity {
  readonly worldLots:number;
  readonly lotsPerTarget:number;
 }
+/** Current common-ground access does not rely on the old source still
+ * existing. A new land right/obstruction may block access, but never erases
+ * a durable ground lot. */
+export function canAccessMvpGroundFruitTile(world:World,at:Vec):boolean {
+ return validPoint(world,at)&&world.map.tiles[at.y*world.map.width+at.x]==='grass'&&walkable(world,at)&&
+  !world.resources.some(r=>same(r.at,at))&&!world.graves.some(g=>same(g.at,at))&&
+  !world.buildings.some(b=>same(b.door,at))&&!world.map.mvpGarden?.trees.some(t=>same(t.at,at))&&
+  (!world.map.mvpGarden?.well||!same(world.map.mvpGarden.well,at))&&noRights(world,at);
+}
+
 function physicallyEligible(world:World,source:Resource,at:Vec):boolean {
- if(!validPoint(world,at)||distance(source.at,at)!==1||!pastureEdgeOpen(world,source.at,at)||
-  world.map.tiles[at.y*world.map.width+at.x]!=='grass'||!walkable(world,at)||
-  world.resources.some(r=>same(r.at,at))||world.graves.some(g=>same(g.at,at))||
-  world.buildings.some(b=>same(b.door,at))||world.map.mvpGarden?.trees.some(t=>same(t.at,at))||
-  (world.map.mvpGarden?.well&&same(world.map.mvpGarden.well,at))||
-  !noRights(world,at))return false;
+ if(!canAccessMvpGroundFruitTile(world,at)||distance(source.at,at)!==1||!pastureEdgeOpen(world,source.at,at))return false;
  const entrance=world.map.entrance;
  return walkable(world,entrance)&&noRights(world,entrance)&&
   findPath(world,entrance,at,false,world.map.width*world.map.height,(_from,to)=>noRights(world,to))!==null;

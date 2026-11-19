@@ -5,6 +5,7 @@ import {
 export {validValleySpiritFruitFallReceipt,valleySpiritFruitFallEffectId,type ValleySpiritFruitFallReceipt} from '../shared/valley-spirit-effects.js';
 import {
  preflightValleySpiritFruitFall,
+ preflightValleySpiritFruitFallFixtureAttachment,
  type ValleySpiritFruitFallEvidence,
  type ValleySpiritFruitFallPolicy,
  type ValleySpiritFruitFallProposal,
@@ -80,6 +81,22 @@ export function executeValleySpiritFruitFall(
  activation:{type:'fruit_fall';enabled:boolean;policy:ValleySpiritFruitFallPolicy}|undefined,
  authority:ValleySpiritFruitFallAuthority,
 ):ValleySpiritFruitFallExecution {
+ return coordinateFruitFall(proposal,activation,authority,preflightValleySpiritFruitFall);
+}
+/** Attachment-only developer path; never used by the live/default or G1 entry. */
+export function executeValleySpiritFruitFallFixture(
+ proposal:ValleySpiritFruitFallProposal,
+ activation:{type:'fruit_fall';enabled:boolean;policy:ValleySpiritFruitFallPolicy}|undefined,
+ authority:ValleySpiritFruitFallAuthority,
+):ValleySpiritFruitFallExecution {
+ return coordinateFruitFall(proposal,activation,authority,preflightValleySpiritFruitFallFixtureAttachment);
+}
+function coordinateFruitFall(
+ proposal:ValleySpiritFruitFallProposal,
+ activation:{type:'fruit_fall';enabled:boolean;policy:ValleySpiritFruitFallPolicy}|undefined,
+ authority:ValleySpiritFruitFallAuthority,
+ preflight:typeof preflightValleySpiritFruitFall,
+):ValleySpiritFruitFallExecution {
  if(activation?.type!==FAMILY||activation.enabled!==true)return {status:'disabled'};
  let effectId:string;
  try{
@@ -100,7 +117,7 @@ export function executeValleySpiritFruitFall(
       now<scheduled.firstMicroMinute||now>=scheduled.expiresMicroMinute)
     return {status:'rejected',reason:'schedule'};
    if(effectQuotaAvailable!==true)return {status:'rejected',reason:'cooldown-or-quota'};
-   const checked=preflightValleySpiritFruitFall(proposal,evidence,activation.policy);
+   const checked=preflight(proposal,evidence,activation.policy);
    if(checked.status!=='validated_shadow')return {status:'rejected',reason:'revalidation'};
    return {status:'commit',receipt:Object.freeze({
     schemaVersion:VERSION,family:FAMILY,worldId:proposal.worldId,effectId,opportunityId:proposal.opportunityId,

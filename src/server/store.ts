@@ -176,38 +176,69 @@ export class WorldStore {
   return gzipSync(JSON.stringify({...state,ledgerVersion:1,terrainKey,resourceCount:persistedResources.length,resourceChanges}),{level:1});
  }
  seasonalLedger(world:World){if(!this.seasonalModel)throw Error('seasonal_model_store_required');return readSeasonalLedger(this.db,world,true);}
- commit(world:World,previousRevision:number|null,appended?:AppendedHistory,seasonalLedger?:SeasonalLedger):void{
+ private assertWritable(world:World):void {
   assertWorldCompatibility(world,!!this.mvpSpiritEffectFixture);
   if(!this.allowMvpClimate)rejectMvpClimateForModels(world);
   if(!this.seasonalModel&&world.mvpSeasonalModelVersion!==undefined)throw Error('seasonal_model_store_required');
+ }
+ commit(world:World,previousRevision:number|null,appended?:AppendedHistory,seasonalLedger?:SeasonalLedger):void{
+  this.assertWritable(world);
   this.db.exec('BEGIN IMMEDIATE');
   try{
-   const row=this.db.prepare('SELECT revision,state FROM worlds WHERE id=?').get(world.id) as {revision:number;state:string|Uint8Array}|undefined;
-   const stored=row?decodeSavedWorld(row.state,!!this.mvpSpiritEffectFixture):null;
-   if(stored){if(stored.schemaVersion===3&&world.schemaVersion!==3)throw Error('shelter_schema_downgrade');if(stored.mvpSeasonalModelVersion===1&&(!this.seasonalModel||world.mvpSeasonalModelVersion!==1))throw Error('seasonal_model_dependency_downgrade');assertSeasonalKnowledgeAdvance(stored as unknown as World,world);if(Object.prototype.hasOwnProperty.call(stored,'mvpPreservation')&&!world.mvpPreservation)throw Error('preservation_dependency_downgrade');if(Object.prototype.hasOwnProperty.call(stored,'mvpSoil')&&(!world.mvpSoil||(world.mvpClimate?.schemaVersion??0)<2))throw Error('soil_dependency_downgrade');if(Object.prototype.hasOwnProperty.call(stored,'mvpAgriculture')&&(!world.mvpAgriculture||world.mvpClimate?.schemaVersion!==3))throw Error('agriculture_dependency_downgrade');if(!this.allowMvpClimate)rejectMvpClimateForModels(stored);}
-   if((row?.revision??null)!==previousRevision)throw new Error('stale_world_revision');
-   if(this.allowMvpClimate)assertMvpRainProvenanceAdvance(stored as unknown as World|null,world);
-   if(this.mvpSpiritEffectFixture)assertMvpSpiritEffectsAdvance(stored as unknown as World|null,world,this.mvpSpiritEffectFixture);
-   const prior=this.seasonalModel?readSeasonalLedger(this.db,stored as unknown as World|null,true):null;
-   if(!!(seasonalLedger??prior)!==(world.mvpSeasonalModelVersion===1))throw Error('seasonal_model_ledger_marker_mismatch');
-   if(seasonalLedger){if(!this.seasonalModel)throw Error('seasonal_model_store_required');writeSeasonalLedger(this.db,seasonalLedger,prior,world);}
-   else if(prior?.requests.at(-1)?.state==='intent')throw Error('seasonal_model_unresolved_request');
-   const insert=this.db.prepare('INSERT INTO events(id,world_id,at,body) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body WHERE events.body<>excluded.body');
-   // Full-state callers validate every fact. The runtime supplies a transaction-local suffix only after
-   // the first checkpoint in this format. Old inline histories migrate on the first successful commit.
-   const ledger=world.mode==='formal'&&this.separateLedgers.has(world.id)&&appended?appended:world;
-   const indexPerson=this.db.prepare("INSERT OR IGNORE INTO event_people(world_id,person_id,event_id,event_seq) SELECT e.world_id,a.value,e.id,e.rowid FROM events e,json_each(e.body,'$.actors') a WHERE e.id=? AND typeof(a.value)='text'");
-   const indexAnimal=this.db.prepare("INSERT OR IGNORE INTO event_animals(world_id,animal_id,event_id,event_seq) SELECT e.world_id,a.value,e.id,e.rowid FROM events e,json_each(e.body,'$.animalIds') a WHERE e.id=? AND json_type(e.body,'$.animalIds')='array' AND a.type='text'");
-   for(const event of ledger.events){insert.run(event.id,world.id,event.at,JSON.stringify(event));indexPerson.run(event.id);indexAnimal.run(event.id);}
-   if(world.mode==='formal'){
-    const receipt=this.db.prepare('INSERT OR IGNORE INTO receipts(world_id,receipt) VALUES(?,?)');
-    for(const id of ledger.processed)receipt.run(world.id,id);
-   }
-   this.db.prepare('INSERT INTO worlds(id,revision,state) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision,state=excluded.state').run(world.id,world.revision,this.encode(world));
-   this.dailySnapshots?.committed(world,previousRevision);
+   this.writeCommit(world,previousRevision,appended,seasonalLedger);
    this.db.exec('COMMIT');
    if(world.mode==='formal'){this.terrainKeys.add(terrainRevision(world.map));this.separateLedgers.add(world.id);}
   }catch(error){this.db.exec('ROLLBACK');throw error;}
+ }
+ hasMvpSpiritEffectFixture():boolean{return this.mvpSpiritEffectFixture!==undefined;}
+ /** Fixture only: re-read and plan under the same synchronous SQLite lock
+  * that validates the dedicated append and writes the authoritative rows. */
+ runMvpSpiritEffectFixture<T>(
+  worldId:string,operation:(current:World,capacity:MvpGroundFruitCapacity)=>{result:T;draft?:World},
+ ):T {
+  const capacity=this.mvpSpiritEffectFixture;
+  if(!capacity)throw Error('mvp_spirit_fixture_requires_disposable_memory');
+  this.db.exec('BEGIN IMMEDIATE');
+  try{
+   const current=this.readWorld(false,false);
+   if(!current||current.id!==worldId||current.mode!=='validation'||!current.mvpClimate?.spiritEffects)
+    throw Error('mvp_spirit_fixture_world_not_adopted');
+   const revision=current.revision,appliedCount=current.mvpClimate.spiritEffects.applied.length;
+   const change=operation(current,capacity);
+   if(change.draft){
+    if(change.draft.id!==worldId||change.draft.mvpClimate?.spiritEffects?.applied.length!==appliedCount+1)
+     throw Error('mvp_spirit_fixture_requires_one_effect');
+    this.assertWritable(change.draft);
+    this.writeCommit(change.draft,revision);
+   }
+   this.db.exec('COMMIT');
+   return change.result;
+  }catch(error){this.db.exec('ROLLBACK');throw error;}
+ }
+ private writeCommit(world:World,previousRevision:number|null,appended?:AppendedHistory,seasonalLedger?:SeasonalLedger):void {
+  const row=this.db.prepare('SELECT revision,state FROM worlds WHERE id=?').get(world.id) as {revision:number;state:string|Uint8Array}|undefined;
+  const stored=row?decodeSavedWorld(row.state,!!this.mvpSpiritEffectFixture):null;
+  if(stored){if(stored.schemaVersion===3&&world.schemaVersion!==3)throw Error('shelter_schema_downgrade');if(stored.mvpSeasonalModelVersion===1&&(!this.seasonalModel||world.mvpSeasonalModelVersion!==1))throw Error('seasonal_model_dependency_downgrade');assertSeasonalKnowledgeAdvance(stored as unknown as World,world);if(Object.prototype.hasOwnProperty.call(stored,'mvpPreservation')&&!world.mvpPreservation)throw Error('preservation_dependency_downgrade');if(Object.prototype.hasOwnProperty.call(stored,'mvpSoil')&&(!world.mvpSoil||(world.mvpClimate?.schemaVersion??0)<2))throw Error('soil_dependency_downgrade');if(Object.prototype.hasOwnProperty.call(stored,'mvpAgriculture')&&(!world.mvpAgriculture||world.mvpClimate?.schemaVersion!==3))throw Error('agriculture_dependency_downgrade');if(!this.allowMvpClimate)rejectMvpClimateForModels(stored);}
+  if((row?.revision??null)!==previousRevision)throw new Error('stale_world_revision');
+  if(this.allowMvpClimate)assertMvpRainProvenanceAdvance(stored as unknown as World|null,world);
+  if(this.mvpSpiritEffectFixture)assertMvpSpiritEffectsAdvance(stored as unknown as World|null,world,this.mvpSpiritEffectFixture);
+  const prior=this.seasonalModel?readSeasonalLedger(this.db,stored as unknown as World|null,true):null;
+  if(!!(seasonalLedger??prior)!==(world.mvpSeasonalModelVersion===1))throw Error('seasonal_model_ledger_marker_mismatch');
+  if(seasonalLedger){if(!this.seasonalModel)throw Error('seasonal_model_store_required');writeSeasonalLedger(this.db,seasonalLedger,prior,world);}
+  else if(prior?.requests.at(-1)?.state==='intent')throw Error('seasonal_model_unresolved_request');
+  const insert=this.db.prepare('INSERT INTO events(id,world_id,at,body) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body WHERE events.body<>excluded.body');
+  // Full-state callers validate every fact. The runtime supplies a transaction-local suffix only after
+  // the first checkpoint in this format. Old inline histories migrate on the first successful commit.
+  const ledger=world.mode==='formal'&&this.separateLedgers.has(world.id)&&appended?appended:world;
+  const indexPerson=this.db.prepare("INSERT OR IGNORE INTO event_people(world_id,person_id,event_id,event_seq) SELECT e.world_id,a.value,e.id,e.rowid FROM events e,json_each(e.body,'$.actors') a WHERE e.id=? AND typeof(a.value)='text'");
+  const indexAnimal=this.db.prepare("INSERT OR IGNORE INTO event_animals(world_id,animal_id,event_id,event_seq) SELECT e.world_id,a.value,e.id,e.rowid FROM events e,json_each(e.body,'$.animalIds') a WHERE e.id=? AND json_type(e.body,'$.animalIds')='array' AND a.type='text'");
+  for(const event of ledger.events){insert.run(event.id,world.id,event.at,JSON.stringify(event));indexPerson.run(event.id);indexAnimal.run(event.id);}
+  if(world.mode==='formal'){
+   const receipt=this.db.prepare('INSERT OR IGNORE INTO receipts(world_id,receipt) VALUES(?,?)');
+   for(const id of ledger.processed)receipt.run(world.id,id);
+  }
+  this.db.prepare('INSERT INTO worlds(id,revision,state) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision,state=excluded.state').run(world.id,world.revision,this.encode(world));
+  this.dailySnapshots?.committed(world,previousRevision);
  }
  dailySnapshotReport(){
   if(!this.dailySnapshots)throw new Error('daily_snapshots_not_enabled');

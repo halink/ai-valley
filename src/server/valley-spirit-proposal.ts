@@ -193,6 +193,25 @@ export function preflightValleySpiritFruitFall(
   evidence: ValleySpiritFruitFallEvidence | undefined,
   policy?: ValleySpiritFruitFallPolicy,
 ): ValleySpiritFruitFallPreflight {
+  return checkFruitFall(proposal, evidence, policy, false);
+}
+
+/** Isolated storage attachment does not test resident discovery or pickup.
+ * Production and G1 preview must continue to use the strict preflight above. */
+export function preflightValleySpiritFruitFallFixtureAttachment(
+  proposal: ValleySpiritFruitFallProposal,
+  evidence: ValleySpiritFruitFallEvidence | undefined,
+  policy?: ValleySpiritFruitFallPolicy,
+): ValleySpiritFruitFallPreflight {
+  return checkFruitFall(proposal, evidence, policy, true);
+}
+
+function checkFruitFall(
+  proposal: ValleySpiritFruitFallProposal,
+  evidence: ValleySpiritFruitFallEvidence | undefined,
+  policy: ValleySpiritFruitFallPolicy | undefined,
+  attachmentFixture: boolean,
+): ValleySpiritFruitFallPreflight {
   if (!isEnabledValleySpiritFruitFallPolicy(policy)) return {status: "disabled", code: "shadow_disabled_or_policy_invalid"};
   const reject = (code: Rejection): ValleySpiritFruitFallPreflight => ({status: "rejected", code});
   if (!isValleySpiritFruitFallProposal(proposal)) return reject("invalid_proposal");
@@ -220,7 +239,7 @@ export function preflightValleySpiritFruitFall(
     !natural(source.ripeAvailable) || source.ripeAvailable < proposal.quantity) return reject("source_unavailable");
   if (!target || target.id !== proposal.targetId || target.reachable !== true || target.preservesOwnerId !== source.ownerId ||
     !natural(target.freeCapacity) || target.freeCapacity < proposal.quantity || target.supportsGroundFood !== true ||
-    target.supportsDiscovery !== true || target.supportsPickup !== true) return reject("target_ineligible");
+    target.supportsDiscovery !== !attachmentFixture || target.supportsPickup !== !attachmentFixture) return reject("target_ineligible");
   if (evidence.opportunityConsumed) return reject("opportunity_consumed");
   if (!evidence.proposalQuotaAvailable || (evidence.lastCommittedFruitFallMicroMinute !== null &&
     nowMicroMinute - evidence.lastCommittedFruitFallMicroMinute < policy.minimumCooldownGameMinutes * UNIT)) return reject("quota_or_cooldown");
