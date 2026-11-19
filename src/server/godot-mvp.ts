@@ -13,7 +13,7 @@ import {goods} from '../shared/items.js';
 import {adoptMvpAgriculture,agricultureObservation,agricultureReason,plantTarget,canSow,agriculturePlot} from '../world/mvp-agriculture.js';
 import {CULTIVARS,cultivarKeys,temperatureFactor} from '../shared/mvp-agriculture.js';
 import {adoptMvpSoil,soilObservation} from '../world/mvp-soil.js';
-import {adoptMvpResources,captureMvpFruitRenewalStep,mvpResourceItem,type MvpFruitRenewalWitness} from '../world/mvp-resources.js';
+import {adoptMvpResources,captureMvpFruitFlowStep,captureMvpFruitRenewalStep,mvpResourceItem,type MvpFruitRenewalWitness,type MvpFruitFlowBatch} from '../world/mvp-resources.js';
 import {minuteToClimateUs} from '../world/mvp-climate.js';
 import {adoptMvpClimate,validateMvpClimate} from '../world/mvp-climate-state.js';
 import {inheritReceiptHistory} from '../world/receipts.js';
@@ -257,7 +257,7 @@ function calendarSeason(w:World){return ['spring','summer','autumn','winter'][Ma
 type SessionWeatherReading=Pick<PublicWeatherFact,'minute'|'condition'|'temperatureDeciC'|'relativeHumidityPermille'>;
 type SessionWeather={schemaVersion:1;worldId:string;worldRevision:number;atMinute:number;readings:SessionWeatherReading[]};
 
-export function createMvpSession(options:{observeSessionWeather?:true;world?:World;commit?:(world:World,previousRevision:number,speech?:AddressedSpeechObservation)=>void;persistent?:boolean;captureAddressedSpeechCustody?:true;observeCommittedMeals?:(witnesses:readonly ValleySpiritMvpMealWitness[])=>void;observeCommittedFruitRenewal?:(witnesses:readonly MvpFruitRenewalWitness[])=>void}={}){
+export function createMvpSession(options:{observeSessionWeather?:true;world?:World;commit?:(world:World,previousRevision:number,speech?:AddressedSpeechObservation)=>void;persistent?:boolean;captureAddressedSpeechCustody?:true;observeCommittedMeals?:(witnesses:readonly ValleySpiritMvpMealWitness[])=>void;observeCommittedFruitRenewal?:(witnesses:readonly MvpFruitRenewalWitness[])=>void;observeCommittedFruitFlow?:(flow:MvpFruitFlowBatch)=>void}={}){
  let world=structuredClone(options.world??createMvpWorld());
  if(options.world)inheritReceiptHistory(options.world,world);
  const initialRevision=world.revision;
@@ -328,8 +328,12 @@ export function createMvpSession(options:{observeSessionWeather?:true;world?:Wor
      else stepWorld(world,1,{actionFailures});
     };
     let stageRenewal:(()=>readonly MvpFruitRenewalWitness[])|undefined;
+    let readFlow:(()=>MvpFruitFlowBatch|null)|undefined;
     const advanceObservedEngine=()=>{
-     if(options.persistent&&options.commit&&options.observeCommittedFruitRenewal)
+     if(options.persistent&&options.commit&&options.observeCommittedFruitFlow){
+      const flow=captureMvpFruitFlowStep(world,current,advanceEngine);
+      stageRenewal=flow.readRenewal;readFlow=flow.readFlow;
+     }else if(options.persistent&&options.commit&&options.observeCommittedFruitRenewal)
       stageRenewal=captureMvpFruitRenewalStep(world,advanceEngine);
      else advanceEngine();
     };
@@ -373,11 +377,14 @@ export function createMvpSession(options:{observeSessionWeather?:true;world?:Wor
     if(optional.stageMealWitnesses)try{witnesses=optional.stageMealWitnesses();}catch{/* optional custody */}
     let renewal:readonly MvpFruitRenewalWitness[]=[];
     if(stageRenewal)try{renewal=stageRenewal();}catch{/* optional observation */}
+    let fruitFlow:MvpFruitFlowBatch|null=null;
+    if(readFlow)try{fruitFlow=readFlow();}catch{/* optional observation */}
     if(speech?.receipts.length)options.commit?.(world,current.revision,speech);
     else options.commit?.(world,current.revision);
     try{observeCommittedWeather();}catch{sessionWeather=undefined;}
     if(witnesses.length)try{options.observeCommittedMeals?.(witnesses);}catch{/* committed world is independent */}
     if(renewal.length)try{options.observeCommittedFruitRenewal?.(renewal);}catch{/* committed world is independent */}
+    if(fruitFlow)try{options.observeCommittedFruitFlow?.(fruitFlow);}catch{/* committed world is independent */}
     }catch(error){world=current;serial=previousSerial;for(const key of Object.keys(decisions))delete decisions[key];Object.assign(decisions,previousDecisions);throw error;}
    }
   }catch(error){fault=error instanceof Error?error.message:String(error);world.clock.paused=true;world.clock.reason=fault;world.revision++;}

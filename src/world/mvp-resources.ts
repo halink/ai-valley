@@ -68,6 +68,103 @@ export function captureMvpFruitRenewalStep(w:World,step:()=>void):()=>readonly M
   return staged;
  };
 }
+interface FruitSourceHead {
+ readonly sourceId:string;readonly sourceAt:Readonly<Vec>;readonly amount:number;readonly max:number;
+}
+interface NativeFruitGather {
+ readonly kind:'gather';readonly sourceId:string;readonly atUs:string;readonly amountBefore:number;readonly amountAfter:number;
+ readonly quantity:number;readonly actorId:string;readonly planId:string;readonly eventId:string;
+}
+export interface MvpFruitFlowBatch {
+ readonly version:1;readonly worldId:string;readonly fromRevision:number;readonly toRevision:number;
+ readonly fromUs:string;readonly toUs:string;readonly opening:readonly FruitSourceHead[];readonly closing:readonly FruitSourceHead[];
+ readonly operations:readonly (NativeFruitGather|{readonly kind:'renewal';readonly witness:MvpFruitRenewalWitness})[];
+}
+const maxFlowRows=4096; // Structural guard, not a resource limit.
+const gathers=new WeakMap<World,NativeFruitGather[]>();
+function flowSources(w:World):readonly FruitSourceHead[]|null {
+ if(!supportedRenewalHead(w)||w.production||!w.mvpClimate||Object.hasOwn(w.mvpClimate,'spiritEffects')||Object.hasOwn(w.mvpClimate,'spiritFruitSettlement')||
+  !w.mvpResources||w.mvpResources.lastMinute!==w.minute||w.resources.length>maxFlowRows||
+  w.mvpResources.addedResourceIds.length>maxFlowRows)return null;
+ const rows:FruitSourceHead[]=[],seen=new Set<string>();
+ for(const r of w.resources){
+  if(r.kind!=='bush'||r.foodItem!=='fruit')continue;
+  if(!/^mvp-supply-fruit-[0-9]+$/.test(r.id)||seen.has(r.id)||
+   w.resources.filter(s=>s.id===r.id).length!==1||w.mvpResources.addedResourceIds.filter(id=>id===r.id).length!==1||
+   !Object.hasOwn(w.mvpResources.renewal,r.id)||!natural(r.amount)||!natural(r.max)||r.amount>r.max||
+   !natural(r.at.x)||!natural(r.at.y)||r.at.x>=w.map.width||r.at.y>=w.map.height)return null;
+  seen.add(r.id);
+  rows.push(Object.freeze({sourceId:r.id,sourceAt:Object.freeze({x:r.at.x,y:r.at.y}),amount:r.amount,max:r.max}));
+ }
+ if(w.mvpResources.addedResourceIds.some(id=>id.startsWith('mvp-supply-fruit-')&&!seen.has(id)))return null;
+ return Object.freeze(rows.sort((a,b)=>a.sourceId<b.sourceId?-1:a.sourceId>b.sourceId?1:0));
+}
+
+/** Only call from ordinary successful native gather, not plan preview or historical replay. */
+export function noteMvpFruitGather(w:World,r:Resource,before:number,quantity:number,actorId:string,planId:string,eventId:string):void {
+ const rows=gathers.get(w);
+ if(!rows)return;
+ if(rows.length>maxFlowRows)return;
+ try{
+  rows.push(Object.freeze({kind:'gather',sourceId:r.id,amountBefore:before,amountAfter:r.amount,quantity,
+   actorId,planId,eventId,atUs:minuteToClimateUs(w.minute)}));
+ }catch{/* optional observation; changed stock will not reconcile */}
+}
+
+/** Read-only staging for one native engine tick of the audited ordinary writer
+ * set (gather, then renewal). A matching scalar is not a proof against new,
+ * uninstrumented offsetting operations. Commit authority belongs to caller. */
+export function captureMvpFruitFlowStep(w:World,previous:World,step:()=>void) {
+ let opening:readonly FruitSourceHead[]|null=null,fromUs:string|undefined;
+ const worldId=previous.id,fromRevision=previous.revision;
+ try{
+  if(w.id===worldId&&w.minute===previous.minute&&w.revision>=fromRevision&&!gathers.has(w)){
+   opening=flowSources(previous);
+   if(opening&&JSON.stringify(opening)===JSON.stringify(flowSources(w)))fromUs=minuteToClimateUs(w.minute);
+  }
+ }catch{/* never block actual step */}
+ const earlierEvents=fromUs?new Set(w.events.map(event=>event.id)):undefined;
+ const collected:NativeFruitGather[]=[];
+ let readRenewal:()=>readonly MvpFruitRenewalWitness[];
+ if(fromUs)gathers.set(w,collected);
+ try{readRenewal=captureMvpFruitRenewalStep(w,step);}
+ finally{if(fromUs)gathers.delete(w);}
+ const toRevision=w.revision,toMinute=w.minute;
+ return {
+  readRenewal,
+  readFlow:():MvpFruitFlowBatch|null=>{
+   if(!opening||fromUs===undefined||w.id!==worldId||w.revision!==toRevision||w.minute!==toMinute||
+    !natural(toRevision)||toRevision<=fromRevision||collected.length>maxFlowRows)return null;
+   const toUs=minuteToClimateUs(toMinute);
+   if(BigInt(toUs)-BigInt(fromUs)!==1000000n||w.mvpClimate?.lastUs!==toUs)return null;
+   const closing=flowSources(w);
+   if(!closing||closing.length!==opening.length||opening.some((p,i)=>p.sourceId!==closing[i].sourceId||
+    !same(p.sourceAt,closing[i].sourceAt)||p.max!==closing[i].max))return null;
+   const balance=new Map(opening.map(row=>[row.sourceId,row.amount])),events=new Set<string>();
+   const renewal=readRenewal(),receipts=new Set<string>(),fresh=new Map(w.events.filter(e=>!earlierEvents?.has(e.id)).map(e=>[e.id,e]));
+   function apply(id:string,before:number,after:number,difference:number):boolean {
+    if(!natural(before)||!natural(after)||balance.get(id)!==before||after-before!==difference)return false;
+    balance.set(id,after);return true;
+   }
+   for(const r of collected){
+    const event=fresh.get(r.eventId);
+    if(!event||event.kind!=='action'||event.observerOnly||event.at!==toMinute||event.actors.length!==1||event.actors[0]!==r.actorId||!natural(r.quantity)||r.quantity===0||r.atUs!==toUs||!r.actorId||!r.planId||!r.eventId||events.has(r.eventId)||
+     !apply(r.sourceId,r.amountBefore,r.amountAfter,-r.quantity))return null;
+    events.add(r.eventId);
+   }
+   for(const r of renewal){
+    if(r.atUs!==toUs||r.worldRevision!==toRevision||receipts.has(r.sourceId)||
+     !apply(r.sourceId,r.amountBefore,r.amountAfter,r.naturallyRenewed))return null;
+    receipts.add(r.sourceId);
+   }
+   if(closing.some(row=>balance.get(row.sourceId)!==row.amount))return null;
+   const operations=[...collected,...renewal.map(witness=>Object.freeze({kind:'renewal' as const,witness}))];
+   return Object.freeze({version:1,worldId,fromRevision,toRevision,fromUs,toUs,opening,closing,
+    operations:Object.freeze(operations)});
+  },
+ };
+}
+
 export function mvpResourceItem(w:World,r:Resource):'berry'|'fruit'|'water'|'wood'|'stone'{
  return r.kind==='bush'?(w.mvpResources&&r.foodItem==='fruit'?'fruit':'berry'):r.kind==='spring'?'water':r.kind==='tree'?'wood':'stone';
 }

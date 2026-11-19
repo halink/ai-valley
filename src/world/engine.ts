@@ -6,7 +6,7 @@ import {validAgricultureAction,agriculturePlot,agricultureRoute,agricultureReaso
 import {allocateSoilWaterExecution,assertSoilWaterUnsettled,settleSoilWater} from './mvp-soil.js';
 import {minuteToClimateUs} from './mvp-climate.js';
 import {validateMvpClimate,advanceMvpClimate} from './mvp-climate-state.js';
-import {advanceMvpResources,mvpResourceItem} from './mvp-resources.js';
+import {advanceMvpResources,mvpResourceItem,noteMvpFruitGather} from './mvp-resources.js';
 import {isMvpSeedAction,mvpSeedReason,mvpSeedPlace,completeMvpSeed} from './mvp-seeds.js';
 import {mvpSleepProblem,mvpDiningPlace} from './mvp-rooms.js';
 import {hasMvpHamlet,MVP_HALL} from '../shared/mvp-hamlet.js';
@@ -461,7 +461,8 @@ function completeAtomic(world:World,r:Resident,a:Action,definition:string,elapse
   const resource=world.resources.find(v=>v.id===a.resourceId);if(!resource||distance(resource.at,r.at)>1||resource.kind==='spring'&&!canContactSpring(world,r,resource)||resource.kind==='bush'&&!canContactBerry(world,r,resource)||resource.amount<a.quantity)return '资源或实际位置已经变化';
   if(resource.kind==='spring'&&resource.floodDamage?.clearedAt===null)return '泉水已淤塞，不能取得安全清水';
   if(resource.kind==='tree'){const axe=world.industry?.tools.find(t=>t.ownerId===r.id&&!t.location&&t.kind==='axe'&&t.durability>0);if(axe)axe.durability=Math.max(0,axe.durability-1);}
-  resource.amount-=a.quantity;resource.lastHarvest=world.minute;const item=mvpResourceItem(world,resource);r.inventory[item]=(r.inventory[item]??0)+a.quantity;r.energy=Math.max(0,r.energy-a.quantity*0.5);const event=record(`${r.name}采集了 ${a.quantity} 份${names[item]}。`);
+  const amountBefore=resource.amount;resource.amount-=a.quantity;resource.lastHarvest=world.minute;const item=mvpResourceItem(world,resource);r.inventory[item]=(r.inventory[item]??0)+a.quantity;r.energy=Math.max(0,r.energy-a.quantity*0.5);const event=record(`${r.name}采集了 ${a.quantity} 份${names[item]}。`);
+  if(item==='fruit')noteMvpFruitGather(world,resource,amountBefore,a.quantity,r.id,r.activity!.planId,event.id);
   if(item==='berry')recordFoodFlow(world,{type:'source_added',action:'gather_berry',at:world.minute,residentId:r.id,eventId:event.id,planId:r.activity!.planId,container:'person:'+r.id,definition,sourceId:resource.id,output:{berry:a.quantity}});return null;
  }
  if(a.type==='plant'||a.type==='water'||a.type==='harvest'){
