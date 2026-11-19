@@ -1,4 +1,4 @@
-import {assertAgedBirthSqlAuthority,advanceSealedAgedFruitExpiry,readOwnedSealedAgedBirthReceipt,readOwnedSealedAgedFruitExpiry,readOwnedSealedAgedFruitSight,readSealedAgedBirthArchive,rejectSealedAgedBirthOnGenericPath,
+import {assertAgedBirthSqlAuthority,advanceSealedAgedFruitExpiry,advanceSealedAgedFruitMinute,readOwnedSealedAgedBirthReceipt,readOwnedSealedAgedFruitDiscovery,readOwnedSealedAgedFruitExpiry,readOwnedSealedAgedFruitSight,readSealedAgedBirthArchive,rejectSealedAgedBirthOnGenericPath,
  sameAgedBirthProofs,writeSealedAgedBirth,type AgedBirthProofs} from './valley-spirit-aged-birth-archive.js';
 import {makeAgedBirthExecutionTerms,makeAgedBirthReviewTerms,verifiesAgedBirthExecution,verifiesAgedBirthReview} from './valley-spirit-aged-birth-review.js';
 import {agedG1ReviewTerms,agedG1RevokeTerms,advanceAgedG1ReviewEpoch,initializeAgedG1ReviewEpoch,
@@ -65,6 +65,9 @@ export function readSealedMvpAgedFruitSight(owner:DeveloperMvpSpiritFixtureOwner
 }
 export function readSealedMvpAgedFruitExpiry(owner:DeveloperMvpSpiritFixtureOwner){
  return readOwnedSealedAgedFruitExpiry(owner,decodeAgedBirthPredecessor);
+}
+export function readSealedMvpAgedFruitDiscovery(owner:DeveloperMvpSpiritFixtureOwner,worldId:string,residentId:string){
+ return readOwnedSealedAgedFruitDiscovery(owner,decodeAgedBirthPredecessor,worldId,residentId);
 }
 export interface AppendedHistory {
  events: WorldEvent[];
@@ -974,6 +977,20 @@ export class WorldStore {
    owner.assertOwned();this.assertDeveloperSpiritSeal();this.db.exec('BEGIN IMMEDIATE');
    try{
     const result=advanceSealedAgedFruitExpiry(this.db,owner,decodeAgedBirthPredecessor,worldId);
+    owner.assertOwned();this.db.exec('COMMIT');return result;
+   }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }catch{return null;}
+ }
+ /** Non-default, one bounded real minute from the exact previously
+  * replayed head. Unsupported active weather custody remains closed. */
+ stepDeveloperMvpAgedFruitMinute(worldId:string,expectedRevision:number){
+  const owner=this.developerSpiritFixtureOwner;
+  if(!this.sealedAgedBirthExecution||!owner||this.nativeWeatherCredit||
+   !Number.isSafeInteger(expectedRevision)||expectedRevision<1)return null;
+  try{
+   owner.assertOwned();this.assertDeveloperSpiritSeal();this.db.exec('BEGIN IMMEDIATE');
+   try{
+    const result=advanceSealedAgedFruitMinute(this.db,owner,decodeAgedBirthPredecessor,worldId,expectedRevision);
     owner.assertOwned();this.db.exec('COMMIT');return result;
    }catch(error){this.db.exec('ROLLBACK');throw error;}
   }catch{return null;}

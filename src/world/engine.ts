@@ -1,3 +1,4 @@
+import {noteMvpNativeObservationPhase} from './mvp-native-observation-phase.js';
 import {beginFormalRainStep,observeFormalRainEdge} from './formal-rain-provenance.js';
 import {completeMvpShelter,personallyFeelsRain,validMvpShelter,MVP_IDLE_WAIT_MINUTES,shelterRoomWithinIdleTime,shelterPlanDeadline,SHELTER_WAIT,SHELTER_UNAVAILABLE} from './mvp-shelter.js';
 import {captureSeasonalKnowledge,validateSeasonalKnowledge,validSeasonalInspect,seasonalInspectRoute,completeSeasonalInspect} from './mvp-seasonal-knowledge.js';
@@ -713,7 +714,7 @@ export function stepWorld(world:World,minutes:number,options:{actionFailures?:St
     if(r.decisionProtection?.endedAt===null)r.decisionProtection.prevented[source]+=drain[source]*protectedMinutes;
    }
    if(r.health<=0){recordDeath(world,r);continue;}
-   observe(world,r);learnDocks(world,r);
+   observe(world,r);learnDocks(world,r);noteMvpNativeObservationPhase(world,r);
   }
   advanceVisitorAidNeeds(world,!!options.decisionChoices);
   advanceVisitorJourneyNeeds(world,!!options.decisionChoices);

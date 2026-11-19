@@ -1,3 +1,4 @@
+import {captureMvpNativeObservationPhase} from '../world/mvp-native-observation-phase.js';
 import {planMvpFallenFruitAdjacentApproach,unsafeMvpApproachEndpoint} from './valley-spirit-mvp-fallen-fruit-approach.js';
 import {observeMvpFallenFruit} from '../world/mvp-fallen-fruit-resident.js';
 import {captureAddressedSpeech,type AddressedSpeechObservation} from '../world/addressed-speech.js';
@@ -43,7 +44,7 @@ import {canContactSocialTarget} from '../world/social-observation.js';
 import {berryApproachPath,canContactBerry} from '../world/berry-observation.js';
 import {canContactSpring,springApproachPath} from '../world/spring-observation.js';
 import {VALLEY_VERSION} from '../shared/version.js';
-import type {Action,Resident,Snapshot,Tile,World} from '../shared/types.js';
+import type {Action,Resident,Snapshot,Tile,Vec,World} from '../shared/types.js';
 
 export const GODOT_MVP_PORT=3414;
 export const GODOT_MVP_NOTICE='隔离核心循环：本地规则驱动，非真实模型；内存世界，退出后重置';
@@ -380,16 +381,19 @@ export function prepareSealedMvpAdjacentMinute(current:World){
 
 /** One detached ordinary ecology minute without any supplied resident action.
  * Only the sealed store may commit it with custody. */
-export function prepareSealedMvpEcologyMinute(current:World,captureMeals=false){
+export function prepareSealedMvpEcologyMinute(current:World,captureMeals=false,privateFruitPoint?:Vec){
  if(current.mode!=='validation'||current.clock.paused||!current.mvpClimate?.rainProvenance)return null;
  const draft=structuredClone(current);
  inheritReceiptHistory(current,draft);enableCompletedMovement(draft);
  try{
-  const result=advanceMvpRuleMinuteDraft(draft,current,0,{},{meals:captureMeals,fruitFlow:false,fruitRenewal:true,addressedSpeech:true});
+  const advance=()=>advanceMvpRuleMinuteDraft(draft,current,0,{},{meals:captureMeals,fruitFlow:false,fruitRenewal:true,addressedSpeech:true});
+  const capture=privateFruitPoint?captureMvpNativeObservationPhase(draft,privateFruitPoint,advance):{result:advance(),observed:[]};
+  if(!capture)return null;
+  const {result,observed}=capture;
   if(draft.minute!==current.minute+1||
    JSON.stringify(draft.mvpClimate?.spiritEffects)!==JSON.stringify(current.mvpClimate?.spiritEffects)||
    JSON.stringify(draft.mvpClimate?.spiritFruitSettlement)!==JSON.stringify(current.mvpClimate?.spiritFruitSettlement))return null;
-  return {draft,renewal:result.renewal,mealWitnesses:result.witnesses,speech:result.speech};
+  return {draft,renewal:result.renewal,mealWitnesses:result.witnesses,speech:result.speech,observed};
  }catch{return null;}
 }
 
