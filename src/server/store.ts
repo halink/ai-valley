@@ -1,8 +1,9 @@
+import {appendFormalAddressedSpeech,readFormalAddressedSpeech} from './valley-spirit-formal-speech-custody.js';
 import {appendFormalAppointmentChoices,readFormalAppointmentChoice} from './valley-spirit-formal-choice-custody.js';
 import {nativeFormalAppointmentChoice} from '../world/social-appointments.js';
 import {appendNativeMvpMealCustodyV2,readNativeMvpMealV2Receipt,type ValleySpiritMvpMealWitness} from './valley-spirit-meal-custody.js';
 import {readMvpMealFact} from '../shared/mvp-meals.js';
-import {assertAgedBirthSqlAuthority,advanceSealedAgedFruitExpiry,advanceSealedAgedHeldFruitExpiry,advanceSealedAgedHeldFruitMinute,advanceSealedAgedFruitMinute,pickUpSealedAgedFruit,readOwnedSealedAgedHeldFruit,readOwnedSealedAgedHeldFruitExpiry,readOwnedSealedAgedHeldFruitEaten,readOwnedSealedMvpAgedFruitFairness,readOwnedSealedAgedBirthReceipt,readOwnedSealedAgedFruitDiscovery,readOwnedSealedAgedFruitExpiry,readOwnedSealedAgedFruitSight,readSealedAgedBirthArchive,rejectSealedAgedBirthOnGenericPath,
+import {assertAgedBirthSqlAuthority,advanceSealedAgedFruitExpiry,advanceSealedAgedHeldFruitExpiry,advanceSealedAgedHeldFruitMinute,advanceSealedAgedFruitMinute,pickUpSealedAgedFruit,readOwnedSealedAgedHeldFruit,readOwnedSealedAgedHeldFruitExpiry,readOwnedSealedAgedHeldFruitEaten,readOwnedSealedMvpAgedFruitFairness,readOwnedSealedMvpAgedStockFlow,readOwnedSealedAgedBirthReceipt,readOwnedSealedAgedFruitDiscovery,readOwnedSealedAgedFruitExpiry,readOwnedSealedAgedFruitSight,readSealedAgedBirthArchive,rejectSealedAgedBirthOnGenericPath,
  sameAgedBirthProofs,writeSealedAgedBirth,type AgedBirthProofs} from './valley-spirit-aged-birth-archive.js';
 import {makeAgedBirthExecutionTerms,makeAgedBirthReviewTerms,verifiesAgedBirthExecution,verifiesAgedBirthReview} from './valley-spirit-aged-birth-review.js';
 import {agedG1ReviewTerms,agedG1RevokeTerms,advanceAgedG1ReviewEpoch,initializeAgedG1ReviewEpoch,
@@ -33,7 +34,7 @@ import {BRIDGED_FORMAL_BERRY_APPROVAL,DUE_FORMAL_BERRY_APPROVAL,FORMAL_BERRY_EFF
  verifyFormalBerrySignedApproval,pinFormalGroundBerryFoodBirth,type FormalBerryFixtureAnchor,type FormalBerryFixtureEffect} from './valley-spirit-formal-berry-authority.js';
 import {assertFormalRainProvenanceCommit,emptyFormalRainProvenance,forgetFormalRainStep} from '../world/formal-rain-provenance.js';
 import {appendValleySpiritFormalArrivalCustody,readValleySpiritFormalArrivalCustody,verifyValleySpiritFormalArrivalCustody,type ValleySpiritFormalArrivalReceipt} from './valley-spirit-formal-arrival-custody.js';
-import type {AddressedSpeechObservation} from '../world/addressed-speech.js';
+import {formalAddressedSpeechProof,type AddressedSpeechObservation} from '../world/addressed-speech.js';
 import {appendValleySpiritSpeechCustody,readValleySpiritSpeechCustody,verifyValleySpiritSpeechCustody} from './valley-spirit-speech-custody.js';
 import type {ValleySpiritLifeReceipt} from './valley-spirit-life-facts.js';
 import {createHash} from 'node:crypto';
@@ -60,6 +61,9 @@ import {assertDeveloperMvpEffectArchive,assertWorldCompatibility,decodeSavedWorl
 import {claimDeveloperMvpSpiritFixtureOwner,isDeveloperMvpSpiritFixtureOwner,type DeveloperMvpSpiritFixtureOwner} from './valley-spirit-fixture-files.js';
 function decodeAgedBirthPredecessor(state:Uint8Array):World {
  return decodeSavedWorld(state,true) as unknown as World;
+}
+export function readSealedMvpAgedStockFlow(owner:DeveloperMvpSpiritFixtureOwner,worldId:string){
+ return readOwnedSealedMvpAgedStockFlow(owner,decodeAgedBirthPredecessor,worldId);
 }
 export function readSealedMvpAgedFruitFairness(owner:DeveloperMvpSpiritFixtureOwner,worldId:string){
  return readOwnedSealedMvpAgedFruitFairness(owner,decodeAgedBirthPredecessor,worldId);
@@ -119,6 +123,7 @@ export class WorldStore {
  private readonly nativeWeatherCredit:boolean;
  private readonly allowFormalRainProvenance:boolean;
  private readonly formalAppointmentChoiceCustody:boolean;
+ private readonly formalAddressedSpeechCustody:boolean;
  private readonly seasonalModel:boolean;
  private readonly mvpSpiritEffectFixture?:MvpGroundFruitCapacity;
  private readonly sealedAgedBirthExecution:boolean;
@@ -128,7 +133,7 @@ export class WorldStore {
  private agedG1EpochIsolated=false;
  private armedFormalDue:FormalDueIntent|undefined;
  private armedFormalShadow:FormalShadowArm|undefined;
- constructor(path:string,options:{formalRainProvenance?:true;formalAppointmentChoiceCustody?:true;dailySnapshots?:DailySnapshotConfig;allowMvpClimate?:boolean;seasonalModel?:true;mvpSpiritEffectFixture?:MvpGroundFruitCapacity;developerSpiritFixtureOwner?:DeveloperMvpSpiritFixtureOwner;nativeWeatherCredit?:true;sealedAgedBirthExecution?:true}={}){
+ constructor(path:string,options:{formalRainProvenance?:true;formalAppointmentChoiceCustody?:true;formalAddressedSpeechCustody?:true;dailySnapshots?:DailySnapshotConfig;allowMvpClimate?:boolean;seasonalModel?:true;mvpSpiritEffectFixture?:MvpGroundFruitCapacity;developerSpiritFixtureOwner?:DeveloperMvpSpiritFixtureOwner;nativeWeatherCredit?:true;sealedAgedBirthExecution?:true}={}){
   this.allowMvpClimate=options.allowMvpClimate===true;
   this.allowFormalRainProvenance=options.formalRainProvenance===true&&!this.allowMvpClimate&&!options.seasonalModel;
   this.seasonalModel=options.seasonalModel===true;
@@ -138,6 +143,9 @@ export class WorldStore {
   this.formalAppointmentChoiceCustody=options.formalAppointmentChoiceCustody===true;
   if(this.formalAppointmentChoiceCustody&&(this.allowMvpClimate||this.seasonalModel||fixture!==undefined||owner!==undefined||this.nativeWeatherCredit||options.sealedAgedBirthExecution))
    throw Error('formal_appointment_choice_custody_scope');
+  this.formalAddressedSpeechCustody=options.formalAddressedSpeechCustody===true;
+  if(this.formalAddressedSpeechCustody&&(this.allowMvpClimate||this.seasonalModel||fixture!==undefined||owner!==undefined||this.nativeWeatherCredit||options.sealedAgedBirthExecution))
+   throw Error('formal_addressed_speech_scope');
   this.sealedAgedBirthExecution=options.sealedAgedBirthExecution===true;
   if(this.sealedAgedBirthExecution&&(!owner?.agedG1ReviewerKeyPem||!owner.agedPlacementKeyPem||!owner.sourceAge))
    throw Error('sealed_aged_birth_execution_owner_required');
@@ -159,7 +167,9 @@ export class WorldStore {
    this.mvpSpiritEffectFixture=Object.freeze({...fixture});
   }
   const savedHeader=preflightWorldSave(path,{rejectClimate:!this.allowMvpClimate,allowSeasonalModel:this.seasonalModel,developerSpiritFixtureOwner:owner,
-   validateWorld:this.formalAppointmentChoiceCustody?w=>{if(w.mode!=='formal')throw Error('formal_appointment_choice_custody_scope');}:undefined});
+   validateWorld:(this.formalAppointmentChoiceCustody||this.formalAddressedSpeechCustody)?w=>{
+    if(w.mode!=='formal')throw Error(this.formalAppointmentChoiceCustody?'formal_appointment_choice_custody_scope':'formal_addressed_speech_scope');
+   }:undefined});
   if(savedHeader?.formalRainProvenance&&!this.allowFormalRainProvenance)throw Error('formal_rain_store_scope');
   owner?.assertOwned();
   const needsDeveloperSeal=!!owner&&lstatSync(path,{bigint:true}).size===0n;
@@ -700,6 +710,7 @@ export class WorldStore {
    throw Error('mvp_rules_private_meal_world');
   assertWorldCompatibility(world,!!this.mvpSpiritEffectFixture);
   if(this.formalAppointmentChoiceCustody&&world.mode!=='formal')throw Error('formal_appointment_choice_custody_scope');
+  if(this.formalAddressedSpeechCustody&&world.mode!=='formal')throw Error('formal_addressed_speech_scope');
   if(Object.hasOwn(world,'formalBerryFixtureAnchor')&&!this.developerSpiritFixtureOwner?.formalApprovalKeyPem)
    throw Error('formal_berry_fixture_requires_owner');
   if(this.developerSpiritFixtureOwner){
@@ -738,6 +749,12 @@ export class WorldStore {
  verifyCommittedMvpAddressedSpeech(receipt:Readonly<ValleySpiritLifeReceipt>):boolean{
   if(this.developerSpiritFixtureOwner)rejectSealedAgedBirthOnGenericPath(this.db);
   return this.allowMvpClimate&&!this.seasonalModel&&verifyValleySpiritSpeechCustody(this.db,receipt);
+ }
+ readCommittedFormalAddressedSpeech(worldId:string,eventId:string){
+  if(!this.formalAddressedSpeechCustody)return null;
+  this.db.exec('BEGIN');
+  try{return readFormalAddressedSpeech(this.db,worldId,eventId);}
+  finally{this.db.exec('ROLLBACK');}
  }
  readCommittedFormalAppointmentChoice(worldId:string,eventId:string){
   if(!this.formalAppointmentChoiceCustody)return null;
@@ -881,6 +898,16 @@ export class WorldStore {
    }catch{
     this.db.exec('ROLLBACK TO optional_formal_choice_custody');
     this.db.exec('RELEASE optional_formal_choice_custody');
+   }
+  }
+  if(this.formalAddressedSpeechCustody&&previous&&world.mode==='formal'&&appended?.events.some(e=>formalAddressedSpeechProof(world,e))){
+   this.db.exec('SAVEPOINT optional_formal_speech_custody');
+   try{
+    appendFormalAddressedSpeech(this.db,world,previous,appended.events);
+    this.db.exec('RELEASE optional_formal_speech_custody');
+   }catch{
+    this.db.exec('ROLLBACK TO optional_formal_speech_custody');
+    this.db.exec('RELEASE optional_formal_speech_custody');
    }
   }
   return speech;

@@ -2,6 +2,7 @@ import type {Action,Resident,World,WorldEvent} from '../shared/types.js';
 import {readSpeechText,readSpeechTone,type SpeechTone} from '../shared/speech-tone.js';
 import {emitEvent} from './events.js';
 import {canObserve} from './knowledge.js';
+import {hasReceipt} from './receipts.js';
 import {distance} from './navigation.js';
 import {canContactSocialTarget,canSeeSocialTarget} from './social-observation.js';
 
@@ -24,6 +25,15 @@ export interface AddressedSpeechReceipt {
  readonly actualRecipientId:string;
  readonly line:string;
  readonly tone?:SpeechTone;
+}
+/** Formal-only provenance. No transcript or tone, and never an event/save property. */
+export type FormalAddressedSpeechProof=Readonly<Pick<AddressedSpeechReceipt,
+ 'schemaVersion'|'kind'|'worldId'|'eventId'|'eventRevision'|'planId'|'actionType'|'actionIndexFromEnd'|
+ 'startedAt'|'deliveredAt'|'speakerId'|'intendedRecipientId'|'actualRecipientId'>>;
+const nativeFormalDelivery=new WeakMap<WorldEvent,{world:WeakRef<World>;original:string;proof:FormalAddressedSpeechProof}>();
+export function formalAddressedSpeechProof(world:World,event:WorldEvent){
+ const x=nativeFormalDelivery.get(event);
+ return x?.world.deref()===world?x:undefined;
 }
 export interface AddressedSpeechObservation {
  readonly worldId:string;
@@ -92,10 +102,17 @@ export function completeAddressedSpeech(w:World,speaker:Resident,action:TalkActi
  const event=emitEvent(w,{kind:'conversation',actors:[speaker.id,target.id],witnesses:[speaker.id],place:{...speaker.at},
   conversationId,...(tone?{speechTone:tone}:{}),...(speechText!==undefined?{speechText}:{}),text:`${speaker.name}：${line}`});
  deliverLine(w,speaker,target,event,line,tone);
- if(!w.simulationOnly)active.get(w)?.push(Object.freeze({schemaVersion:1,kind:'addressed-speech-delivered',
-  worldId:w.id,eventId:event.id,eventRevision:w.revision,planId:activity.planId,actionType:'talk',
-  actionIndexFromEnd:plan.actions.length,startedAt:activity.startedAt,deliveredAt:w.minute,
-  speakerId:speaker.id,intendedRecipientId:action.targetId,actualRecipientId:target.id,line,...(tone?{tone}:{})}));
+ const speech=w.simulationOnly?undefined:active.get(w);
+ const formal=w.mode==='formal'&&!Object.hasOwn(w,'simulationOnly')&&plan.actorId===speaker.id&&hasReceipt(w,'plan:'+activity.planId);
+ if(speech||formal){
+  const proof:FormalAddressedSpeechProof=Object.freeze({schemaVersion:1,kind:'addressed-speech-delivered',
+   worldId:w.id,eventId:event.id,eventRevision:w.revision,planId:activity.planId,actionType:'talk',
+   actionIndexFromEnd:plan.actions.length,startedAt:activity.startedAt,deliveredAt:w.minute,
+   speakerId:speaker.id,intendedRecipientId:action.targetId,actualRecipientId:target.id});
+  speech?.push(Object.freeze({...proof,line,...(tone?{tone}:{})}));
+  if(formal)
+   nativeFormalDelivery.set(event,Object.freeze({world:new WeakRef(w),original:JSON.stringify(event),proof}));
+ }
  // Evidence can be interpreted by the listener; never decide what they meant.
  for(const [from,to] of [[speaker,target],[target,speaker]]){
   let relation=from.relations.find(v=>v.targetId===to.id);

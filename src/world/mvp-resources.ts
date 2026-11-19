@@ -82,8 +82,17 @@ export interface MvpFruitFlowBatch {
 }
 const maxFlowRows=4096; // Structural guard, not a resource limit.
 const gathers=new WeakMap<World,NativeFruitGather[]>();
-function flowSources(w:World):readonly FruitSourceHead[]|null {
- if(!supportedRenewalHead(w)||w.production||!w.mvpClimate||Object.hasOwn(w.mvpClimate,'spiritEffects')||Object.hasOwn(w.mvpClimate,'spiritFruitSettlement')||
+/** The V2 archive replays the old, verified empty substrate. Stock
+ * inspection may admit only that inert legacy envelope, not a real effect. */
+function emptySealedFlowEnvelope(w:World):boolean{
+ const e=w.mvpClimate?.spiritEffects,s=w.mvpClimate?.spiritFruitSettlement;
+ return !!e&&Object.keys(e).length===4&&e.version===1&&typeof e.adoptedUs==='string'&&
+  !!e.ground&&Object.keys(e.ground).length===2&&e.ground.version===1&&Array.isArray(e.ground.items)&&!e.ground.items.length&&
+  Array.isArray(e.applied)&&!e.applied.length&&!!s&&Object.keys(s).length===4&&s.schemaVersion===1&&s.worldId===w.id&&
+  Array.isArray(s.discoveries)&&!s.discoveries.length&&Array.isArray(s.pickups)&&!s.pickups.length;
+}
+function flowSources(w:World,sealedEmpty=false):readonly FruitSourceHead[]|null {
+ if(!supportedRenewalHead(w)||w.production||!w.mvpClimate||(sealedEmpty?!emptySealedFlowEnvelope(w):Object.hasOwn(w.mvpClimate,'spiritEffects')||Object.hasOwn(w.mvpClimate,'spiritFruitSettlement'))||
   !w.mvpResources||w.mvpResources.lastMinute!==w.minute||w.resources.length>maxFlowRows||
   w.mvpResources.addedResourceIds.length>maxFlowRows)return null;
  const rows:FruitSourceHead[]=[],seen=new Set<string>();
@@ -114,13 +123,13 @@ export function noteMvpFruitGather(w:World,r:Resource,before:number,quantity:num
 /** Read-only staging for one native engine tick of the audited ordinary writer
  * set (gather, then renewal). A matching scalar is not a proof against new,
  * uninstrumented offsetting operations. Commit authority belongs to caller. */
-export function captureMvpFruitFlowStep(w:World,previous:World,step:()=>void) {
+export function captureMvpFruitFlowStep(w:World,previous:World,step:()=>void,sealedEmpty=false) {
  let opening:readonly FruitSourceHead[]|null=null,fromUs:string|undefined;
  const worldId=previous.id,fromRevision=previous.revision;
  try{
   if(w.id===worldId&&w.minute===previous.minute&&w.revision>=fromRevision&&!gathers.has(w)){
-   opening=flowSources(previous);
-   if(opening&&JSON.stringify(opening)===JSON.stringify(flowSources(w)))fromUs=minuteToClimateUs(w.minute);
+   opening=flowSources(previous,sealedEmpty);
+   if(opening&&JSON.stringify(opening)===JSON.stringify(flowSources(w,sealedEmpty)))fromUs=minuteToClimateUs(w.minute);
   }
  }catch{/* never block actual step */}
  const earlierEvents=fromUs?new Set(w.events.map(event=>event.id)):undefined;
@@ -137,7 +146,7 @@ export function captureMvpFruitFlowStep(w:World,previous:World,step:()=>void) {
     !natural(toRevision)||toRevision<=fromRevision||collected.length>maxFlowRows)return null;
    const toUs=minuteToClimateUs(toMinute);
    if(BigInt(toUs)-BigInt(fromUs)!==1000000n||w.mvpClimate?.lastUs!==toUs)return null;
-   const closing=flowSources(w);
+   const closing=flowSources(w,sealedEmpty);
    if(!closing||closing.length!==opening.length||opening.some((p,i)=>p.sourceId!==closing[i].sourceId||
     !same(p.sourceAt,closing[i].sourceAt)||p.max!==closing[i].max))return null;
    const balance=new Map(opening.map(row=>[row.sourceId,row.amount])),events=new Set<string>();

@@ -267,7 +267,7 @@ function calendarSeason(w:World){return ['spring','summer','autumn','winter'][Ma
 type SessionWeatherReading=Pick<PublicWeatherFact,'minute'|'condition'|'temperatureDeciC'|'relativeHumidityPermille'>;
 type SessionWeather={schemaVersion:1;worldId:string;worldRevision:number;atMinute:number;readings:SessionWeatherReading[]};
 
-interface RuleMinuteCapture {meals:boolean;fruitFlow:boolean;fruitRenewal:boolean;addressedSpeech:boolean;}
+interface RuleMinuteCapture {sealedReplayFruitFlow?:true;meals:boolean;fruitFlow:boolean;fruitRenewal:boolean;addressedSpeech:boolean;}
 /** Existing resident choices and exactly one engine minute on an existing
  * detached draft. No caller-supplied action, commit, split tick or delivery. */
 function advanceMvpRuleMinuteDraft(world:World,current:World,serial:number,decisions:Record<string,number>,capture:RuleMinuteCapture,approach?:NonNullable<ReturnType<typeof planMvpFallenFruitAdjacentApproach>>){
@@ -312,7 +312,7 @@ function advanceMvpRuleMinuteDraft(world:World,current:World,serial:number,decis
  let readFlow:(()=>MvpFruitFlowBatch|null)|undefined;
  const advanceObservedEngine=()=>{
   if(capture.fruitFlow){
-   const flow=captureMvpFruitFlowStep(world,current,advanceEngine);
+   const flow=captureMvpFruitFlowStep(world,current,advanceEngine,capture.sealedReplayFruitFlow===true);
    stageRenewal=flow.readRenewal;readFlow=flow.readFlow;
   }else if(capture.fruitRenewal)
    stageRenewal=captureMvpFruitRenewalStep(world,advanceEngine);
@@ -393,12 +393,12 @@ export function prepareSealedMvpAdjacentMinute(current:World){
 
 /** One detached ordinary ecology minute without any supplied resident action.
  * Only the sealed store may commit it with custody. */
-export function prepareSealedMvpEcologyMinute(current:World,captureMeals=false,privateFruitPoint?:Vec,privatePickup?:ReadonlyMap<string,NativeAgedPickupSelection>,privateEat?:NativeAgedEatSelection){
+export function prepareSealedMvpEcologyMinute(current:World,captureMeals=false,privateFruitPoint?:Vec,privatePickup?:ReadonlyMap<string,NativeAgedPickupSelection>,privateEat?:NativeAgedEatSelection,sealedReplayFruitFlow?:true){
  if(current.mode!=='validation'||current.clock.paused||!current.mvpClimate?.rainProvenance)return null;
  const draft=structuredClone(current);
  inheritReceiptHistory(current,draft);enableCompletedMovement(draft);
  try{
-  const advance=()=>advanceMvpRuleMinuteDraft(draft,current,0,{},{meals:captureMeals,fruitFlow:false,fruitRenewal:true,addressedSpeech:true});
+  const advance=()=>advanceMvpRuleMinuteDraft(draft,current,0,{},{meals:captureMeals,fruitFlow:sealedReplayFruitFlow===true,fruitRenewal:true,addressedSpeech:true,sealedReplayFruitFlow});
   const observe=()=>privateFruitPoint?captureMvpNativeObservationPhase(draft,privateFruitPoint,advance):{result:advance(),observed:[],arrivals:[]};
   const pickup=()=>privatePickup?captureMvpNativeAgedPickup(draft,privatePickup,observe):{result:observe(),completion:null};
   const eating=privateEat?captureMvpNativeAgedEat(draft,privateEat,pickup):{result:pickup(),completion:null};
@@ -408,7 +408,7 @@ export function prepareSealedMvpEcologyMinute(current:World,captureMeals=false,p
   if(draft.minute!==current.minute+1||
    JSON.stringify(draft.mvpClimate?.spiritEffects)!==JSON.stringify(current.mvpClimate?.spiritEffects)||
    JSON.stringify(draft.mvpClimate?.spiritFruitSettlement)!==JSON.stringify(current.mvpClimate?.spiritFruitSettlement))return null;
-  return {draft,renewal:result.renewal,mealWitnesses:result.witnesses,speech:result.speech,observed,completion:scoped.completion,eaten:eating?.completion??null,movement:arrivals};
+  return {draft,fruitFlow:result.fruitFlow,renewal:result.renewal,mealWitnesses:result.witnesses,speech:result.speech,observed,completion:scoped.completion,eaten:eating?.completion??null,movement:arrivals};
  }catch{return null;}
 }
 
