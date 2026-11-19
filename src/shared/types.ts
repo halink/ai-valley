@@ -24,6 +24,7 @@ export type Action = DomainAction & {observedTarget?:PersonObservation};
 type DomainAction = import('./mvp-seasonal.js').SeasonalInspectAction
  | {type:'mvpShelter'}
  | {type:'mvpAgedFruitPickup';effectId:string;discoveryId:string}
+ | {type:'mvpAgedFruitEat';effectId:string}
  | import('./mvp-preservation.js').PreservationAction
  | import('./mvp-seeds.js').MvpSeedAction
  | import('./mvp-agriculture.js').AgricultureAction
