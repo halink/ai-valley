@@ -378,7 +378,19 @@ export function prepareSealedMvpAdjacentMinute(current:World){
  }catch{return null;}
 }
 
+const postCommitFruitFlows=new WeakMap<MvpFruitFlowBatch,{sessionToken:symbol;deliveredSequence:number}>();
+/** Exact in-process delivery from the session's trusted commit callback.
+ * Not a database receipt or a verifier for a caller-supplied commit backend. */
+export function isPostCommitMvpFruitFlow(value:unknown):value is MvpFruitFlowBatch {
+ return typeof value==='object'&&value!==null&&postCommitFruitFlows.has(value as MvpFruitFlowBatch);
+}
+/** A cloned world cannot extend observations from a different session. */
+export function followsPostCommitMvpFruitFlow(previous:MvpFruitFlowBatch,next:MvpFruitFlowBatch):boolean {
+ const before=postCommitFruitFlows.get(previous),after=postCommitFruitFlows.get(next);
+ return !!before&&!!after&&before.sessionToken===after.sessionToken&&after.deliveredSequence===before.deliveredSequence+1;
+}
 export function createMvpSession(options:{observeSessionWeather?:true;world?:World;commit?:(world:World,previousRevision:number,speech?:AddressedSpeechObservation)=>void;persistent?:boolean;captureAddressedSpeechCustody?:true;observeCommittedMeals?:(witnesses:readonly ValleySpiritMvpMealWitness[])=>void;observeCommittedFruitRenewal?:(witnesses:readonly MvpFruitRenewalWitness[])=>void;observeCommittedFruitFlow?:(flow:MvpFruitFlowBatch)=>void}={}){
+ const fruitFlowSessionToken=Symbol();let deliveredFruitFlowSequence=0;
  let world=structuredClone(options.world??createMvpWorld());
  if(options.world)inheritReceiptHistory(options.world,world);
  const initialRevision=world.revision;
@@ -435,7 +447,10 @@ export function createMvpSession(options:{observeSessionWeather?:true;world?:Wor
     try{observeCommittedWeather();}catch{sessionWeather=undefined;}
     if(witnesses.length)try{options.observeCommittedMeals?.(witnesses);}catch{/* committed world is independent */}
     if(renewal.length)try{options.observeCommittedFruitRenewal?.(renewal);}catch{/* committed world is independent */}
-    if(fruitFlow)try{options.observeCommittedFruitFlow?.(fruitFlow);}catch{/* committed world is independent */}
+    if(fruitFlow)try{
+     postCommitFruitFlows.set(fruitFlow,{sessionToken:fruitFlowSessionToken,deliveredSequence:++deliveredFruitFlowSequence});
+     options.observeCommittedFruitFlow?.(fruitFlow);
+    }catch{/* committed world is independent */}
     }catch(error){world=current;serial=previousSerial;for(const key of Object.keys(decisions))delete decisions[key];Object.assign(decisions,previousDecisions);throw error;}
    }
   }catch(error){fault=error instanceof Error?error.message:String(error);world.clock.paused=true;world.clock.reason=fault;world.revision++;}
