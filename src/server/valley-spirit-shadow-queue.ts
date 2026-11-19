@@ -147,6 +147,19 @@ export class ValleySpiritShadowQueue {
     return entry ? {status: "found", entry: structuredClone(entry)} : blocked("not_found");
   }
 
+  /** Internal scheduler metadata only. The whole queue is already bounded;
+   * never expose source refs, reasons, or site details from this listing. */
+  pendingFor(head: {worldId: string; nowMicroMinute: number}, currentPolicy?: ValleySpiritFruitFallPolicy):
+    {status: "ready"; jobs: readonly {id: string; deadline: number}[]} | Failure {
+    if (!this.current()) return blocked("queue_isolated");
+    if (!isEnabledValleySpiritFruitFallPolicy(currentPolicy)) return blocked("shadow_disabled");
+    if (head.worldId !== this.worldId || !natural(head.nowMicroMinute)) return blocked("invalid_request");
+    return {status: "ready", jobs: this.state.entries.filter(e =>
+      e.assessment.status === "proposed" && isEqualRecord(e.policy, currentPolicy) &&
+      head.nowMicroMinute >= e.appendedAtMicroMinute && head.nowMicroMinute >= e.proposal.validFromMicroMinute)
+      .map(e => ({id: e.proposal.proposalId, deadline: e.proposal.validUntilMicroMinute}))};
+  }
+
   private current(): boolean {
     if (this.isolated) return false;
     try {

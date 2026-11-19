@@ -7,7 +7,8 @@ import {
 import type {ValleySpiritShadowOffers} from './valley-spirit-shadow-offers.js';
 import {inspectValleySpiritShadow,type ValleySpiritShadowQueue} from './valley-spirit-shadow-queue.js';
 
-type Queue=Pick<ValleySpiritShadowQueue,'append'|'get'|'recordAssessment'|'expire'>;
+type Queue=Pick<ValleySpiritShadowQueue,'append'|'get'|'recordAssessment'|'expire'|'pendingFor'>;
+const MAX_SWEEP_JOBS=8;
 type Ready=Extract<ValleySpiritShadowOffers,{status:'ready'}>;
 interface Menu {
  readonly schemaVersion:1;
@@ -37,6 +38,7 @@ function pinned(ready:Ready){
  * payload is a stable identity with numbered allowlisted choices; underlying
  * site coordinates, authority, and raw source records stay in the resolver. */
 export class ValleySpiritShadowWorkflow {
+ private afterId:string|null=null;
  constructor(
   private readonly capture:()=>ValleySpiritShadowOffers,
   private readonly queue:Queue,
@@ -95,6 +97,41 @@ export class ValleySpiritShadowWorkflow {
   try {
    const head=this.readClock?.();
    return head?this.queue.expire(proposalId,head,this.policy):unavailable;
+  }catch{return unavailable;}
+ }
+
+ /** One bounded pass on an authoritative committed clock. No model,
+  * world mutation, acceptance, execution permission or provider budget. */
+ sweepPending() {
+  if(!isEnabledValleySpiritFruitFallPolicy(this.policy))return unavailable;
+  try {
+   const head=this.readClock?.();
+   if(!head||!safeTime(head.nowMicroMinute))return unavailable;
+   const pending=this.queue.pendingFor(head,this.policy);
+   if(pending.status!=='ready')return unavailable;
+   const ordered=[...pending.jobs].sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0);
+   const cursor=this.afterId;
+   const offset=cursor===null?0:ordered.findIndex(job=>job.id>cursor);
+   const start=Math.max(0,offset);
+   const jobs=[...ordered.slice(start),...ordered.slice(0,start)].slice(0,MAX_SWEEP_JOBS);
+   let settled=0,deferred=0;
+   for(const job of jobs){
+    this.afterId=job.id;
+    if(head.nowMicroMinute>=job.deadline){
+     const result=this.queue.expire(job.id,head,this.policy);
+     if(result.status==='blocked')deferred++;else settled++;
+     continue;
+    }
+    try{
+     const entry=this.queue.get(job.id),ready=this.capture();
+     const evidence=entry.status==='found'&&ready.status==='ready'
+      ?ready.reader.readFruitFallEvidence(entry.entry.proposal):undefined;
+     if(!evidence||evidence.worldId!==head.worldId||evidence.nowMicroMinute!==head.nowMicroMinute){deferred++;continue;}
+     const result=this.queue.recordAssessment(job.id,evidence,this.policy);
+     if(result.status==='blocked')deferred++;else settled++;
+    }catch{deferred++;}
+   }
+   return {status:'swept',settled,deferred,remaining:ordered.length-settled} as const;
   }catch{return unavailable;}
  }
 

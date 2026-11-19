@@ -211,6 +211,13 @@ export class SharedModelAccountLedger {
    r.phase='complete';r.endedAt=at;r.usedInput=usage?.inputTokens??null;r.usedOutput=usage?.outputTokens??null;return true;
   });
  }
+ accountIdentity():string{return this.policy.accountId;}
+ /** Internal recovery lookup. No response text or private resident state. */
+ requestState(requestId:string):{phase:Phase;purpose:ModelAccountPurpose}|null {
+  if(!id(requestId))throw Error('model_account_request_id_invalid');
+  const r=this.read().requests.find(row=>row.id===requestId);
+  return r?{phase:r.phase,purpose:r.purpose}:null;
+ }
  summary(at:number) {
   const s=this.read();
   if(!count(at)||at<s.now)throw Error('model_account_clock_rollback');
