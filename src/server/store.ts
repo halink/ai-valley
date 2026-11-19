@@ -2,7 +2,7 @@ import {appendFormalAppointmentChoices,readFormalAppointmentChoice} from './vall
 import {nativeFormalAppointmentChoice} from '../world/social-appointments.js';
 import {appendNativeMvpMealCustodyV2,readNativeMvpMealV2Receipt,type ValleySpiritMvpMealWitness} from './valley-spirit-meal-custody.js';
 import {readMvpMealFact} from '../shared/mvp-meals.js';
-import {assertAgedBirthSqlAuthority,advanceSealedAgedFruitExpiry,advanceSealedAgedHeldFruitExpiry,advanceSealedAgedHeldFruitMinute,advanceSealedAgedFruitMinute,pickUpSealedAgedFruit,readOwnedSealedAgedHeldFruit,readOwnedSealedAgedHeldFruitExpiry,readOwnedSealedAgedHeldFruitEaten,readOwnedSealedAgedBirthReceipt,readOwnedSealedAgedFruitDiscovery,readOwnedSealedAgedFruitExpiry,readOwnedSealedAgedFruitSight,readSealedAgedBirthArchive,rejectSealedAgedBirthOnGenericPath,
+import {assertAgedBirthSqlAuthority,advanceSealedAgedFruitExpiry,advanceSealedAgedHeldFruitExpiry,advanceSealedAgedHeldFruitMinute,advanceSealedAgedFruitMinute,pickUpSealedAgedFruit,readOwnedSealedAgedHeldFruit,readOwnedSealedAgedHeldFruitExpiry,readOwnedSealedAgedHeldFruitEaten,readOwnedSealedMvpAgedFruitFairness,readOwnedSealedAgedBirthReceipt,readOwnedSealedAgedFruitDiscovery,readOwnedSealedAgedFruitExpiry,readOwnedSealedAgedFruitSight,readSealedAgedBirthArchive,rejectSealedAgedBirthOnGenericPath,
  sameAgedBirthProofs,writeSealedAgedBirth,type AgedBirthProofs} from './valley-spirit-aged-birth-archive.js';
 import {makeAgedBirthExecutionTerms,makeAgedBirthReviewTerms,verifiesAgedBirthExecution,verifiesAgedBirthReview} from './valley-spirit-aged-birth-review.js';
 import {agedG1ReviewTerms,agedG1RevokeTerms,advanceAgedG1ReviewEpoch,initializeAgedG1ReviewEpoch,
@@ -60,6 +60,9 @@ import {assertDeveloperMvpEffectArchive,assertWorldCompatibility,decodeSavedWorl
 import {claimDeveloperMvpSpiritFixtureOwner,isDeveloperMvpSpiritFixtureOwner,type DeveloperMvpSpiritFixtureOwner} from './valley-spirit-fixture-files.js';
 function decodeAgedBirthPredecessor(state:Uint8Array):World {
  return decodeSavedWorld(state,true) as unknown as World;
+}
+export function readSealedMvpAgedFruitFairness(owner:DeveloperMvpSpiritFixtureOwner,worldId:string){
+ return readOwnedSealedMvpAgedFruitFairness(owner,decodeAgedBirthPredecessor,worldId);
 }
 export function readSealedMvpAgedBirthReceipt(owner:DeveloperMvpSpiritFixtureOwner){
  return readOwnedSealedAgedBirthReceipt(owner,decodeAgedBirthPredecessor);

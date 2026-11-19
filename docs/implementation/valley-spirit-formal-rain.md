@@ -56,3 +56,14 @@ sent; uncertain handoffs retain the quota's hold or unknown record. Completion
 requires an explicit synthetic receipt. This is not a provider call, a live
 account qualification, a durable public yearbook, or protection against an
 out-of-band rollback of all authoritative files.
+
+A separate private audit row records the exact fields handed to the compiled
+memory sink and the allowance versions and digests, only after a real memory
+confirmation and a matching canonical quota completion for the original run.
+Usage is the synthetic ledger's counted units, not provider billing. A current
+handle can recheck the paired completion; a reopened handle reports only a
+locally recorded status and does not return the historical packet or reissue
+a request. A consumed opportunity without this row proves no settlement.
+The world-side audit and the quota ledger are separate transactions: if the
+quota settles but the audit write fails, the result is audit-unavailable, not
+an invitation to retry, infer success, or recreate a historical witness.

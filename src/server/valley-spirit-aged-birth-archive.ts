@@ -700,3 +700,52 @@ export function readOwnedSealedAgedHeldFruitEaten(
  if(typeof worldId!=='string'||typeof residentId!=='string'||worldId.length>200||residentId.length>200)return null;
  return readOwnedSealedAgedBirth(owner,decode,p=>p.world.id===worldId&&p.heldEaten?.residentId===residentId?p.heldEaten:null);
 }
+
+/** Owner-only bounded V2 fairness, based on one replay-verified SQLite head.
+ * The executed proposal's signature does not prove full queue coverage. */
+export function readOwnedSealedMvpAgedFruitFairness(
+ owner:DeveloperMvpSpiritFixtureOwner,decode:DecodePredecessor,worldId:string,
+){
+ const unavailable={status:'unavailable',code:'no-matching-sealed-aged-head'} as const;
+ try{
+  return readOwnedSealedAgedBirth(owner,decode,p=>{
+   if(p.world.id!==worldId)return unavailable;
+   const r=p.receipt,t=signedTerms(p.proofs.execution),g1=signedTerms(p.proofs.g1);
+   // Both envelopes were already verified against independent keys during replay.
+   const proposalId=t?.proposalId;
+   if(!t||!g1||typeof proposalId!=='string'||g1.proposalId!==proposalId||typeof g1.permissionVersion!=='number'||
+    t.opportunityId!==r.opportunityId||g1.opportunityId!==r.opportunityId)return fail();
+   const discoveries=[...p.discoveries.values()].map(d=>({
+    discoveryId:d.discoveryId,effectId:r.effectId,residentId:d.residentId,atUs:d.atUs,revision:d.phaseWorldRevision,
+   }));
+   const h=p.held;
+   if(h&&!discoveries.some(d=>d.discoveryId===h.discoveryId&&d.residentId===h.residentId))return fail();
+   const pickups=h?[{effectId:r.effectId,pickupEventId:h.pickupEventId,
+    residentId:h.residentId,discoveryId:h.discoveryId,atUs:h.settledUs,revision:h.revision}]:[];
+   const terminal=p.expiry??p.heldExpiry??p.heldEaten;
+   const disposition=p.expiry?{status:'ground-expired' as const,settledUs:p.expiry.settledUs,eventId:p.expiry.expiryEventId}:
+    p.heldExpiry?{status:'held-expired' as const,settledUs:p.heldExpiry.settledUs,eventId:p.heldExpiry.expiryEventId}:
+    p.heldEaten?{status:'held-eaten' as const,settledUs:p.heldEaten.settledUs,eventId:p.heldEaten.eventId}:
+    h?{status:'held' as const}:{status:'on-ground' as const};
+   return {
+    status:'ready',audience:'sealed-owner-internal-audit',schema:'sealed-mvp-aged-fruit-fairness/v1',
+    worldId,throughRevision:p.world.revision,throughUs:p.world.mvpClimate!.lastUs,
+    proposalDirections:{coverage:'signed-executed-link-only',totalCandidateCount:null,linkedCount:1,
+     records:[{proposalId,opportunityId:r.opportunityId,targetId:r.targetId,permissionVersion:g1.permissionVersion}]},
+    actualEffects:{count:1,records:[{effectId:r.effectId,opportunityId:r.opportunityId,sourceInstanceId:r.sourceInstanceId,
+     targetId:r.targetId,eventId:r.eventId,atUs:r.placedUs,revision:r.revision}]},
+    actualDiscoveries:{coverage:'native-observations-in-this-verified-archive',count:discoveries.length,records:discoveries},
+    actualPickups:{count:pickups.length,records:pickups},
+    supply:{
+     item:'fruit',birth:{sourceDebit:1,groundCredit:1,directNewSupply:0},
+     pickupTransfer:{groundDebit:h?1:0,heldCredit:h?1:0},
+     terminalDebit:{ground:p.expiry?1:0,held:p.heldExpiry||p.heldEaten?1:0},
+     active:{ground:!terminal&&!h?1:0,held:!terminal&&h?1:0},
+     disposition:{...disposition,bornUs:r.bornUs,expiresUs:r.expiresUs},
+     naturalRenewal:{status:'unavailable',code:'not-recorded-by-aged-effect-custody'},
+     causalGain:{status:'unavailable',code:'requires-counterfactual'},
+    },
+   } as const;
+  })??unavailable;
+ }catch{return {status:'unavailable',code:'invalid-sealed-aged-custody'} as const;}
+}

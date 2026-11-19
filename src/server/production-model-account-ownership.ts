@@ -62,7 +62,7 @@ function quotaEnrolled(db:DatabaseSync):string|null{
  if(rows.length!==1||rows[0].slot!==1||rows[0].version!==1||typeof rows[0].attachment!=='string'||!/^[0-9a-f]{64}$/.test(rows[0].attachment))throw Error('model_account_quota_marker_invalid');
  return rows[0].attachment;
 }
-type OwnerState={registryDirectory:string;scope:string;directory:{dev:number;ino:number};assert:()=>void;marker:()=>string|null;enroll:(binding:string)=>void;claim:(request:string,register:boolean)=>boolean;quota?:QuotaChild;};
+type OwnerState={registryDirectory:string;scope:string;directory:{dev:number;ino:number};assert:()=>void;marker:()=>string|null;enroll:(binding:string)=>void;claim:(request:string,register:boolean)=>boolean;hasRecovery:(request:string)=>boolean;quota?:QuotaChild;};
 const quotaHandles=new WeakSet<object>();
 const owners=new WeakMap<ProductionModelAccountOwnership,OwnerState>();
 
@@ -112,6 +112,16 @@ export function attachProductionAccountQuotaRehearsal(ownership:ProductionModelA
   markHandoff(request:string,...args: [at:number]){current();const key=scoped(request);return state.claim(key,false)&&ledger.markHandoff(key,...args);},
   cancelProvenUnsent(request:string,...args: [at:number]){current();const key=scoped(request);return state.claim(key,false)&&ledger.cancelProvenUnsent(key,...args);},
   confirmCompletion(request:string,...args: [at:number,usage?:{inputTokens:number;outputTokens:number}]){current();const key=scoped(request);return state.claim(key,false)&&ledger.confirmCompletion(key,...args);},
+  proveOfflineAlmanacCompletion(request:string,completedAt:number,inputTokens:number,outputTokens:number){
+   current();
+   const key=scoped(request),binding=ledger.offlineFixtureBinding();
+   if(state.marker()!==binding||!state.claim(key,false)||state.hasRecovery(key))return null;
+   const phase=ledger.requestState(key),charge=ledger.completedCharge(key);
+   if(phase?.phase!=='complete'||phase.purpose!=='valley-spirit-almanac'||!charge||
+      charge.endedAt!==completedAt||charge.inputTokens!==inputTokens||charge.outputTokens!==outputTokens)return null;
+   current();
+   return Object.freeze({binding,runId:ownership.runId,completedAt,inputTokens,outputTokens});
+  },
   summary(at:number){current();return ledger.summary(at);},
   matchesPolicy(policy:SharedModelAccountPolicy){current();return ledger.matchesPolicy(policy);},
   /** Confirms only this local quota handle is pending free. The existing
@@ -159,6 +169,7 @@ export function acquireProductionModelAccountOwnership(options:AccountOwnershipO
     },
     marker:()=>enrolled,
     claim(request,register){assertOwned();return quotaClaim(r.db,request,options.runId,register);},
+    hasRecovery(request){assertOwned();return checkedRecoveryTable(r.db)&&!!r.db.prepare('SELECT 1 FROM account_quota_recovery WHERE request=?').get(request);},
     enroll(binding){
      assertOwned();
      if(quotaEnrolled(r.db)!==enrolled)throw Error('model_account_quota_marker_changed');
