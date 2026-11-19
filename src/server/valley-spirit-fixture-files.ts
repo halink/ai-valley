@@ -13,6 +13,8 @@ const databaseName='fixture.sqlite';
 const shape='valley-spirit-private-developer-fixture/v1';
 const formalShape='valley-spirit-private-formal-fixture/v1';
 const formalWeatherShape='valley-spirit-private-formal-weather-preparation/v1';
+const formalDualWeatherShape='valley-spirit-private-formal-dual-weather-preparation/v1';
+type FormalWeatherPurpose=Readonly<{worldId:string;keyPem:string;accountKeyPem?:string;accountScope?:string;accountFingerprint?:string}>;
 const formalWeatherWorld=(v:unknown):v is string=>typeof v==='string'&&/^valley-formal-[A-Za-z0-9_-]{1,180}$/.test(v);
 const formalShadowShape='valley-spirit-private-formal-fixture/v2';
 const agedReviewShape='valley-spirit-private-aged-placement-fixture/v2';
@@ -43,14 +45,14 @@ function root():string {
  return realpathSync(tmpdir());
 }
 interface Manifest {
- readonly schema:typeof shape|typeof formalShape|typeof formalShadowShape|typeof reviewedShape|typeof sourceAgeShape|typeof weatherUseShape|typeof weatherEditorialShape|typeof agedPlacementShape|typeof agedReviewShape|typeof speechShape|typeof speechWeatherShape|typeof sameSaveG0Shape|typeof atomicRulesMealShape|typeof reviewedRulesMealShape|typeof formalWeatherShape;
+ readonly schema:typeof shape|typeof formalShape|typeof formalShadowShape|typeof reviewedShape|typeof sourceAgeShape|typeof weatherUseShape|typeof weatherEditorialShape|typeof agedPlacementShape|typeof agedReviewShape|typeof speechShape|typeof speechWeatherShape|typeof sameSaveG0Shape|typeof atomicRulesMealShape|typeof reviewedRulesMealShape|typeof formalWeatherShape|typeof formalDualWeatherShape;
  readonly approvalKeyPem?:string;
  readonly yearbookReviewerKeyPem?:string;
  readonly rulesSpeechWorldId?:string;
  readonly rulesMealWorldId?:string;
  readonly rulesMealReviewerKeyPem?:string;
  readonly rulesWeatherHourCredit?:true;
- readonly formalWeatherPurpose?:Readonly<{worldId:string;keyPem:string}>;
+ readonly formalWeatherPurpose?:FormalWeatherPurpose;
  readonly rulesWeatherAccountScope?:string;
  readonly weatherUse?:Readonly<{keyPem:string;accountFingerprint:string;editorialKeyPem?:string}>;
  readonly sourceAge?:Readonly<{keyPem:string;policy:SealedMvpSourceAgePolicy}>;
@@ -75,7 +77,7 @@ export interface DeveloperMvpSpiritFixtureOwner {
  readonly rulesMealWorldId?:string;
  readonly rulesMealReviewerKeyPem?:string;
  readonly rulesWeatherHourCredit?:true;
- readonly formalWeatherPurpose?:Readonly<{worldId:string;keyPem:string}>;
+ readonly formalWeatherPurpose?:FormalWeatherPurpose;
  readonly rulesWeatherAccountScope?:string;
  readonly weatherUse?:Readonly<{keyPem:string;accountFingerprint:string;editorialKeyPem?:string}>;
  readonly sourceAge?:Readonly<{keyPem:string;policy:SealedMvpSourceAgePolicy}>;
@@ -178,6 +180,13 @@ export function createDeveloperFormalWeatherPreparationFixtureKey(worldId:string
  return createKey({worldLots:0,lotsPerTarget:0},undefined,undefined,undefined,undefined,undefined,undefined,undefined,
   undefined,undefined,undefined,undefined,undefined,{worldId,keyPem});
 }
+export function createDeveloperFormalDualWeatherPreparationFixtureKey(worldId:string,keyPem:string,
+ accountKeyPem:string,accountScope:string,accountFingerprint:string):DeveloperMvpSpiritFixtureKey{
+ if(!formalWeatherWorld(worldId)||!formalApprovalKey(keyPem)||!independentKeys(keyPem,accountKeyPem)||
+    !rulesAccountScope(accountScope)||!hex(accountFingerprint))return invalid();
+ return createKey({worldLots:0,lotsPerTarget:0},undefined,undefined,undefined,undefined,undefined,undefined,undefined,
+  undefined,undefined,undefined,undefined,undefined,{worldId,keyPem,accountKeyPem,accountScope,accountFingerprint});
+}
 function createKey(capacity:MvpGroundFruitCapacity,approvalKeyPem?:string,shadowKeyPem?:string,yearbookReviewerKeyPem?:string,sourceAge?:Manifest['sourceAge'],weatherUse?:Manifest['weatherUse'],agedPlacementKeyPem?:string,agedG1ReviewerKeyPem?:string,rulesSpeechWorldId?:string,rulesWeatherHourCredit?:true,rulesWeatherAccountScope?:string,rulesMealWorldId?:string,rulesMealReviewerKeyPem?:string,formalWeatherPurpose?:Manifest['formalWeatherPurpose']):DeveloperMvpSpiritFixtureKey {
  if(!validMvpSpiritFixtureCapacity(capacity))return invalid();
  const directory=mkdtempSync(join(root(),prefix));
@@ -189,7 +198,7 @@ function createKey(capacity:MvpGroundFruitCapacity,approvalKeyPem?:string,shadow
   const s=fstatSync(fd,{bigint:true});if(!privateFile(s)||s.size!==0n)return invalid();
   databaseIdentity=identity(s);fsyncSync(fd);
  }finally{closeSync(fd);}
- const manifest:Manifest={schema:formalWeatherPurpose?formalWeatherShape:rulesMealReviewerKeyPem?reviewedRulesMealShape:rulesMealWorldId?atomicRulesMealShape:rulesWeatherAccountScope?sameSaveG0Shape:rulesWeatherHourCredit?speechWeatherShape:rulesSpeechWorldId?speechShape:agedG1ReviewerKeyPem?agedReviewShape:agedPlacementKeyPem?agedPlacementShape:weatherUse?.editorialKeyPem?weatherEditorialShape:weatherUse?weatherUseShape:sourceAge?sourceAgeShape:yearbookReviewerKeyPem?reviewedShape:shadowKeyPem?formalShadowShape:approvalKeyPem?formalShape:shape,directoryIdentity:identity(initial),databaseIdentity,tokenHash:digest(token),capacity:{...capacity},...(approvalKeyPem?{approvalKeyPem}:{}),...(shadowKeyPem?{shadowKeyPem}:{}),...(yearbookReviewerKeyPem?{yearbookReviewerKeyPem}:{}),...(sourceAge?{sourceAge}:{}),...(weatherUse?{weatherUse}:{}),...(agedPlacementKeyPem?{agedPlacementKeyPem}:{}),...(agedG1ReviewerKeyPem?{agedG1ReviewerKeyPem}:{}),...(rulesSpeechWorldId?{rulesSpeechWorldId}:{}),...(rulesWeatherHourCredit?{rulesWeatherHourCredit}:{}),...(rulesWeatherAccountScope?{rulesWeatherAccountScope}:{}),...(rulesMealWorldId?{rulesMealWorldId}:{}),...(rulesMealReviewerKeyPem?{rulesMealReviewerKeyPem}:{}),...(formalWeatherPurpose?{formalWeatherPurpose}:{})};
+ const manifest:Manifest={schema:formalWeatherPurpose?(formalWeatherPurpose.accountKeyPem?formalDualWeatherShape:formalWeatherShape):rulesMealReviewerKeyPem?reviewedRulesMealShape:rulesMealWorldId?atomicRulesMealShape:rulesWeatherAccountScope?sameSaveG0Shape:rulesWeatherHourCredit?speechWeatherShape:rulesSpeechWorldId?speechShape:agedG1ReviewerKeyPem?agedReviewShape:agedPlacementKeyPem?agedPlacementShape:weatherUse?.editorialKeyPem?weatherEditorialShape:weatherUse?weatherUseShape:sourceAge?sourceAgeShape:yearbookReviewerKeyPem?reviewedShape:shadowKeyPem?formalShadowShape:approvalKeyPem?formalShape:shape,directoryIdentity:identity(initial),databaseIdentity,tokenHash:digest(token),capacity:{...capacity},...(approvalKeyPem?{approvalKeyPem}:{}),...(shadowKeyPem?{shadowKeyPem}:{}),...(yearbookReviewerKeyPem?{yearbookReviewerKeyPem}:{}),...(sourceAge?{sourceAge}:{}),...(weatherUse?{weatherUse}:{}),...(agedPlacementKeyPem?{agedPlacementKeyPem}:{}),...(agedG1ReviewerKeyPem?{agedG1ReviewerKeyPem}:{}),...(rulesSpeechWorldId?{rulesSpeechWorldId}:{}),...(rulesWeatherHourCredit?{rulesWeatherHourCredit}:{}),...(rulesWeatherAccountScope?{rulesWeatherAccountScope}:{}),...(rulesMealWorldId?{rulesMealWorldId}:{}),...(rulesMealReviewerKeyPem?{rulesMealReviewerKeyPem}:{}),...(formalWeatherPurpose?{formalWeatherPurpose}:{})};
  const metadata=openSync(join(directory,manifestName),constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600);
  try{writeFileSync(metadata,JSON.stringify(manifest),'utf8');fsyncSync(metadata);}finally{closeSync(metadata);}
  const parent=openSync(directory,constants.O_RDONLY|constants.O_DIRECTORY|constants.O_NOFOLLOW);
@@ -228,6 +237,12 @@ function readManifest(path:string):{identity:string;value:Manifest} {
     formalApprovalKey(v.sourceAge!.keyPem)&&validSealedMvpSourceAgePolicy(v.sourceAge!.policy)||
    v?.schema===weatherEditorialShape&&exact(v,[...base,'weatherUse'])&&exact(v.weatherUse,['keyPem','accountFingerprint','editorialKeyPem'])&&
     independentKeys(v.weatherUse!.keyPem,v.weatherUse!.editorialKeyPem)&&hex(v.weatherUse!.accountFingerprint)||
+   v?.schema===formalDualWeatherShape&&exact(v,[...base,'formalWeatherPurpose'])&&
+    exact(v.formalWeatherPurpose,['worldId','keyPem','accountKeyPem','accountScope','accountFingerprint'])&&
+    formalWeatherWorld(v.formalWeatherPurpose!.worldId)&&formalApprovalKey(v.formalWeatherPurpose!.keyPem)&&
+    independentKeys(v.formalWeatherPurpose!.keyPem,v.formalWeatherPurpose!.accountKeyPem)&&
+    rulesAccountScope(v.formalWeatherPurpose!.accountScope)&&hex(v.formalWeatherPurpose!.accountFingerprint)&&
+    v.capacity?.worldLots===0&&v.capacity?.lotsPerTarget===0||
    v?.schema===formalWeatherShape&&exact(v,[...base,'formalWeatherPurpose'])&&exact(v.formalWeatherPurpose,['worldId','keyPem'])&&
     formalWeatherWorld(v.formalWeatherPurpose!.worldId)&&formalApprovalKey(v.formalWeatherPurpose!.keyPem)&&
     v.capacity?.worldLots===0&&v.capacity?.lotsPerTarget===0||

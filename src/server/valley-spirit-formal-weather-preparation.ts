@@ -3,6 +3,9 @@ import {DatabaseSync} from 'node:sqlite';
 import {acquireDeveloperMvpSpiritFixtureOwner,isDeveloperMvpSpiritFixtureOwner,type DeveloperMvpSpiritFixtureKey,type DeveloperMvpSpiritFixtureOwner} from './valley-spirit-fixture-files.js';
 import type {World} from '../shared/types.js';
 import {validateFormalRainProvenance} from '../world/formal-rain-provenance.js';
+import {WorldStore} from './store.js';
+import {ownsProductionAccountQuotaRehearsal,type ProductionAccountQuotaRehearsal,type ProductionModelAccountOwnership} from './production-model-account-ownership.js';
+import type {SharedModelAccountPolicy} from './shared-model-account.js';
 import {decodeSavedWorld} from './save-preflight.js';
 
 const SCHEMA='sealed-formal-weather-offline-preparation/v1';
@@ -194,4 +197,100 @@ export function readFormalClosedRainObjective(owner:DeveloperMvpSpiritFixtureOwn
   if(began)try{db?.exec('ROLLBACK');}catch{/* read-only connection closes */}
   return unavailable;
  }finally{db?.close();}
+}
+
+const ACCOUNT_SCHEMA='sealed-formal-weather-account-offline-preparation/v1';
+const ACCOUNT_WINDOW=300_000;
+const label=(v:unknown):v is string=>typeof v==='string'&&/^[A-Za-z0-9][A-Za-z0-9:_-]{0,159}$/.test(v);
+const accountKeys=['schema','fixtureScope','worldId','episodeId','sourceDigest','sourceEpoch','sourceAuthorizationDigest',
+ 'accountScope','accountFingerprint','runId','policyDigest','startsAt','expiresAt'] as const;
+export interface FormalWeatherAccountPreparationTerms {
+ schema:typeof ACCOUNT_SCHEMA;fixtureScope:string;worldId:string;episodeId:string;sourceDigest:string;sourceEpoch:number;
+ sourceAuthorizationDigest:string;accountScope:string;accountFingerprint:string;runId:string;policyDigest:string;
+ startsAt:number;expiresAt:number;
+}
+export function encodeFormalWeatherAccountPreparation(t:unknown):Buffer|null{
+ if(!exact(t,accountKeys)||t.schema!==ACCOUNT_SCHEMA||!hex(t.fixtureScope)||!world(t.worldId)||!episode(t.episodeId)||
+    !hex(t.sourceDigest)||!integer(t.sourceEpoch)||t.sourceEpoch<1||t.sourceEpoch>=CAP||!hex(t.sourceAuthorizationDigest)||
+    !label(t.accountScope)||!hex(t.accountFingerprint)||!label(t.runId)||!hex(t.policyDigest)||
+    !integer(t.startsAt)||!integer(t.expiresAt)||t.expiresAt<=t.startsAt||t.expiresAt-t.startsAt>ACCOUNT_WINDOW)return null;
+ return Buffer.from(JSON.stringify(['formal-closed-rain-account-fixed-fields-offline-prepare-only',...accountKeys.map(k=>t[k])]));
+}
+
+/** Borrow a live Formal store lease. No caller connection or facts, no quota
+ * mutation or transport. The second signature is per exact source epoch and
+ * short-lived, not a durable dispatch grant. Primary revoke invalidates both. */
+export function borrowFormalWeatherAccountPreparation(store:WorldStore,owner:DeveloperMvpSpiritFixtureOwner,
+ ownership:ProductionModelAccountOwnership,quota:ProductionAccountQuotaRehearsal,policy:SharedModelAccountPolicy,pinnedEpisodeId:string){
+ if(!(store instanceof WorldStore)||!episode(pinnedEpisodeId))throw Error('formal_dual_weather_scope');
+ const context=owner?.formalWeatherPurpose;
+ if(!context?.accountKeyPem||!context.accountScope||!context.accountFingerprint)throw Error('formal_dual_weather_scope');
+ const {worldId,accountScope,accountFingerprint}=context, frozenPolicy=structuredClone(policy);
+ const assertCurrent=()=>{
+  WorldStore.prototype.assertFormalDualWeatherFixtureOwner.call(store,owner);
+  if(!ownsProductionAccountQuotaRehearsal(ownership,quota)||quota.accountScope!==accountScope||
+     quota.runId!==ownership.runId||!quota.matchesPolicy(frozenPolicy))throw Error('formal_dual_weather_account');
+ };
+ assertCurrent();
+ const policyDigest=createHash('sha256').update(JSON.stringify([frozenPolicy.accountId,
+  ...[frozenPolicy.limit,frozenPolicy.residentFloor,frozenPolicy.almanacCap].flatMap(x=>[x.rpm,x.tpm,x.slots]),
+  frozenPolicy.almanacCooldownMs])).digest('hex');
+ const fixtureScope=createHash('sha256').update(SCHEMA+'\0'+owner.seal).digest('hex');
+ const sourceKey=createPublicKey(context.keyPem),accountKey=createPublicKey(context.accountKeyPem),runId=quota.runId;
+ const pin={mode:FORMAL_RAIN_OBJECTIVE_MODE,worldId,episodeId:pinnedEpisodeId};
+ const db=new DatabaseSync(owner.database,{readOnly:true});
+ try{db.exec('PRAGMA trusted_schema=OFF; PRAGMA query_only=ON');}catch(e){db.close();throw e;}
+ let closed=false,isolated=false,seen:Signed[]=[],rev=-1,at=-1,lastNow=-1;
+ type Snapshot=ReturnType<typeof readFormalClosedRainObjectiveOnConnection>;
+ const read=<T>(f:(projection:NonNullable<Snapshot['projection']>,primary:Signed,now:number)=>T):T|null=>{
+  if(closed||isolated)return null;
+  let begun=false;
+  try{
+   assertCurrent();db.exec('BEGIN');begun=true;
+   const {observedHead,projection}=readFormalClosedRainObjectiveOnConnection(db,owner,pin);
+   const log=history(db,sourceKey,fixtureScope,worldId),primary=log.at(-1),now=Date.now();
+   if(!integer(now)||now<lastNow||observedHead.revision<rev||observedHead.asOfMinute<at||
+      log.length<seen.length||seen.some((x,i)=>JSON.stringify(x)!==JSON.stringify(log[i])))
+    throw Error('formal_dual_weather_rewind');
+   let output:T|null=null;
+   const t=primary?.terms;
+   if(projection&&primary&&t?.allow&&t.episodeId===pinnedEpisodeId&&t.sourceDigest===projection.sourceDigest&&
+      observedHead.asOfMinute>=t.startsMinute&&observedHead.asOfMinute<t.expiresMinute)output=f(projection,primary,now);
+   assertCurrent();db.exec('COMMIT');begun=false;
+   seen=log;rev=observedHead.revision;at=observedHead.asOfMinute;lastNow=now;return output;
+  }catch{
+   isolated=true;
+   if(begun)try{db.exec('ROLLBACK');}catch{/* isolated */}
+   return null;
+  }
+ };
+ const terms=(primary:Signed,startsAt:number,expiresAt:number):FormalWeatherAccountPreparationTerms=>({
+  schema:ACCOUNT_SCHEMA,fixtureScope,worldId,episodeId:pinnedEpisodeId,sourceDigest:primary.terms.sourceDigest,
+  sourceEpoch:primary.terms.version,sourceAuthorizationDigest:createHash('sha256').update(primary.signature).digest('hex'),
+  accountScope,accountFingerprint,runId,policyDigest,startsAt,expiresAt
+ });
+ return Object.freeze({
+  terms(startsAt:number,expiresAt:number){
+   return read((_p,primary,now)=>{
+    const t=terms(primary,startsAt,expiresAt);
+    return encodeFormalWeatherAccountPreparation(t)&&now>=startsAt&&now<expiresAt?Object.freeze(t):null;
+   });
+  },
+  packet(input:unknown){
+   let signed:unknown;try{signed=structuredClone(input);}catch{return null;}
+   if(!exact(signed,['terms','signature'])||!exact(signed.terms,accountKeys)||typeof signed.signature!=='string'||
+      !/^[A-Za-z0-9_-]{86}$/.test(signed.signature))return null;
+   const claimed=signed.terms,sig=Buffer.from(signed.signature,'base64url'),buffer=encodeFormalWeatherAccountPreparation(claimed);
+   if(!buffer||sig.length!==64||sig.toString('base64url')!==signed.signature||!verify(null,buffer,accountKey,sig))return null;
+   return read((p,primary,now)=>{
+    const startsAt=Number(claimed.startsAt),expiresAt=Number(claimed.expiresAt);
+    const expected=encodeFormalWeatherAccountPreparation(terms(primary,startsAt,expiresAt));
+    if(!expected?.equals(buffer)||now<startsAt||now>=expiresAt||Date.now()>=expiresAt)return null;
+    const {sourceRef,startedMinute,closedMinute}=p.source;
+    return Object.freeze({schemaVersion:1 as const,projectionVersion:1 as const,permissionVersion:primary.terms.version,
+     worldId,sourceRef,startedMinute,closedMinute});
+   });
+  },
+  close(){if(!closed){closed=true;db.close();}} // Store owns the lease.
+ });
 }

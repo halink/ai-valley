@@ -117,6 +117,7 @@ export class WorldStore {
  private readonly mvpSpiritEffectFixture?:MvpGroundFruitCapacity;
  private readonly sealedAgedBirthExecution:boolean;
  private readonly developerSpiritFixtureOwner?:DeveloperMvpSpiritFixtureOwner;
+ readonly #formalDualWeatherOwner?:DeveloperMvpSpiritFixtureOwner;
  private agedG1ObservedEpoch:number|undefined;
  private agedG1EpochIsolated=false;
  private armedFormalDue:FormalDueIntent|undefined;
@@ -196,6 +197,7 @@ export class WorldStore {
   if(options.dailySnapshots)this.dailySnapshots=new AtomicDailySnapshots(this.db,options.dailySnapshots);
   this.exactReceipt=this.db.prepare('SELECT 1 FROM receipts WHERE world_id=? AND receipt=?');
   this.receiptPrefix=this.db.prepare('SELECT receipt FROM receipts WHERE world_id=? AND receipt>=? AND receipt<? ORDER BY rowid LIMIT 1');
+  if(owner?.formalWeatherPurpose?.accountKeyPem)this.#formalDualWeatherOwner=owner;
   }catch(error){this.db.close();throw error;}
  }
  private resourceBase(id:string): Resource[] | undefined {
@@ -1394,6 +1396,12 @@ export class WorldStore {
   const changes=this.db.prepare("SELECT e.body FROM event_people p JOIN events e ON e.id=p.event_id WHERE p.world_id=? AND p.person_id=? AND (json_extract(e.body,'$.populationChange') IN ('dating','marriage','separate') OR json_extract(e.body,'$.relationshipEnd') IS NOT NULL) ORDER BY e.rowid").all(worldId,id) as {body:string}[];
   const partners:Biography['partners']=[];for(const row of changes){const e=JSON.parse(row.body) as WorldEvent,other=e.actors.find(actor=>actor!==id);if(!other)continue;const current=[...partners].reverse().find(p=>p.personId===other&&p.endedAt===null&&!p.endReason);if(e.relationshipEnd){const end=e.relationshipEnd;if(current){current.kind=end.kind;current.marriedAt??=end.marriedAt;current.endedAt=end.endedAt;current.endReason=end.reason;current.sourceEvents.push(e.id);}else partners.push({personId:other,kind:end.kind,startedAt:end.startedAt,marriedAt:end.marriedAt,endedAt:end.endedAt,endReason:end.reason,sourceEvents:[e.id]});}else if(e.populationChange==='separate'){if(current){current.endedAt=e.at;current.sourceEvents.push(e.id);}else partners.push({personId:other,kind:'unspecified',startedAt:null,endedAt:e.at,sourceEvents:[e.id]});}else if(e.populationChange==='marriage'){if(current){current.kind='married';current.marriedAt=e.at;current.sourceEvents.push(e.id);}else partners.push({personId:other,kind:'married',marriedAt:e.at,startedAt:null,endedAt:null,sourceEvents:[e.id]});}else partners.push({personId:other,kind:'dating',startedAt:e.at,endedAt:null,sourceEvents:[e.id]});}
   return {recordCount:row.count,firstRecordAt:row.first,lastRecordAt:row.last,partners};
+ }
+ /** Match the existing exclusive owner by identity without lending the store connection. */
+ assertFormalDualWeatherFixtureOwner(owner:DeveloperMvpSpiritFixtureOwner):void{
+  if(!isDeveloperMvpSpiritFixtureOwner(owner)||this.#formalDualWeatherOwner!==owner)
+   throw Error('formal_dual_weather_store_scope');
+  owner.assertOwned();
  }
  close(){this.db.close();this.developerSpiritFixtureOwner?.release();}
 }

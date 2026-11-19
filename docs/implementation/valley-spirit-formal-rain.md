@@ -31,3 +31,14 @@ digest to a minimal packet of versions, world/source IDs and observed start
 and close. Stale versions, wrong scope/source, expiry and missing evidence
 are unavailable. Neither preparing nor revoking a packet creates transport,
 account admission, disclosure, model, or publication authority.
+
+A distinct two-key fixture can additionally prepare the same minimal packet
+while the exact Formal `WorldStore` holds the owner lease. The borrowed reader
+opens its own physical read-only connection and never releases the store lease.
+A detached second signature binds the current source authorization, account
+scope and fixture-pinned account fingerprint, original quota handle's run, and
+exact policy for at most five minutes of wall time. That fingerprint is not
+provider-account attestation. A source revocation invalidates both gates.
+This check does not update the quota ledger, create a request, authorize
+transport, resolve an unknown handoff, or grant publication. Existing
+single-key preparation fixtures do not acquire this capability.
