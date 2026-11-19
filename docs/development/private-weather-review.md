@@ -13,3 +13,5 @@ Only literal IPv4 loopback is used, with no redirects. The native-only viewer va
 The view does not independently verify cryptographic signatures. That authority remains with the separately reviewed backend. Its pins prevent accidentally rendering another world/entry; they are not authentication of an arbitrary process bound to the same local port.
 
 Short local validation: Godot 4.6.3 headless parser cases (valid fact, foreign world, foreign entry, unknown property, out-of-range value, duplicate fact) and explicit scene boot. Actual native rendering verified using a disposable independently signed synthetic edition with one weather fact. No real model or user save was used. Disconnect/timeout/rollback branches are implemented but not claimed as end-to-end fault-injection tested.
+
+The regular Web export excludes the native review scene and script.
