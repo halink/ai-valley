@@ -1,3 +1,5 @@
+import {join} from 'node:path';
+import {acquireDeveloperMvpSpiritFixtureOwner,type DeveloperMvpSpiritFixtureOwner,type DeveloperMvpSpiritFixtureKey} from './valley-spirit-fixture-files.js';
 import {openPersistentGeographyCustody,type PersistentGeographyCustody} from './valley-spirit-geography-custody.js';
 import {inspectPersistentRulesLifeFixture,openPersistentRulesLifeFixture,pinPersistentRulesLifeFixture,type PersistentRulesLifeFixture} from './persistent-rules-life-view.js';
 import {createPersistentRulesShadow,pinPersistentRulesShadowOptions,type PersistentRulesShadowOptions} from './valley-spirit-persistent-rules-shadow.js';
@@ -18,13 +20,19 @@ import {WorldStore} from './store.js';
 import {acquireRuntimeOwnership,type RuntimeOwnership} from './runtime-lock.js';
 import {assertGodotWebExport} from './godot-web.js';
 import type {World} from '../shared/types.js';
-export async function startPersistentRulesMvp(options:{database:string;port:number;webRoot?:string;autoStart?:boolean;tickMs?:number;privateSpiritShadow?:PersistentRulesShadowOptions;privateLifeFixture?:PersistentRulesLifeFixture}){
+export async function startPersistentRulesMvp(options:{database:string;port:number;webRoot?:string;autoStart?:boolean;tickMs?:number;privateSpiritShadow?:PersistentRulesShadowOptions;privateLifeFixture?:PersistentRulesLifeFixture;privateSpeechCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string}>}){
  if(typeof options.database!=='string'||!options.database.trim())throw Error('mvp_rules_database_required');
  if(!Number.isInteger(options.port)||options.port<0||options.port>65535)throw Error('godot_mvp_invalid_port');
  const tickMs=options.tickMs??500,shadowOptions=pinPersistentRulesShadowOptions(options.privateSpiritShadow);
+ const speechPin=options.privateSpeechCustody===undefined?undefined:structuredClone(options.privateSpeechCustody);
+ if(options.privateSpeechCustody!==undefined&&(!speechPin||!speechPin.fixture||typeof speechPin.worldId!=='string'||!/^godot-mvp-[A-Za-z0-9_-]{1,160}$/.test(speechPin.worldId)||
+    Object.keys(speechPin).length!==2||typeof speechPin.fixture.directory!=='string'||
+    options.database!==join(speechPin.fixture.directory,'fixture.sqlite')||
+    options.privateLifeFixture!==undefined||options.privateSpiritShadow!==undefined||options.webRoot!==undefined))
+  throw Error('mvp_rules_private_speech_scope');
  if(!Number.isFinite(tickMs)||tickMs<100)throw Error('mvp_rules_invalid_tick');
  if(options.webRoot!==undefined)assertGodotWebExport(options.webRoot);
- let owner:RuntimeOwnership|undefined,store:WorldStore|undefined,timer:ReturnType<typeof setInterval>|undefined;
+ let owner:RuntimeOwnership|DeveloperMvpSpiritFixtureOwner|undefined,privateOwner:DeveloperMvpSpiritFixtureOwner|undefined,store:WorldStore|undefined,timer:ReturnType<typeof setInterval>|undefined;
  let server:ReturnType<typeof createMvpServer>|undefined;
  let valleySpirit:ValleySpiritJournal|undefined;let spiritPermissions:SqliteValleySpiritPermissions|undefined;
  let geographyCustody:PersistentGeographyCustody|undefined;
@@ -35,25 +43,37 @@ export async function startPersistentRulesMvp(options:{database:string;port:numb
  let closing:Promise<void>|undefined;
  const close=():Promise<void>=>closing??=(async()=>{if(timer)clearInterval(timer);timer=undefined;if(server){server.closeAllConnections();await new Promise<void>(resolve=>server!.close(()=>resolve()));server=undefined;}try{life?.close();}catch{/* optional isolated life reader */}life=undefined;try{almanacReader?.close();}catch{/* optional isolated reader */}almanacReader=undefined;viewers=undefined;shadow=undefined;try{geographyCustody?.close();}catch{/* optional isolated custody */}geographyCustody=undefined;try{spiritPermissions?.close();}catch{valleySpirit?.isolate();}spiritPermissions=undefined;store?.close();store=undefined;owner?.release();owner=undefined;})().catch(error=>{closing=undefined;throw error;});
  try{
-  owner=acquireRuntimeOwnership(options.database);owner.assertOwned();
+  if(speechPin){
+   owner=privateOwner=acquireDeveloperMvpSpiritFixtureOwner(speechPin.fixture);
+   if(privateOwner.rulesSpeechWorldId!==speechPin.worldId)throw Error('mvp_rules_private_speech_world');
+  }else owner=acquireRuntimeOwnership(options.database);
+  owner.assertOwned();
   try{lstatSync(owner.database+'.self-hosted-session');throw Error('mvp_rules_unresolved_session');}catch(error){if(!(error&&typeof error==='object'&&'code' in error&&error.code==='ENOENT'))throw error;}
   let almanacReadable=true;
-  const probe=preflightWorldSave(owner.database,{requireWorld:true,inspectOptionalAlmanac:(db,w)=>{try{inspectValleySpiritAlmanac(db,(w as unknown as World).id);}catch{almanacReadable=false;}if(lifePin)try{inspectPersistentRulesLifeFixture(db,w,lifePin);lifeReadable=true;}catch{/* isolate optional life */}},validateWorld:value=>{const w=value as unknown as World;assertMvpWorld(w);assertMvpClimateWorld(w);const m=w.metrics;
+  const probe=preflightWorldSave(owner.database,{requireWorld:true,developerSpiritFixtureOwner:privateOwner,inspectOptionalAlmanac:(db,w)=>{try{inspectValleySpiritAlmanac(db,(w as unknown as World).id);}catch{almanacReadable=false;}if(lifePin)try{inspectPersistentRulesLifeFixture(db,w,lifePin);lifeReadable=true;}catch{/* isolate optional life */}},validateWorld:value=>{const w=value as unknown as World;assertMvpWorld(w);assertMvpClimateWorld(w);const m=w.metrics;
    if(!m||!Array.isArray(m.inFlight)||m.inFlight.length||m.configured!==false||[m.requests,m.successes,m.failures,m.inputTokens,m.outputTokens].some(n=>n!==0)||m.lastAttemptModel!==undefined||m.admissionCancellation!==undefined||m.routing!==undefined||Object.keys(m.usageWindow??{}).length||Object.keys(m.selfHostedCooldowns??{}).length||m.unmeteredFailures)throw Error('mvp_rules_model_history_unsupported');}});
+  if(speechPin&&probe?.id!==speechPin.worldId)throw Error('mvp_rules_private_speech_world');
   if(probe){assertMvpWorld(probe as unknown as World);validateMvpClimate(probe as unknown as World);}
   // Bind before any writable SQLite open or adoption.
   let session:ReturnType<typeof createMvpSession>|undefined;
   const snapshot=()=>({...session!.snapshot(),valleySpirit:valleySpirit?.view()??valleySpiritUnavailable()});
-  server=createMvpServer({snapshot,get world(){return session?.world;}},{webRoot:options.webRoot,valleySpiritLifeViewer:lifePin?{latest:id=>life?.latest(id)??null}:undefined,valleySpiritSource:ref=>valleySpirit?.resolveSource(ref)??null,valleySpiritArchive:query=>valleySpirit?.archive(query)??{status:'unavailable'},valleySpiritReaders:{almanac:id=>viewers?.almanac(id)??null,latestAlmanac:()=>viewers?.latestAlmanac()??{status:'unavailable'},topics:range=>viewers?.topics(range)??{status:'unavailable'}}});
+  server=createMvpServer({snapshot,get world(){return session?.world;}},{webRoot:options.webRoot,privateSpeechWeatherOnly:speechPin?true:undefined,valleySpiritLifeViewer:lifePin?{latest:id=>life?.latest(id)??null}:undefined,valleySpiritSource:ref=>valleySpirit?.resolveSource(ref)??null,valleySpiritArchive:query=>valleySpirit?.archive(query)??{status:'unavailable'},valleySpiritReaders:{almanac:id=>viewers?.almanac(id)??null,latestAlmanac:()=>viewers?.latestAlmanac()??{status:'unavailable'},topics:range=>viewers?.topics(range)??{status:'unavailable'}}});
   await new Promise<void>((resolve,reject)=>{server!.once('error',reject);server!.listen(options.port,'127.0.0.1',resolve);});
-  store=new WorldStore(owner.database,{allowMvpClimate:true});
+  store=new WorldStore(owner.database,{allowMvpClimate:true,developerSpiritFixtureOwner:privateOwner});
   const saved=store.load(),world=structuredClone(saved??createMvpWorld()),previous=saved?.revision??null;
+  if(speechPin&&world.id!==speechPin.worldId)throw Error('mvp_rules_private_speech_world');
   assertMvpWorld(world);
   const upgraded=upgradeMvpWorld(world),adopted=adoptMvpClimate(world),soilAdopted=adoptMvpSoil(world),agricultureAdopted=adoptMvpAgriculture(world);
   const rainAdopted=adoptMvpRainProvenance(world);
   if(adopted||soilAdopted||agricultureAdopted||rainAdopted)world.revision++;
   if(!saved||upgraded||adopted||soilAdopted||agricultureAdopted||rainAdopted)store.commit(world,previous);
-  session=createMvpSession({world,persistent:true,commit:(draft,revision)=>{owner!.assertOwned();store!.commit(draft,revision);try{valleySpirit?.observe(publicWeatherProjection(draft));}catch{valleySpirit?.isolate();}
+  session=createMvpSession({world,persistent:true,captureAddressedSpeechCustody:speechPin?true:undefined,commit:(draft,revision,speech)=>{
+   owner!.assertOwned();
+   if(speechPin){
+    if(draft.id!==speechPin.worldId)throw Error('mvp_rules_private_speech_world');
+    store!.commitMvpWithAddressedSpeech(draft,revision,speech);
+   }else store!.commit(draft,revision);
+   try{valleySpirit?.observe(publicWeatherProjection(draft));}catch{valleySpirit?.isolate();}
    shadow?.onCommitted(draft);}});
   const initialPublicFact=publicWeatherProjection(session.world);
   if(initialPublicFact){try{spiritPermissions=new SqliteValleySpiritPermissions(owner.database,initialPublicFact.worldId,()=>owner!.assertOwned());valleySpirit=new ValleySpiritJournal(owner.database,initialPublicFact,()=>owner!.assertOwned(),spiritPermissions);valleySpirit.observe(initialPublicFact);}catch{valleySpirit?.isolate();}}
@@ -65,7 +85,7 @@ export async function startPersistentRulesMvp(options:{database:string;port:numb
    if(almanacReadable)try{almanacReader=new SqliteValleySpiritAlmanacReader(owner.database,world.id,()=>owner!.assertOwned());}catch{/* optional unreadable almanac remains isolated */}
    viewers=createValleySpiritPublicReaders(valleySpirit,almanacReader);
   }
-  if(lifePin&&lifeReadable)try{life=openPersistentRulesLifeFixture(owner,store,()=>session!.world,lifePin);}catch{/* no approved view */}
+  if(lifePin&&lifeReadable&&'lockPath' in owner)try{life=openPersistentRulesLifeFixture(owner,store,()=>session!.world,lifePin);}catch{/* no approved view */}
   if(options.autoStart!==false)timer=setInterval(()=>session!.advance(1),tickMs);
   const readPrivateSpiritCandidate=()=>{
    if(!shadowOptions)return {status:'disabled'} as const;

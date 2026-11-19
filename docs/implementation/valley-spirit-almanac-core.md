@@ -181,3 +181,18 @@ every GET. Its versioned DTO contains only IDs, versions and typed weather
 facts (minute, field, value), never source links, rendered prose, approvals,
 World or publishing capability. A revoked/latest-ineligible/missing witness
 returns the same unavailable response and never writes permanent withdrawal.
+
+The actual persistent Godot rules starter has an explicit programmatic
+addressed-speech custody option for a separately sealed temporary fixture
+with an exact world pin and zero effect capacity. Its ordinary rule minute
+commits the typed native delivery evidence with the world in the existing
+SQLite transaction and leaves post-commit weather observation in place.
+The fixture listener allows only the objective weather archive on loopback;
+it denies static, world, life, event, stream and other routes, because normal
+world snapshots can contain raw dialogue. No public life grant, route,
+publication or model is enabled; the ordinary starter's defaults are unchanged.
+In that explicitly armed mode, a new native addressed delivery must have a
+matching same-transaction custody row. Missing proof, malformed custody, or
+a receipt-count/event-identity mismatch rolls back the world minute; quiet
+or non-addressed conversation remains unaffected. Optional custody policy
+outside this fixture is unchanged.

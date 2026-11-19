@@ -622,6 +622,8 @@ export class WorldStore {
  }
  private assertWritable(world:World):void {
   this.developerSpiritFixtureOwner?.assertOwned();
+  if(this.developerSpiritFixtureOwner?.rulesSpeechWorldId&&world.id!==this.developerSpiritFixtureOwner.rulesSpeechWorldId)
+   throw Error('mvp_rules_private_speech_world');
   assertWorldCompatibility(world,!!this.mvpSpiritEffectFixture);
   if(Object.hasOwn(world,'formalBerryFixtureAnchor')&&!this.developerSpiritFixtureOwner?.formalApprovalKeyPem)
    throw Error('formal_berry_fixture_requires_owner');
@@ -665,7 +667,8 @@ export class WorldStore {
   this.assertWritable(world);
   this.db.exec('BEGIN IMMEDIATE');
   try{
-   const speech=this.writeDraftWithCustody(world,previousRevision,appended,seasonalLedger,proof);
+   const speech=this.writeDraftWithCustody(world,previousRevision,appended,seasonalLedger,proof,
+    !!this.developerSpiritFixtureOwner?.rulesSpeechWorldId);
    this.db.exec('COMMIT');
    forgetFormalRainStep(world);
    if(world.mode==='formal'){this.terrainKeys.add(terrainRevision(world.map));this.separateLedgers.add(world.id);}
@@ -688,6 +691,21 @@ export class WorldStore {
     if(strict)throw Error('mvp_adjacent_weather_custody_unavailable');
    }
   }
+  // Only this purpose-pinned runtime demands speech custody for every new
+  // native addressed event. Group, ecological and unreceived speech are not
+  // inferred from text or broad conversation category.
+  const speechStrict=strict&&!!this.developerSpiritFixtureOwner?.rulesSpeechWorldId;
+  const addressedIds=new Set<string>();
+  if(speechStrict){
+   const priorIds=new Set(previous?.events.map(e=>e.id)??[]);
+   for(const e of world.events){
+    if(!priorIds.has(e.id)&&e.kind==='conversation'&&e.conversationId?.startsWith(`conversation-${world.id}-`)&&
+       e.actors.length===2&&e.witnesses?.length===1&&e.witnesses[0]===e.actors[0])addressedIds.add(e.id);
+   }
+   const expected=proof?.receipts??[];
+   if(expected.length!==addressedIds.size||new Set(expected.map(r=>r.eventId)).size!==expected.length||
+      expected.some(r=>!addressedIds.has(r.eventId)))throw Error('mvp_rules_private_speech_proof_missing');
+  }
   let speech:readonly ValleySpiritLifeReceipt[]=[];
   if(Array.isArray(proof?.receipts)&&proof.receipts.length){
    this.db.exec('SAVEPOINT optional_speech_custody');
@@ -701,6 +719,13 @@ export class WorldStore {
     if(strict)throw Error('mvp_adjacent_speech_custody_unavailable');
     speech=[];
    }
+  }
+  if(speechStrict){
+   const written=new Set(speech.map(r=>r.receiptId));
+   if(speech.length!==addressedIds.size||written.size!==speech.length||[...addressedIds].some(eventId=>{
+    const receipt=readValleySpiritSpeechCustody(this.db,world.id,eventId);
+    return !receipt||!written.has(receipt.receiptId);
+   }))throw Error('mvp_rules_private_speech_custody_unconfirmed');
   }
   if(!this.allowMvpClimate&&!this.seasonalModel&&world.mode==='formal'&&appended?.events.some(e=>Object.hasOwn(e,'socialAppointmentArrival'))){
    this.db.exec('SAVEPOINT optional_formal_arrival_custody');

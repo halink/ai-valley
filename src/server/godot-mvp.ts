@@ -491,9 +491,16 @@ function currentLifeView(viewer:Pick<ValleySpiritLifeViewer,'latest'>|undefined,
   return view&&BigInt(view.range.throughUs)<=BigInt(minuteToClimateUs(world.minute))?view:null;
  }catch{return null;}
 }
-export function createMvpServer(session:Pick<ReturnType<typeof createMvpSession>,'snapshot'>&Partial<Pick<ReturnType<typeof createMvpSession>,'world'>>,options:{webRoot?:string;valleySpiritSource?:(sourceRef:string)=>unknown;valleySpiritArchive?:ValleySpiritJournal['archive'];valleySpiritReaders?:ValleySpiritPublicReaders;valleySpiritLifeViewer?:Pick<ValleySpiritLifeViewer,'latest'>}={}):Server {
+export function createMvpServer(session:Pick<ReturnType<typeof createMvpSession>,'snapshot'>&Partial<Pick<ReturnType<typeof createMvpSession>,'world'>>,options:{webRoot?:string;valleySpiritSource?:(sourceRef:string)=>unknown;valleySpiritArchive?:ValleySpiritJournal['archive'];valleySpiritReaders?:ValleySpiritPublicReaders;valleySpiritLifeViewer?:Pick<ValleySpiritLifeViewer,'latest'>;privateSpeechWeatherOnly?:true}={}):Server {
  return createServer((req,res)=>{
   res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');
+  if(options.privateSpeechWeatherOnly){
+   const path='/ai-town/api/valley-spirit/archive',bind=res.socket?.localPort;
+   if(req.method!=='GET'||!bind||req.socket.remoteAddress!=='127.0.0.1'||req.headers.host!=='127.0.0.1:'+bind||
+      !(req.url===path||req.url?.startsWith(path+'?'))||req.headers.authorization!==undefined||req.headers.cookie!==undefined){
+    res.writeHead(404,{'Content-Type':'application/json; charset=utf-8'});res.end('{"status":"unavailable"}');return;
+   }
+  }
   if(options.webRoot&&serveGodotWeb(req,res,options.webRoot))return;
   if(req.method!=='GET'){res.writeHead(405,{'Allow':'GET'});res.end('Read-only MVP');return;}
   const lifeAlmanacPath='/ai-town/api/valley-spirit/almanac/life/latest';
