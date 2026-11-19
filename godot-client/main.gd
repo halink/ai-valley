@@ -51,6 +51,17 @@ var hover_checked_at := 0
 var notice_until := 0
 
 func _ready() -> void:
+	var demo := "--offline-choice-demo" in OS.get_cmdline_user_args()
+	if OS.has_feature("web"):
+		demo = bool(JavaScriptBridge.eval("new URLSearchParams(window.location.search).get('offlineChoiceDemo') === '1'"))
+	if demo:
+		var canvas := CanvasLayer.new()
+		add_child(canvas)
+		canvas.add_child(load("res://offline_choice_demo.gd").new())
+		set_process(false)
+		set_process_input(false)
+		set_process_unhandled_input(false)
+		return
 	valley = Valley3D.new()
 	add_child(valley)
 	hud = ObserverHud.new()
