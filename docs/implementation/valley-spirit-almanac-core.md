@@ -159,3 +159,15 @@ durable mode all sending passes through edition staging; ordinary in-memory
 rehearsal remains the default. Restart does not retry unfinished or grounded
 entries, or reconstruct completion when the separate quota database settled
 before the edition transaction. No ordinary/public almanac table is affected.
+
+An optional separate sealed weather-editorial fixture pins **different**
+Ed25519 keys for sending and editorial review and cannot carry other fixture
+roles. Private preview, approval and readback share a SQLite transaction across
+the durable grounded rehearsal state, current native weather authority and
+bounded signature log. Review binds the exact renderer, packet, typed draft,
+text and grant versions, prior entry and exact rendered content digest. Only
+the latest grounded, authoritatively verified, independently signed synthetic
+edition can be read; send authority is not editorial authority. Missing JSON
+merely hides the edition until the exact witness can be verified again. A
+revoked or rotated public weather grant blocks on read; no ordinary database,
+public release, or automatic retraction writes are performed.

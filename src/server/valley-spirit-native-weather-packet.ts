@@ -27,15 +27,52 @@ export function openPrivateNativeWeatherPacketReaderOnOwner(owner:DeveloperMvpSp
   const sqlite=db=new DatabaseSync(owner.database,{readOnly:true});
   sqlite.exec('PRAGMA trusted_schema=OFF; PRAGMA query_only=ON');
   let closed=false,isolated=false;
+  const borrowed=nativeWeatherPacketAuthorityOnConnection(sqlite,owner,worldId);
+  const authority:ValleySpiritAlmanacAuthority={permission:()=>null,resolve:()=>null,readCurrent(refs){
+   if(closed||isolated)return null;
+   let transaction=false;
+   try{
+    sqlite.exec('BEGIN');transaction=true;
+    const result=borrowed.readCurrent!(refs);
+    owner.assertOwned();
+    sqlite.exec('COMMIT');transaction=false;return result;
+   }catch{
+    isolated=true;
+    if(transaction)try{sqlite.exec('ROLLBACK');}catch{/* isolated */}
+    return null;
+   }
+  }};
+  return Object.freeze({
+   almanacAuthority:Object.freeze(authority),
+   /** Only the canonical allowlisted packet escapes this reader. */
+   packet(range:Omit<ValleySpiritAlmanacRange,'worldId'>){
+    const p=createValleySpiritAlmanacPacket({...range,worldId},authority);
+    if(!p)return null;
+    for(const point of p.points)Object.freeze(point);
+    Object.freeze(p.points);Object.freeze(p.unselectedHourBuckets);
+    return Object.freeze(p);
+   },
+   close(){
+    if(closed)return;closed=true;
+    sqlite.close();
+   }
+  });
+ }catch(e){db?.close();throw e;}
+}
+
+
+/** Internal caller must own the enclosing SQLite snapshot and descriptor. */
+export function nativeWeatherPacketAuthorityOnConnection(sqlite:DatabaseSync,owner:DeveloperMvpSpiritFixtureOwner,worldId:string){
+ if(!isDeveloperMvpSpiritFixtureOwner(owner)||owner.formalApprovalKeyPem||owner.formalShadowKeyPem)throw Error('native_weather_packet_owner_invalid');
+ owner.assertOwned();
+ let isolated=false;
   let priorRevision=-1,priorTime=-1n,priorEpoch=0,priorEntries:PublicWeatherEntry[]=[];
   const authority:ValleySpiritAlmanacAuthority={
    permission:()=>null,resolve:()=>null, // no fallback to uncoupled reads
    readCurrent(refs){
-    if(closed||isolated||refs.length<1||refs.length>MAX_ALMANAC_WEATHER_SOURCES)return null;
-    let transaction=false;
+    if(isolated||refs.length<1||refs.length>MAX_ALMANAC_WEATHER_SOURCES)return null;
     try{
      owner.assertOwned();
-     sqlite.exec('BEGIN');transaction=true;
      const seal=sqlite.prepare('SELECT * FROM mvp_spirit_developer_fixture LIMIT 2').all();
      if(seal.length!==1||Object.keys(seal[0]).length!==2||seal[0].version!==1||seal[0].seal!==owner.seal)
       throw Error('native_weather_packet_seal_changed');
@@ -60,29 +97,12 @@ export function openPrivateNativeWeatherPacketReaderOnOwner(owner:DeveloperMvpSp
       }
      }
      owner.assertOwned();
-     sqlite.exec('COMMIT');transaction=false;
      return batch;
     }catch{
      isolated=true;
-     if(transaction)try{sqlite.exec('ROLLBACK');}catch{/* handle stays isolated */}
      return null;
     }
    }
   };
-  return Object.freeze({
-   almanacAuthority:Object.freeze(authority),
-   /** Only the canonical allowlisted packet escapes this reader. */
-   packet(range:Omit<ValleySpiritAlmanacRange,'worldId'>){
-    const p=createValleySpiritAlmanacPacket({...range,worldId},authority);
-    if(!p)return null;
-    for(const point of p.points)Object.freeze(point);
-    Object.freeze(p.points);Object.freeze(p.unselectedHourBuckets);
-    return Object.freeze(p);
-   },
-   close(){
-    if(closed)return;closed=true;
-    sqlite.close();
-   }
-  });
- }catch(e){db?.close();throw e;}
+ return Object.freeze(authority);
 }

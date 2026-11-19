@@ -31,44 +31,47 @@ function progresses(old:readonly ValleySpiritAlmanacEntry[],next:readonly Valley
  return changed===1;
 }
 
+export function privateWeatherRehearsalScope(owner:DeveloperMvpSpiritFixtureOwner,context:DisconnectedWeatherUseContext){
+ if(!isDeveloperMvpSpiritFixtureOwner(owner)||!owner.weatherUse||
+    context.accountFingerprint!==owner.weatherUse.accountFingerprint||
+    context.fixtureScopeId!==createHash('sha256').update('disconnected-weather-fixture/v1\0'+owner.seal).digest('hex'))
+  throw Error('private_weather_store_scope');
+ owner.assertOwned();
+ return createHash('sha256').update(serial(['private-weather-rehearsal/v1',context])).digest('hex');
+}
+/** Caller borrows a snapshot; this never initializes or mutates the store. */
+export function readPrivateWeatherRehearsalSnapshot(db:DatabaseSync,owner:DeveloperMvpSpiritFixtureOwner,context:DisconnectedWeatherUseContext){
+ const scope=privateWeatherRehearsalScope(owner,context);
+ const seal=db.prepare('SELECT * FROM mvp_spirit_developer_fixture LIMIT 2').all();
+ if(seal.length!==1||Object.keys(seal[0]).length!==2||seal[0].version!==1||seal[0].seal!==owner.seal)
+  throw Error('private_weather_store_seal');
+ const t=db.prepare('SELECT type,sql FROM sqlite_master WHERE name=?').get(TABLE);
+ if(!t)return {text:null,rows:[] as ValleySpiritAlmanacEntry[]};
+ if(t.type!=='table'||t.sql!==DDL||
+    db.prepare("SELECT 1 FROM sqlite_master WHERE tbl_name=? AND (type='trigger' OR (type='index' AND sql IS NOT NULL))").get(TABLE))
+  throw Error('private_weather_store_schema');
+ const stored=db.prepare(`SELECT slot,version,scope,CASE WHEN length(CAST(state AS BLOB))<=? THEN state END AS state FROM ${TABLE} LIMIT 2`).all(BYTES);
+ if(stored.length!==1||stored[0].slot!==1||stored[0].version!==1||stored[0].scope!==scope||typeof stored[0].state!=='string')
+  throw Error('private_weather_store_state');
+ const text=stored[0].state,rows:unknown=JSON.parse(text);
+ if(!valid(rows,context.worldId)||!rows.length||serial(rows)!==text)throw Error('private_weather_store_history');
+ return {text,rows};
+}
 /** Internal storage only. Never consults, updates, or creates public almanac
  * tables. Does not certify any quota completion or recover unfinished sends. */
 export function openPrivateWeatherRehearsalStore(owner:DeveloperMvpSpiritFixtureOwner,context:DisconnectedWeatherUseContext):
  ValleySpiritAlmanacStore&{close():void}{
- if(!isDeveloperMvpSpiritFixtureOwner(owner)||!owner.weatherUse||attached.has(owner)||
-    context.accountFingerprint!==owner.weatherUse.accountFingerprint||
-    context.fixtureScopeId!==createHash('sha256').update('disconnected-weather-fixture/v1\0'+owner.seal).digest('hex'))
-  throw Error('private_weather_store_scope');
- const scope=createHash('sha256').update(serial(['private-weather-rehearsal/v1',context])).digest('hex');
- owner.assertOwned();
+ if(attached.has(owner))throw Error('private_weather_store_scope');
+ const scope=privateWeatherRehearsalScope(owner,context);
  const db=new DatabaseSync(owner.database);
  try{
   db.exec('PRAGMA trusted_schema=OFF; PRAGMA synchronous=FULL');
   let closed=false,isolated=false,seen:string|null|undefined;
-  const seal=()=>{
-   owner.assertOwned();
-   const rows=db.prepare('SELECT * FROM mvp_spirit_developer_fixture LIMIT 2').all();
-   if(rows.length!==1||Object.keys(rows[0]).length!==2||rows[0].version!==1||rows[0].seal!==owner.seal)
-    throw Error('private_weather_store_seal');
-  };
-  const raw=():string|null=>{
-   const t=db.prepare('SELECT type,sql FROM sqlite_master WHERE name=?').get(TABLE);
-   if(!t)return null;
-   if(t.type!=='table'||t.sql!==DDL||
-      db.prepare("SELECT 1 FROM sqlite_master WHERE tbl_name=? AND (type='trigger' OR (type='index' AND sql IS NOT NULL))").get(TABLE))
-    throw Error('private_weather_store_schema');
-   const rows=db.prepare(`SELECT slot,version,scope,CASE WHEN length(CAST(state AS BLOB))<=? THEN state END AS state FROM ${TABLE} LIMIT 2`).all(BYTES);
-   if(rows.length!==1||rows[0].slot!==1||rows[0].version!==1||rows[0].scope!==scope||typeof rows[0].state!=='string')
-    throw Error('private_weather_store_state');
-   return rows[0].state;
-  };
   const current=()=>{
    if(closed||isolated)throw Error('private_weather_store_unavailable');
-   seal();const text=raw();
-   if(seen!==undefined&&text!==seen)throw Error('private_weather_store_changed');
-   const rows:unknown=text===null?[]:JSON.parse(text);
-   if(!valid(rows,context.worldId)||text!==null&&(!rows.length||serial(rows)!==text))throw Error('private_weather_store_history');
-   return {text,rows};
+   const state=readPrivateWeatherRehearsalSnapshot(db,owner,context);
+   if(seen!==undefined&&state.text!==seen)throw Error('private_weather_store_changed');
+   return state;
   };
   const opened=current();seen=opened.text;
   attached.add(owner);

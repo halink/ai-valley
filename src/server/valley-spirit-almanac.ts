@@ -205,6 +205,12 @@ function renderAlmanacTextV1(p:ValleySpiritAlmanacPacket,draft:GroundedDraft):Re
  });
  return {rendererVersion:TEXT_RENDERER_VERSION,facts,atmosphere:{kind:'editorial-register-only',value:draft.atmosphere}};
 }
+/** Private editorial helper; uses the existing versioned renderer, never publishes. */
+export function previewGroundedSyntheticWeather(e:ValleySpiritAlmanacEntry,a:ValleySpiritAlmanacAuthority){
+ if(e.origin.kind!=='offline-synthetic'||e.phase!=='grounded'||!permit(e.packet,a))return null;
+ const draft=groundValleySpiritAlmanacDraft(e.packet,e.draft);
+ return draft?renderAlmanacTextV1(e.packet,draft):null;
+}
 function publicView(e:ValleySpiritAlmanacEntry) {
  if(e.phase!=='published'||!e.rendered||!e.draft)return null;
  const p=e.packet,r=structuredClone(e.rendered);
