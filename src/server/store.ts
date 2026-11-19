@@ -1,3 +1,4 @@
+import {appendNativeWeatherCredit} from './valley-spirit-weather-credit.js';
 import {probeMvpFallenFruitAdjacentEngineEdge} from './valley-spirit-mvp-fallen-fruit-approach.js';
 import {appendFormalDueIntent,formalDueCurrent,formalDueInputs,makeFormalDueCheckpoint,prepareFormalDueIntent,
  readFormalDueRows,writeFormalDueCheckpoint,type FormalDueCheckpoint,type FormalDueIntent} from './valley-spirit-formal-due.js';
@@ -66,16 +67,19 @@ export class WorldStore {
  private readonly exactReceipt;
  private readonly receiptPrefix;
  private readonly allowMvpClimate:boolean;
+ private readonly nativeWeatherCredit:boolean;
  private readonly allowFormalRainProvenance:boolean;
  private readonly seasonalModel:boolean;
  private readonly mvpSpiritEffectFixture?:MvpGroundFruitCapacity;
  private readonly developerSpiritFixtureOwner?:DeveloperMvpSpiritFixtureOwner;
- constructor(path:string,options:{formalRainProvenance?:true;dailySnapshots?:DailySnapshotConfig;allowMvpClimate?:boolean;seasonalModel?:true;mvpSpiritEffectFixture?:MvpGroundFruitCapacity;developerSpiritFixtureOwner?:DeveloperMvpSpiritFixtureOwner}={}){
+ constructor(path:string,options:{formalRainProvenance?:true;dailySnapshots?:DailySnapshotConfig;allowMvpClimate?:boolean;seasonalModel?:true;mvpSpiritEffectFixture?:MvpGroundFruitCapacity;developerSpiritFixtureOwner?:DeveloperMvpSpiritFixtureOwner;nativeWeatherCredit?:true}={}){
   this.allowMvpClimate=options.allowMvpClimate===true;
   this.allowFormalRainProvenance=options.formalRainProvenance===true&&!this.allowMvpClimate&&!options.seasonalModel;
   this.seasonalModel=options.seasonalModel===true;
+  this.nativeWeatherCredit=options.nativeWeatherCredit===true;
   const fixture=options.mvpSpiritEffectFixture;
   const owner=options.developerSpiritFixtureOwner;
+  if(this.nativeWeatherCredit&&(!owner||owner.formalApprovalKeyPem))throw Error('native_weather_credit_requires_sealed_validation_owner');
   if(owner!==undefined){
    if(!isDeveloperMvpSpiritFixtureOwner(owner)||owner.database!==path||
     (owner.formalApprovalKeyPem?!this.allowFormalRainProvenance:!this.allowMvpClimate)||
@@ -618,7 +622,18 @@ export class WorldStore {
   this.assertWritable(world);
   this.db.exec('BEGIN IMMEDIATE');
   try{
-   this.writeCommit(world,previousRevision,appended,seasonalLedger);
+   const previous=this.writeCommit(world,previousRevision,appended,seasonalLedger);
+   if(this.nativeWeatherCredit&&previousRevision!==null&&world.mode==='validation'){
+    this.developerSpiritFixtureOwner!.assertOwned();
+    this.db.exec('SAVEPOINT optional_native_weather_credit');
+    try{
+     appendNativeWeatherCredit(this.db,previous,world,previousRevision);
+     this.db.exec('RELEASE optional_native_weather_credit');
+    }catch{
+     this.db.exec('ROLLBACK TO optional_native_weather_credit');
+     this.db.exec('RELEASE optional_native_weather_credit');
+    }
+   }
    let speech:readonly ValleySpiritLifeReceipt[]=[];
    if(Array.isArray(proof?.receipts)&&proof.receipts.length){
     this.db.exec('SAVEPOINT optional_speech_custody');
@@ -726,7 +741,7 @@ export class WorldStore {
   }catch(error){this.db.exec('ROLLBACK');throw error;}
  }
  private writeCommit(world:World,previousRevision:number|null,appended?:AppendedHistory,seasonalLedger?:SeasonalLedger,
-  settlementOperation?:MvpFallenFruitFixtureOperation,formalBerryAnchor?:FormalBerryFixtureAnchor):void {
+  settlementOperation?:MvpFallenFruitFixtureOperation,formalBerryAnchor?:FormalBerryFixtureAnchor):World|null {
   this.assertDeveloperSpiritSeal();
   if(this.developerSpiritFixtureOwner){
    const ids=this.db.prepare('SELECT id FROM worlds ORDER BY rowid LIMIT 2').all();
@@ -762,6 +777,7 @@ export class WorldStore {
   }
   this.db.prepare('INSERT INTO worlds(id,revision,state) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision,state=excluded.state').run(world.id,world.revision,this.encode(world));
   this.dailySnapshots?.committed(world,previousRevision);
+  return stored as unknown as World|null;
  }
  private assertDeveloperSpiritSeal():void {
   if(!this.developerSpiritFixtureOwner)return;

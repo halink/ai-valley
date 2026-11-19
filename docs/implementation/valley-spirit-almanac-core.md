@@ -55,3 +55,23 @@
 独立只读检查器自行取得同一个既有世界所有权锁，不连接已运行实例。它读取受 SQLite 权限核验的既有天气 JSON、确切已发布的天气条目，以及既有生活查看器核准并由原生交谈保管凭据验证的指定生活版次。两次同步读取都必须匹配本机已提交世界、时点、来源和现行授权，所回传内容只含类型化事实，不直接转发正文或私人语句。读取期间发现世界、权限或日志倒退即隔离，撤权后的来源不可读。
 
 这只是协作式同一所有权下的临时合编依据。SQLite 和天气 JSON 不是一笔原子事务，重开检查器不能证明它启动前未发生全档回滚。不写观察、授权或刊物，不接一般运行器、路由、模型、正式保管凭据或发布。检查器默认不启动。
+
+### Private SQLite weather credit (sealed development only)
+
+A sealed temporary validation WorldStore must explicitly opt in. Initial world
+creation, normal CLI runs, the JSON archive, and all public readers are unchanged.
+With an already open SQLite weather grant, each grant/hour can credit the first
+eligible forward one-minute native commit **after** opt-in, including mid-hour. The
+same transaction checks the persisted preceding head and validated clock/climate
+projections at both ends; this is a transition check, not a separate attestation of
+which in-process function built the draft. Same-minute writes never qualify. It does
+not backfill, guess gaps, grant permission, or credit startup archive observations.
+This independent savepoint stores the source identity and a versioned digest of
+the exact typed weather projection, never its prose or a second public row.
+Optional malformed custody leaves normal world writes intact.
+
+The read primitive checks the current grant and exact supplied projection. A
+different first JSON sample in the same hour, or a missing post-commit JSON write,
+must never be treated as proof for a public archive record. Nothing here proves
+JSON publication, whole-DB anti-rollback, or a combined atomic yearbook; sharing a
+SQLite snapshot across the existing head, edition, and life readers is separate.

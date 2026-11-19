@@ -56,7 +56,7 @@ function decodeCursor(value:unknown):ArchiveCursor|null {
   return c;
  }catch{return null;}
 }
-function validFact(v:unknown):v is PublicWeatherFact {
+export function validPublicWeatherFact(v:unknown):v is PublicWeatherFact {
  if(!exact(v,keys))return false;const f=v as PublicWeatherFact;
  if(f.projectionVersion!==1||typeof f.worldId!=='string'||!f.worldId.startsWith('godot-mvp-')||f.worldId.length>200||!integer(f.worldRevision)||!Number.isFinite(f.minute)||f.minute<0||f.minute>1e9||typeof f.atUs!=='string'||f.atUs!==minuteToClimateUs(f.minute)||!['sun','cloud','rain','snow','mixed'].includes(f.condition)||!Number.isInteger(f.temperatureDeciC)||f.temperatureDeciC< -300||f.temperatureDeciC>450)return false;
  return ['relativeHumidityPermille','cloudPermille','windPermille','daylightPermille','precipitationPermille'].every(k=>{const n=f[k as keyof PublicWeatherFact];return typeof n==='number'&&Number.isInteger(n)&&n>=0&&n<=1000;});
@@ -66,17 +66,17 @@ export function publicWeatherProjection(w:World):PublicWeatherFact|null {
  try{if(w.simulationOnly||w.mode!=='validation'||!w.mvpClimate||![1,2,3].includes(w.mvpClimate.schemaVersion)||w.mvpClimate.algorithmVersion!==1||w.mvpClimate.lastMinute!==w.minute)return null;
  const p=w.mvpClimate.current;if(p.schemaVersion!==w.mvpClimate.schemaVersion||p.algorithmVersion!==1)return null;
  const f:PublicWeatherFact={projectionVersion:1,worldId:w.id,worldRevision:w.revision,minute:w.minute,atUs:p.atUs,condition:p.condition,temperatureDeciC:p.temperatureDeciC,relativeHumidityPermille:p.relativeHumidityPermille,cloudPermille:p.cloudPermille,windPermille:p.windPermille,daylightPermille:p.daylightPermille,precipitationPermille:p.precipitationPermille};
- return validFact(f)?f:null;}catch{return null;}
+ return validPublicWeatherFact(f)?f:null;}catch{return null;}
 }
 const seasons={spring:'春',summer:'夏',autumn:'秋',winter:'冬'};
 const weather={sun:'晴',cloud:'阴',rain:'雨',snow:'雪',mixed:'雨雪混合'};
 function describe(f:PublicWeatherFact):string {const c=calendar(f.minute);return `第${c.year}年${seasons[c.season]}季第${c.day}日 ${String(c.hour).padStart(2,'0')}:${String(c.minute).padStart(2,'0')}，此时${weather[f.condition]}，气温${(f.temperatureDeciC/10).toFixed(1)}℃、相对湿度${(f.relativeHumidityPermille/10).toFixed(1)}%。这是一个实际时点记录，不代表整日天气。`;}
-function entryId(f:PublicWeatherFact,version:number){return `weather-${version}-${Math.floor(f.minute/60)}`;}
+export function publicWeatherEntryId(f:PublicWeatherFact,version:number){return `weather-${version}-${Math.floor(f.minute/60)}`;}
 function validJournal(v:unknown,head:PublicWeatherFact):v is Journal {
  if(!exact(v,['schemaVersion','worldId','permission','entries']))return false;const j=v as Journal;
  if(j.schemaVersion!==1||j.worldId!==head.worldId||!exact(j.permission,['version','publicWeather'])||!integer(j.permission.version)||j.permission.version<1||typeof j.permission.publicWeather!=='boolean'||!Array.isArray(j.entries))return false;
  let minute=-1,revision=-1,permission=0;const ids=new Set<string>();
- for(const e of j.entries){if(!exact(e,['entryId','sourceRef','permissionVersion','fromMinute','toMinute','fact','text'])||!validFact(e.fact)||e.fact.worldId!==head.worldId||e.fact.minute>head.minute||e.fact.worldRevision>head.worldRevision||e.fact.minute<minute||e.fact.worldRevision<revision||!integer(e.permissionVersion)||e.permissionVersion<1||e.permissionVersion<permission||e.permissionVersion>j.permission.version||e.entryId!==entryId(e.fact,e.permissionVersion)||ids.has(e.entryId)||e.sourceRef!==`${j.worldId}/${e.entryId}`||e.fromMinute!==e.fact.minute||e.toMinute!==e.fact.minute||e.text!==describe(e.fact))return false;ids.add(e.entryId);minute=e.fact.minute;revision=e.fact.worldRevision;permission=e.permissionVersion;}
+ for(const e of j.entries){if(!exact(e,['entryId','sourceRef','permissionVersion','fromMinute','toMinute','fact','text'])||!validPublicWeatherFact(e.fact)||e.fact.worldId!==head.worldId||e.fact.minute>head.minute||e.fact.worldRevision>head.worldRevision||e.fact.minute<minute||e.fact.worldRevision<revision||!integer(e.permissionVersion)||e.permissionVersion<1||e.permissionVersion<permission||e.permissionVersion>j.permission.version||e.entryId!==publicWeatherEntryId(e.fact,e.permissionVersion)||ids.has(e.entryId)||e.sourceRef!==`${j.worldId}/${e.entryId}`||e.fromMinute!==e.fact.minute||e.toMinute!==e.fact.minute||e.text!==describe(e.fact))return false;ids.add(e.entryId);minute=e.fact.minute;revision=e.fact.worldRevision;permission=e.permissionVersion;}
  return true;
 }
 function readWeatherJournal(path:string):string|null {
@@ -88,7 +88,7 @@ function readWeatherJournal(path:string):string|null {
  * Caller owns the runtime lock and supplies the committed projection and SQL
  * permission. Monitor the returned bytes against the prior accepted prefix. */
 export function readExistingPublicWeatherJournal(database:string,head:PublicWeatherFact,grant:{version:number;publicWeather:boolean}|null){
- if(!validFact(head)||!grant?.publicWeather)return null;
+ if(!validPublicWeatherFact(head)||!grant?.publicWeather)return null;
  const raw=readWeatherJournal(resolve(database)+'.valley-spirit.json');
  if(raw===null)return null;
  const parsed:unknown=JSON.parse(raw);
@@ -107,7 +107,7 @@ export class ValleySpiritJournal {
  private readonly path:string;
  constructor(database:string,head:PublicWeatherFact,private readonly assertOwned:()=>void,private readonly permissions:ValleySpiritPermissionAuthority){
   this.path=resolve(database)+'.valley-spirit.json';this.head=structuredClone(head);
-  try{if(!validFact(head))throw Error('invalid_public_fact');assertOwned();const text=this.read(),authority=permissions.read();if(text===null){if(authority)throw Error('initialized_journal_missing');this.state={schemaVersion:1,worldId:head.worldId,permission:permissions.initialize(),entries:[]};}else{const parsed:unknown=JSON.parse(text);if(!authority||!validJournal(parsed,head)||parsed.permission.version!==authority.version||parsed.permission.publicWeather!==authority.publicWeather)throw Error('incompatible_journal');this.state=parsed;}this.diskText=text;}catch{this.isolated=true;}
+  try{if(!validPublicWeatherFact(head))throw Error('invalid_public_fact');assertOwned();const text=this.read(),authority=permissions.read();if(text===null){if(authority)throw Error('initialized_journal_missing');this.state={schemaVersion:1,worldId:head.worldId,permission:permissions.initialize(),entries:[]};}else{const parsed:unknown=JSON.parse(text);if(!authority||!validJournal(parsed,head)||parsed.permission.version!==authority.version||parsed.permission.publicWeather!==authority.publicWeather)throw Error('incompatible_journal');this.state=parsed;}this.diskText=text;}catch{this.isolated=true;}
  }
  isolate():void {this.isolated=true;}
  private read():string|null{return readWeatherJournal(this.path);}
@@ -123,8 +123,8 @@ export class ValleySpiritJournal {
  }
  /** Called only after authoritative world commit succeeds. No catch-up or guessed gaps. */
  observe(fact:PublicWeatherFact|null):void {
-  try{const s=this.current();if(!s)return;if(!validFact(fact)||fact.worldId!==this.head.worldId||fact.minute<this.head.minute||fact.worldRevision<this.head.worldRevision)throw Error('invalid_committed_public_fact');this.head=structuredClone(fact);
-   if(!s.permission.publicWeather)return;const id=entryId(fact,s.permission.version);if(s.entries.some(e=>e.entryId===id))return;
+  try{const s=this.current();if(!s)return;if(!validPublicWeatherFact(fact)||fact.worldId!==this.head.worldId||fact.minute<this.head.minute||fact.worldRevision<this.head.worldRevision)throw Error('invalid_committed_public_fact');this.head=structuredClone(fact);
+   if(!s.permission.publicWeather)return;const id=publicWeatherEntryId(fact,s.permission.version);if(s.entries.some(e=>e.entryId===id))return;
    const next=structuredClone(s);next.entries.push({entryId:id,sourceRef:`${s.worldId}/${id}`,permissionVersion:s.permission.version,fromMinute:fact.minute,toMinute:fact.minute,fact:structuredClone(fact),text:describe(fact)});this.save(next);
   }catch{this.isolated=true;}
  }
