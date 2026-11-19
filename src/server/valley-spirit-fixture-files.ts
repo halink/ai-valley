@@ -13,6 +13,7 @@ const databaseName='fixture.sqlite';
 const shape='valley-spirit-private-developer-fixture/v1';
 const formalShape='valley-spirit-private-formal-fixture/v1';
 const formalShadowShape='valley-spirit-private-formal-fixture/v2';
+const agedReviewShape='valley-spirit-private-aged-placement-fixture/v2';
 const agedPlacementShape='valley-spirit-private-aged-placement-fixture/v1';
 const sourceAgeShape='valley-spirit-private-source-age-fixture/v1';
 const reviewedShape='valley-spirit-private-yearbook-review-fixture/v1';
@@ -32,12 +33,13 @@ function root():string {
  return realpathSync(tmpdir());
 }
 interface Manifest {
- readonly schema:typeof shape|typeof formalShape|typeof formalShadowShape|typeof reviewedShape|typeof sourceAgeShape|typeof weatherUseShape|typeof agedPlacementShape;
+ readonly schema:typeof shape|typeof formalShape|typeof formalShadowShape|typeof reviewedShape|typeof sourceAgeShape|typeof weatherUseShape|typeof agedPlacementShape|typeof agedReviewShape;
  readonly approvalKeyPem?:string;
  readonly yearbookReviewerKeyPem?:string;
  readonly weatherUse?:Readonly<{keyPem:string;accountFingerprint:string}>;
  readonly sourceAge?:Readonly<{keyPem:string;policy:SealedMvpSourceAgePolicy}>;
  readonly agedPlacementKeyPem?:string;
+ readonly agedG1ReviewerKeyPem?:string;
  readonly shadowKeyPem?:string;
  readonly directoryIdentity:string;
  readonly databaseIdentity:string;
@@ -56,6 +58,7 @@ export interface DeveloperMvpSpiritFixtureOwner {
  readonly weatherUse?:Readonly<{keyPem:string;accountFingerprint:string}>;
  readonly sourceAge?:Readonly<{keyPem:string;policy:SealedMvpSourceAgePolicy}>;
  readonly agedPlacementKeyPem?:string;
+ readonly agedG1ReviewerKeyPem?:string;
  readonly formalShadowKeyPem?:string;
  readonly seal:string;
  readonly capacity:MvpGroundFruitCapacity;
@@ -112,7 +115,15 @@ export function createDeveloperMvpAgedPlacementFixtureKey(
   capacity.worldLots<1||capacity.lotsPerTarget<1)return invalid();
  return createKey(capacity,undefined,undefined,undefined,{keyPem:ageKeyPem,policy:{...policy}},undefined,effectKeyPem);
 }
-function createKey(capacity:MvpGroundFruitCapacity,approvalKeyPem?:string,shadowKeyPem?:string,yearbookReviewerKeyPem?:string,sourceAge?:Manifest['sourceAge'],weatherUse?:Manifest['weatherUse'],agedPlacementKeyPem?:string):DeveloperMvpSpiritFixtureKey {
+export function createDeveloperMvpAgedReviewFixtureKey(
+ capacity:MvpGroundFruitCapacity,ageKeyPem:string,policy:SealedMvpSourceAgePolicy,effectKeyPem:string,reviewerKeyPem:string,
+):DeveloperMvpSpiritFixtureKey {
+ if(!independentKeys(ageKeyPem,effectKeyPem)||!independentKeys(ageKeyPem,reviewerKeyPem)||
+  !independentKeys(effectKeyPem,reviewerKeyPem)||!validSealedMvpSourceAgePolicy(policy)||
+  capacity.worldLots<1||capacity.lotsPerTarget<1)return invalid();
+ return createKey(capacity,undefined,undefined,undefined,{keyPem:ageKeyPem,policy:{...policy}},undefined,effectKeyPem,reviewerKeyPem);
+}
+function createKey(capacity:MvpGroundFruitCapacity,approvalKeyPem?:string,shadowKeyPem?:string,yearbookReviewerKeyPem?:string,sourceAge?:Manifest['sourceAge'],weatherUse?:Manifest['weatherUse'],agedPlacementKeyPem?:string,agedG1ReviewerKeyPem?:string):DeveloperMvpSpiritFixtureKey {
  if(!validMvpSpiritFixtureCapacity(capacity))return invalid();
  const directory=mkdtempSync(join(root(),prefix));
  const initial=lstatSync(directory,{bigint:true});if(!privateDirectory(initial))return invalid();
@@ -123,7 +134,7 @@ function createKey(capacity:MvpGroundFruitCapacity,approvalKeyPem?:string,shadow
   const s=fstatSync(fd,{bigint:true});if(!privateFile(s)||s.size!==0n)return invalid();
   databaseIdentity=identity(s);fsyncSync(fd);
  }finally{closeSync(fd);}
- const manifest:Manifest={schema:agedPlacementKeyPem?agedPlacementShape:weatherUse?weatherUseShape:sourceAge?sourceAgeShape:yearbookReviewerKeyPem?reviewedShape:shadowKeyPem?formalShadowShape:approvalKeyPem?formalShape:shape,directoryIdentity:identity(initial),databaseIdentity,tokenHash:digest(token),capacity:{...capacity},...(approvalKeyPem?{approvalKeyPem}:{}),...(shadowKeyPem?{shadowKeyPem}:{}),...(yearbookReviewerKeyPem?{yearbookReviewerKeyPem}:{}),...(sourceAge?{sourceAge}:{}),...(weatherUse?{weatherUse}:{}),...(agedPlacementKeyPem?{agedPlacementKeyPem}:{})};
+ const manifest:Manifest={schema:agedG1ReviewerKeyPem?agedReviewShape:agedPlacementKeyPem?agedPlacementShape:weatherUse?weatherUseShape:sourceAge?sourceAgeShape:yearbookReviewerKeyPem?reviewedShape:shadowKeyPem?formalShadowShape:approvalKeyPem?formalShape:shape,directoryIdentity:identity(initial),databaseIdentity,tokenHash:digest(token),capacity:{...capacity},...(approvalKeyPem?{approvalKeyPem}:{}),...(shadowKeyPem?{shadowKeyPem}:{}),...(yearbookReviewerKeyPem?{yearbookReviewerKeyPem}:{}),...(sourceAge?{sourceAge}:{}),...(weatherUse?{weatherUse}:{}),...(agedPlacementKeyPem?{agedPlacementKeyPem}:{}),...(agedG1ReviewerKeyPem?{agedG1ReviewerKeyPem}:{})};
  const metadata=openSync(join(directory,manifestName),constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600);
  try{writeFileSync(metadata,JSON.stringify(manifest),'utf8');fsyncSync(metadata);}finally{closeSync(metadata);}
  const parent=openSync(directory,constants.O_RDONLY|constants.O_DIRECTORY|constants.O_NOFOLLOW);
@@ -153,6 +164,10 @@ function readManifest(path:string):{identity:string;value:Manifest} {
   if(!(v?.schema===shape&&exact(v,base)||v?.schema===formalShape&&exact(v,[...base,'approvalKeyPem'])&&formalApprovalKey(v.approvalKeyPem)||
    v?.schema===agedPlacementShape&&exact(v,[...base,'sourceAge','agedPlacementKeyPem'])&&exact(v.sourceAge,['keyPem','policy'])&&
     independentKeys(v.sourceAge!.keyPem,v.agedPlacementKeyPem)&&validSealedMvpSourceAgePolicy(v.sourceAge!.policy)&&
+    v.capacity?.worldLots>0&&v.capacity?.lotsPerTarget>0||
+   v?.schema===agedReviewShape&&exact(v,[...base,'sourceAge','agedPlacementKeyPem','agedG1ReviewerKeyPem'])&&exact(v.sourceAge,['keyPem','policy'])&&
+    independentKeys(v.sourceAge!.keyPem,v.agedPlacementKeyPem)&&independentKeys(v.sourceAge!.keyPem,v.agedG1ReviewerKeyPem)&&
+    independentKeys(v.agedPlacementKeyPem!,v.agedG1ReviewerKeyPem)&&validSealedMvpSourceAgePolicy(v.sourceAge!.policy)&&
     v.capacity?.worldLots>0&&v.capacity?.lotsPerTarget>0||
    v?.schema===sourceAgeShape&&exact(v,[...base,'sourceAge'])&&exact(v.sourceAge,['keyPem','policy'])&&
     formalApprovalKey(v.sourceAge!.keyPem)&&validSealedMvpSourceAgePolicy(v.sourceAge!.policy)||
@@ -193,6 +208,7 @@ export function acquireDeveloperMvpSpiritFixtureOwner(key:DeveloperMvpSpiritFixt
    ...(manifest.weatherUse?{weatherUse:Object.freeze({...manifest.weatherUse})}:{}),
    ...(manifest.sourceAge?{sourceAge:Object.freeze({keyPem:manifest.sourceAge.keyPem,policy:Object.freeze({...manifest.sourceAge.policy})})}:{}),
    ...(manifest.agedPlacementKeyPem?{agedPlacementKeyPem:manifest.agedPlacementKeyPem}:{}),
+   ...(manifest.agedG1ReviewerKeyPem?{agedG1ReviewerKeyPem:manifest.agedG1ReviewerKeyPem}:{}),
    ...(manifest.shadowKeyPem?{formalShadowKeyPem:manifest.shadowKeyPem}:{}),
    assertOwned(){
     if(!active.has(owner))return invalid();

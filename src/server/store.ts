@@ -1,3 +1,5 @@
+import {agedG1ReviewTerms,agedG1RevokeTerms,advanceAgedG1ReviewEpoch,initializeAgedG1ReviewEpoch,
+ readAgedG1ReviewEpoch,verifiesAgedG1Review} from './valley-spirit-aged-g1-review.js';
 import {buildSealedMvpAgedG1Basis} from './valley-spirit-aged-g1.js';
 import {makeSealedAgedPlacementTerms,sealedAgedPlacementAgeDigest,sealedAgedPlacementScope,verifiesSealedAgedPlacementEncoding} from './valley-spirit-aged-placement-terms.js';
 import {valleySpiritFruitFallOpportunityId} from '../shared/valley-spirit-effects.js';
@@ -82,6 +84,8 @@ export class WorldStore {
  private readonly seasonalModel:boolean;
  private readonly mvpSpiritEffectFixture?:MvpGroundFruitCapacity;
  private readonly developerSpiritFixtureOwner?:DeveloperMvpSpiritFixtureOwner;
+ private agedG1ObservedEpoch:number|undefined;
+ private agedG1EpochIsolated=false;
  constructor(path:string,options:{formalRainProvenance?:true;dailySnapshots?:DailySnapshotConfig;allowMvpClimate?:boolean;seasonalModel?:true;mvpSpiritEffectFixture?:MvpGroundFruitCapacity;developerSpiritFixtureOwner?:DeveloperMvpSpiritFixtureOwner;nativeWeatherCredit?:true}={}){
   this.allowMvpClimate=options.allowMvpClimate===true;
   this.allowFormalRainProvenance=options.formalRainProvenance===true&&!this.allowMvpClimate&&!options.seasonalModel;
@@ -134,8 +138,12 @@ export class WorldStore {
    this.db.prepare('INSERT INTO mvp_spirit_developer_fixture VALUES (1,?)').run(owner!.seal);
    if(owner!.formalApprovalKeyPem)this.db.exec(FORMAL_BERRY_EFFECT_SCHEMA);
    if(owner!.formalShadowKeyPem)initializeFormalShadowCustody(this.db);
+   if(owner!.agedG1ReviewerKeyPem)initializeAgedG1ReviewEpoch(this.db,owner!.seal);
    this.db.exec('COMMIT');
   }
+  if(owner?.agedG1ReviewerKeyPem)try{
+   this.agedG1ObservedEpoch=readAgedG1ReviewEpoch(this.db,owner.seal);
+  }catch{this.agedG1EpochIsolated=true;}
   if(!this.db.prepare("SELECT value FROM archive_meta WHERE key='event_people_v1'").get()){
    this.db.exec('BEGIN IMMEDIATE');try{this.db.exec("INSERT OR IGNORE INTO event_people(world_id,person_id,event_id,event_seq) SELECT e.world_id,a.value,e.id,e.rowid FROM events e,json_each(e.body,'$.actors') a WHERE typeof(a.value)='text'");this.db.prepare('INSERT INTO archive_meta(key,value) VALUES(?,?)').run('event_people_v1','1');this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
@@ -843,6 +851,59 @@ export class WorldStore {
     assertDeveloperMvpEffectArchive(this.db,w);
     const result=buildSealedMvpAgedG1Basis(this.db,owner,w,proposalId,proof);
     this.db.exec('COMMIT');return result;
+   }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }catch{return null;}
+ }
+ private checkedAgedG1ReviewEpoch(seal:string){
+  if(this.agedG1EpochIsolated)throw Error('aged_g1_review_epoch_isolated');
+  const epoch=readAgedG1ReviewEpoch(this.db,seal);
+  if(this.agedG1ObservedEpoch!==undefined&&epoch<this.agedG1ObservedEpoch){
+   this.agedG1EpochIsolated=true;
+   throw Error('aged_g1_review_epoch_rewound_on_open_handle');
+  }
+  return epoch;
+ }
+ /** Reviewer-only signature, re-derived from current independently
+  * verified age, rain, candidate and live grant inside one owned snapshot. */
+ readDeveloperMvpAgedG1Review(worldId:string,proposalId:string,ageProof:unknown,review?:unknown){
+  const owner=this.developerSpiritFixtureOwner,key=owner?.agedG1ReviewerKeyPem;
+  if(!owner||!key)return null;
+  try{
+   const age=structuredClone(ageProof),signed=structuredClone(review);
+   owner.assertOwned();this.db.exec('BEGIN');
+   try{
+    const w=this.readWorld(false,false);
+    if(!w||w.id!==worldId){this.db.exec('COMMIT');return null;}
+    assertDeveloperMvpEffectArchive(this.db,w);
+    const basis=buildSealedMvpAgedG1Basis(this.db,owner,w,proposalId,age);
+    const epoch=this.checkedAgedG1ReviewEpoch(owner.seal);
+    const terms=basis?agedG1ReviewTerms(basis,epoch):null;
+    const result=!terms?null:signed===undefined?{status:'review-signing-input' as const,terms,executionAuthorized:false as const}:
+     verifiesAgedG1Review(key,terms,signed)?{status:'review-verified' as const,terms,executionAuthorized:false as const}:null;
+    this.db.exec('COMMIT');this.agedG1ObservedEpoch=epoch;return result;
+   }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }catch{return null;}
+ }
+ /** The sole durable reviewer state is a global, monotonic revocation floor.
+  * Scope is sealed and a verified update never writes the world or queue. */
+ revokeDeveloperMvpAgedG1Reviews(worldId:string,review?:unknown){
+  const owner=this.developerSpiritFixtureOwner,key=owner?.agedG1ReviewerKeyPem;
+  if(!owner||!key)return null;
+  try{
+   const signed=structuredClone(review);
+   owner.assertOwned();this.db.exec(signed===undefined?'BEGIN':'BEGIN IMMEDIATE');
+   try{
+    const w=this.readWorld(false,false);
+    if(!w||w.id!==worldId){this.db.exec('COMMIT');return null;}
+    const epoch=this.checkedAgedG1ReviewEpoch(owner.seal);
+    if(!Number.isSafeInteger(epoch+1)){this.db.exec('COMMIT');this.agedG1ObservedEpoch=epoch;return null;}
+    const terms=agedG1RevokeTerms(sealedAgedPlacementScope(owner.seal),w.id,epoch);
+    if(signed!==undefined){
+     if(!verifiesAgedG1Review(key,terms,signed)){this.db.exec('COMMIT');this.agedG1ObservedEpoch=epoch;return null;}
+     advanceAgedG1ReviewEpoch(this.db,owner.seal,epoch);
+    }
+    this.db.exec('COMMIT');this.agedG1ObservedEpoch=signed===undefined?epoch:epoch+1;
+    return {status:signed===undefined?'revocation-signing-input' as const:'revoked-prior-reviews' as const,terms};
    }catch(error){this.db.exec('ROLLBACK');throw error;}
   }catch{return null;}
  }
