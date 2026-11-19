@@ -11,8 +11,9 @@ import {findPath,distance} from './navigation.js';
 import {MVP_HALL} from '../shared/mvp-hamlet.js';
 import {roomLayout,roomPath} from '../shared/rooms.js';
 import {emitEvent} from './events.js';
+import {AGRICULTURE_MEAL_RECIPE as MEAL} from '../shared/mvp-meals.js';
 export const AGRICULTURE_WORK_MINUTES={plant:15,water:8,harvest:10,clear:30,collectSeed:10,saveSeed:30,cook:20} as const;
-export const AGRICULTURE_PARAMETERS=JSON.stringify({version:1,cultivars:CULTIVARS,workMinutes:AGRICULTURE_WORK_MINUTES,temperatureDenominator:400,growthDenominatorMultiplier:8000,cropRateMultiplier:10000,microOrder:'snow,melt,rain,evap,crop,drain,growth-end-water',matureStopsUse:true,grant:'min(P,2N)',claim:'plot+demandEpoch;held-seed-plotId-order;harvest-only-epoch',yield:3,save:{roots:1,seeds:2},cook:{roots:2,water:1,meal:1},nutrition:{spring:goods.springRoot.food,summer:goods.summerRoot.food,winter:goods.winterRoot.food,meal:goods.meal.food}});
+export const AGRICULTURE_PARAMETERS=JSON.stringify({version:1,cultivars:CULTIVARS,workMinutes:AGRICULTURE_WORK_MINUTES,temperatureDenominator:400,growthDenominatorMultiplier:8000,cropRateMultiplier:10000,microOrder:'snow,melt,rain,evap,crop,drain,growth-end-water',matureStopsUse:true,grant:'min(P,2N)',claim:'plot+demandEpoch;held-seed-plotId-order;harvest-only-epoch',yield:3,save:{roots:1,seeds:2},cook:MEAL,nutrition:{spring:goods.springRoot.food,summer:goods.summerRoot.food,winter:goods.winterRoot.food,meal:goods.meal.food}});
 export const AGRICULTURE_FINGERPRINT=createHash('sha256').update(AGRICULTURE_PARAMETERS).digest('hex');
 export const GROWTH_DENOMINATOR=8000n*D;
 const own=(v:object,k:string)=>Object.prototype.hasOwnProperty.call(v,k);
@@ -68,7 +69,7 @@ export function agricultureReason(w:World,r:Resident,a:AgricultureAction,onSite=
  }
  if(['collectSeed','saveSeed','cook'].includes(a.operation)){const station=agricultureStation(w,r,a.operation);if(!station)return '没有实际可达的种台或厨房';if(onSite&&(r.inside!==station.building.id||r.at.x!==station.building.door.x||r.at.y!==station.building.door.y||r.roomAt?.x!==station.at.x||r.roomAt?.y!==station.at.y))return '尚未实际到达劳动工位';}
  if(a.operation==='saveSeed'&&(r.inventory[d.root]??0)<1)return '留种需要本人一份实际同种根菜';
- if(a.operation==='cook'&&((r.inventory[d.root]??0)<2||(r.inventory.water??0)<1))return '烹饪需要本人两份同种根菜和一份清水';
+ if(a.operation==='cook'&&((r.inventory[d.root]??0)<MEAL.roots||(r.inventory.water??0)<MEAL.water))return '烹饪需要本人两份同种根菜和一份清水';
  if(a.operation==='collectSeed'){
   if(!canSow(w,a.cultivar)||!Array.isArray(a.targets)||!a.targets.length||a.targets.length>w.plots.length)return '领取须用于当前合法播季的本人真实田地缺口';
   const ids=new Set<string>();for(const t of a.targets){if(ids.has(t.plotId)||targetReason(w,r,t)||t.instanceId!==null&&!t.replace)return '领取目标必须逐田有效并明确确认替换原实例';ids.add(t.plotId);}
@@ -85,10 +86,10 @@ export function completeAgriculture(w:World,r:Resident,a:AgricultureAction):stri
  if(a.operation==='harvest'){r.inventory[d.root]=(r.inventory[d.root]??0)+3;p!.crop=null;retireCrop(w,p!,'harvest');}
  if(a.operation==='clear'){p!.crop=null;retireCrop(w,p!,'clear');}
  if(a.operation==='saveSeed'){r.inventory[d.root]!-=1;r.inventory[d.seed]=(r.inventory[d.seed]??0)+2;}
- if(a.operation==='cook'){r.inventory[d.root]!-=2;r.inventory.water!-=1;r.inventory.meal=(r.inventory.meal??0)+1;}
+ if(a.operation==='cook'){r.inventory[d.root]!-=MEAL.roots;r.inventory.water!-=MEAL.water;r.inventory.meal=(r.inventory.meal??0)+MEAL.meal;}
  if(a.operation==='collectSeed'){s.grants[a.cultivar].stock--;r.inventory[d.seed]=(r.inventory[d.seed]??0)+1;}
  const labels={plant:'播种',harvest:'收获3份',clear:'清除原作物，无退种或产粮',saveSeed:'用1根留出2份种子',cook:'用2根和1水做成1份餐食',collectSeed:'领取1份有限公共种子'};
- const event=emitEvent(w,{kind:'production',actors:[r.id],place:{...r.at},text:a.operation==='clear'?r.name+'清除本人田里的原作物，不退种、不产粮。':r.name+'完成'+d.name+'：'+labels[a.operation]+'。',agriculture:{executionId:id,operation:a.operation,cultivar:a.cultivar,plotId,epoch:'target'in a?a.target.epoch:null,instanceId:'target'in a?a.target.instanceId:null}});
+ const event=emitEvent(w,{kind:'production',actors:[r.id],place:{...r.at}, ...(a.operation==='cook'?{mvpMeal:{schemaVersion:1,kind:'cooked',cultivar:a.cultivar,...MEAL}}:{}),text:a.operation==='clear'?r.name+'清除本人田里的原作物，不退种、不产粮。':r.name+'完成'+d.name+'：'+labels[a.operation]+'。',agriculture:{executionId:id,operation:a.operation,cultivar:a.cultivar,plotId,epoch:'target'in a?a.target.epoch:null,instanceId:'target'in a?a.target.instanceId:null}});
  s.receipts[id]={actorId:r.id,operation:a.operation,cultivar:a.cultivar,plotId,epoch:'target'in a?a.target.epoch:null,instanceId:'target'in a?a.target.instanceId:null,eventId:event.id};
  if(a.operation==='collectSeed')s.claims[a.target.plotId+'|'+a.target.epoch]={actorId:r.id,plotId:a.target.plotId,epoch:a.target.epoch,cultivar:a.cultivar,executionId:id,eventId:event.id};return null;
 }

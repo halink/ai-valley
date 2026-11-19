@@ -6,6 +6,7 @@ const ObserverHud = preload("res://observer_hud.gd")
 const JournalRecords = preload("res://journal_records.gd")
 const Snapshot = preload("res://snapshot.gd")
 const SeedObservation = preload("res://seed_observation.gd")
+const MealObservation = preload("res://meal_observation.gd")
 const AgricultureObservation = preload("res://agriculture_observation.gd")
 const PreservationObservation = preload("res://preservation_observation.gd")
 const ValleySpirit = preload("res://valley_spirit.gd")
@@ -27,6 +28,7 @@ var soil_observation: Dictionary = {}
 var agriculture_observation: Dictionary = {}
 var preservation_observation: Dictionary = {}
 var resident_weather: Dictionary = {}
+var meal_observation: Variant
 var valley_spirit_snapshot: Dictionary = {}
 var relationship_history: Variant
 var selected_resident := ""
@@ -99,6 +101,7 @@ func _connect_server(origin: String) -> void:
 	agriculture_observation = {}
 	preservation_observation = {}
 	resident_weather = {}
+	meal_observation = null
 	valley_spirit_snapshot = {}
 	valley.agriculture_observation = {}
 	valley.environment_preview = {}
@@ -157,6 +160,7 @@ func _apply_snapshot(parsed: Dictionary) -> void:
 	soil_observation = SoilObservation.from_snapshot(parsed)
 	agriculture_observation = AgricultureObservation.from_snapshot(parsed)
 	preservation_observation = PreservationObservation.from_snapshot(parsed)
+	meal_observation = mode.get("mealObservation")
 	var perceptions: Variant = mode.get("residentWeather")
 	resident_weather = perceptions if perceptions is Dictionary else {}
 	valley_spirit_snapshot = {"world":{"id":world.id,"revision":world.revision,"minute":world.minute},"valleySpirit":parsed.get("valleySpirit")}
@@ -517,6 +521,8 @@ func _update_resident_card() -> void:
 		details += Snapshot.resident_weather_label(resident_weather, person, world.get("minute")) + "\n"
 		if person.get("plan") is Dictionary: details += Snapshot.plan_summary(person) + "\n"
 		details += PreservationObservation.details(preservation_observation, str(person.id)) + "\n\n"
+		if world.get("mode") == "validation":
+			details += MealObservation.details(meal_observation, str(person.id), world.get("minute")) + "\n\n"
 		details += Snapshot.memory_summary(person)
 	var home_id := str(person.get("homeId", ""))
 	var residence := _building_name(_building(home_id)) if connected and valley.room_layouts.has(home_id) else ""

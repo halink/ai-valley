@@ -450,7 +450,10 @@ function completeAtomic(world:World,r:Resident,a:Action,definition:string,elapse
  if(a.type==='mvpDrink')return completeMvpDrink(world,r);
  if(a.type==='eat'){
   if(a.mvpAtTable){const place=mvpDiningPlace(world,r);if(!place||r.inside!==place.building.id||r.roomAt?.x!==place.at.x||r.roomAt.y!==place.at.y)return '尚未到达本人实际餐位';}
-  if(!has(r.inventory,{[a.item]:1}))return '食物已经不足';const nutrition=foodValue(world,'person:'+r.id,a.item),before=r.hunger;consume(r.inventory,{[a.item]:1});r.hunger=Math.max(0,r.hunger-nutrition);const event=record(`${r.name}吃了一份${names[a.item]}。`);
+  if(!has(r.inventory,{[a.item]:1}))return '食物已经不足';const nutrition=foodValue(world,'person:'+r.id,a.item),before=r.hunger;consume(r.inventory,{[a.item]:1});r.hunger=Math.max(0,r.hunger-nutrition);const text=`${r.name}吃了一份${names[a.item]}。`;
+  const event=world.mode==='validation'&&a.item==='meal'
+   ?emitEvent(world,{kind:'action',actors:[r.id],place:{...r.at},text,mvpMeal:{schemaVersion:1,kind:'ate',meal:1}})
+   :record(text);
   recordDirectEating(world,{at:world.minute,residentId:r.id,eventId:event.id,planId:r.activity!.planId,container:'person:'+r.id,item:a.item,quantity:1,nutrition,hungerRelief:before-r.hunger});return null;
  }
  if(a.type==='gather'){
