@@ -1,3 +1,6 @@
+import type {AddressedSpeechObservation} from '../world/addressed-speech.js';
+import {appendValleySpiritSpeechCustody,readValleySpiritSpeechCustody,verifyValleySpiritSpeechCustody} from './valley-spirit-speech-custody.js';
+import type {ValleySpiritLifeReceipt} from './valley-spirit-life-facts.js';
 import {createHash} from 'node:crypto';
 import {readSeasonalLedger,writeSeasonalLedger,type SeasonalLedger} from './seasonal-model-ledger.js';
 import {assertSeasonalKnowledgeAdvance} from '../world/mvp-seasonal-knowledge.js';
@@ -212,12 +215,43 @@ export class WorldStore {
   if(!this.seasonalModel&&world.mvpSeasonalModelVersion!==undefined)throw Error('seasonal_model_store_required');
  }
  commit(world:World,previousRevision:number|null,appended?:AppendedHistory,seasonalLedger?:SeasonalLedger):void{
+  this.commitTransaction(world,previousRevision,appended,seasonalLedger);
+ }
+ /** Explicit developer attachment only. The private append shares the exact
+  * world transaction; results escape only after COMMIT succeeds. */
+ commitMvpWithAddressedSpeech(world:World,previousRevision:number,proof?:AddressedSpeechObservation):readonly ValleySpiritLifeReceipt[]{
+  if(!this.allowMvpClimate||this.seasonalModel||this.dailySnapshots||world.mode!=='validation')
+   throw Error('mvp_addressed_speech_store_required');
+  return this.commitTransaction(world,previousRevision,undefined,undefined,proof);
+ }
+ readCommittedMvpAddressedSpeech(worldId:string,eventId:string):ValleySpiritLifeReceipt|null{
+  return this.allowMvpClimate&&!this.seasonalModel?readValleySpiritSpeechCustody(this.db,worldId,eventId):null;
+ }
+ verifyCommittedMvpAddressedSpeech(receipt:Readonly<ValleySpiritLifeReceipt>):boolean{
+  return this.allowMvpClimate&&!this.seasonalModel&&verifyValleySpiritSpeechCustody(this.db,receipt);
+ }
+ private commitTransaction(world:World,previousRevision:number|null,appended?:AppendedHistory,seasonalLedger?:SeasonalLedger,
+  proof?:AddressedSpeechObservation):readonly ValleySpiritLifeReceipt[]{
   this.assertWritable(world);
   this.db.exec('BEGIN IMMEDIATE');
   try{
    this.writeCommit(world,previousRevision,appended,seasonalLedger);
+   let speech:readonly ValleySpiritLifeReceipt[]=[];
+   if(Array.isArray(proof?.receipts)&&proof.receipts.length){
+    this.db.exec('SAVEPOINT optional_speech_custody');
+    try{
+     speech=appendValleySpiritSpeechCustody(this.db,world,previousRevision,proof);
+     this.db.exec('RELEASE optional_speech_custody');
+    }catch{
+     // Unknown optional custody must not corrupt or block the world log.
+     this.db.exec('ROLLBACK TO optional_speech_custody');
+     this.db.exec('RELEASE optional_speech_custody');
+     speech=[];
+    }
+   }
    this.db.exec('COMMIT');
    if(world.mode==='formal'){this.terrainKeys.add(terrainRevision(world.map));this.separateLedgers.add(world.id);}
+   return speech;
   }catch(error){this.db.exec('ROLLBACK');throw error;}
  }
  /** Internal read-only seam. Memory fixtures and ordinary/production saves

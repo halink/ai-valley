@@ -1,3 +1,4 @@
+import {captureAddressedSpeech,type AddressedSpeechObservation} from '../world/addressed-speech.js';
 import type {ValleySpiritLifeViewer,ValleySpiritPublishedLifeView} from './valley-spirit-life-publisher.js';
 import {captureValleySpiritMvpMealStep,type ValleySpiritMvpMealWitness} from './valley-spirit-meal-custody.js';
 import {parseValleySpiritAlmanacId,parseValleySpiritTopicWindow,type ValleySpiritPublicReaders} from './valley-spirit-reader.js';
@@ -253,7 +254,7 @@ function chooseAgricultureRule(w:World,r:Resident):{action:Action;reason:string}
  return null;
 }
 function calendarSeason(w:World){return ['spring','summer','autumn','winter'][Math.floor(w.minute/1440/28)%4];}
-export function createMvpSession(options:{world?:World;commit?:(world:World,previousRevision:number)=>void;persistent?:boolean;observeCommittedMeals?:(witnesses:readonly ValleySpiritMvpMealWitness[])=>void}={}){
+export function createMvpSession(options:{world?:World;commit?:(world:World,previousRevision:number,speech?:AddressedSpeechObservation)=>void;persistent?:boolean;captureAddressedSpeechCustody?:true;observeCommittedMeals?:(witnesses:readonly ValleySpiritMvpMealWitness[])=>void}={}){
  let world=structuredClone(options.world??createMvpWorld());
  if(options.world)inheritReceiptHistory(options.world,world);
  const initialRevision=world.revision;
@@ -299,9 +300,15 @@ export function createMvpSession(options:{world?:World;commit?:(world:World,prev
     const shelterWorkers=new Set(world.residents.filter(r=>r.activity?.action.type==='mvpShelter'||r.plan?.actions[0]?.type==='mvpShelter').map(r=>r.id));
     const activityPlans=new Map(world.residents.map(r=>[r.id,r.activity?.planId]));
     const actionFailures:import('../world/engine.js').StepActionFailure[]=[];
-    const stageMealWitnesses=options.persistent&&options.commit&&options.observeCommittedMeals
-     ?captureValleySpiritMvpMealStep(world,{actionFailures}):null;
-    if(!stageMealWitnesses)stepWorld(world,1,{actionFailures});
+    const optional:{stageMealWitnesses?:()=>readonly ValleySpiritMvpMealWitness[]}={};
+    const advanceEngine=()=>{
+     if(options.persistent&&options.commit&&options.observeCommittedMeals)optional.stageMealWitnesses=captureValleySpiritMvpMealStep(world,{actionFailures});
+     else stepWorld(world,1,{actionFailures});
+    };
+    let speech:AddressedSpeechObservation|undefined;
+    if(options.persistent&&options.commit&&options.captureAddressedSpeechCustody)
+     speech=captureAddressedSpeech(world,advanceEngine);
+    else advanceEngine();
     for(const failed of world.residents.filter(r=>r.lastFailure)){
      const action=gathering.get(failed.id);
      const fresh=newGather.get(failed.id);
@@ -335,8 +342,9 @@ export function createMvpSession(options:{world?:World;commit?:(world:World,prev
     // Capture only fresh typed evidence. Neither capture nor delivery can
     // pause the world, and no draft acknowledgement is emitted on rollback.
     let witnesses:readonly ValleySpiritMvpMealWitness[]=[];
-    if(stageMealWitnesses)try{witnesses=stageMealWitnesses();}catch{/* optional custody */}
-    options.commit?.(world,current.revision);
+    if(optional.stageMealWitnesses)try{witnesses=optional.stageMealWitnesses();}catch{/* optional custody */}
+    if(speech?.receipts.length)options.commit?.(world,current.revision,speech);
+    else options.commit?.(world,current.revision);
     if(witnesses.length)try{options.observeCommittedMeals?.(witnesses);}catch{/* committed world is independent */}
     }catch(error){world=current;serial=previousSerial;for(const key of Object.keys(decisions))delete decisions[key];Object.assign(decisions,previousDecisions);throw error;}
    }
