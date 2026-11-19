@@ -77,7 +77,7 @@ static func presentation(dto: Variant, authority: Dictionary) -> String:
 	var end := _clock(dto.range.throughUs)
 	if start < 0 or end < start or end > authority.asOfUs or end - start > 1440000000: return ""
 	if not dto.lines is Array or dto.lines.is_empty() or dto.lines.size() > 3: return ""
-	var rendered := PackedStringArray(["生活年鉴 · 离线合成选择", "仅展示当前获准读取的事实，未调用真实模型。", ""])
+	var rendered := PackedStringArray(["生活年鉴 · 离线"])
 	var seen := {}
 	var previous := start
 	for line in dto.lines:
@@ -91,6 +91,4 @@ static func presentation(dto: Variant, authority: Dictionary) -> String:
 		seen[line.sourceRef] = true
 		previous = at
 		rendered.append(text)
-		rendered.append("来源：" + line.sourceRef)
-		rendered.append("")
 	return "\n".join(rendered)

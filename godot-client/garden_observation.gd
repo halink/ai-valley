@@ -11,9 +11,9 @@ static func title(world: Dictionary, plot: Dictionary) -> String:
 static func stage(world: Dictionary, plot: Dictionary, observed: Dictionary = {}) -> String:
 	if observed.get("kind") == "climate": return Agriculture.stage(observed)
 	var crop: Variant = plot.get("crop")
-	if crop == null: return "空田 · 尚无作物"
+	if crop == null: return "空田"
 	if not crop is Dictionary: return "作物状态未知"
-	if crop.has("mvpCrop"): return "新制作物 · 观测暂缺"
+	if crop.has("mvpCrop"): return "作物状态暂不可用"
 	var days: Variant = world.get("definitions", {}).get(crop.get("definition", ""), {}).get("data", {}).get("growthDays")
 	var growth: Variant = crop.get("growth")
 	if not (days is float or days is int) or not (growth is float or growth is int): return "作物状态未知"
@@ -23,7 +23,7 @@ static func stage(world: Dictionary, plot: Dictionary, observed: Dictionary = {}
 
 static func details(world: Dictionary, plot: Dictionary, separate_climate := false, observed: Dictionary = {}) -> String:
 	if observed.get("kind") == "climate": return Agriculture.details(observed)
-	if plot.get("crop") is Dictionary and plot.crop.has("mvpCrop"): return "新制作物 · 观测暂缺，暂不推算生长"
+	if plot.get("crop") is Dictionary and plot.crop.has("mvpCrop"): return "作物状态暂不可用"
 	var result := stage(world, plot)
 	var crop: Variant = plot.get("crop")
 	if crop is Dictionary:
@@ -31,10 +31,5 @@ static func details(world: Dictionary, plot: Dictionary, separate_climate := fal
 		if watered is float or watered is int:
 			result += "\n今日已浇水" if watered == floorf(float(world.get("minute", 0)) / 1440.0) else "今日未浇水"
 		else: result += "\n浇水记录未知"
-		result += (" · 旧制雨日" if separate_climate else " · 当前下雨") if world.get("weather") == "rain" else ""
-		if separate_climate: result += "\n旧制作物 · 不读取 PAW，沿用旧日雨规则"
-		result += "\n生长按季节和每日水分结算"
-	else:
-		result += "\n是否播种由居民自己决定"
-	result += "\n收成以实际收获结算为准"
+		if not separate_climate and world.get("weather") == "rain": result += " · 当前下雨"
 	return result

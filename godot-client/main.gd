@@ -24,7 +24,6 @@ var resident_movement := ResidentMovement.new()
 var http: HTTPRequest
 var timer: Timer
 var world: Dictionary = {}
-var observation: Dictionary = {}
 var environment_preview: Dictionary = {}
 var soil_observation: Dictionary = {}
 var agriculture_observation: Dictionary = {}
@@ -42,7 +41,6 @@ var selected_building := ""
 var selected_plot := ""
 var selected_resource := ""
 var active_endpoint := ""
-var mode_text := ""
 var source_tag := ""
 var decision_source := ""
 var connected := false
@@ -112,7 +110,6 @@ func _connect_server(origin: String) -> void:
 	active_endpoint = url
 	_set_archive_authority({})
 	_set_spirit_life_authority({})
-	mode_text = "等待新的世界快照"
 	movement_feed.reset()
 	resident_movement.reset()
 	valley.settle_motion()
@@ -128,7 +125,6 @@ func _connect_server(origin: String) -> void:
 	valley.agriculture_observation = {}
 	valley.environment_preview = {}
 	world = {}
-	observation = {}
 	relationship_history = null
 	valley.room_layouts = {}
 	valley.show_world(world, "")
@@ -177,10 +173,8 @@ func _apply_snapshot(parsed: Dictionary) -> void:
 	var continuous: bool = connected and not reset
 	if reset: _reset_context()
 	world = parsed.world
-	observation = parsed.get("observation", {}) if parsed.get("observation") is Dictionary else {}
 	relationship_history = parsed.get("relationshipHistory")
 	valley.room_layouts = Snapshot.room_views(parsed)
-	mode_text = Snapshot.mode_label(parsed)
 	var mode: Dictionary = parsed.get("mvp", {})
 	decision_source = str(mode.get("driver", ""))
 	environment_preview = EnvironmentPreview.from_snapshot(parsed)
@@ -193,8 +187,7 @@ func _apply_snapshot(parsed: Dictionary) -> void:
 	valley_spirit_snapshot = {"world":{"id":world.id,"revision":world.revision,"minute":world.minute},"valleySpirit":parsed.get("valleySpirit")}
 	valley.agriculture_observation = agriculture_observation.get("plots", {})
 	valley.environment_preview = environment_preview
-	source_tag = {"local-rules": "规则演示 · 非模型", "model": "已配置模型", "disabled": "模型禁用"}.get(decision_source, "")
-	if mode.get("fault") == "unresolved_model_request": source_tag = "保护停表"
+	source_tag = "世界已暂停" if mode.get("fault") == "unresolved_model_request" else ""
 	connected = true
 	_set_archive_authority(ValleySpiritArchive.authority(valley_spirit_snapshot))
 	_set_spirit_life_authority(ValleySpiritLife.context(parsed))
@@ -271,9 +264,7 @@ func _connection_lost(reason: String) -> void:
 	connected = false
 	_set_archive_authority({})
 	_set_spirit_life_authority({})
-	observation = {}
 	relationship_history = null
-	mode_text = "数据过期 · 当前决策来源未知"
 	movement_feed.reset()
 	resident_movement.reset()
 	valley.settle_motion()
@@ -543,7 +534,7 @@ func _spirit_archive_received(result: int, code: int, _headers: PackedStringArra
 	var text := ""
 	if result == HTTPRequest.RESULT_SUCCESS and code == 200:
 		text = ValleySpiritArchive.presentation(JSON.parse_string(body.get_string_from_utf8()), spirit_archive_context, requested)
-	if text.is_empty(): text = "天气档案暂不可读；不保留旧数据。"
+	if text.is_empty(): text = "天气档案暂不可读。"
 	hud.show_spirit_archive(true, false, text)
 
 func _request_spirit_almanac() -> void:
@@ -569,7 +560,7 @@ func _spirit_almanac_received(result: int, code: int, _headers: PackedStringArra
 	var display := ""
 	if result == HTTPRequest.RESULT_SUCCESS and code == 200:
 		display = ValleySpiritArchive.almanac_presentation(JSON.parse_string(body.get_string_from_utf8()), spirit_archive_context)
-	if display.is_empty(): display = "年鉴暂不可读；不保留旧数据。"
+	if display.is_empty(): display = "年鉴暂不可读。"
 	hud.show_spirit_almanac(true, false, display)
 
 func _quarantine_pending_spirit_life(parsed: Dictionary) -> void:
@@ -648,11 +639,10 @@ func _update_hud() -> void:
 	var transport := "已断开"
 	if connected:
 		transport = "世界已暂停" if world.clock.paused else "世界运行中"
-		transport += " · 快照 " + Snapshot.number_label(world.revision)
 		if world.clock.paused and notice_until == 0: hud.show_feedback("世界已暂停")
 		elif notice_until == 0: hud.show_feedback("")
 	hud.show_environment(environment_preview, float(world.get("minute", 0)), not connected)
-	hud.show_transport(clock, mode_text, transport, summary.get_slice("\n", 1), Snapshot.model_status(observation), source_tag if connected else "")
+	hud.show_transport(clock, transport, summary.get_slice("\n", 1), source_tag if connected else "")
 	_update_resident_card()
 	_update_place_card()
 	_update_history()

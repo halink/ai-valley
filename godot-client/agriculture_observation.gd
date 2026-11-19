@@ -1,6 +1,6 @@
 extends RefCounted
 const ClimateView = preload("res://environment_preview.gd")
-const REASONS := {"empty":"尚未播种", "legacy":"旧制每日生长", "mature":"成熟可收获", "temperature":"温度限制生长", "water":"土壤水分限制生长", "temperature-and-water":"温度与水分共同限制", "none":"当前温水条件适宜"}
+const REASONS := {"empty":"尚未播种", "legacy":"生长中", "mature":"成熟可收获", "temperature":"温度限制生长", "water":"土壤水分限制生长", "temperature-and-water":"温度与水分共同限制", "none":"当前温水条件适宜"}
 
 static func from_snapshot(snapshot: Dictionary) -> Dictionary:
 	if ClimateView.from_snapshot(snapshot).is_empty(): return {}
@@ -37,7 +37,7 @@ static func stage(plot: Dictionary) -> String:
 	return "%s · %s" % [plot.name, "成熟可收获" if plot.mature else "生长 %.1f%%" % (plot.progressPermille / 10.0)]
 
 static func details(plot: Dictionary) -> String:
-	return stage(plot) + "\n有效生长 %.3f / %.3f 天\n%s\n温度系数 %.1f%% · 水分系数 %.1f%%\n新制作物 · 读取当前气候与 PAW\n成熟不等于入库，收成以实际收获为准" % [plot.growthDays, plot.targetDays, REASONS[plot.limitedBy], plot.temperatureFactorPermille / 10.0, plot.waterFactorPermille / 10.0]
+	return stage(plot) + "\n生长 %.3f / %.3f 天\n%s" % [plot.growthDays, plot.targetDays, REASONS[plot.limitedBy]]
 
 static func seeds(value: Dictionary) -> String:
 	if value.is_empty(): return "三季公共种源观测暂缺"

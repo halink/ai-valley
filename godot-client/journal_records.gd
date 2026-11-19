@@ -25,7 +25,7 @@ static func from_world(world: Dictionary, driver: String) -> Array[Dictionary]:
 			"time": time.clock,
 			"category": words.category,
 			"line": _one_line(words.text).left(108),
-			"original": text
+			"original": str(words.get("detail", text))
 		})
 	return result
 
@@ -50,12 +50,13 @@ static func _observer_sentence(event: Dictionary, text: String, names: Dictionar
 		var speech: Variant = event.get("speechText")
 		if speech is String and not speech.is_empty():
 			if driver == "local-rules" and speech.begins_with(RULE_GREETING):
-				category = "规则对话"
 				speech = speech.trim_prefix(RULE_GREETING)
+				var line := subject + "：「" + str(speech) + "」"
+				return {"category": category, "text": line, "detail": line}
 			return {"category": category, "text": subject + "：「" + speech + "」"}
 	if mvp and event.get("kind") == "action" and not subject.is_empty():
 		if text.begins_with(subject + DRINK_REPORT) and text.ends_with(DRINK_SUFFIX):
-			return {"category": "饮水", "text": subject + "喝了一份随身的清水。"}
+			return {"category": "饮水", "text": subject + "喝了一份随身的清水。", "detail": text.trim_suffix(DRINK_SUFFIX) + "。"}
 	return {"category": category, "text": text}
 
 static func _one_line(text: String) -> String:

@@ -92,7 +92,7 @@ func _ready() -> void:
 	heading = _line(text, 17, Art.INK)
 	readings = _line(text, 13, Art.MOSS)
 	caution = _line(text, 12, Art.CLAY)
-	caution.text = "环境预览 · 不影响旧制作物"
+	caution.hide()
 	visible = false
 
 func _line(parent: Control, font_size: int, ink: Color) -> Label:
@@ -110,7 +110,7 @@ func present(value: Dictionary, minute: float, stale: bool) -> void:
 	var season: String = ["春", "夏", "秋", "冬"][int(floor(minute / 1440.0 / 28.0)) % 4]
 	heading.text = "%s · %s  %.1f℃" % [season, CONDITIONS[value.condition], value.temperatureDeciC / 10.0]
 	readings.text = "湿度 %.1f%%  风 %.2f  日照 %.2f" % [value.relativeHumidityPermille / 10.0, value.windPermille / 1000.0, value.daylightPermille / 1000.0]
-	caution.text = ("气候驱动新作物 · 旧茬仍按旧制" if value.get("agriculture") == true else ("气候观测 · 未影响旧制作物" if adopted else "环境预览 · 不影响旧制作物")) + (" · 已过期" if stale else "")
-	tooltip_text = "只读环境样本；风与日照为 0–1 游戏强度，非现实风速。静态天气图形不随设备时间变化。"
+	caution.text = "天气数据已过期" if stale else ""
+	caution.visible = stale
 	sketch.condition = value.condition
 	sketch.queue_redraw()

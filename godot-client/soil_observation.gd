@@ -28,4 +28,4 @@ static func from_snapshot(snapshot: Dictionary) -> Dictionary:
 
 static func details(plot: Dictionary) -> String:
 	if plot.is_empty(): return ""
-	return "\n土壤有效水 PAW %.3f / 100\n雪水 %.3f · 游戏水量，非毫米\n接入起累计：雨入 %.3f · 雪入 %.3f\n融雪 %.3f · 已灌溉 %.3f\n蒸发 %.3f · 排水 %.3f\n初始 50 · 累计作物耗水 %.3f\n水账为实际累计，显示保留三位小数" % [plot.paw, plot.snowWater, plot.rainIn, plot.snowIn, plot.melt, plot.irrigation, plot.evaporation, plot.drainage, plot.cropUse]
+	return "\n土壤有效水 %.3f / 100\n雪水 %.3f\n累计：雨入 %.3f · 雪入 %.3f\n融雪 %.3f · 已灌溉 %.3f\n蒸发 %.3f · 排水 %.3f\n累计作物耗水 %.3f" % [plot.paw, plot.snowWater, plot.rainIn, plot.snowIn, plot.melt, plot.irrigation, plot.evaporation, plot.drainage, plot.cropUse]

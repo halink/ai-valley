@@ -55,6 +55,11 @@ static func _time(minute: float) -> String:
 	var season := floori(day / 28.0) % 4
 	return "第%d年%s季第%d日 %02d:%02d" % [floori(day / 112.0) + 1, SEASONS[season], day % 28 + 1, floori((minute_floor % 1440) / 60.0), minute_floor % 60]
 
+static func weather_line(fact: Dictionary) -> String:
+	if not _number(fact.get("minute"), 0, MAX_MINUTE) or not fact.get("condition") is String or not WEATHER.has(fact.condition): return ""
+	if not _integer(fact.get("temperatureDeciC"), -300, 450) or not _integer(fact.get("relativeHumidityPermille"), 0, 1000): return ""
+	return "%s · %s · %.1f℃ / 湿度 %.1f%%" % [_time(fact.minute), WEATHER[fact.condition], fact.temperatureDeciC / 10.0, fact.relativeHumidityPermille / 10.0]
+
 static func _valid_weather_record(entry: Variant, context: Dictionary, hour: int) -> bool:
 	if not _exact(entry, ["entryId", "sourceRef", "permissionVersion", "fromMinute", "toMinute", "fact", "text"]): return false
 	var expected_id := "weather-%d-%d" % [context.permissionVersion, hour]
@@ -88,7 +93,7 @@ static func presentation(value: Variant, context: Dictionary, requested: Diction
 	for section in [value.range, value.coverage]:
 		if not _exact(section, ["fromHour", "toHour"]) or not _eq_number(section.fromHour, start) or not _eq_number(section.toHour, end): return ""
 	if not value.slots is Array or value.slots.size() != end - start: return ""
-	var lines := PackedStringArray(["天气档案 · 已结束的游戏小时", "%s 至 %s（不含）" % [_time(start * 60.0), _time(end * 60.0)], "只显示实际时点；缺失不补记。", ""])
+	var lines := PackedStringArray(["天气档案", "%s 至 %s（不含）" % [_time(start * 60.0), _time(end * 60.0)]])
 	for i in range(value.slots.size()):
 		var slot: Variant = value.slots[i]
 		var hour := start + i
@@ -99,8 +104,7 @@ static func presentation(value: Variant, context: Dictionary, requested: Diction
 		elif _eq_string(slot.get("status"), "observed"):
 			if not _exact(slot, ["hour", "status", "record"]) or not _valid_weather_record(slot.record, context, hour): return ""
 			var fact: Dictionary = slot.record.fact
-			lines.append("%s · %s · %.1f℃ / 湿度 %.1f%%" % [_time(fact.minute), WEATHER[fact.condition], fact.temperatureDeciC / 10.0, fact.relativeHumidityPermille / 10.0])
-			lines.append("来源：" + slot.record.sourceRef)
+			lines.append(weather_line(fact))
 		else:
 			return ""
 	return "\n".join(lines)
@@ -125,7 +129,7 @@ static func almanac_presentation(value: Variant, context: Dictionary) -> String:
 	if context.is_empty() or not value is Dictionary or not _eq_string(value.get("worldId"), context.worldId) or not _eq_number(value.get("permissionVersion"), context.permissionVersion):
 		return ""
 	if _eq_string(value.get("status"), "objective-only") and _exact(value, ["status", "worldId", "permissionVersion"]):
-		return "暂无已发布的年鉴。客观天气档案仍可读取，不代表模型生成。"
+		return "暂无已发布的年鉴。"
 	if not _eq_string(value.get("status"), "ready") or not _exact(value, ["status", "worldId", "permissionVersion", "entry"]): return ""
 	var entry: Variant = value.entry
 	if not _exact(entry, ["mode", "origin", "entryId", "textVersion", "supersedes", "fromMinute", "throughMinute", "projectionVersion", "permissionVersion", "coverage", "unselectedHourBuckets", "rendering", "facts", "atmosphere"]): return ""
@@ -135,9 +139,9 @@ static func almanac_presentation(value: Variant, context: Dictionary) -> String:
 	if not _exact(entry.origin, ["schemaVersion", "kind"]) or not _eq_number(entry.origin.schemaVersion, 1): return ""
 	var attribution := ""
 	if _eq_string(entry.origin.kind, "offline-synthetic"):
-		attribution = "离线合成选材，不是真实模型输出。"
+		attribution = "天气年鉴 · 离线"
 	elif _eq_string(entry.origin.kind, "unverified-admission"):
-		attribution = "选材来源未核验，不代表真实模型输出。"
+		attribution = "天气年鉴 · 生成方式未核验"
 	if attribution.is_empty(): return ""
 	if not _exact(entry.rendering, ["rendererVersion", "wording"]) or not _eq_number(entry.rendering.rendererVersion, 1): return ""
 	var wording: Variant = entry.rendering.wording
@@ -148,7 +152,7 @@ static func almanac_presentation(value: Variant, context: Dictionary) -> String:
 	elif _eq_string(entry.atmosphere.value, "reflective"): editorial = "回顾"
 	elif _eq_string(entry.atmosphere.value, "plain"): editorial = "平实"
 	if editorial.is_empty(): return ""
-	var lines := PackedStringArray(["谷灵 · 最新已发布年鉴", attribution, "事实字段已核对；以下为获选时点，不代表整段天气。", "文字版本：%d" % int(entry.textVersion), ""])
+	var lines := PackedStringArray([attribution])
 	var shown := {}
 	for fact in entry.facts:
 		if not _exact(fact, ["sourceRef", "minute", "field", "value", "text"]) or not _number(fact.minute, entry.fromMinute, entry.throughMinute) or not fact.field is String: return ""
@@ -169,7 +173,4 @@ static func almanac_presentation(value: Variant, context: Dictionary) -> String:
 		if line.is_empty() or not _matches_almanac_v1_text(fact.text, float(fact.minute), line, wording): return ""
 		var local_time := _time(float(fact.minute))
 		lines.append("%s · %s" % [local_time, line] if wording == "time-first" else "%s（%s）" % [line, local_time])
-		lines.append("来源：" + expected_ref)
-	lines.append("")
-	lines.append("编辑语气（不是事实）：" + editorial)
 	return "\n".join(lines)

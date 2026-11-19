@@ -107,10 +107,8 @@ var relationships: ValleyRelationships
 var relation_entry: Button
 var residence_entry: Button
 var relation_opener: Button
-var mode_label: Label
 var run_label: Label
 var summary_label: Label
-var diagnostics_label: Label
 var endpoint: LineEdit
 var resident_portrait: Dictionary
 var resident_title: Label
@@ -395,10 +393,8 @@ func _build_resident_pane(pane: VBoxContainer) -> void:
 	detail_body.hide()
 
 func _build_settings(pane: VBoxContainer) -> void:
-	mode_label = _label(pane, "", 16, Art.INK, true)
 	run_label = _label(pane, "", 15, Art.FADED, true)
 	summary_label = _label(pane, "", 14, Art.FADED, true)
-	diagnostics_label = _label(pane, "", 14, Art.FADED, true)
 	_brush_rule(pane, Art.MOSS, 46)
 	var labels := Button.new()
 	labels.theme_type_variation = "PaperButton"
@@ -747,15 +743,13 @@ func show_environment(value: Dictionary, minute: float, stale: bool) -> void:
 	environment_plate.visible = environment_view.visible
 	_queue_layout()
 
-func show_transport(clock: String, mode: String, status_text: String, world_summary: String, diagnostics: String, source: String) -> void:
+func show_transport(clock: String, status_text: String, world_summary: String, source: String) -> void:
 	clock_label.text = clock.replace(" · ", "　")
 	source_label.text = source
 	source_plate.visible = not source.is_empty()
 	tools.reset_size()
-	mode_label.text = mode
 	run_label.text = status_text
 	summary_label.text = world_summary
-	diagnostics_label.text = diagnostics
 	brand.reset_size()
 	_queue_layout()
 
