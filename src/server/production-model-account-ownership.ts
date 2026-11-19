@@ -113,6 +113,7 @@ export function attachProductionAccountQuotaRehearsal(ownership:ProductionModelA
   cancelProvenUnsent(request:string,...args: [at:number]){current();const key=scoped(request);return state.claim(key,false)&&ledger.cancelProvenUnsent(key,...args);},
   confirmCompletion(request:string,...args: [at:number,usage?:{inputTokens:number;outputTokens:number}]){current();const key=scoped(request);return state.claim(key,false)&&ledger.confirmCompletion(key,...args);},
   summary(at:number){current();return ledger.summary(at);},
+  matchesPolicy(policy:SharedModelAccountPolicy){current();return ledger.matchesPolicy(policy);},
   /** Confirms only this local quota handle is pending free. The existing
    * supervisor must still separately verify child, world and journal clean. */
   sealPendingFree(at:number){
