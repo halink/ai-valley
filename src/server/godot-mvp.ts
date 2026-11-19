@@ -378,21 +378,27 @@ export function prepareSealedMvpAdjacentMinute(current:World){
  }catch{return null;}
 }
 
-/** Detached native rule minute; only the sealed store may issue durable
- * source evidence. No effect, supplied plan, or ordinary runtime attachment. */
-export function prepareSealedMvpFruitCreditMinute(current:World,sourceId:string){
- if(current.mode!=='validation'||current.clock.paused||!current.mvpClimate?.rainProvenance||
-  !/^mvp-supply-fruit-[0-9]{1,12}$/.test(sourceId))return null;
+/** One detached ordinary ecology minute without any supplied resident action.
+ * Only the sealed store may commit it with custody. */
+export function prepareSealedMvpEcologyMinute(current:World,captureMeals=false){
+ if(current.mode!=='validation'||current.clock.paused||!current.mvpClimate?.rainProvenance)return null;
  const draft=structuredClone(current);
  inheritReceiptHistory(current,draft);enableCompletedMovement(draft);
  try{
-  const result=advanceMvpRuleMinuteDraft(draft,current,0,{},{meals:true,fruitFlow:false,fruitRenewal:true,addressedSpeech:true});
-  const witnesses=result.renewal.filter(w=>w.sourceId===sourceId);
-  if(witnesses.length!==1||draft.minute!==current.minute+1||
+  const result=advanceMvpRuleMinuteDraft(draft,current,0,{},{meals:captureMeals,fruitFlow:false,fruitRenewal:true,addressedSpeech:true});
+  if(draft.minute!==current.minute+1||
    JSON.stringify(draft.mvpClimate?.spiritEffects)!==JSON.stringify(current.mvpClimate?.spiritEffects)||
    JSON.stringify(draft.mvpClimate?.spiritFruitSettlement)!==JSON.stringify(current.mvpClimate?.spiritFruitSettlement))return null;
-  return {draft,witness:witnesses[0],mealWitnesses:result.witnesses,speech:result.speech};
+  return {draft,renewal:result.renewal,mealWitnesses:result.witnesses,speech:result.speech};
  }catch{return null;}
+}
+
+/** Existing narrowly selected source-credit fixture: no credit means no tick. */
+export function prepareSealedMvpFruitCreditMinute(current:World,sourceId:string){
+ if(!/^mvp-supply-fruit-[0-9]{1,12}$/.test(sourceId))return null;
+ const next=prepareSealedMvpEcologyMinute(current,true);
+ const witnesses=next?.renewal.filter(w=>w.sourceId===sourceId);
+ return next&&witnesses?.length===1?{...next,witness:witnesses[0]}:null;
 }
 
 const postCommitFruitFlows=new WeakMap<MvpFruitFlowBatch,{sessionToken:symbol;deliveredSequence:number}>();

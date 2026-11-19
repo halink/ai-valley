@@ -3,7 +3,7 @@ import {ValleySpiritShadowQueue} from './valley-spirit-shadow-queue.js';
 import {minuteToClimateUs} from '../world/mvp-climate.js';
 import {makeSealedMvpSourceAgeTerms,verifySealedMvpSourceAge} from './valley-spirit-mvp-source-age.js';
 import {readCurrentSealedMvpSourceCommitment,readCurrentSealedMvpSourceCredit,writeSealedMvpSourceCredit} from './valley-spirit-mvp-source-credit.js';
-import {prepareSealedMvpAdjacentMinute,prepareSealedMvpFruitCreditMinute} from './godot-mvp.js';
+import {prepareSealedMvpAdjacentMinute,prepareSealedMvpEcologyMinute,prepareSealedMvpFruitCreditMinute} from './godot-mvp.js';
 import {appendNativeWeatherCredit} from './valley-spirit-weather-credit.js';
 import {probeMvpFallenFruitAdjacentEngineEdge} from './valley-spirit-mvp-fallen-fruit-approach.js';
 import {appendFormalDueIntent,formalDueCurrent,formalDueInputs,makeFormalDueCheckpoint,prepareFormalDueIntent,
@@ -774,6 +774,40 @@ export class WorldStore {
    const w=this.readWorld(false,false);
    const result=w&&w.id===worldId?readCurrentSealedMvpSourceCredit(this.db,owner.seal,w):null;
    this.db.exec('COMMIT');return result;
+  }catch(error){this.db.exec('ROLLBACK');throw error;}
+ }
+ /** Sealed-only ordinary rule minute. The optional source ID selects what
+  * to observe, never resident decisions or whether a quiet minute advances.
+  * Native meal gameplay is preserved; no new private meal proof is issued. */
+ stepDeveloperMvpEcologyMinute(worldId:string,sourceId?:string){
+  const owner=this.developerSpiritFixtureOwner;
+  if(!owner||owner.formalApprovalKeyPem||sourceId!==undefined&&!/^mvp-supply-fruit-[0-9]{1,12}$/.test(sourceId))return null;
+  owner.assertOwned();this.assertDeveloperSpiritSeal();this.db.exec('BEGIN IMMEDIATE');
+  try{
+   const current=this.readWorld(false,false);
+   if(!current||current.id!==worldId){this.db.exec('ROLLBACK');return null;}
+   assertDeveloperMvpEffectArchive(this.db,current);
+   const next=prepareSealedMvpEcologyMinute(current);
+   if(!next){this.db.exec('ROLLBACK');return null;}
+   const earlier=new Set(current.events.map(e=>e.id));
+   const appended=next.draft.events.filter(e=>!earlier.has(e.id));
+   const speechIds=new Set(next.speech?.receipts.map(r=>r.eventId)??[]);
+   const spoken=appended.filter(e=>e.speechText!==undefined);
+   if(speechIds.size!==(next.speech?.receipts.length??0)||spoken.length!==speechIds.size||
+    spoken.some(e=>!speechIds.has(e.id))||appended.some(e=>e.socialAppointmentArrival||e.mvpFruitFall)){
+    this.db.exec('ROLLBACK');return null;
+   }
+   const selected=sourceId===undefined?[]:next.renewal.filter(w=>w.sourceId===sourceId);
+   if(selected.length>1)throw Error('sealed_ecology_duplicate_source_credit');
+   this.assertWritable(next.draft);
+   const speech=this.writeDraftWithCustody(next.draft,current.revision,undefined,undefined,next.speech,true);
+   if(speech.length!==speechIds.size)throw Error('sealed_ecology_speech_custody_unconfirmed');
+   const durable=this.readWorld(false,false);
+   if(!durable||durable.id!==next.draft.id||durable.revision!==next.draft.revision||durable.minute!==next.draft.minute)
+    throw Error('sealed_ecology_commit_mismatch');
+   const sourceCredit=selected.length?writeSealedMvpSourceCredit(this.db,owner.seal,current,durable,selected[0]):null;
+   this.db.exec('COMMIT');
+   return {status:'committed' as const,worldRevision:durable.revision,atMinute:durable.minute,sourceCredit,speech};
   }catch(error){this.db.exec('ROLLBACK');throw error;}
  }
  /** A read of the canonical signing input or verification of detached age
