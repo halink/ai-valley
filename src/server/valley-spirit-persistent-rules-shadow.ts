@@ -34,7 +34,7 @@ interface Sample {
  readonly packet:PublicWeatherNarrationInput;readonly sourceResourceInstanceId:string;readonly targetId:string;readonly first?:GeographyObservation;
 }
 type Authority=Pick<ValleySpiritJournal,'currentObservedRainPacket'|'isCurrentPublicInput'>;
-function currentClosedRain(w:World,maxAge:number){
+export function currentClosedRain(w:World,maxAge:number){
  if(w.mode!=='validation'||w.clock.paused||w.simulationOnly||!w.mvpClimate||
   w.mvpClimate.current.precipitationPermille>0)return null;
  const recent=w.mvpClimate.rainProvenance?.recent.at(-1);

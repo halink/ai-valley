@@ -1,3 +1,4 @@
+import {openRulesGeographyQueue,pinRulesGeographyQueue,type RulesGeographyQueueOptions} from './valley-spirit-rules-geography-queue.js';
 import {nativeWeatherHourTransition} from './valley-spirit-weather-credit.js';
 import {join} from 'node:path';
 import {acquireDeveloperMvpSpiritFixtureOwner,type DeveloperMvpSpiritFixtureOwner,type DeveloperMvpSpiritFixtureKey} from './valley-spirit-fixture-files.js';
@@ -21,10 +22,13 @@ import {WorldStore} from './store.js';
 import {acquireRuntimeOwnership,type RuntimeOwnership} from './runtime-lock.js';
 import {assertGodotWebExport} from './godot-web.js';
 import type {World} from '../shared/types.js';
-export async function startPersistentRulesMvp(options:{database:string;port:number;webRoot?:string;autoStart?:boolean;tickMs?:number;privateSpiritShadow?:PersistentRulesShadowOptions;privateLifeFixture?:PersistentRulesLifeFixture;privateSpeechCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string;nativeWeatherCredit?:true}>;privateMealCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string}>}){
+export async function startPersistentRulesMvp(options:{database:string;port:number;webRoot?:string;autoStart?:boolean;tickMs?:number;privateSpiritShadow?:PersistentRulesShadowOptions;privateSpiritGeographyQueue?:RulesGeographyQueueOptions;privateLifeFixture?:PersistentRulesLifeFixture;privateSpeechCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string;nativeWeatherCredit?:true}>;privateMealCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string}>}){
  if(typeof options.database!=='string'||!options.database.trim())throw Error('mvp_rules_database_required');
  if(!Number.isInteger(options.port)||options.port<0||options.port>65535)throw Error('godot_mvp_invalid_port');
  const tickMs=options.tickMs??500,shadowOptions=pinPersistentRulesShadowOptions(options.privateSpiritShadow);
+ const queuePin=pinRulesGeographyQueue(options.privateSpiritGeographyQueue);
+ if(options.privateSpiritGeographyQueue!==undefined&&(!queuePin||options.privateSpeechCustody!==undefined||options.privateMealCustody!==undefined))
+  throw Error('mvp_rules_private_geography_queue_scope');
  const speechPin=options.privateSpeechCustody===undefined?undefined:structuredClone(options.privateSpeechCustody);
  if(options.privateSpeechCustody!==undefined&&(!speechPin||!speechPin.fixture||typeof speechPin.worldId!=='string'||!/^godot-mvp-[A-Za-z0-9_-]{1,160}$/.test(speechPin.worldId)||
     Object.keys(speechPin).some(k=>!['fixture','worldId','nativeWeatherCredit'].includes(k))||
@@ -47,6 +51,7 @@ export async function startPersistentRulesMvp(options:{database:string;port:numb
  let valleySpirit:ValleySpiritJournal|undefined;let spiritPermissions:SqliteValleySpiritPermissions|undefined;
  let geographyCustody:PersistentGeographyCustody|undefined;
  let shadow:ReturnType<typeof createPersistentRulesShadow>|undefined;
+ let observeGeographicProposal:ReturnType<typeof openRulesGeographyQueue>|undefined;
  let viewers:ValleySpiritPublicReaders|undefined,almanacReader:SqliteValleySpiritAlmanacReader|undefined;
  const lifePin=pinPersistentRulesLifeFixture(options.privateLifeFixture);
  let life:ReturnType<typeof openPersistentRulesLifeFixture>|undefined,lifeReadable=false;
@@ -89,13 +94,19 @@ export async function startPersistentRulesMvp(options:{database:string;port:numb
     if(draft.id!==speechPin.worldId)throw Error('mvp_rules_private_speech_world');
     store!.commitMvpWithAddressedSpeech(draft,revision,speech);
    }else store!.commit(draft,revision);
-   const sample=!weatherCredit||nativeWeatherHourTransition(lastCommittedMinute,draft.minute);
+   const beforeMinute=lastCommittedMinute;
+   const exactHour=nativeWeatherHourTransition(beforeMinute,draft.minute);
+   const sample=!weatherCredit||exactHour;
    lastCommittedMinute=draft.minute;
    try{valleySpirit?.observe(publicWeatherProjection(draft),sample);}catch{valleySpirit?.isolate();}
-   shadow?.onCommitted(draft);}});
+   shadow?.onCommitted(draft);
+   if(exactHour&&!draft.clock.paused)observeGeographicProposal?.(beforeMinute,draft);}});
   const initialPublicFact=publicWeatherProjection(session.world);
   if(initialPublicFact){try{spiritPermissions=new SqliteValleySpiritPermissions(owner.database,initialPublicFact.worldId,()=>owner!.assertOwned());valleySpirit=new ValleySpiritJournal(owner.database,initialPublicFact,()=>owner!.assertOwned(),spiritPermissions,weatherCredit?{persistEmpty:true}:undefined);if(!weatherCredit)valleySpirit.observe(initialPublicFact);}catch{valleySpirit?.isolate();}}
   if(valleySpirit){
+   if(queuePin?.worldId===world.id)try{
+    observeGeographicProposal=openRulesGeographyQueue(owner.database,queuePin,valleySpirit,()=>owner!.assertOwned(),()=>store!.load());
+   }catch{/* independent private G1 queue does not block starting normal rules */}
    if(shadowOptions)try{
     if(shadowOptions.durableObservation)geographyCustody=openPersistentGeographyCustody(owner.database,world.id,()=>owner!.assertOwned());
     shadow=createPersistentRulesShadow(shadowOptions,valleySpirit,geographyCustody);shadow.onCommitted(session.world);

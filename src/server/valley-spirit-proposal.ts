@@ -46,6 +46,12 @@ function validOption(option: ValleySpiritFruitFallOption): boolean {
     [...option.sourceRefs].every(ref => typeof ref === "string" && REF.test(ref)) && new Set(option.sourceRefs).size === option.sourceRefs.length;
 }
 
+// This menu is a private G1 geography observation, not full placement evidence.
+export const VALLEY_SPIRIT_GEOGRAPHY_ONLY_MENU = "persistent-rules-geographic-only-v1";
+export const VALLEY_SPIRIT_GEOGRAPHY_ONLY_PIN = "valley-geography:";
+export function isValleySpiritGeographyOnly(p:ValleySpiritFruitFallOption):boolean {
+ return p.menuVersion===VALLEY_SPIRIT_GEOGRAPHY_ONLY_MENU||p.inputSnapshotId.startsWith(VALLEY_SPIRIT_GEOGRAPHY_ONLY_PIN);
+}
 export interface ValleySpiritProposalChoice {
   readonly optionNumber: number;
   readonly rationale: string;
@@ -214,7 +220,7 @@ function checkFruitFall(
 ): ValleySpiritFruitFallPreflight {
   if (!isEnabledValleySpiritFruitFallPolicy(policy)) return {status: "disabled", code: "shadow_disabled_or_policy_invalid"};
   const reject = (code: Rejection): ValleySpiritFruitFallPreflight => ({status: "rejected", code});
-  if (!isValleySpiritFruitFallProposal(proposal)) return reject("invalid_proposal");
+  if (!isValleySpiritFruitFallProposal(proposal) || isValleySpiritGeographyOnly(proposal)) return reject("invalid_proposal");
   if (!evidence || evidence.worldId !== proposal.worldId || !natural(evidence.nowMicroMinute) ||
       !evidence.approvedBasis || typeof evidence.opportunityConsumed !== "boolean" ||
       typeof evidence.proposalQuotaAvailable !== "boolean" ||
