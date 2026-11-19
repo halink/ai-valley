@@ -229,7 +229,7 @@ static func plan_summary(person: Dictionary) -> String:
 		return "行为计划：未知"
 	var plan = person.get("plan")
 	if plan == null:
-		return "行为计划：当前没有待执行计划（不代表居民没有意愿）"
+		return "暂无待执行计划"
 	if not plan is Dictionary or not plan.get("actions") is Array:
 		return "行为计划：未知"
 	var intention = plan.get("intention")
@@ -245,7 +245,7 @@ static func plan_summary(person: Dictionary) -> String:
 	if not queued.is_empty():
 		next = " → ".join(queued)
 		if plan.actions.size() > 5: next += " → …"
-	return "行为计划 · 已提交意图：" + declared + "\n后续队列：" + next + "\n当前动作见上方；队列尚未完成，可能失败或改变。不是模型思维记录。"
+	return "计划：" + declared + "\n待执行：" + next
 
 static func failure_label(person: Dictionary) -> String:
 	if not person.has("lastFailure"):
@@ -309,7 +309,7 @@ static func thirst_label(world: Dictionary, person_id: String) -> String:
 	var state = world.get("mvpDrinking")
 	if not state is Dictionary or state.get("version") != 1 or not state.get("thirst") is Dictionary:
 		return "口渴：未启用／未知"
-	return "口渴：" + number_label(state.thirst.get(person_id)) + "/100（MVP 暂无脱水伤害）"
+	return "口渴：" + number_label(state.thirst.get(person_id)) + "/100"
 
 # Optional room projection is accepted only for this exact snapshot. Fail closed.
 static func room_views(value: Dictionary) -> Dictionary:
@@ -395,14 +395,13 @@ static func memory_summary(person: Dictionary) -> String:
 			continue
 		records.append(memory)
 	records.sort_custom(func(a, b): return a.receivedAt > b.receivedAt)
-	var lines: Array[String] = ["本人近期经历 · 最多3条已收到记录"]
+	var lines: Array[String] = ["近期经历"]
 	for memory in records.slice(0, 3):
 		var source: String = {"self": "亲历", "witness": "目睹", "heard": "听闻"}.get(memory.get("source"), "来源未知")
 		var excerpt: String = memory.text.replace("\n", " ").replace("\r", " ").replace("\t", " ").strip_edges().left(180)
 		if memory.text.length() > 180: excerpt += "…"
-		lines.append("收到于世界分钟 %s · %s：%s" % [number_label(memory.receivedAt), source, excerpt])
-	if records.is_empty(): lines.append("当前快照无可显示记录，不代表没有经历。")
-	lines.append("仅为居民收到的记录节选，不是完整记忆、模型思维或事实核验。")
+		lines.append("游戏分钟 %s · %s：%s" % [number_label(memory.receivedAt), source, excerpt])
+	if records.is_empty(): lines.append("暂无记录。")
 	return "\n".join(lines)
 
 # Only describes the received definition; it does not predict the next harvest.
@@ -413,8 +412,8 @@ static func resource_renewal(world: Dictionary, resource: Dictionary) -> String:
 		if renewal is Dictionary:
 			var rate: Variant = renewal.get("perDay")
 			if (rate is float or rate is int) and is_finite(float(rate)) and rate > 0:
-				return "\n每日恢复 %.2f 份 · 达容量上限即停止\n按世界时间积累，采集不重置恢复进度" % float(rate)
+				return "\n每日恢复 %.2f 份" % float(rate)
 	var days: Variant = resource.get("regrowthDays")
-	if not (days is float or days is int) or not is_finite(float(days)) or days < 0: return "\n恢复规则未知"
-	if days == 0: return "\n有限资源 · 耗尽后不自动再生"
-	return "\n恢复周期 %s 游戏日 · 以世界结算为准" % str(days)
+	if not (days is float or days is int) or not is_finite(float(days)) or days < 0: return "\n恢复信息未知"
+	if days == 0: return "\n不可再生"
+	return "\n恢复周期 %s 游戏日" % str(days)

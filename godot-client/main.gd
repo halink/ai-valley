@@ -688,7 +688,7 @@ func _update_place_card() -> void:
 	if connected and not selected_resource.is_empty():
 		var resource := _resource(selected_resource)
 		if not resource.is_empty():
-			var note := _resource_stock(resource) + Snapshot.resource_renewal(world, resource) + "\n采集须居民亲自到达并完成行动\n是否前往由居民自己决定\n资源余量不等于随身库存"
+			var note := _resource_stock(resource) + Snapshot.resource_renewal(world, resource)
 			hud.show_place(selected_resource, _resource_title(resource), note, false)
 			return
 	if connected and not selected_plot.is_empty():
