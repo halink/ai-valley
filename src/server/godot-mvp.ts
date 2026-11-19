@@ -257,6 +257,91 @@ function calendarSeason(w:World){return ['spring','summer','autumn','winter'][Ma
 type SessionWeatherReading=Pick<PublicWeatherFact,'minute'|'condition'|'temperatureDeciC'|'relativeHumidityPermille'>;
 type SessionWeather={schemaVersion:1;worldId:string;worldRevision:number;atMinute:number;readings:SessionWeatherReading[]};
 
+interface RuleMinuteCapture {meals:boolean;fruitFlow:boolean;fruitRenewal:boolean;addressedSpeech:boolean;}
+/** Existing resident choices and exactly one engine minute on an existing
+ * detached draft. No caller-supplied action, commit, split tick or delivery. */
+function advanceMvpRuleMinuteDraft(world:World,current:World,serial:number,decisions:Record<string,number>,capture:RuleMinuteCapture){
+ const newGather=new Map<string,{planId:string;resourceId:string;quantity:number}>();
+ for(const r of world.residents){
+  if(r.status!=='alive'||r.activity||r.plan)continue;
+  const choice=chooseMvpAction(world,r);
+  const planId=`mvp-rule-${world.id}-${world.revision}-${r.id}-${++serial}`;
+  const result=submitPlan(world,{id:planId,actorId:r.id,actorRevision:r.revision,createdAt:world.minute,definition:mvpPlanDefinition(world,choice.action),intention:'本地规则：'+choice.reason,actions:[choice.action]});
+  if(!result.ok)throw new Error(`MVP plan rejected for ${r.id}: ${result.error}`);
+  if(choice.action.type==='gather'){
+   const {resourceId,quantity}=choice.action;
+   const source=world.resources.find(s=>s.id===resourceId);
+   if(source&&Number.isFinite(source.amount)&&source.amount>=quantity)newGather.set(r.id,{planId,resourceId,quantity});
+  }
+  decisions[r.id]=(decisions[r.id]??0)+1;
+ }
+ // A neighbour may finish harvesting after this resident chose a source.
+ // Keep the engine's rejected action (no inventory credit), then let the
+ // next tick choose from current stock instead of freezing the whole demo.
+ const gathering=new Map(world.residents.map(r=>[r.id,r.activity?.action]));
+ const shelterWorkers=new Set(world.residents.filter(r=>r.activity?.action.type==='mvpShelter'||r.plan?.actions[0]?.type==='mvpShelter').map(r=>r.id));
+ const activityPlans=new Map(world.residents.map(r=>[r.id,r.activity?.planId]));
+ const actionFailures:import('../world/engine.js').StepActionFailure[]=[];
+ const optional:{stageMealWitnesses?:()=>readonly ValleySpiritMvpMealWitness[]}={};
+ const advanceEngine=()=>{
+  if(capture.meals)optional.stageMealWitnesses=captureValleySpiritMvpMealStep(world,{actionFailures});
+  else stepWorld(world,1,{actionFailures});
+ };
+ let stageRenewal:(()=>readonly MvpFruitRenewalWitness[])|undefined;
+ let readFlow:(()=>MvpFruitFlowBatch|null)|undefined;
+ const advanceObservedEngine=()=>{
+  if(capture.fruitFlow){
+   const flow=captureMvpFruitFlowStep(world,current,advanceEngine);
+   stageRenewal=flow.readRenewal;readFlow=flow.readFlow;
+  }else if(capture.fruitRenewal)
+   stageRenewal=captureMvpFruitRenewalStep(world,advanceEngine);
+  else advanceEngine();
+ };
+ let speech:AddressedSpeechObservation|undefined;
+ if(capture.addressedSpeech)
+  speech=captureAddressedSpeech(world,advanceObservedEngine);
+ else advanceObservedEngine();
+ for(const failed of world.residents.filter(r=>r.lastFailure)){
+  const action=gathering.get(failed.id);
+  const fresh=newGather.get(failed.id);
+  // A live start rejected only after a same-tick stock change is not a
+  // world fault. Older plans, unverified depletion and malformed targets do not
+  // get recovery from an error message (or any other typed failure).
+  if(fresh&&actionFailures.some(f=>f.code==='resource_stock_depleted_before_gather'&&f.actionType==='gather'&&
+   f.actorId===failed.id&&f.planId===fresh.planId&&f.resourceId===fresh.resourceId&&f.quantity===fresh.quantity&&f.available<fresh.quantity))continue;
+  if(action?.type==='talk'&&actionFailures.some(f=>f.actorId===failed.id&&f.planId===activityPlans.get(failed.id)&&f.actionType==='talk'&&f.code==='room_slot_contended'))continue;
+  if(action?.type==='mvpAgriculture'||action?.type==='mvpPreservation'||shelterWorkers.has(failed.id))continue;
+  if(action&&isMvpSeedAction(action)&&['灶堂有限种源已领完','这处实际工位正在被另一项劳动占用'].includes(failed.lastFailure!))continue;
+  const source=action?.type==='gather'?world.resources.find(s=>s.id===action.resourceId):undefined;
+  const depleted=action?.type==='gather'&&source&&source.amount<action.quantity&&distance(failed.at,source.at)<=1
+   &&(source.kind!=='bush'||canContactBerry(world,failed,source))
+   &&(source.kind!=='spring'||canContactSpring(world,failed,source));
+  if(failed.lastFailure==='资源或实际位置已经变化'&&depleted)continue;
+  // A listener may leave while the finite utterance is being performed.
+  // Keep the engine's failure, without inventing speech or freezing time.
+  if(failed.lastFailure==='对方已经不在能够交谈的位置'&&action?.type==='talk')continue;
+  // A quoted counterparty or stock may change before actual settlement.
+  // The engine rejects atomically; retry policy next tick, never credit goods.
+  if((action?.type==='offer'||action?.type==='accept')&&[
+   '须另一位在场的实际当事人，不能与自己虚构交换','报价物品或本人实际库存无效','对方还有未处理的报价',
+   '报价已经失效或没有交给本人','报价已经失效','交易须有两位不同的实际在场当事人','任一方的实际库存已不足',
+   '当前没有实际可见且可接近的交流对象，须先前往寻找','当前视野内没有找到对方，须先前往寻找',
+  ].includes(failed.lastFailure!))continue;
+  throw new Error(`MVP action failed for ${failed.id}: ${failed.lastFailure}`);
+ }
+ validateMvpClimate(world);validateMvpPreservation(world);
+ world.revision=Math.max(world.revision,current.revision+1);
+ // Resolve fresh staged evidence on this draft. Delivery is a separate,
+ // strictly post-commit responsibility of the session.
+ let witnesses:readonly ValleySpiritMvpMealWitness[]=[];
+ if(optional.stageMealWitnesses)try{witnesses=optional.stageMealWitnesses();}catch{/* optional custody */}
+ let renewal:readonly MvpFruitRenewalWitness[]=[];
+ if(stageRenewal)try{renewal=stageRenewal();}catch{/* optional observation */}
+ let fruitFlow:MvpFruitFlowBatch|null=null;
+ if(readFlow)try{fruitFlow=readFlow();}catch{/* optional observation */}
+ return {serial,speech,witnesses,renewal,fruitFlow};
+}
+
 export function createMvpSession(options:{observeSessionWeather?:true;world?:World;commit?:(world:World,previousRevision:number,speech?:AddressedSpeechObservation)=>void;persistent?:boolean;captureAddressedSpeechCustody?:true;observeCommittedMeals?:(witnesses:readonly ValleySpiritMvpMealWitness[])=>void;observeCommittedFruitRenewal?:(witnesses:readonly MvpFruitRenewalWitness[])=>void;observeCommittedFruitFlow?:(flow:MvpFruitFlowBatch)=>void}={}){
  let world=structuredClone(options.world??createMvpWorld());
  if(options.world)inheritReceiptHistory(options.world,world);
@@ -301,84 +386,14 @@ export function createMvpSession(options:{observeSessionWeather?:true;world?:Wor
     const draft=structuredClone(current);inheritReceiptHistory(current,draft);forkCompletedMovement(current,draft);
     world=draft;
     try{
-    const newGather=new Map<string,{planId:string;resourceId:string;quantity:number}>();
-    for(const r of world.residents){
-     if(r.status!=='alive'||r.activity||r.plan)continue;
-     const choice=chooseMvpAction(world,r);
-     const planId=`mvp-rule-${world.id}-${world.revision}-${r.id}-${++serial}`;
-     const result=submitPlan(world,{id:planId,actorId:r.id,actorRevision:r.revision,createdAt:world.minute,definition:mvpPlanDefinition(world,choice.action),intention:'本地规则：'+choice.reason,actions:[choice.action]});
-     if(!result.ok)throw new Error(`MVP plan rejected for ${r.id}: ${result.error}`);
-     if(choice.action.type==='gather'){
-      const {resourceId,quantity}=choice.action;
-      const source=world.resources.find(s=>s.id===resourceId);
-      if(source&&Number.isFinite(source.amount)&&source.amount>=quantity)newGather.set(r.id,{planId,resourceId,quantity});
-     }
-     decisions[r.id]=(decisions[r.id]??0)+1;
-    }
-    // A neighbour may finish harvesting after this resident chose a source.
-    // Keep the engine's rejected action (no inventory credit), then let the
-    // next tick choose from current stock instead of freezing the whole demo.
-    const gathering=new Map(world.residents.map(r=>[r.id,r.activity?.action]));
-    const shelterWorkers=new Set(world.residents.filter(r=>r.activity?.action.type==='mvpShelter'||r.plan?.actions[0]?.type==='mvpShelter').map(r=>r.id));
-    const activityPlans=new Map(world.residents.map(r=>[r.id,r.activity?.planId]));
-    const actionFailures:import('../world/engine.js').StepActionFailure[]=[];
-    const optional:{stageMealWitnesses?:()=>readonly ValleySpiritMvpMealWitness[]}={};
-    const advanceEngine=()=>{
-     if(options.persistent&&options.commit&&options.observeCommittedMeals)optional.stageMealWitnesses=captureValleySpiritMvpMealStep(world,{actionFailures});
-     else stepWorld(world,1,{actionFailures});
-    };
-    let stageRenewal:(()=>readonly MvpFruitRenewalWitness[])|undefined;
-    let readFlow:(()=>MvpFruitFlowBatch|null)|undefined;
-    const advanceObservedEngine=()=>{
-     if(options.persistent&&options.commit&&options.observeCommittedFruitFlow){
-      const flow=captureMvpFruitFlowStep(world,current,advanceEngine);
-      stageRenewal=flow.readRenewal;readFlow=flow.readFlow;
-     }else if(options.persistent&&options.commit&&options.observeCommittedFruitRenewal)
-      stageRenewal=captureMvpFruitRenewalStep(world,advanceEngine);
-     else advanceEngine();
-    };
-    let speech:AddressedSpeechObservation|undefined;
-    if(options.persistent&&options.commit&&options.captureAddressedSpeechCustody)
-     speech=captureAddressedSpeech(world,advanceObservedEngine);
-    else advanceObservedEngine();
-    for(const failed of world.residents.filter(r=>r.lastFailure)){
-     const action=gathering.get(failed.id);
-     const fresh=newGather.get(failed.id);
-     // A live start rejected only after a same-tick stock change is not a
-     // world fault. Older plans, unverified depletion and malformed targets do not
-     // get recovery from an error message (or any other typed failure).
-     if(fresh&&actionFailures.some(f=>f.code==='resource_stock_depleted_before_gather'&&f.actionType==='gather'&&
-      f.actorId===failed.id&&f.planId===fresh.planId&&f.resourceId===fresh.resourceId&&f.quantity===fresh.quantity&&f.available<fresh.quantity))continue;
-     if(action?.type==='talk'&&actionFailures.some(f=>f.actorId===failed.id&&f.planId===activityPlans.get(failed.id)&&f.actionType==='talk'&&f.code==='room_slot_contended'))continue;
-     if(action?.type==='mvpAgriculture'||action?.type==='mvpPreservation'||shelterWorkers.has(failed.id))continue;
-     if(action&&isMvpSeedAction(action)&&['灶堂有限种源已领完','这处实际工位正在被另一项劳动占用'].includes(failed.lastFailure!))continue;
-     const source=action?.type==='gather'?world.resources.find(s=>s.id===action.resourceId):undefined;
-     const depleted=action?.type==='gather'&&source&&source.amount<action.quantity&&distance(failed.at,source.at)<=1
-      &&(source.kind!=='bush'||canContactBerry(world,failed,source))
-      &&(source.kind!=='spring'||canContactSpring(world,failed,source));
-     if(failed.lastFailure==='资源或实际位置已经变化'&&depleted)continue;
-     // A listener may leave while the finite utterance is being performed.
-     // Keep the engine's failure, without inventing speech or freezing time.
-     if(failed.lastFailure==='对方已经不在能够交谈的位置'&&action?.type==='talk')continue;
-     // A quoted counterparty or stock may change before actual settlement.
-     // The engine rejects atomically; retry policy next tick, never credit goods.
-     if((action?.type==='offer'||action?.type==='accept')&&[
-      '须另一位在场的实际当事人，不能与自己虚构交换','报价物品或本人实际库存无效','对方还有未处理的报价',
-      '报价已经失效或没有交给本人','报价已经失效','交易须有两位不同的实际在场当事人','任一方的实际库存已不足',
-      '当前没有实际可见且可接近的交流对象，须先前往寻找','当前视野内没有找到对方，须先前往寻找',
-     ].includes(failed.lastFailure!))continue;
-     throw new Error(`MVP action failed for ${failed.id}: ${failed.lastFailure}`);
-    }
-    validateMvpClimate(world);validateMvpPreservation(world);
-    world.revision=Math.max(world.revision,current.revision+1);
-    // Capture only fresh typed evidence. Neither capture nor delivery can
-    // pause the world, and no draft acknowledgement is emitted on rollback.
-    let witnesses:readonly ValleySpiritMvpMealWitness[]=[];
-    if(optional.stageMealWitnesses)try{witnesses=optional.stageMealWitnesses();}catch{/* optional custody */}
-    let renewal:readonly MvpFruitRenewalWitness[]=[];
-    if(stageRenewal)try{renewal=stageRenewal();}catch{/* optional observation */}
-    let fruitFlow:MvpFruitFlowBatch|null=null;
-    if(readFlow)try{fruitFlow=readFlow();}catch{/* optional observation */}
+    const minute=advanceMvpRuleMinuteDraft(world,current,serial,decisions,{
+     meals:!!(options.persistent&&options.commit&&options.observeCommittedMeals),
+     fruitFlow:!!(options.persistent&&options.commit&&options.observeCommittedFruitFlow),
+     fruitRenewal:!!(options.persistent&&options.commit&&options.observeCommittedFruitRenewal),
+     addressedSpeech:!!(options.persistent&&options.commit&&options.captureAddressedSpeechCustody),
+    });
+    serial=minute.serial;
+    const {speech,witnesses,renewal,fruitFlow}=minute;
     if(speech?.receipts.length)options.commit?.(world,current.revision,speech);
     else options.commit?.(world,current.revision);
     try{observeCommittedWeather();}catch{sessionWeather=undefined;}
