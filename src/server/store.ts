@@ -1,12 +1,12 @@
-import {appendFormalShadowPermission,appendFormalShadowProposal,formalShadowScope,initializeFormalShadowCustody,makeFormalShadowProposal,
- readFormalShadowRows,verifyFormalShadowPermission} from './valley-spirit-formal-shadow-custody.js';
+import {appendFormalShadowPermission,appendFormalShadowProposal,formalShadowApprovalBasis,formalShadowScope,initializeFormalShadowCustody,makeFormalShadowProposal,
+ readFormalShadowRows,verifyFormalShadowPermission,type FormalShadowProposal} from './valley-spirit-formal-shadow-custody.js';
 import {readFormalRainShadowBasis} from './valley-spirit-formal-eligibility.js';
 import {projectCommittedFormalBerryFairness} from './valley-spirit-formal-berry-fairness.js';
 import {completeDeveloperFormalBerryPickup} from './valley-spirit-formal-berry-pickup.js';
 import {DAY} from '../world/time.js';
 import {projectDeveloperFormalBerryDiscovery} from './valley-spirit-formal-berry-discovery.js';
 import {draftFormalBerryGround,validateFormalBerryDetachedLedger} from './valley-spirit-formal-berry-draft.js';
-import {FORMAL_BERRY_EFFECT_SCHEMA,assertFormalBerryMirrorHeader,formalBerryEffectAnchor,formalBerryFixtureScope,
+import {BRIDGED_FORMAL_BERRY_APPROVAL,FORMAL_BERRY_EFFECT_SCHEMA,assertFormalBerryMirrorHeader,formalBerryEffectAnchor,formalBerryFixtureScope,
  verifyFormalBerrySignedApproval,pinFormalGroundBerryFoodBirth,type FormalBerryFixtureAnchor,type FormalBerryFixtureEffect} from './valley-spirit-formal-berry-authority.js';
 import {assertFormalRainProvenanceCommit,emptyFormalRainProvenance,forgetFormalRainStep} from '../world/formal-rain-provenance.js';
 import {appendValleySpiritFormalArrivalCustody,readValleySpiritFormalArrivalCustody,verifyValleySpiritFormalArrivalCustody,type ValleySpiritFormalArrivalReceipt} from './valley-spirit-formal-arrival-custody.js';
@@ -340,10 +340,13 @@ export class WorldStore {
     const w=this.readWorld(false,false);
     if(!w||w.id!==worldId){this.db.exec('COMMIT');return {status:'unavailable'} as const;}
     const rows=readFormalShadowRows(this.db,owner,w),current=rows.at(-1)?.permission.terms;
-    const proposals=rows.flatMap(({proposal:p})=>p?[{proposal:p,
-     permissionCurrent:p.permissionVersion===current?.version&&current.decision==='allow'&&w.minute<p.expiresAt&&
-      !w.clock.paused&&w.weather==='sun'&&!w.formalRainProvenance?.open&&w.formalRainProvenance?.closed.at(-1)?.episodeId===p.episodeId,
-    }]:[]);
+    const proposals=rows.flatMap(row=>{
+     const p=row.proposal;if(!p)return [];
+     const permissionCurrent=p.permissionVersion===current?.version&&current.decision==='allow'&&w.minute<p.expiresAt&&
+      !w.clock.paused&&w.weather==='sun'&&!w.formalRainProvenance?.open&&w.formalRainProvenance?.closed.at(-1)?.episodeId===p.episodeId;
+     return [{proposal:p,permissionCurrent,
+      approvalBasisDigest:permissionCurrent&&p.atRevision===w.revision&&p.atMinute===w.minute?formalShadowApprovalBasis(row):null}];
+    });
     this.db.exec('COMMIT');return {status:'ready' as const,proposals};
    }catch(error){this.db.exec('ROLLBACK');throw error;}
   }catch{return {status:'unavailable'} as const;}
@@ -420,17 +423,40 @@ export class WorldStore {
     w.minute<terms.firstMinute||w.minute>=terms.expiresMinute){
     this.db.exec('COMMIT');return {status:'denied'} as const;
    }
+   let reviewedProposal:FormalShadowProposal|undefined;
+   if(owner.formalShadowKeyPem){
+    // A new effect in a dual-key save has no standalone path. Read the
+    // actual current review and proposal inside the effect transaction.
+    if(terms.schema!==BRIDGED_FORMAL_BERRY_APPROVAL){this.db.exec('COMMIT');return {status:'denied'} as const;}
+    let shadow:ReturnType<typeof readFormalShadowRows>[number]|undefined;
+    try{shadow=readFormalShadowRows(this.db,owner,w).at(-1);}catch{/* unreadable G1 disables new G2, not old receipts */}
+    const proposal=shadow?.proposal,review=shadow?.permission.terms;
+    if(!shadow||!proposal||!review||review.decision!=='allow'||w.minute<review.startsAt||
+     w.minute>=proposal.expiresAt||proposal.permissionVersion!==review.version||terms.shadowPermissionVersion!==review.version||
+     proposal.proposalId!==terms.shadowProposalId||formalShadowApprovalBasis(shadow)!==terms.shadowBasisDigest||
+     proposal.worldId!==terms.worldId||proposal.episodeId!==terms.episodeId||proposal.sourceId!==terms.sourceId||
+     proposal.target.x!==terms.target.x||proposal.target.y!==terms.target.y||
+     proposal.atRevision!==terms.revision||proposal.atMinute!==w.minute||
+     terms.maxAgeGameMinutes!==review.maxAgeGameMinutes||terms.firstMinute<proposal.atMinute||
+     terms.expiresMinute>proposal.expiresAt){
+     this.db.exec('COMMIT');return {status:'denied'} as const;
+    }
+    reviewedProposal=proposal;
+   }
    const planned=draftFormalBerryGround(this,{scope:'formal-berry-detached-draft',enabled:true,capacity:owner.capacity,
     geography:{scope:'formal-rain-geography-shadow-only',enabled:true,worldId:w.id,episodeId:terms.episodeId,
      maxAgeGameMinutes:terms.maxAgeGameMinutes,sites:[{sourceId:terms.sourceId,target:terms.target}]}},{
     schemaVersion:1,worldId:w.id,rainAdoptedMinute:w.formalRainProvenance.adoptedMinute,capacity:owner.capacity,
     drafts:rows.map(row=>row.receipt),
    });
-   if(planned.status!=='draft_only'||planned.expectedWorldRevision!==w.revision||planned.receipt.sourceBefore!==terms.sourceBefore){
+   if(planned.status!=='draft_only'||planned.expectedWorldRevision!==w.revision||planned.receipt.sourceBefore!==terms.sourceBefore||
+    reviewedProposal&&(planned.receipt.draftId!==reviewedProposal.opportunityId||
+     planned.receipt.rain.startedMinute!==reviewedProposal.rainStartedAt||
+     planned.receipt.rain.closedMinute!==reviewedProposal.rainClosedAt)){
     this.db.exec('COMMIT');return {status:'denied'} as const;
    }
    const foodBirth=pinFormalGroundBerryFoodBirth(w,planned.receipt);
-   if(!foodBirth||terms.schema!=='sealed-formal-berry-approval/v2'||terms.foodDefinition!==foodBirth.definition||
+   if(!foodBirth||terms.schema==='sealed-formal-berry-approval/v1'||terms.foodDefinition!==foodBirth.definition||
     foodBirth.expiresAt!==foodBirth.producedAt+terms.foodLifeDays!*DAY){this.db.exec('COMMIT');return {status:'denied'} as const;}
    const draft=structuredClone(w),source=draft.resources.find(r=>r.id===terms.sourceId);
    if(!source||source.amount!==terms.sourceBefore||!Number.isSafeInteger(w.revision+1))throw Error('formal_berry_fixture_stock_changed');

@@ -56,10 +56,13 @@ export interface FormalShadowProposal {
  readonly rationale:'first-eligible-signed-site';
 }
 interface Row {readonly permission:SignedPermission;readonly proposal:FormalShadowProposal|null}
+export function formalShadowProposalId(opportunityId:string,permissionVersion:number){
+ return 'formal-shadow:'+digest([opportunityId,permissionVersion]);
+}
 export function makeFormalShadowProposal(t:FormalShadowPermission,w:Pick<World,'id'|'revision'|'minute'>,site:FormalShadowPermission['sites'][number],rain:Pick<FormalRainEpisode,'startedMinute'|'closedMinute'>):FormalShadowProposal{
  const opportunityId=formalBerryOpportunityId(w.id,t.episodeId,site.sourceId);
  return {schema:'formal-berry-shadow-proposal/v1',menuVersion:1,family:'fruit_fall',status:'proposed_only',executionAuthorized:false,
-  proposalId:'formal-shadow:'+digest([opportunityId,t.version]),opportunityId,worldId:w.id,episodeId:t.episodeId,
+  proposalId:formalShadowProposalId(opportunityId,t.version),opportunityId,worldId:w.id,episodeId:t.episodeId,
   permissionVersion:t.version,optionNumber:1,sourceId:site.sourceId,target:{...site.target},atRevision:w.revision,atMinute:w.minute,rainStartedAt:rain.startedMinute,rainClosedAt:rain.closedMinute,
   expiresAt:Math.min(t.expiresAt,rain.closedMinute+t.maxAgeGameMinutes),cooldownGameMinutes:t.cooldownGameMinutes,offlineSelectionCost:1,providerTokens:0,rationale:'first-eligible-signed-site'};
 }
@@ -110,6 +113,11 @@ export function readFormalShadowRows(db:DatabaseSync,owner:DeveloperMvpSpiritFix
    throw Error('formal_shadow_invalid_proposal');
   used.add(p.opportunityId);prior=p;return {permission:grant,proposal:p};
  });
+}
+/** The reviewer envelope and all proposal evidence are bound, not just an
+ * ID derived from a rain/source pair. Only hashed data leaves this read. */
+export function formalShadowApprovalBasis(row:Row){
+ return row.proposal?digest(['formal-berry-g1-approval-basis/v1',row.permission,row.proposal]):null;
 }
 export function appendFormalShadowPermission(db:DatabaseSync,grant:SignedPermission){
  if(!hasTable(db))throw Error('formal_shadow_not_installed');

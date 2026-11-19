@@ -3,6 +3,7 @@ import type {DatabaseSync} from 'node:sqlite';
 import type {Vec,World} from '../shared/types.js';
 import {DAY} from '../world/time.js';
 import {pinNativeFormalBerryLot} from '../world/food.js';
+import {formalShadowProposalId} from './valley-spirit-formal-shadow-custody.js';
 import type {FormalBerryDetachedReceipt} from './valley-spirit-formal-berry-draft.js';
 import type {DeveloperMvpSpiritFixtureOwner} from './valley-spirit-fixture-files.js';
 
@@ -10,6 +11,7 @@ const TABLE='formal_berry_fixture_effects';
 export const FORMAL_BERRY_EFFECT_SCHEMA='CREATE TABLE '+TABLE+' (draft_id TEXT PRIMARY KEY NOT NULL, approval_id TEXT NOT NULL UNIQUE, body TEXT NOT NULL)';
 const LEGACY='sealed-formal-berry-approval/v1';
 const VERSION='sealed-formal-berry-approval/v2';
+export const BRIDGED_FORMAL_BERRY_APPROVAL='sealed-formal-berry-approval/v3';
 const hex=/^[a-f0-9]{64}$/u;
 const approvalId=/^[A-Za-z0-9][A-Za-z0-9:._-]{0,159}$/u;
 const signature=/^[A-Za-z0-9_-]{86}$/u;
@@ -24,7 +26,8 @@ const digest=(s:string)=>createHash('sha256').update(s,'utf8').digest('hex');
 
 export interface FormalBerryFixtureAnchor {readonly version:1;readonly count:number;readonly digest:string;}
 export interface FormalBerrySignedTerms {
- readonly schema:typeof VERSION|typeof LEGACY;readonly foodDefinition?:string;readonly foodLifeDays?:number;readonly item:'berry';readonly quantity:1;
+ readonly schema:typeof VERSION|typeof LEGACY|typeof BRIDGED_FORMAL_BERRY_APPROVAL;
+ readonly shadowProposalId?:string;readonly shadowPermissionVersion?:number;readonly shadowBasisDigest?:string;readonly foodDefinition?:string;readonly foodLifeDays?:number;readonly item:'berry';readonly quantity:1;
  readonly fixtureScope:string;readonly worldId:string;readonly revision:number;readonly approvalId:string;
  readonly episodeId:string;readonly sourceId:string;readonly sourceBefore:number;readonly target:Vec;
  readonly maxAgeGameMinutes:number;readonly firstMinute:number;readonly expiresMinute:number;
@@ -77,19 +80,21 @@ export function validateFormalGroundBerryFoodBirth(w:World,effect:Pick<FormalBer
 }
 export const formalBerryFixtureScope=(owner:DeveloperMvpSpiritFixtureOwner)=>digest('sealed-formal-berry:'+owner.seal);
 export function encodeFormalBerrySignedTerms(t:unknown):Buffer|null {
- const next=!!t&&typeof t==='object'&&'schema' in t&&t.schema===VERSION;
+ const schema=t&&typeof t==='object'&&'schema' in t?t.schema:null;
+ const linked=schema===BRIDGED_FORMAL_BERRY_APPROVAL,next=schema===VERSION||linked;
  if(!exact(t,['schema','item','quantity','fixtureScope','worldId','revision','approvalId','episodeId','sourceId','sourceBefore',
-  'target','maxAgeGameMinutes','firstMinute','expiresMinute',...(next?['foodDefinition','foodLifeDays']:[])])||
-  (t.schema!==VERSION&&t.schema!==LEGACY)||t.item!=='berry'||t.quantity!==1||
+  'target','maxAgeGameMinutes','firstMinute','expiresMinute',...(next?['foodDefinition','foodLifeDays']:[]),...(linked?['shadowProposalId','shadowPermissionVersion','shadowBasisDigest']:[])])||
+  (t.schema!==VERSION&&t.schema!==LEGACY&&t.schema!==BRIDGED_FORMAL_BERRY_APPROVAL)||t.item!=='berry'||t.quantity!==1||
   !pattern(t.fixtureScope,hex)||!pattern(t.worldId,nativeId)||!nat(t.revision)||!pattern(t.approvalId,approvalId)||
   !pattern(t.episodeId,rainId)||!pattern(t.sourceId,/^bush-\d{1,8}-\d{1,8}$/u)||!nat(t.sourceBefore)||t.sourceBefore<1||
   !exact(t.target,['x','y'])||!nat(t.target.x)||!nat(t.target.y)||!nat(t.maxAgeGameMinutes)||t.maxAgeGameMinutes<1||
   t.maxAgeGameMinutes>40320||!minute(t.firstMinute)||!minute(t.expiresMinute)||t.firstMinute>=t.expiresMinute)return null;
  if(next&&(!pattern(t.foodDefinition,/^food\/life@[1-9][0-9]*$/u)||typeof t.foodLifeDays!=='number'||
   !Number.isFinite(t.foodLifeDays)||t.foodLifeDays<=0||t.foodLifeDays>448))return null;
+ if(linked&&(!pattern(t.shadowProposalId,/^formal-shadow:[a-f0-9]{64}$/u)||!nat(t.shadowPermissionVersion)||t.shadowPermissionVersion<1||t.shadowPermissionVersion>64||!pattern(t.shadowBasisDigest,hex)))return null;
  return Buffer.from(JSON.stringify([t.schema,t.item,t.quantity,t.fixtureScope,t.worldId,t.revision,t.approvalId,t.episodeId,t.sourceId,
   t.sourceBefore,t.target.x,t.target.y,t.maxAgeGameMinutes,t.firstMinute,t.expiresMinute,
-  ...(next?[t.foodDefinition,t.foodLifeDays]:[])]));
+  ...(next?[t.foodDefinition,t.foodLifeDays]:[]),...(linked?[t.shadowProposalId,t.shadowPermissionVersion,t.shadowBasisDigest]:[])]));
 }
 
 export function verifyFormalBerrySignedApproval(a:unknown,owner:DeveloperMvpSpiritFixtureOwner):a is FormalBerrySignedApproval {
@@ -97,6 +102,7 @@ export function verifyFormalBerrySignedApproval(a:unknown,owner:DeveloperMvpSpir
   if(!owner.formalApprovalKeyPem||!exact(a,['terms','signature'])||!pattern(a.signature,signature))return false;
   const message=encodeFormalBerrySignedTerms(a.terms);
   if(!message||(a.terms as FormalBerrySignedTerms).fixtureScope!==formalBerryFixtureScope(owner))return false;
+  if((a.terms as FormalBerrySignedTerms).schema===BRIDGED_FORMAL_BERRY_APPROVAL&&!owner.formalShadowKeyPem)return false;
   const sig=Buffer.from(a.signature,'base64url'),key=createPublicKey(owner.formalApprovalKeyPem);
   return sig.length===64&&sig.toString('base64url')===a.signature&&key.asymmetricKeyType==='ed25519'&&verify(null,message,key,sig);
  }catch{return false;}
@@ -125,9 +131,10 @@ export function assertFormalBerryMirrorHeader(db:DatabaseSync,owner:DeveloperMvp
   const t=saved.approval.terms,r=saved.receipt as FormalBerryDetachedReceipt;
   if(!r||t.worldId!==worldId||t.approvalId!==value.approval_id||r.draftId!==value.draft_id||t.revision+1!==saved.committedRevision||
    r.atRevision!==t.revision||r.item!=='berry'||r.sourceId!==t.sourceId||r.sourceBefore!==t.sourceBefore||
+   (t.schema===BRIDGED_FORMAL_BERRY_APPROVAL&&t.shadowProposalId!==formalShadowProposalId(r.draftId,t.shadowPermissionVersion!))||
    r.rain?.episodeId!==t.episodeId||r.target?.x!==t.target.x||r.target?.y!==t.target.y||
    !minute(r.placedMinute)||r.placedMinute<t.firstMinute||r.placedMinute>=t.expiresMinute||
-   (t.schema===VERSION?(!foodBirthMatchesReceipt(saved.foodBirth,r)||saved.foodBirth.definition!==t.foodDefinition||
+   (t.schema!==LEGACY?(!foodBirthMatchesReceipt(saved.foodBirth,r)||saved.foodBirth.definition!==t.foodDefinition||
     saved.foodBirth.expiresAt!==saved.foodBirth.producedAt+t.foodLifeDays!*DAY):Object.hasOwn(saved,'foodBirth')))
    throw Error('formal_berry_fixture_archive_binding');
   if(Object.hasOwn(saved,'pickup')){
