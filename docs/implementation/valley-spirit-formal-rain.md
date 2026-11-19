@@ -77,3 +77,14 @@ hourly readings, temperature, humidity or residents' reactions. The reviewed
 text exists only in that handle, disappears on revoke, failure, expiry or
 close, and is never restored from a reopened audit or shown on an ordinary
 player surface.
+
+The explicit v2 historical verifier is separate from a normally reopened
+handle. While the original local stores are quiescent, it acquires existing
+leases without creating stores or locks and reads the world, original account
+registry and quota ledger without writing their data or creating WAL/SHM
+files. It requires the recorded original file and directory identities, exact
+policy and original clean run's request claim, exact completed usage, and no
+recovery entry. Only a status is returned: it never restores a draft, returns
+the payload, or dispatches. A v1 witness remains locally recorded only.
+This local custody check does not detect an out-of-band coordinated rollback
+of all authoritative files.

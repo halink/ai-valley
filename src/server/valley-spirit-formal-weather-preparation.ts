@@ -1,11 +1,12 @@
 import {createHash,createPublicKey,verify,type KeyObject} from 'node:crypto';
+import {lstatSync} from 'node:fs';
 import {DatabaseSync} from 'node:sqlite';
 import {acquireDeveloperMvpSpiritFixtureOwner,isDeveloperMvpSpiritFixtureOwner,type DeveloperMvpSpiritFixtureKey,type DeveloperMvpSpiritFixtureOwner} from './valley-spirit-fixture-files.js';
 import type {World} from '../shared/types.js';
 import {validateFormalRainProvenance} from '../world/formal-rain-provenance.js';
 import {formalSyntheticWeatherBinding} from './production-model-runtime.js';
 import {WorldStore} from './store.js';
-import {ownsProductionAccountQuotaRehearsal,type ProductionAccountQuotaRehearsal,type ProductionModelAccountOwnership} from './production-model-account-ownership.js';
+import {verifyHistoricalOfflineAlmanacCompletion,ownsProductionAccountQuotaRehearsal,type ProductionAccountQuotaRehearsal,type ProductionModelAccountOwnership} from './production-model-account-ownership.js';
 import type {SharedModelAccountPolicy} from './shared-model-account.js';
 import {decodeSavedWorld} from './save-preflight.js';
 
@@ -224,7 +225,7 @@ export function encodeFormalWeatherAccountPreparation(t:unknown):Buffer|null{
  * short-lived, not a durable dispatch grant. Primary revoke invalidates both. */
 export function borrowFormalWeatherAccountPreparation(store:WorldStore,owner:DeveloperMvpSpiritFixtureOwner,
  ownership:ProductionModelAccountOwnership,quota:ProductionAccountQuotaRehearsal,policy:SharedModelAccountPolicy,pinnedEpisodeId:string){
- const {terms,packet,close}=openFormalWeatherAccountSnapshot(store,owner,ownership,quota,policy,pinnedEpisodeId,false);
+ const {terms,packet,close}=openFormalWeatherAccountSnapshot(owner,policy,pinnedEpisodeId,{store,ownership,quota,synthetic:false});
  return Object.freeze({terms,packet,close});
 }
 
@@ -266,12 +267,13 @@ const AUDIT_DDL=`CREATE TABLE ${AUDIT}(singleton INTEGER NOT NULL PRIMARY KEY CH
 const auditKeys=['schemaVersion','mode','fixtureScope','packet','packetDigest','episodeId','sourceDigest','sourceAuthorizationDigest',
  'dispatchTermsDigest','startsAt','expiresAt','requestId','accountScope','accountRunId','policyDigest','quotaBinding',
  'completedAt','inputTokens','outputTokens'] as const;
+const auditKeysV2=[...auditKeys,'registryIdentity'] as const;
 const hash=(v:string|Buffer)=>createHash('sha256').update(v).digest('hex');
 const memoryRequestId=(seal:string,p:FormalMemoryPacket)=>'formal-weather-memory-'+hash(JSON.stringify([
  seal,p.worldId,p.sourceRef,p.startedMinute,p.closedMinute]));
 type PairedCompletion=NonNullable<ReturnType<ProductionAccountQuotaRehearsal['proveOfflineAlmanacCompletion']>>;
 type FormalWeatherDraft=Readonly<{terms:Readonly<FormalWeatherEditorialTerms>;rendered:ReturnType<typeof renderFormalWeatherDraft>}>;
-type FormalAuditStatus='unavailable'|'not-recorded'|'settlement-unproven'|'locally-recorded'|'paired-verified';
+type FormalAuditStatus='unavailable'|'not-recorded'|'settlement-unproven'|'locally-recorded'|'paired-verified'|'historically-verified';
 function auditRow(db:DatabaseSync){
  const entry=db.prepare('SELECT type,sql FROM sqlite_schema WHERE name=?').get(AUDIT);
  if(!entry)return null;
@@ -283,29 +285,55 @@ function auditRow(db:DatabaseSync){
  if(rows.length!==1||r.singleton!==1||typeof r.witness!=='string'||r.witness_digest!==hash(r.witness))
   throw Error('formal_weather_audit_row');
  const v:unknown=JSON.parse(r.witness);
- if(!exact(v,auditKeys)||JSON.stringify(Object.fromEntries(auditKeys.map(k=>[k,v[k]])))!==r.witness)
+ const keys=v&&typeof v==='object'&&'schemaVersion' in v&&v.schemaVersion===2?auditKeysV2:auditKeys;
+ if(!exact(v,keys)||JSON.stringify(Object.fromEntries(keys.map(k=>[k,v[k]])))!==r.witness)
   throw Error('formal_weather_audit_record');
  return {value:v,digest:r.witness_digest};
 }
-function openFormalWeatherAccountSnapshot(store:WorldStore,owner:DeveloperMvpSpiritFixtureOwner,
- ownership:ProductionModelAccountOwnership,quota:ProductionAccountQuotaRehearsal,policy:SharedModelAccountPolicy,pinnedEpisodeId:string,synthetic:boolean){
- if(!(store instanceof WorldStore)||!episode(pinnedEpisodeId))throw Error('formal_dual_weather_scope');
+/** Reopen only the same disposable world and prove one v2 history under the
+ * original cooperating local registry. This status cannot mint a draft. */
+export function verifyFormalWeatherHistoricalAudit(fixture:DeveloperMvpSpiritFixtureKey,
+ registryDirectory:string,policy:SharedModelAccountPolicy,pinnedEpisodeId:string):FormalAuditStatus{
+ let owner:DeveloperMvpSpiritFixtureOwner|undefined,snapshot:ReturnType<typeof openFormalWeatherAccountSnapshot>|undefined;
+ try{
+  owner=acquireDeveloperMvpSpiritFixtureOwner(fixture,{existingOnly:true});
+  snapshot=openFormalWeatherAccountSnapshot(owner,policy,pinnedEpisodeId,{registryDirectory});
+  return snapshot.auditStatus();
+ }catch{return 'unavailable';}
+ finally{try{snapshot?.close();}finally{owner?.release();}}
+}
+function openFormalWeatherAccountSnapshot(owner:DeveloperMvpSpiritFixtureOwner,policy:SharedModelAccountPolicy,pinnedEpisodeId:string,
+ access:{store:WorldStore;ownership:ProductionModelAccountOwnership;quota:ProductionAccountQuotaRehearsal;synthetic:boolean}|{registryDirectory:string}){
+ const live='store' in access?access:undefined,historical='registryDirectory' in access?access:undefined;
+ const quota=live?.quota,synthetic=live?.synthetic===true;
+ if(live&&!(live.store instanceof WorldStore)||!episode(pinnedEpisodeId))throw Error('formal_dual_weather_scope');
  const context=owner?.formalWeatherPurpose;
  if(!context?.accountKeyPem||!context.accountScope||!context.accountFingerprint)throw Error('formal_dual_weather_scope');
  const {worldId,accountScope,accountFingerprint}=context, frozenPolicy=structuredClone(policy);
  const assertCurrent=()=>{
-  WorldStore.prototype.assertFormalDualWeatherFixtureOwner.call(store,owner);
-  if(!ownsProductionAccountQuotaRehearsal(ownership,quota)||quota.accountScope!==accountScope||
-     quota.runId!==ownership.runId||!quota.matchesPolicy(frozenPolicy))throw Error('formal_dual_weather_account');
+  if(live){
+   const {ownership,quota,store}=live;
+   WorldStore.prototype.assertFormalDualWeatherFixtureOwner.call(store,owner);
+   if(!ownsProductionAccountQuotaRehearsal(ownership,quota)||quota.accountScope!==accountScope||
+      quota.runId!==ownership.runId||!quota.matchesPolicy(frozenPolicy))throw Error('formal_dual_weather_account');
+  }else{
+   owner.assertOwned();if(frozenPolicy.accountId!==accountScope)throw Error('formal_dual_weather_account');
+   for(const suffix of ['-journal','-wal','-shm']){
+    try{lstatSync(owner.database+suffix);}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')continue;throw e;}
+    throw Error('formal_weather_history_pending_journal');
+   }
+  }
  };
  assertCurrent();
  const policyDigest=createHash('sha256').update(JSON.stringify([frozenPolicy.accountId,
   ...[frozenPolicy.limit,frozenPolicy.residentFloor,frozenPolicy.almanacCap].flatMap(x=>[x.rpm,x.tpm,x.slots]),
   frozenPolicy.almanacCooldownMs])).digest('hex');
  const fixtureScope=createHash('sha256').update(SCHEMA+'\0'+owner.seal).digest('hex');
- const sourceKey=createPublicKey(context.keyPem),accountKey=createPublicKey(context.accountKeyPem),runId=quota.runId;
+ const sourceKey=createPublicKey(context.keyPem),accountKey=createPublicKey(context.accountKeyPem),runId=quota?.runId??'';
  const pin={mode:FORMAL_RAIN_OBJECTIVE_MODE,worldId,episodeId:pinnedEpisodeId};
- const db=new DatabaseSync(owner.database,{readOnly:!synthetic});
+ // WorldStore uses WAL. After an exclusive clean reopen, immutable access
+ // neither creates WAL/shm sidecars nor ignores a pending WAL (checked above).
+ const db=new DatabaseSync(historical?'file:'+owner.database+'?immutable=1':owner.database,{readOnly:!synthetic});
  try{db.exec(synthetic?'PRAGMA trusted_schema=OFF; PRAGMA synchronous=FULL':'PRAGMA trusted_schema=OFF; PRAGMA query_only=ON');}catch(e){db.close();throw e;}
  let closed=false,isolated=false,seen:Signed[]=[],rev=-1,at=-1,lastNow=-1;
  type Snapshot=ReturnType<typeof readFormalClosedRainObjectiveOnConnection>;
@@ -332,7 +360,7 @@ function openFormalWeatherAccountSnapshot(store:WorldStore,owner:DeveloperMvpSpi
   }
  };
  const terms=(primary:Signed,startsAt:number,expiresAt:number):FormalWeatherAccountPreparationTerms=>({
-  schema:synthetic?SYNTHETIC_SCHEMA:ACCOUNT_SCHEMA,fixtureScope,worldId,episodeId:pinnedEpisodeId,sourceDigest:primary.terms.sourceDigest,
+  schema:synthetic||historical?SYNTHETIC_SCHEMA:ACCOUNT_SCHEMA,fixtureScope,worldId,episodeId:pinnedEpisodeId,sourceDigest:primary.terms.sourceDigest,
   sourceEpoch:primary.terms.version,sourceAuthorizationDigest:createHash('sha256').update(primary.signature).digest('hex'),
   accountScope,accountFingerprint,runId,policyDigest,startsAt,expiresAt
  });
@@ -369,12 +397,12 @@ function openFormalWeatherAccountSnapshot(store:WorldStore,owner:DeveloperMvpSpi
         audit.id!==memoryRequestId(owner.seal,projected)||auditRow(db))return null;
      const proof=audit.proof;
      if(proof.runId!==runId||proof.inputTokens!==Buffer.byteLength(JSON.stringify(projected))+INPUT_OVERHEAD||
-        proof.outputTokens!==1||!hex(proof.binding))return null;
-     const record=JSON.stringify({schemaVersion:1,mode:'compiled-memory-only',fixtureScope,packet:projected,
+        proof.outputTokens!==1||!hex(proof.binding)||!hex(proof.registryIdentity))return null;
+     const record=JSON.stringify({schemaVersion:2,mode:'compiled-memory-only',fixtureScope,packet:projected,
       packetDigest:hash(JSON.stringify(projected)),episodeId:pinnedEpisodeId,sourceDigest:p.sourceDigest,
       sourceAuthorizationDigest:terms(primary,startsAt,expiresAt).sourceAuthorizationDigest,dispatchTermsDigest:hash(buffer),
       startsAt,expiresAt,requestId:audit.id,accountScope,accountRunId:proof.runId,policyDigest,quotaBinding:proof.binding,
-      completedAt:proof.completedAt,inputTokens:proof.inputTokens,outputTokens:proof.outputTokens});
+      completedAt:proof.completedAt,inputTokens:proof.inputTokens,outputTokens:proof.outputTokens,registryIdentity:proof.registryIdentity});
      db.exec(AUDIT_DDL);
      const digest=hash(record);
      db.prepare(`INSERT INTO ${AUDIT} VALUES (1,?,?)`).run(record,digest);stagedDigest=digest;
@@ -389,28 +417,39 @@ function openFormalWeatherAccountSnapshot(store:WorldStore,owner:DeveloperMvpSpi
     const spent=spentSource(db,fixtureScope,p.sourceDigest),row=auditRow(db);
     if(!row)return pairedAuditDigest!==undefined?'unavailable':spent?'settlement-unproven':'not-recorded';
     const r=row.value;
-    if(!spent||r.schemaVersion!==1||r.mode!=='compiled-memory-only'||r.fixtureScope!==fixtureScope||
+    if(!spent||r.schemaVersion!==1&&r.schemaVersion!==2||r.schemaVersion===2&&!hex(r.registryIdentity)||r.mode!=='compiled-memory-only'||r.fixtureScope!==fixtureScope||
        r.episodeId!==pinnedEpisodeId||r.sourceDigest!==p.sourceDigest||r.accountScope!==accountScope||
        !label(r.accountRunId)||!hex(r.policyDigest)||!hex(r.quotaBinding)||
        !integer(r.startsAt)||!integer(r.expiresAt)||!integer(r.completedAt)||r.completedAt<r.startsAt||
        !exact(r.packet,['schemaVersion','projectionVersion','permissionVersion','worldId','sourceRef','startedMinute','closedMinute'])||
        !integer(r.packet.permissionVersion)||r.packet.permissionVersion===0)return 'unavailable';
-    const historical=log[r.packet.permissionVersion-1];
-    if(!historical?.terms.allow||historical.terms.sourceDigest!==p.sourceDigest||
-       historical.terms.episodeId!==pinnedEpisodeId)return 'unavailable';
-    const projected=makePacket(p,historical.terms.version),bytes=JSON.stringify(projected);
-    const oldTerms={...terms(historical,r.startsAt,r.expiresAt),runId:r.accountRunId,policyDigest:r.policyDigest};
+    const originalGrant=log[r.packet.permissionVersion-1];
+    if(!originalGrant?.terms.allow||originalGrant.terms.sourceDigest!==p.sourceDigest||
+       originalGrant.terms.episodeId!==pinnedEpisodeId)return 'unavailable';
+    const projected=makePacket(p,originalGrant.terms.version),bytes=JSON.stringify(projected);
+    const oldTerms={...terms(originalGrant,r.startsAt,r.expiresAt),runId:r.accountRunId,policyDigest:r.policyDigest};
     const encoded=encodeFormalWeatherAccountPreparation(oldTerms);
     if(!encoded||r.sourceAuthorizationDigest!==oldTerms.sourceAuthorizationDigest||r.dispatchTermsDigest!==hash(encoded)||
        JSON.stringify(r.packet)!==bytes||r.packetDigest!==hash(bytes)||r.requestId!==memoryRequestId(owner.seal,projected)||
        r.inputTokens!==Buffer.byteLength(bytes)+INPUT_OVERHEAD||r.outputTokens!==1)return 'unavailable';
     if(pairedAuditDigest!==undefined){
      if(pairedAuditDigest!==row.digest)return 'unavailable';
-     const proof=quota.proveOfflineAlmanacCompletion(String(r.requestId),r.completedAt,Number(r.inputTokens),1);
-     if(proof?.runId!==r.accountRunId||proof.binding!==r.quotaBinding)return 'unavailable';
-     if(primary.terms.version===historical.terms.version&&now>=r.startsAt&&now<r.expiresAt&&Date.now()<r.expiresAt)
+     const proof=quota?.proveOfflineAlmanacCompletion(String(r.requestId),r.completedAt,Number(r.inputTokens),1);
+     if(proof?.runId!==r.accountRunId||proof.binding!==r.quotaBinding||proof.registryIdentity!==r.registryIdentity)return 'unavailable';
+     if(primary.terms.version===originalGrant.terms.version&&now>=r.startsAt&&now<r.expiresAt&&Date.now()<r.expiresAt)
       onDraft?.(projected,row.digest,String(r.packetDigest));
      return 'paired-verified';
+    }
+    if(historical){
+     if(r.schemaVersion===1)return 'locally-recorded';
+     if(primary.terms.version!==originalGrant.terms.version||r.policyDigest!==policyDigest)return 'unavailable';
+     try{
+      return verifyHistoricalOfflineAlmanacCompletion({
+       registryDirectory:historical.registryDirectory,accountScope,runId:r.accountRunId,policy:frozenPolicy,
+       registryIdentity:String(r.registryIdentity),binding:r.quotaBinding,requestId:String(r.requestId),
+       completedAt:r.completedAt,inputTokens:Number(r.inputTokens),outputTokens:1
+      })?'historically-verified':'unavailable';
+     }catch{return 'unavailable';}
     }
     return 'locally-recorded';
    });
@@ -461,7 +500,7 @@ export function openFormalWeatherMemoryHandoff(bridge:unknown,owner:DeveloperMvp
  const bound=formalSyntheticWeatherBinding(bridge);
  if(!bound||bound.signal.aborted)throw Error('formal_weather_resident_bridge_required');
  const {store,ownership,quota,signal}=bound;
- const snapshot=openFormalWeatherAccountSnapshot(store,owner,ownership,quota,bound.policy(),pinnedEpisodeId,true);
+ const snapshot=openFormalWeatherAccountSnapshot(owner,bound.policy(),pinnedEpisodeId,{store,ownership,quota,synthetic:true});
  let closed=false,active=false,uncertain=false,spentHere=false;
  const reviewerPem=owner.formalWeatherPurpose?.reviewerKeyPem;
  const reviewer=reviewerPem?createPublicKey(reviewerPem):undefined;

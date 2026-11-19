@@ -1,7 +1,8 @@
 import {createHash} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
 import {lstatSync} from 'node:fs';
-import {acquireRuntimeOwnership,type RuntimeOwnership} from './runtime-lock.js';
+import {dirname} from 'node:path';
+import {acquireRuntimeOwnership,assertExistingRollbackSqliteHeader,type RuntimeOwnership} from './runtime-lock.js';
 
 export type ModelAccountPurpose='resident'|'valley-spirit-almanac';
 export interface ModelAccountCapacity {rpm:number;tpm:number;slots:number;}
@@ -88,6 +89,28 @@ function load(db:DatabaseSync,policyText:string):State {
 }
 const exists=(file:string)=>{try{return lstatSync(file);}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return null;throw e;}};
 const noJournal=(path:string)=>{for(const suffix of ['-wal','-shm','-journal'])if(exists(path+suffix))throw Error('model_account_pending_journal');};
+/** One exact historical row, under the existing ledger lease; never opens a
+ * writable data connection, updates clocks/budgets or treats totals as proof. */
+export function verifyHistoricalAlmanacLedger(database:string,policy:SharedModelAccountPolicy,binding:string,
+ requestId:string,completedAt:number,inputTokens:number,outputTokens:number):boolean{
+ if(!id(requestId)||!count(completedAt)||!token(inputTokens)||!token(outputTokens))return false;
+ const policyText=JSON.stringify(trustedPolicy(policy)),owner=acquireRuntimeOwnership(database,{existingOnly:true});
+ let db:DatabaseSync|undefined;
+ try{
+  owner.assertOwned();noJournal(owner.database);
+  const file=lstatSync(owner.database),parent=lstatSync(dirname(owner.database)+'/.');
+  if(!file.isFile()||file.nlink!==1||file.uid!==process.getuid?.()||(file.mode&0o022)!==0||
+     !parent.isDirectory()||parent.uid!==file.uid||(parent.mode&0o777)!==0o700||
+     createHash('sha256').update(JSON.stringify([policyText,file.dev,file.ino])).digest('hex')!==binding)return false;
+  assertExistingRollbackSqliteHeader(owner.database);
+  db=new DatabaseSync('file:'+owner.database+'?immutable=1',{readOnly:true});
+  db.exec('PRAGMA trusted_schema=OFF; PRAGMA query_only=ON; BEGIN');
+  const state=load(db,policyText),r=state.requests.find(row=>row.id===requestId);
+  owner.assertOwned();noJournal(owner.database);assertExistingRollbackSqliteHeader(owner.database);db.exec('COMMIT');
+  return r?.phase==='complete'&&r.purpose==='valley-spirit-almanac'&&r.endedAt===completedAt&&
+   r.usedInput===inputTokens&&r.usedOutput===outputTokens;
+ }finally{try{db?.close();}finally{owner.release();}}
+}
 export type SharedModelAccountAdmission =
  {status:'reserved';requestId:string}|
  {status:'resident-priority'|'account-capacity'|'almanac-capacity'|'almanac-cooldown'|'duplicate'|'ledger-capacity'};

@@ -7,7 +7,7 @@
  * Unknown files are never repaired or deleted. This requires a local filesystem
  * with working SQLite file locks; shared/network filesystems are not supported.
  */
-import {constants,openSync,closeSync,fstatSync,lstatSync,mkdirSync,statfsSync,type Stats} from 'node:fs';
+import {constants,openSync,closeSync,fstatSync,lstatSync,mkdirSync,readSync,statfsSync,type Stats} from 'node:fs';
 import {basename,dirname,resolve} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
 
@@ -26,13 +26,13 @@ function optionalStat(path:string){try{return lstatSync(path);}catch(error){if(a
 function regular(info:Stats){
  if(!info.isFile()||info.isSymbolicLink()||info.nlink!==1)throw new RuntimeLockError('unsafe_runtime_file');
 }
-function directoryFd(path:string){
+function directoryFd(path:string,create:boolean){
  // No pathname ancestor is followed, including while a directory is created.
  let fd=openSync('/',constants.O_RDONLY|constants.O_DIRECTORY|constants.O_NOFOLLOW);
  try{
   for(const part of path.split('/').filter(Boolean)){
    const nextPath=child(fd,part);
-   try{mkdirSync(nextPath,{mode:0o700});}catch(error){if(!(error&&typeof error==='object'&&'code' in error&&error.code==='EEXIST'))throw error;}
+   if(create)try{mkdirSync(nextPath,{mode:0o700});}catch(error){if(!(error&&typeof error==='object'&&'code' in error&&error.code==='EEXIST'))throw error;}
    const next=openSync(nextPath,constants.O_RDONLY|constants.O_DIRECTORY|constants.O_NOFOLLOW);
    closeSync(fd);fd=next;
   }
@@ -48,6 +48,18 @@ function checkSidecars(path:string,lock=false){
  }
 }
 
+/** A readonly SQLite connection can still create WAL sidecars. Verify the
+ * underlying header directly before/after immutable reads of DELETE stores. */
+export function assertExistingRollbackSqliteHeader(path:string):void{
+ const fd=openSync(path,constants.O_RDONLY|constants.O_NOFOLLOW|constants.O_NONBLOCK);
+ try{
+  const info=fstatSync(fd);regular(info);
+  const header=Buffer.alloc(100);
+  if(readSync(fd,header,0,header.length,0)!==header.length||
+     header.subarray(0,16).toString('latin1')!=='SQLite format 3\0'||header[18]!==1||header[19]!==1||
+     !same(info,lstatSync(path)))throw new RuntimeLockError('runtime_sqlite_rollback_header_required');
+ }finally{closeSync(fd);}
+}
 export interface RuntimeOwnership{
  /** Descriptor-anchored path; keep this owner alive until WorldStore is closed. */
  readonly database:string;
@@ -55,7 +67,7 @@ export interface RuntimeOwnership{
  assertOwned():void;
  release():void;
 }
-export function acquireRuntimeOwnership(input:string):RuntimeOwnership{
+export function acquireRuntimeOwnership(input:string,options?:Readonly<{existingOnly:true}>):RuntimeOwnership{
  if(process.platform!=='linux'||!constants.O_NOFOLLOW||!constants.O_DIRECTORY)
   throw new RuntimeLockError('runtime_lock_requires_linux_local_filesystem');
  if(!input||input.includes('\0')||input===':memory:')throw new RuntimeLockError('invalid_runtime_database');
@@ -63,7 +75,8 @@ export function acquireRuntimeOwnership(input:string):RuntimeOwnership{
  if(/(?:\.runtime-lock|-(?:journal|wal|shm))$/i.test(name))throw new RuntimeLockError('invalid_runtime_database');
  let directory=-1,lockFd=-1,db:DatabaseSync|undefined,key:string|undefined,registered=false;
  try{
-  directory=directoryFd(dirname(target));
+  const existingOnly=options?.existingOnly===true;
+  directory=directoryFd(dirname(target),!existingOnly);
   const parent=fstatSync(directory);
   if(parent.uid!==process.getuid!()||(parent.mode&0o022)!==0)throw new RuntimeLockError('unsafe_runtime_directory');
   if(!localFileSystems.has(statfsSync(child(directory,'.')).type))throw new RuntimeLockError('runtime_lock_requires_linux_local_filesystem');
@@ -71,12 +84,15 @@ export function acquireRuntimeOwnership(input:string):RuntimeOwnership{
   const initial=optionalStat(database);if(initial)regular(initial);
   checkSidecars(database);
   const prior=optionalStat(lockPath);
+  if(existingOnly&&(!initial||!prior))throw new RuntimeLockError('runtime_read_existing_required');
   if(prior){regular(prior);if(held.has(identity(prior)))throw new RuntimeLockError('runtime_already_owned');}
   // Creating an empty file is atomic. A crash during creation leaves a usable
   // lock, not partially written owner metadata requiring unsafe stale recovery.
-  try{lockFd=openSync(lockPath,constants.O_RDWR|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600);}
+  try{lockFd=existingOnly
+   ?openSync(lockPath,constants.O_RDWR|constants.O_NOFOLLOW|constants.O_NONBLOCK)
+   :openSync(lockPath,constants.O_RDWR|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600);}
   catch(error){
-   if(!(error&&typeof error==='object'&&'code' in error&&error.code==='EEXIST'))throw error;
+   if(existingOnly||!(error&&typeof error==='object'&&'code' in error&&error.code==='EEXIST'))throw error;
    lockFd=openSync(lockPath,constants.O_RDWR|constants.O_NOFOLLOW|constants.O_NONBLOCK);
   }
   const info=fstatSync(lockFd);regular(info);

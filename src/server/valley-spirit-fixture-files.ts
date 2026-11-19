@@ -289,7 +289,7 @@ function readManifest(path:string):{identity:string;value:Manifest} {
 
 /** Requires the opaque capability and the exact new temp directory/DB inodes.
  * No arbitrary input database path can acquire the writable fixture capability. */
-export function acquireDeveloperMvpSpiritFixtureOwner(key:DeveloperMvpSpiritFixtureKey):DeveloperMvpSpiritFixtureOwner {
+export function acquireDeveloperMvpSpiritFixtureOwner(key:DeveloperMvpSpiritFixtureKey,options?:Readonly<{existingOnly:true}>):DeveloperMvpSpiritFixtureOwner {
  const tmp=root();
  if(!exact(key,['directory','token'])||!hex(key.token)||typeof key.directory!=='string'||
   dirname(key.directory)!==tmp||key.directory!==join(tmp,basename(key.directory))||
@@ -303,7 +303,7 @@ export function acquireDeveloperMvpSpiritFixtureOwner(key:DeveloperMvpSpiritFixt
  if(!privateFile(initial)||identity(initial)!==manifest.databaseIdentity)return invalid();
  let ownership:RuntimeOwnership|undefined;
  try{
-  ownership=acquireRuntimeOwnership(path);
+  ownership=acquireRuntimeOwnership(path,options);
   const handle=ownership,owner:DeveloperMvpSpiritFixtureOwner=Object.freeze({
    database:handle.database,seal:createHmac('sha256',key.token).update(manifestSnapshot,'utf8').digest('hex'),
    capacity:Object.freeze({...manifest.capacity}),
