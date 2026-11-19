@@ -35,7 +35,7 @@ import type {World,WorldEvent,Resource} from '../shared/types.js';
 import {AtomicDailySnapshots} from './acceptance-daily-store.js';
 import type {DailySnapshotConfig} from './acceptance-daily-snapshots.js';
 import {attachReceiptHistory} from '../world/receipts.js';
-import {assertWorldCompatibility,decodeSavedWorld,preflightWorldSave} from './save-preflight.js';
+import {assertDeveloperMvpEffectArchive,assertWorldCompatibility,decodeSavedWorld,preflightWorldSave} from './save-preflight.js';
 import {claimDeveloperMvpSpiritFixtureOwner,isDeveloperMvpSpiritFixtureOwner,type DeveloperMvpSpiritFixtureOwner} from './valley-spirit-fixture-files.js';
 export interface AppendedHistory {
  events: WorldEvent[];
@@ -691,10 +691,13 @@ export class WorldStore {
   if(!this.hasMvpSpiritEffectFixture())throw Error('mvp_spirit_resident_fruit_requires_isolated_fixture');
   this.developerSpiritFixtureOwner?.assertOwned();
   const pinned=structuredClone(operation);
+  if(pinned?.type==='native-resident-round'&&(!this.developerSpiritFixtureOwner||this.developerSpiritFixtureOwner.formalApprovalKeyPem))
+   throw Error('mvp_spirit_native_round_requires_owned_disk_fixture');
   this.db.exec('BEGIN IMMEDIATE');
   try{
    const current=this.readWorld(false,false);
    if(!current||current.id!==worldId)throw Error('mvp_spirit_resident_fruit_invalid_head');
+   if(pinned?.type==='native-resident-round')assertDeveloperMvpEffectArchive(this.db,current);
    const planned=planMvpFallenFruitFixtureStep(current,pinned);
    if(planned.draft){
     this.assertWritable(planned.draft);

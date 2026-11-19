@@ -125,6 +125,13 @@ function jsonBlob(body:unknown):unknown {
  try{return JSON.parse(gunzipSync(body,{maxOutputLength:MAX_STATE_BYTES}).toString());}
  catch{fail('save_invalid_landscape_encoding');}
 }
+export function assertDeveloperMvpEffectArchive(db:DatabaseSync,world:World):void {
+ const expected=world.events.filter(event=>event.mvpFruitFall!==undefined);
+ const archived=db.prepare("SELECT id,at,body FROM events WHERE world_id=? AND json_type(body,'$.mvpFruitFall') IS NOT NULL ORDER BY rowid LIMIT 4097").all(world.id);
+ if(expected.length!==archived.length||expected.some((event,i)=>event.id!==archived[i].id||
+  event.at!==archived[i].at||JSON.stringify(event)!==archived[i].body))fail('save_invalid_developer_effect_archive');
+}
+
 function inspectDatabase(db:DatabaseSync,rejectClimate:boolean,validateWorld?: (world:Record<string,unknown>)=>void,allowSeasonalModel=false,inspectSeasonalModel?:(s:SeasonalLedger|null)=>void,fixtureSeal?:string,formalOwner?:DeveloperMvpSpiritFixtureOwner):Record<string,unknown>|null {
  const fixtureTable=db.prepare("SELECT name,type,sql FROM sqlite_master WHERE lower(name)='mvp_spirit_developer_fixture'").get();
  if(fixtureTable&&!fixtureSeal)fail('save_developer_fixture_requires_owner');
@@ -152,10 +159,7 @@ function inspectDatabase(db:DatabaseSync,rejectClimate:boolean,validateWorld?: (
    if(latest!==null||world.mode!=='validation'||world.mvpSeasonalModelVersion!==undefined||
     typeof world.id!=='string'||!world.id.startsWith('godot-mvp-')||
     !(world as unknown as World).mvpClimate?.rainProvenance)fail('save_unknown_developer_fixture');
-   const expected=(world as unknown as World).events.filter(event=>event.mvpFruitFall!==undefined);
-   const archived=db.prepare("SELECT id,at,body FROM events WHERE world_id=? AND json_type(body,'$.mvpFruitFall') IS NOT NULL ORDER BY rowid LIMIT 4097").all(world.id);
-   if(expected.length!==archived.length||expected.some((event,i)=>event.id!==archived[i].id||
-    event.at!==archived[i].at||JSON.stringify(event)!==archived[i].body))fail('save_invalid_developer_effect_archive');
+   assertDeveloperMvpEffectArchive(db,world as unknown as World);
   }
   if(!allowSeasonalModel&&world.schemaVersion===2)fail('save_seasonal_model_requires_explicit_entry');
   if(rejectClimate&&owns(world,'mvpClimate'))fail('save_mvpClimate_requires_opt_in');

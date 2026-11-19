@@ -2,7 +2,7 @@ import {isDeepStrictEqual} from 'node:util';
 import type {MvpGroundFruitState} from '../shared/mvp-ground-fruit.js';
 import type {World} from '../shared/types.js';
 import type {ValleySpiritFallenFruitDiscoveryFact,ValleySpiritFallenFruitPickupFact} from '../shared/valley-spirit-fairness.js';
-import {chooseMvpFallenFruitPickup,type MvpFallenFruitPickupIntent} from '../world/mvp-fallen-fruit-resident.js';
+import {chooseMvpFallenFruitPickup,observeMvpFallenFruit,type MvpFallenFruitPickupIntent} from '../world/mvp-fallen-fruit-resident.js';
 import {draftMvpFallenFruitDiscovery,draftMvpFallenFruitPickup,projectMvpFallenFruitLiveGround} from '../world/mvp-fallen-fruit-settlement.js';
 import {chooseMvpAction} from './godot-mvp.js';
 
@@ -13,13 +13,15 @@ export function hasMvpFallenFruitSettlement(w:World|null):boolean {
 
 export type MvpFallenFruitFixtureOperation =
  | {readonly type:'adopt'}
+ | {readonly type:'native-resident-round'}
  | {readonly type:'discover';readonly residentId:string;readonly effectId:string}
  | {readonly type:'pickup';readonly intent:MvpFallenFruitPickupIntent};
 export type MvpFallenFruitFixtureResult =
  | {readonly status:'adopted'|'already-adopted'}
  | {readonly status:'recorded'|'replayed';readonly kind:'discovery';readonly fact:ValleySpiritFallenFruitDiscoveryFact}
  | {readonly status:'recorded'|'replayed';readonly kind:'pickup';readonly fact:ValleySpiritFallenFruitPickupFact}
- | {readonly status:'rejected';readonly code:string};
+ | {readonly status:'rejected';readonly code:string}
+ | {readonly status:'no-change'};
 interface PlannedStep {
  readonly result:MvpFallenFruitFixtureResult;
  readonly draft?:World;
@@ -45,6 +47,32 @@ export function readMvpFallenFruitFixtureGround(w:World):MvpGroundFruitState|nul
  return ledger?projectMvpFallenFruitLiveGround(w,ledger):null;
 }
 
+/** One isolated round, not a rule tick. Use engine resident order and
+ * actual local perception, then the real chooser for any already-seen lot.
+ * No routing or clock/plan writes; absence leaves the normal tick untouched. */
+function residentRound(current:World):PlannedStep {
+ const state=current.mvpClimate!.spiritFruitSettlement!;
+ const ground=projectMvpFallenFruitLiveGround(current,state);
+ if(!ground)return reject('unavailable');
+ if(!ground.items.length)return {result:{status:'no-change'}};
+ const picked=new Set(state.pickups.map(p=>p.effectId));
+ const known=new Set(state.discoveries.map(d=>d.discoveryId));
+ for(const r of current.residents.slice(0,8)){
+  if(r.status!=='alive'||r.activity||r.plan||!r.canDecide)continue;
+  const intent=chooseMvpFallenFruitFixtureIntent(current,r.id);
+  // Prior personal observation alone never grants pickup. The ordinary
+  // chooser must still return the actual final idle in the current head.
+  if(intent&&known.has(intent.discoveryId)){
+   const planned=planMvpFallenFruitFixtureStep(current,{type:'pickup',intent});
+   if(planned.draft)return planned;
+   if(planned.result.status==='rejected')return planned;
+  }
+  const unseen=observeMvpFallenFruit(current,r.id,picked).find(s=>!known.has(s.discoveryId));
+  if(unseen)return planMvpFallenFruitFixtureStep(current,{type:'discover',residentId:r.id,effectId:unseen.effectId});
+ }
+ return {result:{status:'no-change'}};
+}
+
 /** Deterministic internal planner; no caller callback or caller-authored
  * world replacement. The store reruns it on its freshly-read committed head. */
 export function planMvpFallenFruitFixtureStep(current:World,operation:MvpFallenFruitFixtureOperation):PlannedStep {
@@ -61,6 +89,7 @@ export function planMvpFallenFruitFixtureStep(current:World,operation:MvpFallenF
    return {result:{status:'adopted'},draft};
   }
   if(!state||current.clock.paused)return reject('unavailable');
+  if(operation.type==='native-resident-round'&&exact(operation,['type']))return residentRound(current);
   if(operation.type==='discover'&&exact(operation,['type','residentId','effectId'])){
    const d=draftMvpFallenFruitDiscovery(current,state,operation.residentId,operation.effectId);
    if(d.status==='rejected')return reject(d.code);
