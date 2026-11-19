@@ -15,6 +15,11 @@ export interface ValleySpiritAlmanacWeatherSource {sourceRef:string;permissionVe
 export interface ValleySpiritAlmanacAuthority {
  permission(): {version:number;publicWeather:boolean}|null;
  resolve(sourceRef:string): ValleySpiritAlmanacWeatherSource|null;
+ /** Atomically read a verified permission anchor and ordered evidence with one
+  * journal read. A denied/unavailable batch must return null, not fall back. */
+ readCurrent?(sourceRefs:readonly string[]):{
+  worldId:string;permissionVersion:number;records:readonly ValleySpiritAlmanacWeatherSource[];
+ }|null;
 }
 export interface ValleySpiritAlmanacRange {
  worldId:string; fromMinute:number; throughMinute:number; sourceRefs:readonly string[];
@@ -82,20 +87,31 @@ function validPacket(v:unknown):v is ValleySpiritAlmanacPacket {
  * Empty hour buckets mean "not represented in this packet", not an archive claim. */
 export function createValleySpiritAlmanacPacket(range:ValleySpiritAlmanacRange,a:ValleySpiritAlmanacAuthority):ValleySpiritAlmanacPacket|null {
  try{
-  const permission=a.permission();
-  if(!permission?.publicWeather||!world(range.worldId)||!minute(range.fromMinute)||!minute(range.throughMinute)||range.throughMinute<range.fromMinute||Math.floor(range.throughMinute/60)-Math.floor(range.fromMinute/60)>=MAX_SOURCES||!Array.isArray(range.sourceRefs)||!range.sourceRefs.length||range.sourceRefs.length>MAX_SOURCES||new Set(range.sourceRefs).size!==range.sourceRefs.length)return null;
+  if(!world(range.worldId)||!minute(range.fromMinute)||!minute(range.throughMinute)||range.throughMinute<range.fromMinute||Math.floor(range.throughMinute/60)-Math.floor(range.fromMinute/60)>=MAX_SOURCES||!Array.isArray(range.sourceRefs)||!range.sourceRefs.length||range.sourceRefs.length>MAX_SOURCES||new Set(range.sourceRefs).size!==range.sourceRefs.length||!range.sourceRefs.every(ref=>sourceId(range.worldId,ref)))return null;
+  let version:number,records:readonly ValleySpiritAlmanacWeatherSource[];
+  const readCurrent=a.readCurrent?.bind(a);
+  if(readCurrent){
+   const batch=readCurrent(range.sourceRefs);
+   if(!batch||batch.worldId!==range.worldId||!Array.isArray(batch.records)||batch.records.length!==range.sourceRefs.length)return null;
+   version=batch.permissionVersion;records=batch.records;
+  }else{
+   const permission=a.permission();if(!permission?.publicWeather)return null;
+   const sources=range.sourceRefs.map(ref=>a.resolve(ref));
+   if(sources.some(source=>source===null))return null;
+   version=permission.version;records=sources as ValleySpiritAlmanacWeatherSource[];
+   const check=a.permission();
+   if(!check?.publicWeather||check.version!==version)return null;
+  }
   const points:WeatherPoint[]=[];
-  for(const ref of range.sourceRefs){
-   if(!sourceId(range.worldId,ref))return null;
-   const source=a.resolve(ref);
-   if(!source||source.sourceRef!==ref||source.permissionVersion!==permission.version||source.fact.projectionVersion!==VERSION||source.fact.worldId!==range.worldId)return null;
+  for(const [i,source] of records.entries()){
+   const ref=range.sourceRefs[i];
+   if(!source||source.sourceRef!==ref||source.permissionVersion!==version||source.fact.projectionVersion!==VERSION||source.fact.worldId!==range.worldId)return null;
    const f=source.fact;
    points.push({sourceRef:ref,minute:f.minute,condition:f.condition,temperatureDeciC:f.temperatureDeciC,relativeHumidityPermille:f.relativeHumidityPermille});
   }
   points.sort(byMinute);
-  const p:ValleySpiritAlmanacPacket={schemaVersion:VERSION,projectionVersion:VERSION,permissionVersion:permission.version,worldId:range.worldId,fromMinute:range.fromMinute,throughMinute:range.throughMinute,coverage:'selected-actual-points-only',unselectedHourBuckets:unselectedBuckets(range.fromMinute,range.throughMinute,points),points};
-  const check=a.permission();
-  return validPacket(p)&&check?.publicWeather&&check.version===permission.version?p:null;
+  const p:ValleySpiritAlmanacPacket={schemaVersion:VERSION,projectionVersion:VERSION,permissionVersion:version,worldId:range.worldId,fromMinute:range.fromMinute,throughMinute:range.throughMinute,coverage:'selected-actual-points-only',unselectedHourBuckets:unselectedBuckets(range.fromMinute,range.throughMinute,points),points};
+  return validPacket(p)?p:null;
  }catch{return null;}
 }
 function canonicalPacket(p:ValleySpiritAlmanacPacket):ValleySpiritAlmanacPacket {
@@ -205,6 +221,14 @@ export class ValleySpiritAlmanac {
    }finally{if(!started)reservation.cancelUnsent();}
   }catch{return null;} // durable intent or sent-unknown is never retried automatically
  }
+ /** Internal scheduler recovery view, never an HTTP/export surface. */
+ schedulingState(range:Pick<ValleySpiritAlmanacRange,'worldId'|'fromMinute'|'throughMinute'>):
+  {status:'empty'|'unavailable'}|{status:'recorded';entryId:string;phase:Phase}{
+  try{
+   const head=this.read().filter(e=>e.packet.worldId===range.worldId&&e.packet.fromMinute===range.fromMinute&&e.packet.throughMinute===range.throughMinute).at(-1);
+   return head?{status:'recorded',entryId:head.entryId,phase:head.phase}:{status:'empty'};
+  }catch{return {status:'unavailable'};}
+ }
  publish(entryId:string):boolean {
   try{
    const rows=this.read(),e=rows.find(e=>e.entryId===entryId);
@@ -235,6 +259,26 @@ export class ValleySpiritAlmanac {
    // A correction must not disclose a previously revoked entry's ID.
    const publicEntry=e.supersedes&&rows.some(r=>r.entryId===e.supersedes&&r.phase==='published'&&permit(r.packet,this.authority))?e:{...e,supersedes:null};
    return publicView(publicEntry);
+  }catch{return null;}
+ }
+ /** Public index never returns revoked, ungrounded, or superseded text. */
+ latest(worldId:string,permissionVersion:number){
+  try{
+   const rows=this.read(),visibleHeads=new Map<string,ValleySpiritAlmanacEntry>();
+   for(const entry of rows){
+    if(entry.packet.worldId!==worldId||!['published','retracted'].includes(entry.phase))continue;
+    visibleHeads.set(identity(entry.packet,0),entry);
+   }
+   const ordered=[...visibleHeads.values()]
+    .filter(entry=>entry.phase==='published'&&entry.packet.permissionVersion===permissionVersion)
+    .sort((a,b)=>b.packet.throughMinute-a.packet.throughMinute||b.textVersion-a.textVersion||a.entryId.localeCompare(b.entryId));
+   for(const entry of ordered.slice(0,24)){
+    if(!permit(entry.packet,this.authority))continue;
+    const previous=entry.supersedes?rows.find(row=>row.entryId===entry.supersedes):null;
+    const mayLink=previous?.phase==='published'&&permit(previous.packet,this.authority);
+    return publicView(mayLink?entry:{...entry,supersedes:null});
+   }
+   return null;
   }catch{return null;}
  }
  /** Explicit fallback must never masquerade as model narration. */

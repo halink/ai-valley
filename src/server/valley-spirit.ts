@@ -157,6 +157,8 @@ export class ValleySpiritJournal {
    range:{fromHour:cursor.fromHour,toHour:cursor.toHour},coverage:{fromHour:cursor.nextHour,toHour:pageEnd},slots,
    nextCursor:pageEnd<cursor.toHour?encodeCursor({...cursor,nextHour:pageEnd}):null};
  }
+ /** Runtime reader adapters use the same checked journal and SQLite grant. */
+ publicWeatherPermission(){const s=this.current();return s?{...s.permission}:null;}
  /** All source lookups and future narrative input exports share the current gate. */
  resolveSource(sourceRef:string){const s=this.current();if(!s?.permission.publicWeather)return null;const e=s.entries.find(e=>e.sourceRef===sourceRef&&e.permissionVersion===s.permission.version);return e?structuredClone(e):null;}
  private narrationEntries(s:Journal,refs:readonly string[]):PublicWeatherEntry[]|null {
@@ -182,7 +184,7 @@ export class ValleySpiritJournal {
   const s=this.current();
   if(!s?.permission.publicWeather||!input||!exact(input,['mode','worldId','projectionVersion','permissionVersion','sourceRefs','records','dispatch'])||
     input.mode!=='public-weather-only'||input.projectionVersion!==1||input.dispatch!=='disabled'||input.worldId!==s.worldId||
-    input.permissionVersion!==s.permission.version||!Array.isArray(input.sourceRefs)||!Array.isArray(input.records))return false;
+    input.permissionVersion!==s.permission.version||!Array.isArray(input.sourceRefs)||input.sourceRefs.length===0||!Array.isArray(input.records))return false;
   const sources=this.narrationEntries(s,input.sourceRefs);
   try{return !!sources&&sources.length===input.records.length&&sources.every((source,i)=>JSON.stringify(source)===JSON.stringify(input.records[i]));}
   catch{return false;}

@@ -1,4 +1,5 @@
-import {createHash} from "node:crypto";
+import {valleySpiritFruitFallOpportunityId} from "../shared/valley-spirit-effects.js";
+export {valleySpiritFruitFallOpportunityId} from "../shared/valley-spirit-effects.js";
 
 /** Internal only. This module has no World, storage, network, scheduler or effect access. */
 const KIND = "fruit_fall" as const;
@@ -33,13 +34,6 @@ export interface ValleySpiritFruitFallProposal extends ValleySpiritFruitFallOpti
   readonly type: typeof KIND;
   /** Diagnostic only. Never used by policy or accepted as a command. */
   readonly rationale: string;
-}
-
-/** Stable across schema versions, menu revisions, targets, and proposal IDs. */
-export function valleySpiritFruitFallOpportunityId(worldId: string, rainEventId: string, sourceResourceInstanceId: string): string {
-  if (![worldId, rainEventId, sourceResourceInstanceId].every(isId)) throw new TypeError("invalid opportunity identity");
-  const key = JSON.stringify([worldId, KIND, rainEventId, sourceResourceInstanceId]);
-  return `fruit_fall:${createHash("sha256").update(key).digest("hex")}`;
 }
 
 function validOption(option: ValleySpiritFruitFallOption): boolean {
@@ -154,8 +148,11 @@ export interface ValleySpiritFruitFallEvidence {
   readonly lastCommittedFruitFallMicroMinute?: number | null;
 }
 
-type Rejection = "invalid_proposal" | "evidence_unavailable" | "permission_or_basis_changed" | "outside_time_window" |
-  "rain_missing_or_ineligible" | "source_unavailable" | "target_ineligible" | "opportunity_consumed" | "quota_or_cooldown";
+export const VALLEY_SPIRIT_SHADOW_REJECTIONS = Object.freeze([
+  "invalid_proposal", "evidence_unavailable", "permission_or_basis_changed", "outside_time_window",
+  "rain_missing_or_ineligible", "source_unavailable", "target_ineligible", "opportunity_consumed", "quota_or_cooldown",
+] as const);
+type Rejection = typeof VALLEY_SPIRIT_SHADOW_REJECTIONS[number];
 
 export type ValleySpiritFruitFallPreflight =
   | {readonly status: "disabled"; readonly code: "shadow_disabled_or_policy_invalid"}
@@ -166,20 +163,39 @@ export type ValleySpiritFruitFallPreflight =
     readonly ownerId: string;
   }};
 
+/** Exact persisted wire form. Unknown fields must not survive an independent queue rewrite. */
+export function isValleySpiritFruitFallProposal(value: unknown): value is ValleySpiritFruitFallProposal {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const fields = ["schema", "proposalId", "opportunityId", "type", "worldId", "menuVersion", "inputSnapshotId",
+    "permissionVersion", "sourceRefs", "rainEventId", "sourceResourceInstanceId", "targetId", "quantity",
+    "validFromMicroMinute", "validUntilMicroMinute", "rationale"];
+  if (Object.keys(value).length !== fields.length || !fields.every(field => Object.hasOwn(value, field))) return false;
+  const p = value as ValleySpiritFruitFallProposal;
+  return p.schema === SCHEMA && p.type === KIND && isId(p.proposalId) && validOption(p) &&
+    p.opportunityId === valleySpiritFruitFallOpportunityId(p.worldId, p.rainEventId, p.sourceResourceInstanceId) &&
+    parseChoice({optionNumber: 1, rationale: p.rationale})?.rationale === p.rationale && typeof p.rationale === "string";
+}
+
+/** Only exact enabled policies may be retained with a proposal. */
+export function isEnabledValleySpiritFruitFallPolicy(value: unknown): value is ValleySpiritFruitFallPolicy {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const fields = ["version", "shadowEnabled", "maxAgeGameMinutes", "minimumCooldownGameMinutes"];
+  if (Object.keys(value).length !== fields.length || !fields.every(field => Object.hasOwn(value, field))) return false;
+  const policy = value as ValleySpiritFruitFallPolicy;
+  return policy.version === VERSION && policy.shadowEnabled === true && natural(policy.maxAgeGameMinutes) &&
+    policy.maxAgeGameMinutes > 0 && natural(policy.minimumCooldownGameMinutes) &&
+    natural(policy.maxAgeGameMinutes * UNIT) && natural(policy.minimumCooldownGameMinutes * UNIT);
+}
+
 /** Internal shadow result. It is not an acceptance, receipt, or an authorization to schedule/write. */
 export function preflightValleySpiritFruitFall(
   proposal: ValleySpiritFruitFallProposal,
   evidence: ValleySpiritFruitFallEvidence | undefined,
   policy?: ValleySpiritFruitFallPolicy,
 ): ValleySpiritFruitFallPreflight {
-  if (!policy || policy.version !== VERSION || policy.shadowEnabled !== true ||
-    !natural(policy.maxAgeGameMinutes) || policy.maxAgeGameMinutes === 0 ||
-    !natural(policy.minimumCooldownGameMinutes) || !natural(policy.maxAgeGameMinutes * UNIT) ||
-    !natural(policy.minimumCooldownGameMinutes * UNIT)) return {status: "disabled", code: "shadow_disabled_or_policy_invalid"};
+  if (!isEnabledValleySpiritFruitFallPolicy(policy)) return {status: "disabled", code: "shadow_disabled_or_policy_invalid"};
   const reject = (code: Rejection): ValleySpiritFruitFallPreflight => ({status: "rejected", code});
-  if (!proposal || proposal.schema !== SCHEMA || proposal.type !== KIND || !isId(proposal.proposalId) ||
-      !validOption(proposal) || proposal.opportunityId !== valleySpiritFruitFallOpportunityId(
-        proposal.worldId, proposal.rainEventId, proposal.sourceResourceInstanceId)) return reject("invalid_proposal");
+  if (!isValleySpiritFruitFallProposal(proposal)) return reject("invalid_proposal");
   if (!evidence || evidence.worldId !== proposal.worldId || !natural(evidence.nowMicroMinute) ||
       !evidence.approvedBasis || typeof evidence.opportunityConsumed !== "boolean" ||
       typeof evidence.proposalQuotaAvailable !== "boolean" ||

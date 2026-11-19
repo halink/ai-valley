@@ -3,6 +3,7 @@ import {readSeasonalLedger,type SeasonalLedger} from './seasonal-model-ledger.js
 import {validateSeasonalKnowledge} from '../world/mvp-seasonal-knowledge.js';
 import {validateMvpPreservation} from '../world/mvp-preservation.js';
 import {validateMvpClimate} from '../world/mvp-climate-state.js';
+import {hasMvpSpiritEffects,hasMvpSpiritEffectEvents,validateMvpSpiritEffects} from '../world/mvp-spirit-effects.js';
 import type {World} from '../shared/types.js';
 /** Read-before-write compatibility gate. No migration or model/runtime dependency.
  * The probe reads private copies so SQLite cannot create/change the source SHM.
@@ -23,11 +24,11 @@ const record=(v:unknown):v is Record<string,unknown>=>!!v&&typeof v==='object'&&
 const owns=(v:object,key:string)=>Object.prototype.hasOwnProperty.call(v,key);
 // Exact reserved upgrade names only. Unknown legacy extension names are not
 // guessed from prefixes/regex. These modules have no writable format yet.
-const unsupportedUpgradeFields=['worldUpgrade'] as const;
+const unsupportedUpgradeFields=['worldUpgrade','mvpGroundFruit','mvpSpiritEffects'] as const;
 const MAX_STATE_BYTES=256*1024*1024;
 
 /** Validate only the compatibility envelope, not every game's domain rule. */
-export function assertWorldCompatibility(value:unknown):asserts value is Record<string,unknown> {
+export function assertWorldCompatibility(value:unknown,allowMvpSpiritEffectFixture=false):asserts value is Record<string,unknown> {
  if(!record(value))fail('save_invalid_world');
  // Reject presence, not a recognized version/truthy value. No upgrade escape.
  if(owns(value,'simulationOnly'))fail('save_simulation_only');
@@ -96,15 +97,20 @@ export function assertWorldCompatibility(value:unknown):asserts value is Record<
  // arrays inline. Preserve them rather than assuming missing means empty.
  if(!owns(value,'ledgerVersion')&&(!Array.isArray(value.events)||!Array.isArray(value.processed)))
   fail('save_missing_inline_ledger');
+ const world=value as unknown as World;
+ if(hasMvpSpiritEffects(world.mvpClimate)||hasMvpSpiritEffectEvents(world.events)){
+  if(!allowMvpSpiritEffectFixture)fail('save_mvpSpiritEffects_requires_isolated_fixture');
+  try{validateMvpSpiritEffects(world);}catch{fail('save_invalid_mvpSpiritEffects');}
+ }
 }
-export function decodeSavedWorld(body:unknown):Record<string,unknown> {
+export function decodeSavedWorld(body:unknown,allowMvpSpiritEffectFixture=false):Record<string,unknown> {
  let value:unknown;
  try{
   const json=typeof body==='string'?body:body instanceof Uint8Array?gunzipSync(body,{maxOutputLength:MAX_STATE_BYTES}).toString():fail('save_invalid_state_encoding');
   if(Buffer.byteLength(json)>MAX_STATE_BYTES)fail('save_state_too_large');
   value=JSON.parse(json);
  }catch(error){if(error instanceof SaveCompatibilityError)throw error;fail('save_invalid_state_encoding');}
- assertWorldCompatibility(value);return value;
+ assertWorldCompatibility(value,allowMvpSpiritEffectFixture);return value;
 }
 function jsonBlob(body:unknown):unknown {
  if(!(body instanceof Uint8Array))fail('save_invalid_landscape_encoding');
@@ -190,7 +196,7 @@ function unchanged(path:string,files:ReadonlyArray<SourceFile|null>,suffixes:rea
  * checkpoint. WAL is copied alongside the DB and SQLite reads its latest state.
  * This is not a substitute for caller-held ownership against concurrent writers.
  */
-export function preflightWorldSave(path:string,options:{requireWorld?:boolean;rejectClimate?:boolean;allowSeasonalModel?:boolean;inspectSeasonalModel?:(s:SeasonalLedger|null)=>void;validateWorld?:(world:Record<string,unknown>)=>void}={}):Record<string,unknown>|null {
+export function preflightWorldSave(path:string,options:{requireWorld?:boolean;rejectClimate?:boolean;allowSeasonalModel?:boolean;inspectSeasonalModel?:(s:SeasonalLedger|null)=>void;inspectOptionalAlmanac?:(snapshot:DatabaseSync,world:Record<string,unknown>)=>void;validateWorld?:(world:Record<string,unknown>)=>void}={}):Record<string,unknown>|null {
  if(path===':memory:')return null;
  const suffixes=['','-wal','-journal'] as const;
  const files:Array<SourceFile|null>=[];
@@ -211,6 +217,7 @@ export function preflightWorldSave(path:string,options:{requireWorld?:boolean;re
   db=new DatabaseSync(copy,{readOnly:true});
   const result=inspectDatabase(db,options.rejectClimate===true,options.validateWorld,options.allowSeasonalModel===true,options.inspectSeasonalModel);
   if(!result&&options.requireWorld)fail('save_missing_world');
+  if(result&&options.inspectOptionalAlmanac){db.exec('PRAGMA trusted_schema=OFF; PRAGMA query_only=ON');options.inspectOptionalAlmanac(db,result);}
   unchanged(path,files,suffixes);
   return result;
  }catch(error){if(error instanceof SaveCompatibilityError)throw error;throw new SaveCompatibilityError('save_preflight_failed');}

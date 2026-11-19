@@ -24,6 +24,10 @@ export function validateMvpClimate(w:World):void {
  if(!s||typeof s!=='object'||Array.isArray(s)||!((s.schemaVersion===1&&s.capability==='observation-only')||(s.schemaVersion===2&&s.capability==='soil-water-v1')||(s.schemaVersion===3&&s.capability==='agriculture-v1'))||s.algorithmVersion!==1||s.seed!==w.seed||s.parameterFingerprint!==MVP_CLIMATE_PARAMETER_FINGERPRINT||s.rhTableFingerprint!==MVP_CLIMATE_RH_FINGERPRINT)throw Error('mvp_climate_unsupported_state');
  const keys=['schemaVersion','capability','seed','algorithmVersion','parameterFingerprint','rhTableFingerprint','adoptedMinute','adoptedUs','lastMinute','lastUs','current'];
  if(owns(s,'rainProvenance'))keys.push('rainProvenance');
+ if(owns(s,'spiritEffects')){
+  if(s.spiritEffects?.version!==1)throw Error('mvp_climate_unknown_spirit_effect_dependency');
+  keys.push('spiritEffects');
+ }
  if(Object.keys(s).length!==keys.length||keys.some(k=>!owns(s,k)))throw Error('mvp_climate_unknown_fields');
  if(minuteToClimateUs(s.adoptedMinute)!==s.adoptedUs||minuteToClimateUs(s.lastMinute)!==s.lastUs||s.lastMinute!==w.minute||s.adoptedMinute>s.lastMinute||parseClimateUs(s.adoptedUs)>parseClimateUs(s.lastUs))throw Error('mvp_climate_clock_mismatch');
  if(!same(s.current,point(w.seed,w.minute,s.schemaVersion)))throw Error('mvp_climate_sample_mismatch');

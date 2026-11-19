@@ -10,6 +10,7 @@ const MealObservation = preload("res://meal_observation.gd")
 const AgricultureObservation = preload("res://agriculture_observation.gd")
 const PreservationObservation = preload("res://preservation_observation.gd")
 const ValleySpirit = preload("res://valley_spirit.gd")
+const ValleySpiritArchive = preload("res://valley_spirit_archive.gd")
 const SoilObservation = preload("res://soil_observation.gd")
 const GardenObservation = preload("res://garden_observation.gd")
 const MovementFeed = preload("res://completed_movement.gd")
@@ -30,6 +31,8 @@ var preservation_observation: Dictionary = {}
 var resident_weather: Dictionary = {}
 var meal_observation: Variant
 var valley_spirit_snapshot: Dictionary = {}
+var spirit_archive_context: Dictionary = {}
+var spirit_archive_request: HTTPRequest
 var relationship_history: Variant
 var selected_resident := ""
 var selected_building := ""
@@ -77,6 +80,8 @@ func _ready() -> void:
 	hud.zoom_requested.connect(valley.zoom)
 	hud.reconnect_requested.connect(_connect_server)
 	hud.place_labels_changed.connect(valley.set_place_labels)
+	hud.spirit_archive_requested.connect(_request_spirit_archive)
+	hud.spirit_almanac_requested.connect(_request_spirit_almanac)
 	http = HTTPRequest.new()
 	http.timeout = 8.0
 	http.body_size_limit = 33554432
@@ -101,6 +106,7 @@ func _connect_server(origin: String) -> void:
 	busy = false
 	connected = false
 	active_endpoint = url
+	_set_archive_authority({})
 	mode_text = "等待新的世界快照"
 	movement_feed.reset()
 	resident_movement.reset()
@@ -151,6 +157,9 @@ func _received(result: int, code: int, _headers: PackedStringArray, body: Packed
 		_connection_lost("地图超出当前观察范围")
 		return
 	if doorway_active:
+		# Revoke immediately, even if the next scene must wait for animation.
+		if not ValleySpiritArchive.same_authority(spirit_archive_context, ValleySpiritArchive.authority(parsed)):
+			_set_archive_authority({})
 		pending_snapshot = parsed
 		return
 	_apply_snapshot(parsed)
@@ -180,6 +189,7 @@ func _apply_snapshot(parsed: Dictionary) -> void:
 	source_tag = {"local-rules": "规则演示 · 非模型", "model": "已配置模型", "disabled": "模型禁用"}.get(decision_source, "")
 	if mode.get("fault") == "unresolved_model_request": source_tag = "保护停表"
 	connected = true
+	_set_archive_authority(ValleySpiritArchive.authority(valley_spirit_snapshot))
 	if not continuous:
 		notice_until = 0
 		hud.show_feedback("")
@@ -251,6 +261,7 @@ func _cancel_doorway() -> void:
 func _connection_lost(reason: String) -> void:
 	var was_connected := connected
 	connected = false
+	_set_archive_authority({})
 	observation = {}
 	relationship_history = null
 	mode_text = "数据过期 · 当前决策来源未知"
@@ -475,6 +486,74 @@ func _set_follow(enabled: bool) -> void:
 	if enabled and not following: _notice("这位居民的位置暂不可见")
 	if following: _locate_resident()
 	_update_resident_card()
+
+func _set_archive_authority(next: Dictionary) -> void:
+	var stable := ValleySpiritArchive.same_authority(spirit_archive_context, next)
+	spirit_archive_context = next
+	if stable: return
+	if spirit_archive_request != null:
+		spirit_archive_request.cancel_request()
+		spirit_archive_request.queue_free()
+		spirit_archive_request = null
+	hud.show_spirit_archive(not next.is_empty(), false, "")
+	hud.show_spirit_almanac(not next.is_empty(), false, "")
+
+func _request_spirit_archive() -> void:
+	if not connected or spirit_archive_context.is_empty() or spirit_archive_request != null: return
+	var requested := ValleySpiritArchive.latest_range(spirit_archive_context)
+	if requested.is_empty():
+		hud.show_spirit_archive(true, false, "还没有已结束的游戏小时。")
+		return
+	var request := HTTPRequest.new()
+	request.timeout = 6.0
+	request.body_size_limit = 65536
+	request.max_redirects = 0
+	add_child(request)
+	spirit_archive_request = request
+	request.request_completed.connect(_spirit_archive_received.bind(request, spirit_archive_context.duplicate(), requested))
+	hud.show_spirit_archive(true, true, "正在读取天气档案…")
+	var endpoint := active_endpoint + "/ai-town/api/valley-spirit/archive?fromHour=%d&toHour=%d&limit=24" % [requested.fromHour, requested.toHour]
+	if request.request(endpoint) != OK:
+		_spirit_archive_received(HTTPRequest.RESULT_CANT_CONNECT, 0, PackedStringArray(), PackedByteArray(), request, spirit_archive_context, requested)
+
+func _spirit_archive_received(result: int, code: int, _headers: PackedStringArray, body: PackedByteArray, request: HTTPRequest, grant: Dictionary, requested: Dictionary) -> void:
+	if request != spirit_archive_request: return
+	spirit_archive_request = null
+	request.queue_free()
+	if not connected or not ValleySpiritArchive.same_authority(grant, spirit_archive_context):
+		hud.show_spirit_archive(false, false, "")
+		return
+	var text := ""
+	if result == HTTPRequest.RESULT_SUCCESS and code == 200:
+		text = ValleySpiritArchive.presentation(JSON.parse_string(body.get_string_from_utf8()), spirit_archive_context, requested)
+	if text.is_empty(): text = "天气档案暂不可读；不保留旧数据。"
+	hud.show_spirit_archive(true, false, text)
+
+func _request_spirit_almanac() -> void:
+	if not connected or spirit_archive_context.is_empty() or spirit_archive_request != null: return
+	var request := HTTPRequest.new()
+	request.timeout = 6.0
+	request.body_size_limit = 65536
+	request.max_redirects = 0
+	add_child(request)
+	spirit_archive_request = request
+	request.request_completed.connect(_spirit_almanac_received.bind(request, spirit_archive_context.duplicate()))
+	hud.show_spirit_almanac(true, true, "正在读取年鉴…")
+	if request.request(active_endpoint + "/ai-town/api/valley-spirit/almanac/latest") != OK:
+		_spirit_almanac_received(HTTPRequest.RESULT_CANT_CONNECT, 0, PackedStringArray(), PackedByteArray(), request, spirit_archive_context)
+
+func _spirit_almanac_received(result: int, code: int, _headers: PackedStringArray, body: PackedByteArray, request: HTTPRequest, grant: Dictionary) -> void:
+	if request != spirit_archive_request: return
+	spirit_archive_request = null
+	request.queue_free()
+	if not connected or not ValleySpiritArchive.same_authority(grant, spirit_archive_context):
+		hud.show_spirit_almanac(false, false, "")
+		return
+	var display := ""
+	if result == HTTPRequest.RESULT_SUCCESS and code == 200:
+		display = ValleySpiritArchive.almanac_presentation(JSON.parse_string(body.get_string_from_utf8()), spirit_archive_context)
+	if display.is_empty(): display = "年鉴暂不可读；不保留旧数据。"
+	hud.show_spirit_almanac(true, false, display)
 
 func _update_hud() -> void:
 	hud.show_spirit(ValleySpirit.text(valley_spirit_snapshot, connected))

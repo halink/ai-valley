@@ -1,3 +1,4 @@
+import {parseValleySpiritAlmanacId,parseValleySpiritTopicWindow,type ValleySpiritPublicReaders} from './valley-spirit-reader.js';
 import {parseWeatherArchiveQuery,type ValleySpiritJournal} from './valley-spirit.js';
 import {mvpMealObservation} from './mvp-meal-observation.js';
 import {seasonalPersonalWeather} from './mvp-seasonal-context.js';
@@ -333,11 +334,35 @@ export function createMvpSession(options:{world?:World;commit?:(world:World,prev
  };
  return {get world(){return world;},snapshot,advance};
 }
-export function createMvpServer(session:Pick<ReturnType<typeof createMvpSession>,'snapshot'>,options:{webRoot?:string;valleySpiritSource?:(sourceRef:string)=>unknown;valleySpiritArchive?:ValleySpiritJournal['archive']}={}):Server {
+export function createMvpServer(session:Pick<ReturnType<typeof createMvpSession>,'snapshot'>,options:{webRoot?:string;valleySpiritSource?:(sourceRef:string)=>unknown;valleySpiritArchive?:ValleySpiritJournal['archive'];valleySpiritReaders?:ValleySpiritPublicReaders}={}):Server {
  return createServer((req,res)=>{
   res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');
   if(options.webRoot&&serveGodotWeb(req,res,options.webRoot))return;
   if(req.method!=='GET'){res.writeHead(405,{'Allow':'GET'});res.end('Read-only MVP');return;}
+  const latestAlmanacPath='/ai-town/api/valley-spirit/almanac/latest';
+  if(req.url===latestAlmanacPath||req.url?.startsWith(latestAlmanacPath+'?')){
+   let data:ReturnType<ValleySpiritPublicReaders['latestAlmanac']>|{status:'invalid'}={status:'unavailable'};
+   try{data=req.url===latestAlmanacPath?options.valleySpiritReaders?.latestAlmanac()??data:{status:'invalid'};}catch{/* fail closed */}
+   res.writeHead(data.status==='unavailable'?404:data.status==='invalid'?400:200,{'Content-Type':'application/json; charset=utf-8'});
+   res.end(JSON.stringify(data));return;
+  }
+  const almanacPath='/ai-town/api/valley-spirit/almanac',topicsPath='/ai-town/api/valley-spirit/topics';
+  if(req.url===almanacPath||req.url===topicsPath||req.url?.startsWith(almanacPath+'?')||req.url?.startsWith(topicsPath+'?')){
+   const unavailable={status:'unavailable'} as const,invalid={status:'invalid'} as const;
+   const target=new URL(req.url,'http://localhost');let result:unknown=unavailable,code=404;
+   try{
+    if(options.valleySpiritReaders){
+     if(target.pathname===almanacPath){
+      const id=parseValleySpiritAlmanacId(target.searchParams),entry=id?options.valleySpiritReaders.almanac(id):null;
+      result=entry?{status:'ready',entry}:id?unavailable:invalid;code=entry?200:id?404:400;
+     }else{
+      const range=parseValleySpiritTopicWindow(target.searchParams),page=range?options.valleySpiritReaders.topics(range):invalid;
+      result=page;code=page.status==='ready'?200:page.status==='invalid'?400:404;
+     }
+    }
+   }catch{result=unavailable;code=404;}
+   res.writeHead(code,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(result));return;
+  }
   const archivePath='/ai-town/api/valley-spirit/archive';
   if(req.url===archivePath||req.url?.startsWith(archivePath+'?')){
    const unavailable={status:'unavailable'} as const;

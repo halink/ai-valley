@@ -2,6 +2,8 @@ import {readSeasonalLedger,writeSeasonalLedger,type SeasonalLedger} from './seas
 import {assertSeasonalKnowledgeAdvance} from '../world/mvp-seasonal-knowledge.js';
 import {rejectMvpClimateForModels} from '../world/mvp-climate-state.js';
 import {assertMvpRainProvenanceAdvance} from '../world/mvp-rain-provenance.js';
+import {assertMvpSpiritEffectsAdvance,validMvpSpiritFixtureCapacity} from '../world/mvp-spirit-effects.js';
+import type {MvpGroundFruitCapacity} from '../world/mvp-ground-fruit.js';
 import type {Biography,HistoryPage,HistoryQuery} from '../shared/history.js';
 import {normalizeHistory,historyKey,readHistoryCursor,makeHistoryCursor} from './history-query.js';
 import {DatabaseSync} from 'node:sqlite';
@@ -43,9 +45,17 @@ export class WorldStore {
  private readonly receiptPrefix;
  private readonly allowMvpClimate:boolean;
  private readonly seasonalModel:boolean;
- constructor(path:string,options:{dailySnapshots?:DailySnapshotConfig;allowMvpClimate?:boolean;seasonalModel?:true}={}){
+ private readonly mvpSpiritEffectFixture?:MvpGroundFruitCapacity;
+ constructor(path:string,options:{dailySnapshots?:DailySnapshotConfig;allowMvpClimate?:boolean;seasonalModel?:true;mvpSpiritEffectFixture?:MvpGroundFruitCapacity}={}){
   this.allowMvpClimate=options.allowMvpClimate===true;
   this.seasonalModel=options.seasonalModel===true;
+  const fixture=options.mvpSpiritEffectFixture;
+  if(fixture!==undefined){
+   // Never permit this developer authority against a real or files-backed save.
+   if(path!==':memory:'||!this.allowMvpClimate||this.seasonalModel||options.dailySnapshots!==undefined||
+    !validMvpSpiritFixtureCapacity(fixture))throw Error('mvp_spirit_fixture_requires_disposable_memory');
+   this.mvpSpiritEffectFixture=Object.freeze({...fixture});
+  }
   preflightWorldSave(path,{rejectClimate:!this.allowMvpClimate,allowSeasonalModel:this.seasonalModel});
   if(path!==':memory:')mkdirSync(dirname(path),{recursive:true,mode:0o700});
   this.db=new DatabaseSync(path);
@@ -112,7 +122,7 @@ export class WorldStore {
  private readWorld(working:boolean,indexedReceipts:boolean):World|null {
   const row=this.db.prepare('SELECT state FROM worlds ORDER BY rowid DESC LIMIT 1').get() as {state:string|Uint8Array}|undefined;
   if (!row) return null;
-  const saved=decodeSavedWorld(row.state) as unknown as World & {terrainKey?:string;resourceChanges:Array<[number,Resource]>;resourceCount:number;ledgerVersion?:1};
+  const saved=decodeSavedWorld(row.state,!!this.mvpSpiritEffectFixture) as unknown as World & {terrainKey?:string;resourceChanges:Array<[number,Resource]>;resourceCount:number;ledgerVersion?:1};
   if(!this.allowMvpClimate)rejectMvpClimateForModels(saved);
   if(!this.seasonalModel&&saved.mvpSeasonalModelVersion!==undefined)throw Error('seasonal_model_store_required');
   if (!saved.terrainKey) return saved;
@@ -167,16 +177,17 @@ export class WorldStore {
  }
  seasonalLedger(world:World){if(!this.seasonalModel)throw Error('seasonal_model_store_required');return readSeasonalLedger(this.db,world,true);}
  commit(world:World,previousRevision:number|null,appended?:AppendedHistory,seasonalLedger?:SeasonalLedger):void{
-  assertWorldCompatibility(world);
+  assertWorldCompatibility(world,!!this.mvpSpiritEffectFixture);
   if(!this.allowMvpClimate)rejectMvpClimateForModels(world);
   if(!this.seasonalModel&&world.mvpSeasonalModelVersion!==undefined)throw Error('seasonal_model_store_required');
   this.db.exec('BEGIN IMMEDIATE');
   try{
    const row=this.db.prepare('SELECT revision,state FROM worlds WHERE id=?').get(world.id) as {revision:number;state:string|Uint8Array}|undefined;
-   const stored=row?decodeSavedWorld(row.state):null;
+   const stored=row?decodeSavedWorld(row.state,!!this.mvpSpiritEffectFixture):null;
    if(stored){if(stored.schemaVersion===3&&world.schemaVersion!==3)throw Error('shelter_schema_downgrade');if(stored.mvpSeasonalModelVersion===1&&(!this.seasonalModel||world.mvpSeasonalModelVersion!==1))throw Error('seasonal_model_dependency_downgrade');assertSeasonalKnowledgeAdvance(stored as unknown as World,world);if(Object.prototype.hasOwnProperty.call(stored,'mvpPreservation')&&!world.mvpPreservation)throw Error('preservation_dependency_downgrade');if(Object.prototype.hasOwnProperty.call(stored,'mvpSoil')&&(!world.mvpSoil||(world.mvpClimate?.schemaVersion??0)<2))throw Error('soil_dependency_downgrade');if(Object.prototype.hasOwnProperty.call(stored,'mvpAgriculture')&&(!world.mvpAgriculture||world.mvpClimate?.schemaVersion!==3))throw Error('agriculture_dependency_downgrade');if(!this.allowMvpClimate)rejectMvpClimateForModels(stored);}
    if((row?.revision??null)!==previousRevision)throw new Error('stale_world_revision');
    if(this.allowMvpClimate)assertMvpRainProvenanceAdvance(stored as unknown as World|null,world);
+   if(this.mvpSpiritEffectFixture)assertMvpSpiritEffectsAdvance(stored as unknown as World|null,world,this.mvpSpiritEffectFixture);
    const prior=this.seasonalModel?readSeasonalLedger(this.db,stored as unknown as World|null,true):null;
    if(!!(seasonalLedger??prior)!==(world.mvpSeasonalModelVersion===1))throw Error('seasonal_model_ledger_marker_mismatch');
    if(seasonalLedger){if(!this.seasonalModel)throw Error('seasonal_model_store_required');writeSeasonalLedger(this.db,seasonalLedger,prior,world);}

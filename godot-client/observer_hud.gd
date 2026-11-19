@@ -11,6 +11,8 @@ signal follow_changed(enabled: bool)
 signal zoom_requested(factor: float)
 signal reconnect_requested(origin: String)
 signal place_labels_changed(enabled: bool)
+signal spirit_archive_requested
+signal spirit_almanac_requested
 
 const Art = preload("res://valley_interface_style.gd")
 const ValleyJournal = preload("res://valley_journal.gd")
@@ -91,6 +93,10 @@ var scroll: ScrollContainer
 var panes := {}
 var dock_buttons := {}
 var spirit_text: Label
+var spirit_archive_button: Button
+var spirit_almanac_button: Button
+var spirit_almanac_text: Label
+var spirit_archive_text: Label
 var people_list: VBoxContainer
 var places_list: VBoxContainer
 var journal: ValleyJournal
@@ -327,9 +333,21 @@ func _build_drawer() -> void:
 	_label(people_list, "暂无居民记录", 15, Art.FADED)
 	_label(places_list, "暂无场所记录", 15, Art.FADED)
 	_build_settings(panes.settings)
+	spirit_archive_button = _button(panes.spirit, "天气档案", func(): spirit_archive_requested.emit(), "QuietButton", 16)
+	spirit_archive_button.tooltip_text = "读取最近 24 个已结束的游戏小时"
+	spirit_archive_button.hide()
+	spirit_archive_text = _label(panes.spirit, "", 15, Art.INK)
+	spirit_archive_text.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
+	spirit_archive_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	spirit_archive_text.hide()
 	spirit_text = _label(panes.spirit, "谷灵记录尚未连接", 15, Art.INK)
 	spirit_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	spirit_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	spirit_almanac_button = _button(panes.spirit, "查看年鉴", func(): spirit_almanac_requested.emit(), "PaperButton", 16)
+	spirit_almanac_button.hide()
+	spirit_almanac_text = _label(panes.spirit, "", 15, Art.INK, true)
+	spirit_almanac_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	spirit_almanac_text.hide()
 	drawer.hide()
 
 func _build_resident_pane(pane: VBoxContainer) -> void:
@@ -776,4 +794,21 @@ func pass_doorway(departure: float, arrival: float, swap_scene: Callable, finish
 func show_spirit(text: String) -> void:
 	if spirit_text.text != text:
 		spirit_text.text = text
+		_queue_layout()
+
+func show_spirit_archive(available: bool, busy: bool, text: String) -> void:
+	spirit_archive_button.visible = available
+	spirit_archive_button.disabled = busy
+	if spirit_archive_text.text != text or spirit_archive_text.visible != (not text.is_empty()):
+		spirit_archive_text.text = text
+		spirit_archive_text.visible = not text.is_empty()
+		_queue_layout()
+
+
+func show_spirit_almanac(available: bool, busy: bool, text: String) -> void:
+	spirit_almanac_button.visible = available
+	spirit_almanac_button.disabled = busy
+	if spirit_almanac_text.text != text or spirit_almanac_text.visible != (not text.is_empty()):
+		spirit_almanac_text.text = text
+		spirit_almanac_text.visible = not text.is_empty()
 		_queue_layout()

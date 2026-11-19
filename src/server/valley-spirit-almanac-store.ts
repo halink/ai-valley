@@ -22,6 +22,23 @@ function validated(text:string|null,worldId:string):ValleySpiritAlmanacEntry[]{
  if(!validateValleySpiritAlmanacEntries(rows)||!rows.every(e=>e.packet.worldId===worldId))throw Error('invalid_almanac_state');
  return rows;
 }
+/** Used on the authoritative save's private preflight copy, before writable
+ * WorldStore opens. This inspector makes no migrations or repairs. */
+export function inspectValleySpiritAlmanac(db:DatabaseSync,worldId:string):void {
+ validated(tables(db,worldId),worldId);
+}
+/** Runtime viewer owns a physically read-only SQLite connection. */
+export class SqliteValleySpiritAlmanacReader {
+ private readonly db:DatabaseSync;
+ constructor(database:string,private readonly worldId:string,private readonly assertOwned:()=>void){
+  assertOwned();this.db=new DatabaseSync(database,{readOnly:true});
+  try{this.db.exec('PRAGMA trusted_schema=OFF; PRAGMA query_only=ON');inspectValleySpiritAlmanac(this.db,worldId);}catch(e){this.db.close();throw e;}
+ }
+ read():ValleySpiritAlmanacEntry[]{
+  this.assertOwned();return validated(tables(this.db,this.worldId),this.worldId);
+ }
+ close(){this.db.close();}
+}
 /** Read-only optional-module preflight on a previously validated world DB.
  * A bad almanac is isolated by the caller; never repair/overwrite it here.
  * Callers own the same actor-independent runtime lease as the world writer. */
@@ -30,7 +47,7 @@ export function preflightValleySpiritAlmanac(database:string,worldId:string,asse
  const file=lstatSync(database);
  if(!file.isFile()||file.isSymbolicLink()||file.nlink!==1)throw Error('unsafe_almanac_database');
  const db=new DatabaseSync(database,{readOnly:true});
- try{db.exec('PRAGMA trusted_schema=OFF');validated(tables(db,worldId),worldId);}finally{db.close();}
+ try{db.exec('PRAGMA trusted_schema=OFF');inspectValleySpiritAlmanac(db,worldId);}finally{db.close();}
 }
 export class SqliteValleySpiritAlmanacStore implements ValleySpiritAlmanacStore {
  private readonly db:DatabaseSync;
