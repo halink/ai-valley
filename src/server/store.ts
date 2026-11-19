@@ -1,3 +1,5 @@
+import {appendFormalDueIntent,formalDueCurrent,formalDueInputs,makeFormalDueCheckpoint,prepareFormalDueIntent,
+ readFormalDueRows,writeFormalDueCheckpoint} from './valley-spirit-formal-due.js';
 import {appendFormalShadowPermission,appendFormalShadowProposal,formalShadowApprovalBasis,formalShadowScope,initializeFormalShadowCustody,makeFormalShadowProposal,
  readFormalShadowRows,verifyFormalShadowPermission,type FormalShadowProposal} from './valley-spirit-formal-shadow-custody.js';
 import {readFormalRainShadowBasis} from './valley-spirit-formal-eligibility.js';
@@ -350,6 +352,83 @@ export class WorldStore {
     this.db.exec('COMMIT');return {status:'ready' as const,proposals};
    }catch(error){this.db.exec('ROLLBACK');throw error;}
   }catch{return {status:'unavailable'} as const;}
+ }
+ /** An intent is not an approval or a reservation. No world data is
+  * written by either the intent or checkpoint operations. */
+ recordDeveloperFormalDueIntent(worldId:string,input:unknown){
+  const owner=this.developerSpiritFixtureOwner;
+  if(!owner?.formalShadowKeyPem)return {status:'disabled'} as const;
+  let request:unknown;
+  try{request=structuredClone(input);}catch{return {status:'denied'} as const;}
+  if(!formalDueInputs(request))return {status:'denied'} as const;
+  owner.assertOwned();this.db.exec('BEGIN IMMEDIATE');
+  try{
+   const w=this.readWorld(false,false);
+   if(!w||w.id!==worldId){this.db.exec('COMMIT');return {status:'denied'} as const;}
+   const shadow=readFormalShadowRows(this.db,owner,w),intent=prepareFormalDueIntent(w,shadow.at(-1),request);
+   if(!intent||this.readFormalBerryArchive(w).some(e=>e.receipt.draftId===intent.opportunityId)){
+    this.db.exec('COMMIT');return {status:'denied'} as const;
+   }
+   const prior=readFormalDueRows(this.db,w,shadow).find(r=>r.intent.id===intent.id);
+   if(prior){
+    this.db.exec('COMMIT');return JSON.stringify(prior.intent)===JSON.stringify(intent)?
+     {status:'recorded' as const,replay:true,intent:prior.intent}:{status:'denied' as const};
+   }
+   appendFormalDueIntent(this.db,intent);
+   this.db.exec('COMMIT');return {status:'recorded' as const,replay:false,intent};
+  }catch(error){this.db.exec('ROLLBACK');throw error;}
+ }
+ readDeveloperFormalDueIntent(worldId:string,id:string){
+  const owner=this.developerSpiritFixtureOwner;
+  if(!owner?.formalShadowKeyPem)return {status:'disabled'} as const;
+  try{
+   owner.assertOwned();this.db.exec('BEGIN');
+   try{
+    const w=this.readWorld(false,false);
+    if(!w||w.id!==worldId){this.db.exec('COMMIT');return {status:'unavailable'} as const;}
+    const shadow=readFormalShadowRows(this.db,owner,w),row=readFormalDueRows(this.db,w,shadow).find(r=>r.intent.id===id);
+    const result=row?{status:formalDueCurrent(w,row.intent,shadow.at(-1),this.readFormalBerryArchive(w)),
+     intent:row.intent,lastCheckpoint:row.checkpoint}:{status:'unavailable'} as const;
+    this.db.exec('COMMIT');return result;
+   }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }catch{return {status:'unavailable'} as const;}
+ }
+ /** Revalidate from the actual current formal head under one SQLite lock.
+  * Returns evidence only. Even a successful checkpoint cannot execute v3. */
+ stepDeveloperFormalDueCheckpoint(worldId:string,id:string){
+  const owner=this.developerSpiritFixtureOwner;
+  if(!owner?.formalShadowKeyPem)return {status:'disabled'} as const;
+  owner.assertOwned();this.db.exec('BEGIN IMMEDIATE');
+  try{
+   const w=this.readWorld(false,false);
+   if(!w||w.id!==worldId){this.db.exec('COMMIT');return {status:'unavailable'} as const;}
+   const shadow=readFormalShadowRows(this.db,owner,w),current=shadow.at(-1);
+   const row=readFormalDueRows(this.db,w,shadow).find(r=>r.intent.id===id);
+   if(!row){this.db.exec('COMMIT');return {status:'unavailable'} as const;}
+   const effects=this.readFormalBerryArchive(w),state=formalDueCurrent(w,row.intent,current,effects);
+   if(state!=='due'){this.db.exec('COMMIT');return {status:state} as const;}
+   const p=current!.proposal!,review=current!.permission.terms;
+   const planned=draftFormalBerryGround(this,{scope:'formal-berry-detached-draft',enabled:true,capacity:owner.capacity,
+    geography:{scope:'formal-rain-geography-shadow-only',enabled:true,worldId:w.id,episodeId:p.episodeId,
+     maxAgeGameMinutes:review.maxAgeGameMinutes,sites:[{sourceId:p.sourceId,target:p.target}]}},{
+    schemaVersion:1,worldId:w.id,rainAdoptedMinute:w.formalRainProvenance!.adoptedMinute,capacity:owner.capacity,
+    drafts:effects.map(e=>e.receipt),
+   });
+   if(planned.status!=='draft_only'||planned.expectedWorldRevision!==w.revision||planned.receipt.placedMinute!==w.minute||
+    planned.receipt.draftId!==row.intent.opportunityId||planned.receipt.rain.startedMinute!==p.rainStartedAt||
+    planned.receipt.rain.closedMinute!==p.rainClosedAt){
+    this.db.exec('COMMIT');return {status:planned.status==='capacity'?'capacity':'blocked'} as const;
+   }
+   const food=pinFormalGroundBerryFoodBirth(w,planned.receipt);
+   if(!food){this.db.exec('COMMIT');return {status:'blocked'} as const;}
+   const checkpoint=makeFormalDueCheckpoint(row.intent,planned.receipt,food,owner.capacity);
+   const replay=JSON.stringify(checkpoint)===JSON.stringify(row.checkpoint);
+   if(!replay&&row.checkpoint?.atRevision===checkpoint.atRevision){
+    this.db.exec('COMMIT');return {status:'blocked'} as const;
+   }
+   if(!replay)writeFormalDueCheckpoint(this.db,checkpoint);
+   this.db.exec('COMMIT');return {status:'checkpoint' as const,replay,checkpoint};
+  }catch(error){this.db.exec('ROLLBACK');throw error;}
  }
  /** Explicit private resident projection; reads only committed ground. */
  readDeveloperFormalBerryDiscovery(worldId:string,residentId:string){
