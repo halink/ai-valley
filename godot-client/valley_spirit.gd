@@ -3,6 +3,7 @@ extends RefCounted
 # This view is separate from resident knowledge and the ordinary event journal.
 static func text(snapshot: Dictionary, connected: bool) -> String:
 	if not connected: return "谷灵 · 客观天气手记\n连接已断开，历史发布权限尚未重新核验。"
+	if snapshot.get("publicProjectionPending") == true: return "谷灵 · 客观天气手记\n等待重新核验公开权限；不显示旧记录。"
 	var value: Variant = snapshot.get("valleySpirit")
 	var world: Variant = snapshot.get("world")
 	if not value is Dictionary or value.get("schemaVersion") != 1 or not world is Dictionary:

@@ -157,9 +157,7 @@ func _received(result: int, code: int, _headers: PackedStringArray, body: Packed
 		_connection_lost("地图超出当前观察范围")
 		return
 	if doorway_active:
-		# Revoke immediately, even if the next scene must wait for animation.
-		if not ValleySpiritArchive.same_authority(spirit_archive_context, ValleySpiritArchive.authority(parsed)):
-			_set_archive_authority({})
+		_quarantine_pending_spirit_projection(parsed)
 		pending_snapshot = parsed
 		return
 	_apply_snapshot(parsed)
@@ -486,6 +484,14 @@ func _set_follow(enabled: bool) -> void:
 	if enabled and not following: _notice("这位居民的位置暂不可见")
 	if following: _locate_resident()
 	_update_resident_card()
+
+# Do not leave the prior public text visible while the scene buffers an
+# authority change. Clear both the rendered and the retained projections.
+func _quarantine_pending_spirit_projection(parsed: Dictionary) -> void:
+	if ValleySpiritArchive.same_authority(spirit_archive_context, ValleySpiritArchive.authority(parsed)): return
+	valley_spirit_snapshot = {"publicProjectionPending": true}
+	_set_archive_authority({})
+	hud.show_spirit(ValleySpirit.text(valley_spirit_snapshot, connected))
 
 func _set_archive_authority(next: Dictionary) -> void:
 	var stable := ValleySpiritArchive.same_authority(spirit_archive_context, next)
