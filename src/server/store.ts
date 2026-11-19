@@ -1,4 +1,5 @@
-import {prepareSealedMvpAdjacentMinute} from './godot-mvp.js';
+import {readCurrentSealedMvpSourceCredit,writeSealedMvpSourceCredit} from './valley-spirit-mvp-source-credit.js';
+import {prepareSealedMvpAdjacentMinute,prepareSealedMvpFruitCreditMinute} from './godot-mvp.js';
 import {appendNativeWeatherCredit} from './valley-spirit-weather-credit.js';
 import {probeMvpFallenFruitAdjacentEngineEdge} from './valley-spirit-mvp-fallen-fruit-approach.js';
 import {appendFormalDueIntent,formalDueCurrent,formalDueInputs,makeFormalDueCheckpoint,prepareFormalDueIntent,
@@ -708,6 +709,45 @@ export class WorldStore {
    }
    this.db.exec('COMMIT');
    return change.result;
+  }catch(error){this.db.exec('ROLLBACK');throw error;}
+ }
+ /** Sealed private evidence only: run one complete native minute, or write
+  * nothing. No expiry policy, reservation, ground effects or public marker. */
+ stepDeveloperMvpFruitSourceCredit(worldId:string,sourceId:string){
+  const owner=this.developerSpiritFixtureOwner;
+  if(!owner||owner.formalApprovalKeyPem)return null;
+  owner.assertOwned();this.assertDeveloperSpiritSeal();this.db.exec('BEGIN IMMEDIATE');
+  try{
+   const current=this.readWorld(false,false);
+   if(!current||current.id!==worldId){this.db.exec('ROLLBACK');return null;}
+   assertDeveloperMvpEffectArchive(this.db,current);
+   const next=prepareSealedMvpFruitCreditMinute(current,sourceId);
+   if(!next){this.db.exec('ROLLBACK');return null;}
+   const before=new Set(current.events.map(e=>e.id));
+   const appended=next.draft.events.filter(e=>!before.has(e.id));
+   // Do not create unrelated evidence via this narrow route. Those minutes
+   // remain available only to their respective custody writers.
+   if(next.mealWitnesses.length||next.speech?.receipts.length||
+    appended.some(e=>e.speechText!==undefined||e.mvpMeal||e.socialAppointmentArrival||e.mvpFruitFall)){
+    this.db.exec('ROLLBACK');return null;
+   }
+   this.assertWritable(next.draft);
+   this.writeDraftWithCustody(next.draft,current.revision,undefined,undefined,undefined,true);
+   const durable=this.readWorld(false,false);
+   if(!durable)throw Error('sealed_source_credit_missing_world');
+   const receipt=writeSealedMvpSourceCredit(this.db,owner.seal,current,durable,next.witness);
+   this.db.exec('COMMIT');
+   return receipt;
+  }catch(error){this.db.exec('ROLLBACK');throw error;}
+ }
+ readDeveloperMvpFruitSourceCredit(worldId:string){
+  const owner=this.developerSpiritFixtureOwner;
+  if(!owner||owner.formalApprovalKeyPem)return null;
+  owner.assertOwned();this.assertDeveloperSpiritSeal();this.db.exec('BEGIN');
+  try{
+   const w=this.readWorld(false,false);
+   const result=w&&w.id===worldId?readCurrentSealedMvpSourceCredit(this.db,owner.seal,w):null;
+   this.db.exec('COMMIT');return result;
   }catch(error){this.db.exec('ROLLBACK');throw error;}
  }
  /** Developer-only detached probe, not a world tick or write. The engine

@@ -378,6 +378,23 @@ export function prepareSealedMvpAdjacentMinute(current:World){
  }catch{return null;}
 }
 
+/** Detached native rule minute; only the sealed store may issue durable
+ * source evidence. No effect, supplied plan, or ordinary runtime attachment. */
+export function prepareSealedMvpFruitCreditMinute(current:World,sourceId:string){
+ if(current.mode!=='validation'||current.clock.paused||!current.mvpClimate?.rainProvenance||
+  !/^mvp-supply-fruit-[0-9]{1,12}$/.test(sourceId))return null;
+ const draft=structuredClone(current);
+ inheritReceiptHistory(current,draft);enableCompletedMovement(draft);
+ try{
+  const result=advanceMvpRuleMinuteDraft(draft,current,0,{},{meals:true,fruitFlow:false,fruitRenewal:true,addressedSpeech:true});
+  const witnesses=result.renewal.filter(w=>w.sourceId===sourceId);
+  if(witnesses.length!==1||draft.minute!==current.minute+1||
+   JSON.stringify(draft.mvpClimate?.spiritEffects)!==JSON.stringify(current.mvpClimate?.spiritEffects)||
+   JSON.stringify(draft.mvpClimate?.spiritFruitSettlement)!==JSON.stringify(current.mvpClimate?.spiritFruitSettlement))return null;
+  return {draft,witness:witnesses[0],mealWitnesses:result.witnesses,speech:result.speech};
+ }catch{return null;}
+}
+
 const postCommitFruitFlows=new WeakMap<MvpFruitFlowBatch,{sessionToken:symbol;deliveredSequence:number}>();
 /** Exact in-process delivery from the session's trusted commit callback.
  * Not a database receipt or a verifier for a caller-supplied commit backend. */
