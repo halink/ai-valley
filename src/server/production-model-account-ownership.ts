@@ -123,9 +123,14 @@ export function attachProductionAccountQuotaRehearsal(ownership:ProductionModelA
    ledger.close();closed=true;sealed=true;
   },
  });
- quotaHandles.add(handle);return handle;
+ quotaHandles.add(handle);quotaHolder.set(handle,ownership);return handle;
 }
 export type ProductionAccountQuotaRehearsal=ReturnType<typeof attachProductionAccountQuotaRehearsal>;
+const quotaHolder=new WeakMap<object,ProductionModelAccountOwnership>();
+/** Checks original host/handle object identity, not caller-reported scopes. */
+export function ownsProductionAccountQuotaRehearsal(owner:ProductionModelAccountOwnership,quota:ProductionAccountQuotaRehearsal):boolean{
+ return isProductionAccountQuotaRehearsal(quota)&&quotaHolder.get(quota)===owner&&owners.has(owner);
+}
 export function isProductionAccountQuotaRehearsal(value:unknown):value is ProductionAccountQuotaRehearsal{
  return value!==null&&typeof value==='object'&&quotaHandles.has(value);
 }

@@ -1,3 +1,5 @@
+import {appendFormalAppointmentChoices,readFormalAppointmentChoice} from './valley-spirit-formal-choice-custody.js';
+import {nativeFormalAppointmentChoice} from '../world/social-appointments.js';
 import {appendNativeMvpMealCustodyV2,readNativeMvpMealV2Receipt,type ValleySpiritMvpMealWitness} from './valley-spirit-meal-custody.js';
 import {readMvpMealFact} from '../shared/mvp-meals.js';
 import {assertAgedBirthSqlAuthority,advanceSealedAgedFruitExpiry,advanceSealedAgedHeldFruitExpiry,advanceSealedAgedHeldFruitMinute,advanceSealedAgedFruitMinute,pickUpSealedAgedFruit,readOwnedSealedAgedHeldFruit,readOwnedSealedAgedHeldFruitExpiry,readOwnedSealedAgedHeldFruitEaten,readOwnedSealedAgedBirthReceipt,readOwnedSealedAgedFruitDiscovery,readOwnedSealedAgedFruitExpiry,readOwnedSealedAgedFruitSight,readSealedAgedBirthArchive,rejectSealedAgedBirthOnGenericPath,
@@ -110,19 +112,23 @@ export class WorldStore {
  private readonly allowMvpClimate:boolean;
  private readonly nativeWeatherCredit:boolean;
  private readonly allowFormalRainProvenance:boolean;
+ private readonly formalAppointmentChoiceCustody:boolean;
  private readonly seasonalModel:boolean;
  private readonly mvpSpiritEffectFixture?:MvpGroundFruitCapacity;
  private readonly sealedAgedBirthExecution:boolean;
  private readonly developerSpiritFixtureOwner?:DeveloperMvpSpiritFixtureOwner;
  private agedG1ObservedEpoch:number|undefined;
  private agedG1EpochIsolated=false;
- constructor(path:string,options:{formalRainProvenance?:true;dailySnapshots?:DailySnapshotConfig;allowMvpClimate?:boolean;seasonalModel?:true;mvpSpiritEffectFixture?:MvpGroundFruitCapacity;developerSpiritFixtureOwner?:DeveloperMvpSpiritFixtureOwner;nativeWeatherCredit?:true;sealedAgedBirthExecution?:true}={}){
+ constructor(path:string,options:{formalRainProvenance?:true;formalAppointmentChoiceCustody?:true;dailySnapshots?:DailySnapshotConfig;allowMvpClimate?:boolean;seasonalModel?:true;mvpSpiritEffectFixture?:MvpGroundFruitCapacity;developerSpiritFixtureOwner?:DeveloperMvpSpiritFixtureOwner;nativeWeatherCredit?:true;sealedAgedBirthExecution?:true}={}){
   this.allowMvpClimate=options.allowMvpClimate===true;
   this.allowFormalRainProvenance=options.formalRainProvenance===true&&!this.allowMvpClimate&&!options.seasonalModel;
   this.seasonalModel=options.seasonalModel===true;
   this.nativeWeatherCredit=options.nativeWeatherCredit===true;
   const fixture=options.mvpSpiritEffectFixture;
   const owner=options.developerSpiritFixtureOwner;
+  this.formalAppointmentChoiceCustody=options.formalAppointmentChoiceCustody===true;
+  if(this.formalAppointmentChoiceCustody&&(this.allowMvpClimate||this.seasonalModel||fixture!==undefined||owner!==undefined||this.nativeWeatherCredit||options.sealedAgedBirthExecution))
+   throw Error('formal_appointment_choice_custody_scope');
   this.sealedAgedBirthExecution=options.sealedAgedBirthExecution===true;
   if(this.sealedAgedBirthExecution&&(!owner?.agedG1ReviewerKeyPem||!owner.agedPlacementKeyPem||!owner.sourceAge))
    throw Error('sealed_aged_birth_execution_owner_required');
@@ -142,7 +148,8 @@ export class WorldStore {
     !validMvpSpiritFixtureCapacity(fixture))throw Error('mvp_spirit_fixture_requires_disposable_memory');
    this.mvpSpiritEffectFixture=Object.freeze({...fixture});
   }
-  const savedHeader=preflightWorldSave(path,{rejectClimate:!this.allowMvpClimate,allowSeasonalModel:this.seasonalModel,developerSpiritFixtureOwner:owner});
+  const savedHeader=preflightWorldSave(path,{rejectClimate:!this.allowMvpClimate,allowSeasonalModel:this.seasonalModel,developerSpiritFixtureOwner:owner,
+   validateWorld:this.formalAppointmentChoiceCustody?w=>{if(w.mode!=='formal')throw Error('formal_appointment_choice_custody_scope');}:undefined});
   if(savedHeader?.formalRainProvenance&&!this.allowFormalRainProvenance)throw Error('formal_rain_store_scope');
   owner?.assertOwned();
   const needsDeveloperSeal=!!owner&&lstatSync(path,{bigint:true}).size===0n;
@@ -638,6 +645,7 @@ export class WorldStore {
   if(this.developerSpiritFixtureOwner?.rulesMealWorldId&&world.id!==this.developerSpiritFixtureOwner.rulesMealWorldId)
    throw Error('mvp_rules_private_meal_world');
   assertWorldCompatibility(world,!!this.mvpSpiritEffectFixture);
+  if(this.formalAppointmentChoiceCustody&&world.mode!=='formal')throw Error('formal_appointment_choice_custody_scope');
   if(Object.hasOwn(world,'formalBerryFixtureAnchor')&&!this.developerSpiritFixtureOwner?.formalApprovalKeyPem)
    throw Error('formal_berry_fixture_requires_owner');
   if(this.developerSpiritFixtureOwner){
@@ -674,6 +682,12 @@ export class WorldStore {
  verifyCommittedMvpAddressedSpeech(receipt:Readonly<ValleySpiritLifeReceipt>):boolean{
   if(this.developerSpiritFixtureOwner)rejectSealedAgedBirthOnGenericPath(this.db);
   return this.allowMvpClimate&&!this.seasonalModel&&verifyValleySpiritSpeechCustody(this.db,receipt);
+ }
+ readCommittedFormalAppointmentChoice(worldId:string,eventId:string){
+  if(!this.formalAppointmentChoiceCustody)return null;
+  this.db.exec('BEGIN');
+  try{return readFormalAppointmentChoice(this.db,worldId,eventId);}
+  finally{this.db.exec('ROLLBACK');}
  }
  readCommittedFormalArrival(worldId:string,eventId:string):ValleySpiritFormalArrivalReceipt|null{
   return !this.allowMvpClimate&&!this.seasonalModel?readValleySpiritFormalArrivalCustody(this.db,worldId,eventId):null;
@@ -773,6 +787,17 @@ export class WorldStore {
    }catch{
     this.db.exec('ROLLBACK TO optional_formal_arrival_custody');
     this.db.exec('RELEASE optional_formal_arrival_custody');
+   }
+  }
+  if(this.formalAppointmentChoiceCustody&&world.mode==='formal'&&previousRevision!==null&&
+   appended?.events.some(e=>nativeFormalAppointmentChoice(world,e))){
+   this.db.exec('SAVEPOINT optional_formal_choice_custody');
+   try{
+    appendFormalAppointmentChoices(this.db,world,previousRevision,appended.events);
+    this.db.exec('RELEASE optional_formal_choice_custody');
+   }catch{
+    this.db.exec('ROLLBACK TO optional_formal_choice_custody');
+    this.db.exec('RELEASE optional_formal_choice_custody');
    }
   }
   return speech;

@@ -126,20 +126,23 @@ export class ValleyRuntime {
  private readonly admissionBaseline:{requests:number;cancellations:number};
  private readonly acceptanceLifecycle?:AcceptanceLifecycleObserver;
  private readonly acceptanceAdmission?:()=>unknown;
+ private readonly observeResidentQuotaWaiting?:(waiting:boolean)=>boolean;
  private acceptanceDraining=false;
  private tickTimer?:ReturnType<typeof setInterval>;
- constructor(private store:WorldStore,credentials:string|null|readonly ModelConnection[],private model:Model=callModel,options:{selfHostedSafety?:boolean;dailySnapshots?:DailySnapshotConfig;dayMinutes?:number;mode?:World['mode'];modelSlots?:number;decisionWaitEvidence?:DecisionWaitEvidenceOptions;directEatingEvidence?:RuntimeFoodEvidenceOptions;acceptanceStop?:AcceptanceStopOptions;acceptanceEvidence?:{writer:AcceptanceEvidenceWriter;sourceFingerprintAfter:()=>string};decisionCommitted?:(event:DecisionCommittedEvent)=>unknown;decisionAdmissionCancelled?:(event:DecisionAdmissionCancelledEvent)=>unknown;acceptanceLifecycle?:AcceptanceLifecycleObserver;acceptanceAdmission?:()=>unknown}={}){
+ constructor(private store:WorldStore,credentials:string|null|readonly ModelConnection[],private model:Model=callModel,options:{selfHostedSafety?:boolean;dailySnapshots?:DailySnapshotConfig;dayMinutes?:number;mode?:World['mode'];modelSlots?:number;decisionWaitEvidence?:DecisionWaitEvidenceOptions;directEatingEvidence?:RuntimeFoodEvidenceOptions;acceptanceStop?:AcceptanceStopOptions;acceptanceEvidence?:{writer:AcceptanceEvidenceWriter;sourceFingerprintAfter:()=>string};decisionCommitted?:(event:DecisionCommittedEvent)=>unknown;decisionAdmissionCancelled?:(event:DecisionAdmissionCancelledEvent)=>unknown;acceptanceLifecycle?:AcceptanceLifecycleObserver;acceptanceAdmission?:()=>unknown;observeResidentQuotaWaiting?:(waiting:boolean)=>boolean}={}){
   if(options.dailySnapshots&&!options.acceptanceStop)throw new Error('daily_snapshots_require_acceptance_control');
   this.dailySnapshots=options.dailySnapshots?checkedDailySnapshotConfig(options.dailySnapshots):undefined;
   this.selfHostedSafety=options.selfHostedSafety===true;
   if(options.decisionCommitted&&!options.acceptanceStop)throw new Error('decision_commit_observer_requires_control');
   if(options.acceptanceLifecycle&&!options.acceptanceStop)throw new Error('acceptance_lifecycle_requires_control');
   if(options.acceptanceAdmission&&!options.acceptanceStop)throw new Error('acceptance_admission_requires_control');
+  if(options.observeResidentQuotaWaiting&&!options.acceptanceStop)throw new Error('resident_quota_wait_requires_control');
   if(options.decisionAdmissionCancelled&&(!options.acceptanceStop||!options.acceptanceAdmission))throw new Error('admission_cancel_observer_requires_control');
   this.decisionCommitted=options.decisionCommitted;
   this.decisionAdmissionCancelled=options.decisionAdmissionCancelled;
   this.acceptanceLifecycle=options.acceptanceLifecycle?{...options.acceptanceLifecycle}:undefined;
   this.acceptanceAdmission=options.acceptanceAdmission;
+  this.observeResidentQuotaWaiting=options.observeResidentQuotaWaiting;
   if(options.acceptanceEvidence&&(!options.acceptanceStop||options.decisionWaitEvidence||options.directEatingEvidence))throw new Error('acceptance_evidence_requires_exclusive_controlled_channels');
   this.acceptanceEvidence=options.acceptanceEvidence?{...options.acceptanceEvidence}:undefined;
   if(options.acceptanceStop){
@@ -431,17 +434,28 @@ export class ValleyRuntime {
   if(this.acceptance&&(!this.acceptanceReady()||!this.acceptance.committed(this.world)))return;
   this.schedule();
  }
+ private publishResidentQuotaWaiting(waiting:boolean):boolean {
+  if(!this.observeResidentQuotaWaiting)return true;
+  try{if(this.observeResidentQuotaWaiting(waiting)===true)return true;}catch{/* controlled stop below */}
+  this.acceptance!.stop('runtime_failed');return false;
+ }
  private schedule(){
   if(!this.acceptanceReady())return;
   if(!this.acceptanceAdmissionReady())return;
   if(!this.stopped)this.observeDecisionWaiters();
   if(!this.providers.length||this.stopped)return;
   const now=Date.now();
-  if(this.providers.every(provider=>now<Math.max(provider.blockedUntil,provider.admitAfter)))return;
+  const cooling=this.providers.every(provider=>now<Math.max(provider.blockedUntil,provider.admitAfter));
+  if(cooling&&!this.observeResidentQuotaWaiting)return;
   const residents=this.world.residents.filter(p=>this.ready(p));
   const travellers=[...outsideCandidate(this.world),...foreignCandidates(this.world)];
   for(const visitor of travellers)if(!this.waitingSince.has(visitor.id))this.waitingSince.set(visitor.id,now);
   const candidates=[...residents,...travellers].filter(p=>!this.inFlight.has(p.id)&&(this.retryAt.get(p.id)??0)<=now);
+  // Publish actual waiting demand even when all local model slots are held.
+  // This hook is only installed by the explicit disconnected quota bridge.
+  const waitingForResidentSlot=()=>residents.some(p=>!this.inFlight.has(p.id)&&(this.retryAt.get(p.id)??0)<=now);
+  if(this.observeResidentQuotaWaiting&&!this.publishResidentQuotaWaiting(waitingForResidentSlot()))return;
+  if(cooling)return;
   // Need and elapsed opportunity come before a stable, non-roster tie breaker.
   candidates.sort((a,b)=>this.priority(b,now)-this.priority(a,now));
   for(const actor of candidates){
@@ -449,6 +463,7 @@ export class ValleyRuntime {
    const provider=this.providerFor(actor.id,now);
    if(provider)void this.decide(actor.id,provider);
   }
+  if(this.observeResidentQuotaWaiting&&this.acceptanceReady()&&!this.stopped)this.publishResidentQuotaWaiting(waitingForResidentSlot());
  }
  private providerFor(actorId:string,now:number):Provider|undefined{
   const [primary,backup]=this.providers;

@@ -28,6 +28,36 @@ export function isFreshSocialAppointmentArrival(event:WorldEvent):boolean {
  const fresh=freshArrivals.get(event);
  return !!fresh&&event.socialAppointmentArrival===fresh;
 }
+export interface NativeFormalAppointmentChoice {
+ readonly kind:'offered'|'accepted';
+ readonly worldId:string; readonly appointmentId:string;
+ readonly eventId:string; readonly offeredEventId:string;
+ readonly actorId:string; readonly counterpartId:string;
+ readonly planId:string; readonly executionStartedAt:number; readonly at:number;
+ readonly terms:string;
+}
+const freshChoices=new WeakMap<WorldEvent,{world:WeakRef<World>;original:string;proof:NativeFormalAppointmentChoice}>();
+/** Nonserialized native proof. A copied, imported or observer event cannot mint it. */
+export function nativeFormalAppointmentChoice(world:World,event:WorldEvent):NativeFormalAppointmentChoice|undefined {
+ const entry=freshChoices.get(event);
+ return entry?.world.deref()===world?entry.proof:undefined;
+}
+export function matchesNativeFormalAppointmentChoice(world:World,event:WorldEvent):boolean {
+ const entry=freshChoices.get(event);
+ const proof=entry?.proof,c=world.socialAppointments?.records.find(c=>c.id===proof?.appointmentId);
+ return !!proof&&entry.world.deref()===world&&entry.original===JSON.stringify(event)&&!!c&&binding(c)===proof.terms&&
+  (proof.kind==='offered'?c.offeredAt===proof.at:c.acceptedAt===proof.at);
+}
+function certifyChoice(w:World,c:SocialAppointment,r:Resident,event:WorldEvent,kind:NativeFormalAppointmentChoice['kind'],offeredEventId:string){
+ const a=r.activity,plan=r.plan;
+ const other=kind==='offered'?c.personId:c.proposerId;
+ if(Object.hasOwn(w,'simulationOnly')||!a?.appointmentWork||!plan||plan.actorId!==r.id||plan.id!==a.planId||
+  !hasReceipt(w,'plan:'+a.planId)||!Number.isFinite(a.appointmentStartedAt)||
+  a.appointmentStartedAt!>a.appointmentWork.from+1e-7||event.actors.length!==2||event.actors[0]!==r.id||
+  event.actors[1]!==other||!event.witnesses.includes(r.id)||!event.witnesses.includes(other))return;
+ freshChoices.set(event,{world:new WeakRef(w),original:JSON.stringify(event),proof:Object.freeze({kind,worldId:w.id,appointmentId:c.id,eventId:event.id,offeredEventId,
+  actorId:r.id,counterpartId:other,planId:a.planId,executionStartedAt:a.appointmentStartedAt!,at:event.at,terms:binding(c)})});
+}
 export const socialAppointmentReceiptId=(r:Resident)=>`appointment:${r.id}:${r.revision}`;
 export function initializeSocialAppointments(w:World){if(w.mode==='formal')w.socialAppointments??={nextSerial:1,records:[]};}
 function binding(c:SocialAppointment){return JSON.stringify([c.id,c.proposerId,c.personId,c.buildingId,c.place,c.placeName,c.offeredAt,c.start,c.end,c.receiptId,c.births,c.names]);}
@@ -62,6 +92,7 @@ function notice(w:World,c:SocialAppointment,r:Resident,status:AppointmentKnowled
  const other=person(w,r.id===c.proposerId?c.personId:c.proposerId),listeners=[r.id,...(other&&contact(w,r,other)?[other.id]:[])];
  const e=event(w,c,r,text,listeners,rule);c.known[r.id]=status;
  for(const id of e.witnesses){c.known[id]=status;const p=person(w,id)!;p.revision++;/* No activity or decision timer is interrupted. */}
+ return e;
 }
 function shape(a:SocialAppointmentAction){
  const fields=a.operation==='offer'?['type','operation','personId','buildingId','startsIn','windowMinutes','receiptId']:a.operation==='wait'?['type','operation','appointmentId','minutes']:['type','operation','appointmentId'];
@@ -135,10 +166,10 @@ export function completeSocialAppointment(w:World,r:Resident,a:SocialAppointment
  if(a.operation==='offer'){
   const b=w.buildings.find(b=>b.id===a.buildingId)!,p=person(w,a.personId)!,state=w.socialAppointments!;
   const c:SocialAppointment={id:`appointment:${w.id}:${state.nextSerial++}`,proposerId:r.id,personId:p.id,buildingId:b.id,place:{...b.door},placeName:b.name+'门前',offeredAt:w.minute,start:w.minute+a.startsIn,end:w.minute+a.startsIn+a.windowMinutes,receiptId:a.receiptId,births:[r.bornAt,p.bornAt],names:[r.name,p.name],acceptedAt:null,endedAt:null,status:'offered',known:{},visits:[],metAt:null,eventIds:[]};
-  state.records.push(c);w.processed.push(receipt(a.receiptId));notice(w,c,r,'offered',`${r.name}当面向${p.name}提出日常约见：${c.placeName}(${c.place.x},${c.place.y})，${c.start}至${c.end}分钟；对方须独立答复，之后双方仍须各自选择赴约。`,'social-appointment/offer@1');return null;
+  state.records.push(c);w.processed.push(receipt(a.receiptId));const e=notice(w,c,r,'offered',`${r.name}当面向${p.name}提出日常约见：${c.placeName}(${c.place.x},${c.place.y})，${c.start}至${c.end}分钟；对方须独立答复，之后双方仍须各自选择赴约。`,'social-appointment/offer@1');certifyChoice(w,c,r,e,'offered',e.id);return null;
  }
  const c=records(w).find(c=>c.id===a.appointmentId)!;
- if(a.operation==='accept'){c.acceptedAt=w.minute;c.status='accepted';notice(w,c,r,'accepted',`${r.name}当面独立接受日常约见${c.id}：${c.placeName}，${c.start}至${c.end}分钟。未开始赴约，不打断任何人的生活安排。`,'social-appointment/accept@1');return null;}
+ if(a.operation==='accept'){const offeredEventId=c.eventIds[0];c.acceptedAt=w.minute;c.status='accepted';const e=notice(w,c,r,'accepted',`${r.name}当面独立接受日常约见${c.id}：${c.placeName}，${c.start}至${c.end}分钟。未开始赴约，不打断任何人的生活安排。`,'social-appointment/accept@1');if(offeredEventId)certifyChoice(w,c,r,e,'accepted',offeredEventId);return null;}
  if(a.operation==='attend'){
   const activity=r.activity!;
   // Appointment terms are immutable in v1; the verified acceptance event,

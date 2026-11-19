@@ -10,14 +10,40 @@ import {PRODUCTION_MODEL_CANDIDATE as P} from './production-model-policy.js';
 import {parseModelCompletion,prepareModelDecision,type ModelResult} from './decisions.js';
 import {persistedWorldFingerprint as fingerprint} from './acceptance-offline-protocol.js';
 import {offlineProductionRuntimeOwners as owners} from './production-model-runtime-ownership.js';
+import {createHash} from 'node:crypto';
+import {ownsProductionAccountQuotaRehearsal,type ProductionModelAccountOwnership,type ProductionAccountQuotaRehearsal} from './production-model-account-ownership.js';
+import type {SharedModelAccountPolicy} from './shared-model-account.js';
 import {evaluateProductionHttpAdmission,type ProductionHttpAdmission} from './production-model-admission.js';
 
 type RuntimeOptions={store:WorldStore;journal:ProductionModelJournal;
  transport:ProductionHttpTransport;endGameMinute:number;maxWallMs?:number};
-export function createProductionModelOfflineRuntime(options:RuntimeOptions){
+interface OfflineResidentCanonicalQuota {
+ mode:'explicit-disconnected-resident-quota';ownership:ProductionModelAccountOwnership;
+ quota:ProductionAccountQuotaRehearsal;policy:SharedModelAccountPolicy;
+}
+const taken=new WeakSet<ProductionAccountQuotaRehearsal>();
+const boundResidentJournals=new WeakSet<ProductionModelJournal>();
+export function createProductionModelOfflineRuntime(input:RuntimeOptions&{sharedQuota?:Readonly<OfflineResidentCanonicalQuota>}){
+ const options={...input},attachment=options.sharedQuota;
  if(options.journal.contract.executionKind!=='synthetic-production-candidate'||options.transport.kind!=='synthetic-production-http')
   throw new Error('production_runtime_offline_only');
- return createRuntimeBridge(options);
+ if(attachment===undefined)return createRuntimeBridge(options);
+ if(!attachment||Object.keys(attachment).length!==4||attachment.mode!=='explicit-disconnected-resident-quota')
+  throw Error('production_runtime_shared_quota_scope');
+ const {ownership,quota}=attachment;
+ if(!ownsProductionAccountQuotaRehearsal(ownership,quota)||taken.has(quota)||boundResidentJournals.has(options.journal)||!(options.store instanceof WorldStore)||
+    quota.accountScope!==ownership.accountScope||quota.runId!==options.journal.contract.runId)
+  throw Error('production_runtime_shared_quota_scope');
+ const policy=structuredClone(attachment.policy),at=Date.now();
+ ownership.assertOwned();
+ if(!quota.matchesPolicy(policy)||policy.accountId!==ownership.accountScope)throw Error('production_runtime_shared_quota_policy');
+ const summary=quota.summary(at);
+ if(summary.held||summary.unknown||summary.waitingResidents)throw Error('production_runtime_shared_quota_unresolved');
+ // The host owns an actual disconnected account handle, not a production
+ // account attestation. The runtime itself validates exact journal/world head.
+ const result=createRuntimeBridge(options,undefined,{quota,ownership,policy});
+ taken.add(quota);boundResidentJournals.add(options.journal);
+ return result;
 }
 /** Trusted integration only. Does not fetch evidence or authenticate records.
  * An operator must verify official exact-model pricing/account qualification and
@@ -34,13 +60,14 @@ export function createReviewedProductionModelRuntime(options:RuntimeOptions&{ena
  if(!gate.allowed)throw new Error(gate.reason);
  return createRuntimeBridge(options,gate.record);
 }
-function createRuntimeBridge(options:RuntimeOptions,reviewed?:ProductionHttpAdmission){
+function createRuntimeBridge(options:RuntimeOptions,reviewed?:ProductionHttpAdmission,shared?:Omit<OfflineResidentCanonicalQuota,'mode'>){
  const {store,journal}=options;
  if(owners.has(store))throw new Error('production_runtime_store_owned');
  const initial=store.loadForRuntime(),state=journal.status();
  if(!initial||initial.id!==journal.contract.worldId||initial.mode!=='formal'||fingerprint(initial)!==state.worldFingerprint)
   throw new Error('production_runtime_world_mismatch');
  if(state.pending||state.failure)throw new Error('production_runtime_unresolved');
+ if(shared&&state.attempts!==0)throw new Error('production_runtime_shared_quota_requires_fresh_journal');
  journal.check(Date.now());
  const maxWallMs=options.maxWallMs??30_000;
  if(!Number.isFinite(options.endGameMinute)||options.endGameMinute<=initial.minute
@@ -63,12 +90,38 @@ function createRuntimeBridge(options:RuntimeOptions,reviewed?:ProductionHttpAdmi
   if(!Number.isFinite(checked)||checked<now)throw new Error('clock_invalid');lastMonotonic=checked;
   if(checked>=deadline!)throw new Error('wall_limit');
  };
- const candidate=new ProductionSiliconFlowHttpCandidate(journal,options.transport,reviewed?{executionGuard}:{});
- const results=new WeakMap<ModelResult,{id:number;actorId:string}>();
- const original=store.commit;
+ const residentKey=shared?'resident-runtime-'+createHash('sha256').update(JSON.stringify([shared.ownership.accountScope,journal.contract.runId,journal.contract.worldId])).digest('hex'):null;
+ let waiting=false,quotaFaulted=false;
  const fail=(reason:string)=>{
   failure??=reason;try{journal.block(reason);}catch{/* An uncommitted block is not successful recovery. */}
  };
+ const quotaHealthy=()=>{
+  if(!shared)return true;
+  if(quotaFaulted)return false;
+  try{
+   shared.ownership.assertOwned();
+   if(!shared.quota.matchesPolicy(shared.policy))throw Error('production_runtime_shared_quota_policy');
+   shared.quota.summary(Date.now());
+   return true;
+  }catch{
+   quotaFaulted=true;fail('resident_quota_wait_write_failed');return false;
+  }
+ };
+ const updateWait=(demand:boolean):boolean=>{
+  if(!shared||!residentKey)return true;
+  if(quotaHealthy()){
+   if(demand===waiting)return true;
+   try{shared.quota.setResidentWaiting(residentKey,demand,Date.now());waiting=demand;return true;}
+   catch{quotaFaulted=true;fail('resident_quota_wait_write_failed');}
+  }
+  // A failed store/owner check never clears a persistent waiter or marks
+  // pending quota settled. Abort only the local fake transport.
+  candidate.stop('shared_quota_unavailable');return false;
+ };
+ const candidate=new ProductionSiliconFlowHttpCandidate(journal,options.transport,reviewed?{executionGuard}:shared?
+  {quotaRehearsal:shared.quota,executionGuard:()=>{if(!quotaHealthy())throw Error('shared_quota_unavailable');}}:{});
+ const results=new WeakMap<ModelResult,{id:number;actorId:string}>();
+ const original=store.commit;
  const load=()=>{const world=store.loadForRuntime();if(!world)throw new Error('production_runtime_world_missing');return world;};
  const failedControl=(control:AcceptanceStopStatus|null)=>!!control&&(control.issues.length>0
   ||control.phase==='stopped'&&!CLEAN_RUNTIME_STOP_REASONS.some(reason=>reason===control.reason));
@@ -118,8 +171,9 @@ function createRuntimeBridge(options:RuntimeOptions,reviewed?:ProductionHttpAdmi
     const result=parseModelCompletion(context,request,response.reply,Math.max(0,Date.now()-started));
     results.set(result,{id:response.id,actorId:context.actor.id});return result;
    }catch(error){fail(candidate.status().failure??'model_decision_failed');candidate.stop('model_failed');throw error;}
-  },{mode:'formal',dayMinutes:20,modelSlots:1,decisionCommitted,
+  },{mode:'formal',dayMinutes:20,modelSlots:1,decisionCommitted,observeResidentQuotaWaiting:shared?updateWait:undefined,
    acceptanceLifecycle:{stopping:control=>{
+    if(!updateWait(false))return;
     if(failure||journal.status().failure)return;
     try{journal.beginRuntimeStop(control.reason!,Date.now());}catch(error){fail('runtime_stop_persistence_failed');throw error;}
    },stopped:control=>{
@@ -157,7 +211,7 @@ function createRuntimeBridge(options:RuntimeOptions,reviewed?:ProductionHttpAdmi
     // Revoke the bridge before cancellation; late replies cannot be parsed or
     // acknowledged. Runtime stop is synchronous but a remote abort is not proof.
     closed=true;
-    try{ownedRuntime.stop();
+    try{ownedRuntime.stop();updateWait(false);
      if(controlFailed())fail('runtime_control_failed');
      if(journal.status().pending)fail('unresolved_request_no_retry');
      if(!failure&&!journal.status().failure&&fingerprint(load())!==journal.status().worldFingerprint)fail('world_checkpoint_failed');

@@ -76,3 +76,20 @@ The existing real admission logic, default launching, credential handling and pr
 ### Disabled shared-launch documentary preflight
 
 The offline-only preflight compares an explicit provider/account fingerprint, exact world/run/time envelope and quota policy against current reviewed fixture evidence and the original branded durable account handle. Resident context, public weather and expressly public life receipts have independent data scopes, approval references and grant versions; current revocation of one cannot be filled by another. Earlier account runs and pending quota remain blocking. No raw world or private publication fields are part of the envelope. The result is a private documentary digest with live authorization fixed to false; it does not authenticate provider evidence, expose credentials, or enable the real supervisor, runtime or yearbook publisher.
+
+The isolated Formal offline resident runtime can explicitly attach an original
+canonical disconnected quota handle and its exact original host owner. This
+one-shot attachment also checks the frozen quota policy, exact run ID and
+committed world journal fingerprint, and requires a fresh journal and no
+unresolved canonical reservations. The real resident queue reports demand
+before dispatch so other synthetic purposes cannot take reserved capacity;
+the existing synthetic HTTP candidate records quota handoff and usage, while
+the actual Formal world commit/ack remains a separate durable fact. Nothing
+here proves a real vendor account, persists a production host attestation,
+or permits reopening an already-attempted bound run. Default/offline behavior
+without the option, live startup, and yearbook attachment are unchanged.
+If its owner, quota file, or synchronous waiter update fails, this bound
+runtime records `resident_quota_wait_write_failed`, stops its controlled
+scheduler and local fake transport, and does not erase a surviving waiter
+or pending unknown. A later readable ledger is not taken as clean evidence
+for that failed run.
