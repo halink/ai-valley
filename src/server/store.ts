@@ -1,4 +1,4 @@
-import {assertAgedBirthSqlAuthority,readOwnedSealedAgedBirthReceipt,readOwnedSealedAgedFruitSight,readSealedAgedBirthArchive,rejectSealedAgedBirthOnGenericPath,
+import {assertAgedBirthSqlAuthority,advanceSealedAgedFruitExpiry,readOwnedSealedAgedBirthReceipt,readOwnedSealedAgedFruitExpiry,readOwnedSealedAgedFruitSight,readSealedAgedBirthArchive,rejectSealedAgedBirthOnGenericPath,
  sameAgedBirthProofs,writeSealedAgedBirth,type AgedBirthProofs} from './valley-spirit-aged-birth-archive.js';
 import {makeAgedBirthExecutionTerms,makeAgedBirthReviewTerms,verifiesAgedBirthExecution,verifiesAgedBirthReview} from './valley-spirit-aged-birth-review.js';
 import {agedG1ReviewTerms,agedG1RevokeTerms,advanceAgedG1ReviewEpoch,initializeAgedG1ReviewEpoch,
@@ -62,6 +62,9 @@ export function readSealedMvpAgedBirthReceipt(owner:DeveloperMvpSpiritFixtureOwn
 }
 export function readSealedMvpAgedFruitSight(owner:DeveloperMvpSpiritFixtureOwner,worldId:string,residentId:string){
  return readOwnedSealedAgedFruitSight(owner,decodeAgedBirthPredecessor,worldId,residentId);
+}
+export function readSealedMvpAgedFruitExpiry(owner:DeveloperMvpSpiritFixtureOwner){
+ return readOwnedSealedAgedFruitExpiry(owner,decodeAgedBirthPredecessor);
 }
 export interface AppendedHistory {
  events: WorldEvent[];
@@ -959,6 +962,19 @@ export class WorldStore {
     const receipt=writeSealedAgedBirth(this.db,owner,w,input.proofs,decodeAgedBirthPredecessor);
     owner.assertOwned();this.db.exec('COMMIT');this.agedG1ObservedEpoch=epoch;
     return {status:'committed' as const,replay:false,receipt};
+   }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }catch{return null;}
+ }
+ /** Only the explicitly armed sealed write handle, never a normal V2
+  * load. No active weather-credit attachment can be bypassed here. */
+ stepDeveloperMvpAgedFruitExpiry(worldId:string){
+  const owner=this.developerSpiritFixtureOwner;
+  if(!this.sealedAgedBirthExecution||!owner||this.nativeWeatherCredit)return null;
+  try{
+   owner.assertOwned();this.assertDeveloperSpiritSeal();this.db.exec('BEGIN IMMEDIATE');
+   try{
+    const result=advanceSealedAgedFruitExpiry(this.db,owner,decodeAgedBirthPredecessor,worldId);
+    owner.assertOwned();this.db.exec('COMMIT');return result;
    }catch(error){this.db.exec('ROLLBACK');throw error;}
   }catch{return null;}
  }
