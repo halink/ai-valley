@@ -1,7 +1,12 @@
 import {DatabaseSync} from 'node:sqlite';
 import {lstatSync} from 'node:fs';
-import {ALMANAC_ENTRY_SCHEMA,validateValleySpiritAlmanacEntries,type ValleySpiritAlmanacEntry,type ValleySpiritAlmanacStore} from './valley-spirit-almanac.js';
+import {ALMANAC_ENTRY_SCHEMA,REVIEWED_OFFLINE_ORIGIN,validateValleySpiritAlmanacEntries,type ValleySpiritAlmanacEntry,type ValleySpiritAlmanacStore} from './valley-spirit-almanac.js';
+import {appendOrdinaryWeatherReceipt,ordinaryReviewSaveScope,ordinaryReviewDigest,readExactOrdinaryWeatherReceipt,readOrdinaryWeatherReceipts,
+ type OrdinaryWeatherReviewReceipt} from './valley-spirit-ordinary-weather-receipt.js';
+import {readValleySpiritWeatherPermission} from './valley-spirit-permissions.js';
+import type {PublicWeatherEntry} from './valley-spirit.js';
 
+const reviewed=(rows:readonly ValleySpiritAlmanacEntry[])=>rows.filter(e=>e.origin.kind===REVIEWED_OFFLINE_ORIGIN);
 const TABLE='valley_spirit_almanac';
 const CAP=16*1024*1024;
 const COLUMNS=[
@@ -23,23 +28,40 @@ function validated(text:string|null,worldId:string):ValleySpiritAlmanacEntry[]{
  return rows;
 }
 /** Internal query; caller owns connection and snapshot lifetime. */
-export function readValleySpiritAlmanacSnapshot(db:DatabaseSync,worldId:string):ValleySpiritAlmanacEntry[]{
- return validated(tables(db,worldId),worldId);
+export function readValleySpiritAlmanacSnapshot(db:DatabaseSync,worldId:string,scope?:string):ValleySpiritAlmanacEntry[]{
+ const rows=validated(tables(db,worldId),worldId);
+ readOrdinaryWeatherReceipts(db,worldId,reviewed(rows),scope);
+ return rows;
 }
-/** Used on the authoritative save's private preflight copy, before writable
- * WorldStore opens. This inspector makes no migrations or repairs. */
+/** Preflight copies have a different file identity. Validate signed structural
+ * integrity here; the actual reader enforces the original save identity. */
 export function inspectValleySpiritAlmanac(db:DatabaseSync,worldId:string):void {
- validated(tables(db,worldId),worldId);
+ readValleySpiritAlmanacSnapshot(db,worldId);
 }
 /** Runtime viewer owns a physically read-only SQLite connection. */
 export class SqliteValleySpiritAlmanacReader {
  private readonly db:DatabaseSync;
- constructor(database:string,private readonly worldId:string,private readonly assertOwned:()=>void){
-  assertOwned();this.db=new DatabaseSync(database,{readOnly:true});
-  try{this.db.exec('PRAGMA trusted_schema=OFF; PRAGMA query_only=ON');inspectValleySpiritAlmanac(this.db,worldId);}catch(e){this.db.close();throw e;}
+ private readonly scope:string;
+ constructor(private readonly database:string,private readonly worldId:string,private readonly assertOwned:()=>void){
+  assertOwned();this.scope=ordinaryReviewSaveScope(database,worldId);this.db=new DatabaseSync(database,{readOnly:true});
+  try{this.db.exec('PRAGMA trusted_schema=OFF; PRAGMA query_only=ON');this.read();}catch(e){this.db.close();throw e;}
+ }
+ private snapshot<T>(read:()=>T):T {
+  this.assertOwned();
+  if(ordinaryReviewSaveScope(this.database,this.worldId)!==this.scope)throw Error('ordinary_weather_review_save_changed');
+  this.db.exec('BEGIN');
+  try{const result=read();this.assertOwned();this.db.exec('COMMIT');return result;}
+  catch(error){this.db.exec('ROLLBACK');throw error;}
  }
  read():ValleySpiritAlmanacEntry[]{
-  this.assertOwned();return readValleySpiritAlmanacSnapshot(this.db,this.worldId);
+  return this.snapshot(()=>readValleySpiritAlmanacSnapshot(this.db,this.worldId,this.scope));
+ }
+ matchesReviewedSources(entry:ValleySpiritAlmanacEntry,records:readonly PublicWeatherEntry[]):boolean {
+  try{return this.snapshot(()=>{
+   if(entry.origin.kind!==REVIEWED_OFFLINE_ORIGIN)return false;
+   const proof=readExactOrdinaryWeatherReceipt(this.db,this.worldId,entry,this.scope);
+   return !!proof&&proof.terms.selectedSourcesDigest===ordinaryReviewDigest(records);
+  });}catch{return false;}
  }
  close(){this.db.close();}
 }
@@ -51,31 +73,49 @@ export function preflightValleySpiritAlmanac(database:string,worldId:string,asse
  const file=lstatSync(database);
  if(!file.isFile()||file.isSymbolicLink()||file.nlink!==1)throw Error('unsafe_almanac_database');
  const db=new DatabaseSync(database,{readOnly:true});
- try{db.exec('PRAGMA trusted_schema=OFF');inspectValleySpiritAlmanac(db,worldId);}finally{db.close();}
+ try{db.exec('PRAGMA trusted_schema=OFF');readValleySpiritAlmanacSnapshot(db,worldId,ordinaryReviewSaveScope(database,worldId));}finally{db.close();}
 }
 export class SqliteValleySpiritAlmanacStore implements ValleySpiritAlmanacStore {
  private readonly db:DatabaseSync;
- constructor(database:string,private readonly worldId:string,private readonly assertOwned:()=>void){
+ constructor(private readonly database:string,private readonly worldId:string,private readonly assertOwned:()=>void){
   preflightValleySpiritAlmanac(database,worldId,assertOwned);
   assertOwned();this.db=new DatabaseSync(database);
   try{this.db.exec('PRAGMA trusted_schema=OFF; PRAGMA synchronous=FULL');}catch(e){this.db.close();throw e;}
  }
  read():ValleySpiritAlmanacEntry[]{
-  this.assertOwned();return readValleySpiritAlmanacSnapshot(this.db,this.worldId);
+  this.assertOwned();return readValleySpiritAlmanacSnapshot(this.db,this.worldId,ordinaryReviewSaveScope(this.database,this.worldId));
  }
  replace(previous:readonly ValleySpiritAlmanacEntry[],next:readonly ValleySpiritAlmanacEntry[]):boolean {
+  if(ordinaryReviewDigest(reviewed(previous))!==ordinaryReviewDigest(reviewed(next)))return false;
+  return this.compareAndReplace(previous,next);
+ }
+ recordOrdinaryReview(previous:readonly ValleySpiritAlmanacEntry[],entry:ValleySpiritAlmanacEntry,proof:OrdinaryWeatherReviewReceipt):boolean {
+  if(entry.origin.kind!==REVIEWED_OFFLINE_ORIGIN)return false;
+  return this.compareAndReplace(previous,[...previous,entry],proof);
+ }
+ private compareAndReplace(previous:readonly ValleySpiritAlmanacEntry[],next:readonly ValleySpiritAlmanacEntry[],proof?:OrdinaryWeatherReviewReceipt):boolean {
   this.assertOwned();
+  const scope=ordinaryReviewSaveScope(this.database,this.worldId);
   if(!validateValleySpiritAlmanacEntries(next)||!next.every(e=>e.packet.worldId===this.worldId))return false;
   const serialized=JSON.stringify(next);if(Buffer.byteLength(serialized)>CAP)return false;
   this.db.exec('BEGIN IMMEDIATE');
   try{
-   const raw=tables(this.db,this.worldId),stored=validated(raw,this.worldId);
+   const stored=readValleySpiritAlmanacSnapshot(this.db,this.worldId,scope);
    if(JSON.stringify(stored)!==JSON.stringify(previous)){
     this.db.exec('ROLLBACK');return false;
+   }
+   if(proof){
+    const grant=readValleySpiritWeatherPermission(this.db,this.worldId), e=next.at(-1)!;
+    if(!grant?.publicWeather||grant.version!==proof.terms.permissionVersion||
+     !appendOrdinaryWeatherReceipt(this.db,this.worldId,scope,stored,e,proof)){
+     this.db.exec('ROLLBACK');return false;
+    }
    }
    const tableExists=this.db.prepare("SELECT type FROM sqlite_master WHERE name=?").get(TABLE);
    if(!tableExists)this.db.exec('CREATE TABLE valley_spirit_almanac(world_id TEXT PRIMARY KEY NOT NULL,schema_version INTEGER NOT NULL,state_json TEXT NOT NULL)');
    this.db.prepare('INSERT INTO valley_spirit_almanac VALUES (?,?,?) ON CONFLICT(world_id) DO UPDATE SET state_json=excluded.state_json').run(this.worldId,ALMANAC_ENTRY_SCHEMA,serialized);
+   // Ensure both new rows are now coherent before exposing a successful COMMIT.
+   if(proof)readValleySpiritAlmanacSnapshot(this.db,this.worldId,scope);
    this.assertOwned();this.db.exec('COMMIT');return true;
   }catch(e){this.db.exec('ROLLBACK');throw e;}
  }

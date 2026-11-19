@@ -27,11 +27,16 @@ export interface ValleySpiritPublicReaders {
   {status:'invalid'|'unavailable'};
 }
 /** Intentionally has no transport, generation, store/write or scheduling seam. */
-export function createValleySpiritPublicReaders(journal:JournalReader,reader?:Pick<SqliteValleySpiritAlmanacReader,'read'>):ValleySpiritPublicReaders {
+export function createValleySpiritPublicReaders(journal:JournalReader,reader?:Pick<SqliteValleySpiritAlmanacReader,'read'>&Partial<Pick<SqliteValleySpiritAlmanacReader,'matchesReviewedSources'>>):ValleySpiritPublicReaders {
  const authority:ValleySpiritAlmanacAuthority={
   permission:()=>journal.publicWeatherPermission(),
   resolve:ref=>journal.resolveSource(ref),
   readCurrent:refs=>journal.publicNarrationInput(refs),
+  matchesReviewedSources:entry=>{
+   const current=journal.publicNarrationInput(entry.packet.points.map(p=>p.sourceRef));
+   return !!current&&current.worldId===entry.packet.worldId&&current.permissionVersion===entry.packet.permissionVersion&&
+    reader?.matchesReviewedSources?.(entry,current.records)===true;
+  },
  };
  const almanac=reader?new ValleySpiritAlmanac({read:()=>reader.read(),replace:()=>false},authority):null;
  const topics=new ValleySpiritAlmanacTopics(authority);

@@ -8,31 +8,13 @@ import {readExistingPublicWeatherJournal} from './valley-spirit.js';
 import {composeOfflineWeatherEdition,type ValleySpiritAlmanacRange} from './valley-spirit-almanac.js';
 import {SqliteValleySpiritAlmanacStore,readValleySpiritAlmanacSnapshot} from './valley-spirit-almanac-store.js';
 
-const SCHEMA='ordinary-offline-weather-review/v1' as const;
-const WORLD=/^godot-mvp-[A-Za-z0-9_-]{1,160}$/;
-const ENTRY=/^valley-almanac-[a-f0-9]{64}$/;
-const HEX=/^[a-f0-9]{64}$/;
-const SIG=/^[A-Za-z0-9_-]{86}$/;
-const digest=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
+import {encodeOrdinaryOfflineWeatherReview,ordinaryReviewDigest as digest,ordinaryReviewSaveScope,
+ ORDINARY_OFFLINE_REVIEW_SCHEMA as SCHEMA,ORDINARY_REVIEW_SIGNATURE as SIG,ORDINARY_REVIEW_WORLD as WORLD,
+ type OrdinaryOfflineWeatherReview} from './valley-spirit-ordinary-weather-receipt.js';
+export {encodeOrdinaryOfflineWeatherReview,type OrdinaryOfflineWeatherReview} from './valley-spirit-ordinary-weather-receipt.js';
 const exact=(v:unknown,keys:readonly string[]):v is Record<string,unknown>=>!!v&&typeof v==='object'&&!Array.isArray(v)&&
  Object.keys(v).length===keys.length&&keys.every(k=>Object.hasOwn(v,k));
-const int=(v:unknown,n:number):v is number=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=n;
 
-export interface OrdinaryOfflineWeatherReview {
- schema:typeof SCHEMA;worldId:string;saveScope:string;reviewerFingerprint:string;
- headRevision:number;permissionVersion:number;priorAlmanacDigest:string;
- entryId:string;editionDigest:string;selectedSourcesDigest:string;
-}
-/** The reviewer signs the exact supported edition and authority version, not
- * a generic release request. Private key stays outside the service. */
-export function encodeOrdinaryOfflineWeatherReview(t:unknown):Buffer|null {
- if(!exact(t,['schema','worldId','saveScope','reviewerFingerprint','headRevision','permissionVersion','priorAlmanacDigest','entryId','editionDigest','selectedSourcesDigest'])||
-   t.schema!==SCHEMA||typeof t.worldId!=='string'||!WORLD.test(t.worldId)||typeof t.entryId!=='string'||!ENTRY.test(t.entryId)||
-   !int(t.headRevision,0)||!int(t.permissionVersion,1)||
-   [t.saveScope,t.reviewerFingerprint,t.priorAlmanacDigest,t.editionDigest,t.selectedSourcesDigest].some(v=>typeof v!=='string'||!HEX.test(v)))return null;
- return Buffer.from(JSON.stringify([SCHEMA,t.worldId,t.saveScope,t.reviewerFingerprint,t.headRevision,t.permissionVersion,
-  t.priorAlmanacDigest,t.entryId,t.editionDigest,t.selectedSourcesDigest]),'utf8');
-}
 /** Local operator seam, not imported by any service entrypoint. The trusted
  * caller pins an independent reviewer in configuration. No fixture DBs,
  * automatic startup, signing capability, provider, or HTTP write surface. */
@@ -43,14 +25,15 @@ export function openOrdinaryOfflineWeatherRelease(options:{database:string;world
   throw Error('ordinary_weather_review_pin_invalid');
  const reviewer=createPublicKey(reviewerPublicKeyPem);
  if(reviewer.asymmetricKeyType!=='ed25519')throw Error('ordinary_weather_review_pin_invalid');
- const reviewerFingerprint=createHash('sha256').update(reviewer.export({type:'spki',format:'der'})).digest('hex');
+ const reviewerDer=reviewer.export({type:'spki',format:'der'});
+ const reviewerFingerprint=createHash('sha256').update(reviewerDer).digest('hex');
  const owner=acquireRuntimeOwnership(database,{existingOnly:true});
  let sqlite:DatabaseSync|undefined;
  try{
   const db=sqlite=new DatabaseSync(owner.database,{readOnly:true});
   db.exec('PRAGMA trusted_schema=OFF; PRAGMA query_only=ON');
   const file=lstatSync(owner.database,{bigint:true});
-  const saveScope=digest([SCHEMA,worldId,String(file.dev),String(file.ino)]);
+  const saveScope=ordinaryReviewSaveScope(owner.database,worldId);
   const requireOrdinary=()=>{
    owner.assertOwned();
    const current=lstatSync(owner.database,{bigint:true});
@@ -71,7 +54,7 @@ export function openOrdinaryOfflineWeatherRelease(options:{database:string;world
     const refs=new Map(journal.entries.filter(r=>r.permissionVersion===grant.version).map(r=>[r.sourceRef,r]));
     const built=composeOfflineWeatherEdition({...range,worldId},{permission:()=>grant,resolve:ref=>refs.get(ref)??null});
     if(!built)return null;
-    const before=readValleySpiritAlmanacSnapshot(db,worldId),p=built.entry.packet;
+    const before=readValleySpiritAlmanacSnapshot(db,worldId,saveScope),p=built.entry.packet;
     // This deliberately supports a first edition only, not correction/replacement.
     if(before.some(e=>e.packet.fromMinute===p.fromMinute&&e.packet.throughMinute===p.throughMinute))return null;
     const terms:OrdinaryOfflineWeatherReview={schema:SCHEMA,worldId,saveScope,reviewerFingerprint,
@@ -101,7 +84,7 @@ export function openOrdinaryOfflineWeatherRelease(options:{database:string;world
      const current=snapshot(selected);
      if(!current||current.sourceBytes!==candidate.sourceBytes||!bytes.equals(encodeOrdinaryOfflineWeatherReview(current.terms)!))return null;
      const store=new SqliteValleySpiritAlmanacStore(owner.database,worldId,requireOrdinary);
-     try{return store.replace(current.before,[...current.before,current.entry])?current.entry.entryId:null;}
+     try{return store.recordOrdinaryReview(current.before,current.entry,{terms:current.terms,signature:a.signature,reviewerDer:reviewerDer.toString('base64url')})?current.entry.entryId:null;}
      finally{store.close();}
     }catch{return null;}
    },

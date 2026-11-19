@@ -1,0 +1,113 @@
+import {createHash,createPublicKey,verify} from 'node:crypto';
+import {lstatSync} from 'node:fs';
+import type {DatabaseSync} from 'node:sqlite';
+import type {ValleySpiritAlmanacEntry} from './valley-spirit-almanac.js';
+export const ORDINARY_OFFLINE_REVIEW_SCHEMA='ordinary-offline-weather-review/v1' as const;
+const SCHEMA=ORDINARY_OFFLINE_REVIEW_SCHEMA;
+export const ORDINARY_REVIEW_WORLD=/^godot-mvp-[A-Za-z0-9_-]{1,160}$/;
+const ENTRY=/^valley-almanac-[a-f0-9]{64}$/;
+const HEX=/^[a-f0-9]{64}$/;
+export const ORDINARY_REVIEW_SIGNATURE=/^[A-Za-z0-9_-]{86}$/;
+export const ordinaryReviewDigest=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
+const exact=(v:unknown,keys:readonly string[]):v is Record<string,unknown>=>!!v&&typeof v==='object'&&!Array.isArray(v)&&
+ Object.keys(v).length===keys.length&&keys.every(k=>Object.hasOwn(v,k));
+const int=(v:unknown,n:number):v is number=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=n;
+
+export interface OrdinaryOfflineWeatherReview {
+ schema:typeof SCHEMA;worldId:string;saveScope:string;reviewerFingerprint:string;
+ headRevision:number;permissionVersion:number;priorAlmanacDigest:string;
+ entryId:string;editionDigest:string;selectedSourcesDigest:string;
+}
+/** The reviewer signs the exact supported edition and authority version, not
+ * a generic release request. Private key stays outside the service. */
+export function encodeOrdinaryOfflineWeatherReview(t:unknown):Buffer|null {
+ if(!exact(t,['schema','worldId','saveScope','reviewerFingerprint','headRevision','permissionVersion','priorAlmanacDigest','entryId','editionDigest','selectedSourcesDigest'])||
+   t.schema!==SCHEMA||typeof t.worldId!=='string'||!ORDINARY_REVIEW_WORLD.test(t.worldId)||typeof t.entryId!=='string'||!ENTRY.test(t.entryId)||
+   !int(t.headRevision,0)||!int(t.permissionVersion,1)||
+   [t.saveScope,t.reviewerFingerprint,t.priorAlmanacDigest,t.editionDigest,t.selectedSourcesDigest].some(v=>typeof v!=='string'||!HEX.test(v)))return null;
+ return Buffer.from(JSON.stringify([SCHEMA,t.worldId,t.saveScope,t.reviewerFingerprint,t.headRevision,t.permissionVersion,
+  t.priorAlmanacDigest,t.entryId,t.editionDigest,t.selectedSourcesDigest]),'utf8');
+}
+
+const TABLE='valley_spirit_ordinary_weather_review';
+const DDL='CREATE TABLE valley_spirit_ordinary_weather_review(entry_id TEXT PRIMARY KEY NOT NULL,world_id TEXT NOT NULL,receipt_json TEXT NOT NULL)';
+// The ordinary first-edition developer lane needs only a bounded release
+// history. Every public read checks all signatures once; never let that
+// synchronous operation grow to thousands of verifier calls.
+const MAX_ROWS=256, MAX_BYTES=4096;
+export interface OrdinaryWeatherReviewReceipt {
+ terms:OrdinaryOfflineWeatherReview;
+ reviewerDer:string;
+ signature:string;
+}
+export function ordinaryReviewSaveScope(database:string,worldId:string):string {
+ const file=lstatSync(database,{bigint:true});
+ if(!file.isFile()||file.isSymbolicLink()||file.nlink!==1n)throw Error('ordinary_weather_review_save_scope');
+ return ordinaryReviewDigest([SCHEMA,worldId,String(file.dev),String(file.ino)]);
+}
+function table(db:DatabaseSync):boolean {
+ const row=db.prepare('SELECT type,sql FROM sqlite_master WHERE name=?').get(TABLE);
+ if(!row)return false;
+ if(row.type!=='table'||row.sql!==DDL||db.prepare("SELECT 1 FROM sqlite_master WHERE tbl_name=? AND (type='trigger' OR (type='index' AND sql IS NOT NULL))").get(TABLE))
+  throw Error('unknown_ordinary_weather_review_schema');
+ return true;
+}
+const committedRevision=(db:DatabaseSync,worldId:string)=>db.prepare('SELECT revision FROM worlds WHERE id=?').get(worldId)?.revision;
+export function verifiedOrdinaryWeatherReceipt(value:unknown,entry:ValleySpiritAlmanacEntry,worldRevision:unknown,scope?:string):OrdinaryWeatherReviewReceipt|null{
+ try{
+  if(!exact(value,['terms','reviewerDer','signature'])||typeof value.reviewerDer!=='string'||!(/^[A-Za-z0-9_-]{59}$/.test(value.reviewerDer))||
+   typeof value.signature!=='string'||!ORDINARY_REVIEW_SIGNATURE.test(value.signature))return null;
+  const bytes=encodeOrdinaryOfflineWeatherReview(value.terms),t=value.terms as OrdinaryOfflineWeatherReview;
+  if(!bytes||t.worldId!==entry.packet.worldId||t.entryId!==entry.entryId||t.permissionVersion!==entry.packet.permissionVersion||
+   t.editionDigest!==ordinaryReviewDigest(entry)||!int(worldRevision,t.headRevision)||(scope!==undefined&&t.saveScope!==scope))return null;
+  const publicDer=Buffer.from(value.reviewerDer,'base64url'),signature=Buffer.from(value.signature,'base64url');
+  if(publicDer.length!==44||signature.length!==64||publicDer.toString('base64url')!==value.reviewerDer||
+   signature.toString('base64url')!==value.signature||createHash('sha256').update(publicDer).digest('hex')!==t.reviewerFingerprint)return null;
+  const reviewer=createPublicKey({key:publicDer,format:'der',type:'spki'});
+  return reviewer.asymmetricKeyType==='ed25519'&&reviewer.export({format:'der',type:'spki'}).equals(publicDer)&&verify(null,bytes,reviewer,signature)
+   ? value as unknown as OrdinaryWeatherReviewReceipt:null;
+ }catch{return null;}
+}
+export function readOrdinaryWeatherReceipts(db:DatabaseSync,worldId:string,reviewed:readonly ValleySpiritAlmanacEntry[],scope?:string){
+ const result=new Map<string,OrdinaryWeatherReviewReceipt>();
+ if(!table(db)){
+  if(reviewed.length)throw Error('ordinary_weather_review_receipt_missing');
+  return result;
+ }
+ const rows=db.prepare(`SELECT entry_id,world_id,CASE WHEN length(CAST(receipt_json AS BLOB))<=? THEN receipt_json ELSE NULL END AS receipt_json FROM ${TABLE} LIMIT ?`).all(MAX_BYTES,MAX_ROWS+1);
+ if(rows.length!==reviewed.length||!rows.length||rows.length>MAX_ROWS)throw Error('ordinary_weather_review_receipt_count');
+ const byId=new Map(reviewed.map(e=>[e.entryId,e])),revision=committedRevision(db,worldId);
+ for(const row of rows){
+  const e=typeof row.entry_id==='string'?byId.get(row.entry_id):undefined;
+  const receipt=e&&row.world_id===worldId&&typeof row.receipt_json==='string'
+   ?verifiedOrdinaryWeatherReceipt(JSON.parse(row.receipt_json),e,revision,scope):null;
+  if(!e||!receipt||result.has(e.entryId))throw Error('ordinary_weather_review_receipt_invalid');
+  result.set(e.entryId,receipt);
+ }
+ return result;
+}
+/** Point recheck after the full table integrity gate. Read only the indexed
+ * exact receipt; verify the expected edition object's exact digest in this
+ * snapshot, not an ID/label match. No table-wide materialization or parse. */
+export function readExactOrdinaryWeatherReceipt(db:DatabaseSync,worldId:string,e:ValleySpiritAlmanacEntry,scope:string):OrdinaryWeatherReviewReceipt|null {
+ if(e.packet.worldId!==worldId||!table(db))return null;
+ const row=db.prepare(`SELECT world_id,CASE WHEN length(CAST(receipt_json AS BLOB))<=? THEN receipt_json ELSE NULL END AS receipt_json
+  FROM ${TABLE} WHERE entry_id=?`).get(MAX_BYTES,e.entryId);
+ return row?.world_id===worldId&&typeof row.receipt_json==='string'
+  ?verifiedOrdinaryWeatherReceipt(JSON.parse(row.receipt_json),e,committedRevision(db,worldId),scope):null;
+}
+/** Must run inside the edition CAS transaction. Historical prior-table terms
+ * are enforced at write, not recomputed against future changed legacy rows. */
+export function appendOrdinaryWeatherReceipt(db:DatabaseSync,worldId:string,scope:string,prior:readonly ValleySpiritAlmanacEntry[],
+ entry:ValleySpiritAlmanacEntry,proof:OrdinaryWeatherReviewReceipt){
+ const revision=committedRevision(db,worldId);
+ const valid=verifiedOrdinaryWeatherReceipt(proof,entry,revision,scope);
+ if(!valid||valid.terms.headRevision!==revision||valid.terms.priorAlmanacDigest!==ordinaryReviewDigest(prior))return false;
+ const payload=JSON.stringify(valid);
+ if(Buffer.byteLength(payload)>MAX_BYTES)return false;
+ if(!table(db))db.exec(DDL);
+ const count=db.prepare(`SELECT COUNT(*) AS total FROM ${TABLE}`).get()?.total;
+ if(!int(count,0)||count>=MAX_ROWS)return false;
+ db.prepare(`INSERT INTO ${TABLE} VALUES (?,?,?)`).run(entry.entryId,worldId,payload);
+ return true;
+}

@@ -5,7 +5,8 @@ const VERSION = 1 as const;
 export const ALMANAC_ENTRY_SCHEMA = 3 as const;
 const TEXT_RENDERER_VERSION = 1 as const;
 const ORIGIN_SCHEMA = 1 as const;
-const KNOWN_ORIGINS = ['offline-synthetic','unverified-admission'] as const;
+export const REVIEWED_OFFLINE_ORIGIN='independently-reviewed-offline' as const;
+const KNOWN_ORIGINS = ['offline-synthetic','unverified-admission',REVIEWED_OFFLINE_ORIGIN] as const;
 type ValleySpiritAlmanacOrigin = {schemaVersion:1;kind:typeof KNOWN_ORIGINS[number]};
 export const MAX_ALMANAC_WEATHER_SOURCES = 24;
 const MAX_SOURCES = MAX_ALMANAC_WEATHER_SOURCES;
@@ -21,6 +22,8 @@ type Field = typeof FIELDS[number];
 export interface ValleySpiritAlmanacWeatherSource {sourceRef:string;permissionVersion:number;fact:PublicWeatherFact;}
 export interface ValleySpiritAlmanacAuthority {
  permission(): {version:number;publicWeather:boolean}|null;
+ /** Private ordinary reader validates the full selected public evidence. */
+ matchesReviewedSources?(entry:ValleySpiritAlmanacEntry):boolean;
  resolve(sourceRef:string): ValleySpiritAlmanacWeatherSource|null;
  /** Atomically read a verified permission anchor and ordered evidence with one
   * journal read. A denied/unavailable batch must return null, not fall back. */
@@ -175,6 +178,7 @@ export function validateValleySpiritAlmanacEntries(value:unknown):value is Valle
  for(const e of value as ValleySpiritAlmanacEntry[]){
   if(!exact(e,['schemaVersion','entryId','textVersion','supersedes','packet','phase','draft','failure','rendered','origin'])||e.schemaVersion!==ALMANAC_ENTRY_SCHEMA||!validPacket(e.packet)||!option(phases,e.phase)||!integer(e.textVersion,1,10000)||!validOrigin(e.origin)||e.entryId!==identity(e.packet,e.textVersion,e.origin)||seen.has(e.entryId))return false;
   const k=rangeKey(e.packet),before=heads.get(k);
+  if(e.origin.kind===REVIEWED_OFFLINE_ORIGIN&&(e.phase!=='published'||e.textVersion!==1||e.supersedes!==null)||before?.origin.kind===REVIEWED_OFFLINE_ORIGIN)return false;
   if(e.textVersion===1?(e.supersedes!==null||!!before):(!before||e.supersedes!==before.entryId||before.textVersion+1!==e.textVersion||!['published','retracted'].includes(before.phase)))return false;
   const needsDraft=e.phase==='grounded'||e.phase==='published';
   const grounded=needsDraft?groundValleySpiritAlmanacDraft(e.packet,e.draft):null;
@@ -214,7 +218,7 @@ export function previewGroundedSyntheticWeather(e:ValleySpiritAlmanacEntry,a:Val
 function publicView(e:ValleySpiritAlmanacEntry) {
  if(e.phase!=='published'||!e.rendered||!e.draft)return null;
  const p=e.packet,r=structuredClone(e.rendered);
- return {mode:'curated-verified-weather' as const,origin:{...e.origin},entryId:e.entryId,textVersion:e.textVersion,supersedes:e.supersedes,fromMinute:p.fromMinute,throughMinute:p.throughMinute,projectionVersion:p.projectionVersion,permissionVersion:p.permissionVersion,coverage:p.coverage,unselectedHourBuckets:[...p.unselectedHourBuckets],rendering:{rendererVersion:r.rendererVersion,wording:e.draft.wording},facts:r.facts,atmosphere:r.atmosphere};
+ return {mode:'curated-verified-weather' as const,origin:{schemaVersion:e.origin.schemaVersion,kind:e.origin.kind===REVIEWED_OFFLINE_ORIGIN?'offline-synthetic' as const:e.origin.kind},entryId:e.entryId,textVersion:e.textVersion,supersedes:e.supersedes,fromMinute:p.fromMinute,throughMinute:p.throughMinute,projectionVersion:p.projectionVersion,permissionVersion:p.permissionVersion,coverage:p.coverage,unselectedHourBuckets:[...p.unselectedHourBuckets],rendering:{rendererVersion:r.rendererVersion,wording:e.draft.wording},facts:r.facts,atmosphere:r.atmosphere};
 }
 /** Pure first-edition builder for the independently reviewed offline
  * release path. It performs no transport, admission, write or grant. */
@@ -224,7 +228,7 @@ export function composeOfflineWeatherEdition(range:ValleySpiritAlmanacRange,auth
  const draft=groundValleySpiritAlmanacDraft(packet,{claims:packet.points.map(p=>({sourceRef:p.sourceRef,field:'condition',value:p.condition})),
   atmosphere:'plain',wording:'time-first'});
  if(!draft)return null;
- const origin:ValleySpiritAlmanacOrigin={schemaVersion:ORIGIN_SCHEMA,kind:'offline-synthetic'};
+ const origin:ValleySpiritAlmanacOrigin={schemaVersion:ORIGIN_SCHEMA,kind:REVIEWED_OFFLINE_ORIGIN};
  const entry:ValleySpiritAlmanacEntry={schemaVersion:ALMANAC_ENTRY_SCHEMA,entryId:identity(packet,1,origin),textVersion:1,supersedes:null,
   packet,phase:'published',draft,failure:null,rendered:renderAlmanacTextV1(packet,draft),origin};
  return {entry,view:publicView(entry)!};
@@ -253,6 +257,7 @@ export class ValleySpiritAlmanac {
    const packet=createValleySpiritAlmanacPacket(range,this.authority);if(!packet)return null;
    const origin=originOf(admission);
    const rows=this.read(),latest=rows.filter(e=>rangeKey(e.packet)===rangeKey(packet)).at(-1);
+   if(latest?.origin.kind===REVIEWED_OFFLINE_ORIGIN)return null;
    const retry=latest?.phase==='discarded'&&latest.failure==='not-sent'&&latest.origin.kind===origin.kind&&latest.supersedes===(supersedes??null)&&serial(canonicalPacket(latest.packet))===serial(packet);
    if(!retry&&(latest?(supersedes!==latest.entryId||!['published','retracted'].includes(latest.phase)):supersedes!==undefined))return null;
    const textVersion=retry?latest.textVersion:(latest?.textVersion??0)+1,entryId=identity(packet,textVersion,origin);
@@ -312,7 +317,7 @@ export class ValleySpiritAlmanac {
    const rows=this.read();
    const permission=this.authority.permission();let affected=0;
    const next:ValleySpiritAlmanacEntry[]=rows.map(e=>{
-    if((e.phase!=='published'&&e.phase!=='grounded')||permit(e.packet,this.authority))return e;
+    if(e.origin.kind===REVIEWED_OFFLINE_ORIGIN||(e.phase!=='published'&&e.phase!=='grounded')||permit(e.packet,this.authority))return e;
     affected++;
     const failure=permission?.publicWeather&&permission.version===e.packet.permissionVersion?'source-correction' as const:'permission' as const;
     return {...e,phase:e.phase==='published'?'retracted':'discarded',draft:null,rendered:null,failure};
@@ -320,12 +325,15 @@ export class ValleySpiritAlmanac {
    return affected&&validateValleySpiritAlmanacEntries(next)&&this.store.replace(rows,next)?affected:0;
   }catch{return 0;}
  }
+ private permitted(e:ValleySpiritAlmanacEntry){
+  return permit(e.packet,this.authority)&&(e.origin.kind!==REVIEWED_OFFLINE_ORIGIN||this.authority.matchesReviewedSources?.(e)===true);
+ }
  get(entryId:string){
   try {
    const rows=this.read(),e=rows.find(r=>r.entryId===entryId);
-   if(!e||e.phase!=='published'||!permit(e.packet,this.authority)||rows.some(r=>rangeKey(e.packet)===rangeKey(r.packet)&&r.textVersion>e.textVersion&&(r.phase==='published'||r.phase==='retracted')))return null;
+   if(!e||e.phase!=='published'||!this.permitted(e)||rows.some(r=>rangeKey(e.packet)===rangeKey(r.packet)&&r.textVersion>e.textVersion&&(r.phase==='published'||r.phase==='retracted')))return null;
    // A correction must not disclose a previously revoked entry's ID.
-   const publicEntry=e.supersedes&&rows.some(r=>r.entryId===e.supersedes&&r.phase==='published'&&permit(r.packet,this.authority))?e:{...e,supersedes:null};
+   const publicEntry=e.supersedes&&rows.some(r=>r.entryId===e.supersedes&&r.phase==='published'&&this.permitted(r))?e:{...e,supersedes:null};
    return publicView(publicEntry);
   }catch{return null;}
  }
@@ -341,9 +349,9 @@ export class ValleySpiritAlmanac {
     .filter(entry=>entry.phase==='published'&&entry.packet.permissionVersion===permissionVersion)
     .sort((a,b)=>b.packet.throughMinute-a.packet.throughMinute||b.textVersion-a.textVersion||a.entryId.localeCompare(b.entryId));
    for(const entry of ordered.slice(0,24)){
-    if(!permit(entry.packet,this.authority))continue;
+    if(!this.permitted(entry))continue;
     const previous=entry.supersedes?rows.find(row=>row.entryId===entry.supersedes):null;
-    const mayLink=previous?.phase==='published'&&permit(previous.packet,this.authority);
+    const mayLink=previous?.phase==='published'&&this.permitted(previous);
     return publicView(mayLink?entry:{...entry,supersedes:null});
    }
    return null;
