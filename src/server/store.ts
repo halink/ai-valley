@@ -85,6 +85,9 @@ export function readSealedMvpAgedHeldFruitExpiry(owner:DeveloperMvpSpiritFixture
 export function readSealedMvpAgedHeldFruitEaten(owner:DeveloperMvpSpiritFixtureOwner,worldId:string,residentId:string){
  return readOwnedSealedAgedHeldFruitEaten(owner,decodeAgedBirthPredecessor,worldId,residentId);
 }
+type FormalArmedWindow=Readonly<{worldId:string;notBefore:number;expiresAt:number}>;
+type FormalShadowArm=FormalArmedWindow&Readonly<{permissionVersion:number;permissionDigest:string}>;
+const formalShadowGrantDigest=(permission:unknown)=>createHash('sha256').update(JSON.stringify(permission)).digest('hex');
 export interface AppendedHistory {
  events: WorldEvent[];
  processed: string[];
@@ -124,6 +127,7 @@ export class WorldStore {
  private agedG1ObservedEpoch:number|undefined;
  private agedG1EpochIsolated=false;
  private armedFormalDue:FormalDueIntent|undefined;
+ private armedFormalShadow:FormalShadowArm|undefined;
  constructor(path:string,options:{formalRainProvenance?:true;formalAppointmentChoiceCustody?:true;dailySnapshots?:DailySnapshotConfig;allowMvpClimate?:boolean;seasonalModel?:true;mvpSpiritEffectFixture?:MvpGroundFruitCapacity;developerSpiritFixtureOwner?:DeveloperMvpSpiritFixtureOwner;nativeWeatherCredit?:true;sealedAgedBirthExecution?:true}={}){
   this.allowMvpClimate=options.allowMvpClimate===true;
   this.allowFormalRainProvenance=options.formalRainProvenance===true&&!this.allowMvpClimate&&!options.seasonalModel;
@@ -376,18 +380,46 @@ export class WorldStore {
    this.db.exec('COMMIT');return {status:'recorded' as const,version:t.version};
   }catch(error){this.db.exec('ROLLBACK');throw error;}
  }
+ /** In-memory one-shot only. Arming never installs permission or schedules an effect. */
+ armDeveloperFormalShadowProposal(worldId:string,permissionVersion:number,notBefore:number,expiresAt:number):boolean{
+  const owner=this.developerSpiritFixtureOwner;
+  if(!owner?.formalShadowKeyPem||this.armedFormalShadow||!/^valley-formal-[a-zA-Z0-9_-]{1,180}$/u.test(worldId)||
+   !Number.isSafeInteger(permissionVersion)||permissionVersion<1||!Number.isFinite(notBefore)||!Number.isFinite(expiresAt)||
+   notBefore>=expiresAt)return false;
+  try{
+   owner.assertOwned();this.assertDeveloperSpiritSeal();this.db.exec('BEGIN');
+   try{
+    const w=this.readWorld(false,false);
+    const row=w?.id===worldId?readFormalShadowRows(this.db,owner,w).at(-1):undefined;
+    const t=row?.permission.terms,episode=w?.formalRainProvenance?.closed.at(-1);
+    const arm=w&&t&&t.decision==='allow'&&t.version===permissionVersion&&!row!.proposal&&
+     !w.clock.paused&&w.weather==='sun'&&!w.formalRainProvenance?.open&&episode?.episodeId===t.episodeId&&
+     w.minute>=t.startsAt&&w.minute<notBefore&&expiresAt<=t.expiresAt&&expiresAt<=episode.closedMinute+t.maxAgeGameMinutes?
+     Object.freeze({worldId,permissionVersion,notBefore,expiresAt,permissionDigest:formalShadowGrantDigest(row!.permission)}):undefined;
+    owner.assertOwned();this.db.exec('COMMIT');
+    if(!arm)return false;
+    this.armedFormalShadow=arm;return true;
+   }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }catch{return false;}
+ }
  /** Number-only offline selection: always option 1 from the freshly
   * validated, independently signed menu. Never requests an actual effect. */
  stepDeveloperFormalShadowProposal(worldId:string){
+  return this.proposeFormalShadow(worldId);
+ }
+ private proposeFormalShadow(worldId:string,expected?:Readonly<{headRevision:number;headMinute:number;arm:FormalShadowArm}>){
   const owner=this.developerSpiritFixtureOwner;
   if(!owner?.formalShadowKeyPem)return {status:'disabled'} as const;
   const no={status:'no_proposal'} as const;
-  owner.assertOwned();this.db.exec('BEGIN IMMEDIATE');
+  owner.assertOwned();if(expected)this.assertDeveloperSpiritSeal();
+  this.db.exec('BEGIN IMMEDIATE');
   try{
    const w=this.readWorld(false,false);
-   if(!w||w.id!==worldId){this.db.exec('COMMIT');return no;}
+   if(!w||w.id!==worldId||expected&&(expected.headMinute!==w.minute||expected.headRevision!==w.revision)){this.db.exec('COMMIT');return no;}
    const rows=readFormalShadowRows(this.db,owner,w),head=rows.at(-1),terms=head?.permission.terms;
-   if(!terms||terms.decision!=='allow'||head.proposal||w.minute<terms.startsAt||w.minute>=terms.expiresAt){
+   if(!terms||terms.decision!=='allow'||head.proposal||w.minute<terms.startsAt||w.minute>=terms.expiresAt||
+    expected&&(terms.version!==expected.arm.permissionVersion||formalShadowGrantDigest(head.permission)!==expected.arm.permissionDigest||
+      w.minute<expected.arm.notBefore||w.minute>=expected.arm.expiresAt)){
     this.db.exec('COMMIT');return no;
    }
    const prior=rows.filter(r=>r.proposal).at(-1)?.proposal;
@@ -722,22 +754,21 @@ export class WorldStore {
  private commitTransaction(world:World,previousRevision:number|null,appended?:AppendedHistory,seasonalLedger?:SeasonalLedger,
   proof?:AddressedSpeechObservation,mealWitnesses?:readonly ValleySpiritMvpMealWitness[]):readonly ValleySpiritLifeReceipt[]{
   this.assertWritable(world);
-  const armed=this.armedFormalDue;
-  let exactDueCrossing=false;
-  let reachedArmedTime=false;
+  const due=this.armedFormalDue,shadow=this.armedFormalShadow;
+  const reached=(job:FormalArmedWindow|undefined)=>!!job&&previousRevision!==null&&
+   world.id===job.worldId&&world.mode==='formal'&&world.minute>=job.notBefore;
+  const reachedDue=reached(due),reachedShadow=reached(shadow);
+  let fromMinute:number|undefined;
   let speech:readonly ValleySpiritLifeReceipt[];
   this.db.exec('BEGIN IMMEDIATE');
   try{
-   if(armed&&previousRevision!==null&&world.id===armed.worldId&&world.mode==='formal'&&world.minute>=armed.notBefore){
-    reachedArmedTime=true;
-    // Only an exact ordinary advancing minute. writeCommit also requires its
-    // genuine native rain-step witness; adoption/static edits cannot qualify.
+   if(reachedDue||reachedShadow){
+    // writeCommit independently requires an actual native rain-step witness.
     try{
      const before=this.readWorld(false,false);
-     exactDueCrossing=!!before&&before.id===world.id&&before.revision===previousRevision&&!!before.formalRainProvenance&&
-      !before.clock.paused&&!world.clock.paused&&world.minute===before.minute+1&&before.minute<armed.notBefore&&
-      world.minute<armed.expiresAt&&world.revision>before.revision;
-    }catch{/* Optional checkpoint must not affect a valid world transaction. */}
+     if(before&&before.id===world.id&&before.revision===previousRevision&&before.formalRainProvenance&&
+      !before.clock.paused&&!world.clock.paused&&world.minute===before.minute+1&&world.revision>before.revision)fromMinute=before.minute;
+    }catch{/* Optional triggers cannot veto a valid world transaction. */}
    }
    speech=this.writeDraftWithCustody(world,previousRevision,appended,seasonalLedger,proof,
     !!this.developerSpiritFixtureOwner?.rulesSpeechWorldId,mealWitnesses);
@@ -745,11 +776,18 @@ export class WorldStore {
   }catch(error){this.db.exec('ROLLBACK');throw error;}
   forgetFormalRainStep(world);
   if(world.mode==='formal'){this.terrainKeys.add(terrainRevision(world.map));this.separateLedgers.add(world.id);}
-  if(armed&&reachedArmedTime){
+  const crossed=(job:FormalArmedWindow)=>fromMinute!==undefined&&fromMinute<job.notBefore&&world.minute<job.expiresAt;
+  if(due&&reachedDue){
    this.armedFormalDue=undefined;
-   if(exactDueCrossing)try{
-    this.checkpointFormalDue(world.id,armed.id,{headRevision:world.revision,headMinute:world.minute,intent:armed});
-   }catch{/* Committed world must not be reported as rolled back. Explicit manual recovery remains separate. */}
+   if(crossed(due))try{
+    this.checkpointFormalDue(world.id,due.id,{headRevision:world.revision,headMinute:world.minute,intent:due});
+   }catch{/* Preserve success of the committed world. */}
+  }
+  if(shadow&&reachedShadow){
+   this.armedFormalShadow=undefined;
+   if(crossed(shadow))try{
+    this.proposeFormalShadow(world.id,{headRevision:world.revision,headMinute:world.minute,arm:shadow});
+   }catch{/* Same isolation as the independent due checkpoint. */}
   }
   return speech;
  }
