@@ -1,4 +1,6 @@
 import {createHash} from 'node:crypto';
+import {offlineSharedValleySpiritAccount} from './shared-model-account-offline.js';
+import type {ValleySpiritSyntheticSchedulePolicy} from './valley-spirit-almanac-scheduler.js';
 import type {SharedModelAccountLedger} from './shared-model-account.js';
 
 /** Stable ID supplied by the decision-round owner, not by a server process,
@@ -29,6 +31,10 @@ interface RoundOptions<T> {
 export class OfflineResidentAccountAdmission {
  constructor(private readonly ledger:SharedModelAccountLedger,private readonly now:()=>number){
   if(!/^offline-[A-Za-z0-9_-]{1,80}$/.test(ledger.accountIdentity()))throw Error('resident_account_offline_fixture_required');
+ }
+ fixtureYearbook(policy:ValleySpiritSyntheticSchedulePolicy,simulate:Parameters<typeof offlineSharedValleySpiritAccount>[1]['simulate']){
+  if(policy.mode!=='offline-synthetic'||!this.ledger.matchesPolicy({accountId:policy.accountId,limit:policy.account,residentFloor:policy.residentFloor,almanacCap:policy.yearbookCap,almanacCooldownMs:policy.cooldownMs}))throw Error('seasonal_almanac_shared_policy_mismatch');
+  return offlineSharedValleySpiritAccount(this.ledger,{now:this.now,simulate});
  }
  fixtureBinding():string{return this.ledger.offlineFixtureBinding();}
  verifyWorldRecovery(rounds:readonly {round:ResidentAccountRound;worldTerminal:boolean}[]):boolean {

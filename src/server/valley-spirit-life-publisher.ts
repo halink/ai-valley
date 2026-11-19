@@ -25,13 +25,18 @@ interface Menu {
  readonly schemaVersion:1;
  readonly options:readonly {readonly number:number;readonly kind:string;readonly atUs:string}[];
 }
-interface Reserved {readonly schemaVersion:1;readonly phase:'reserved';readonly id:string;readonly packet:Packet;readonly menu:Menu;}
+interface Reserved {readonly schemaVersion:1;readonly phase:'reserved';readonly id:string;readonly packet:Packet;readonly menu:Menu;readonly correctionOf?:string;}
 type Terminal =
  | {readonly schemaVersion:1;readonly phase:'suppressed';readonly id:string}
  | {readonly schemaVersion:1;readonly phase:'published';readonly id:string;readonly section:Section};
 type Op=Reserved|Terminal;
 const key=(worldId:string,range:Range)=>'life-publication-'+hash([worldId,range.fromUs,range.throughUs]);
+const correctionKey=(base:string,previousId:string)=>'life-publication-'+hash([base,'correction',previousId]);
 const equal=(left:unknown,right:unknown)=>JSON.stringify(left)===JSON.stringify(right);
+function sameBasis(left:Packet,right:Packet):boolean {
+ const sorted=(packet:Packet)=>[...packet.source.facts].sort((a,b)=>a.sourceRef<b.sourceRef?-1:a.sourceRef>b.sourceRef?1:0);
+ return equal(sorted(left),sorted(right));
+}
 function packetShape(p:unknown,worldId:string):p is Packet {
  if(!exact(p,['schemaVersion','mode','range','source'])||p.schemaVersion!==1||p.mode!=='public-life-almanac'||
   !exact(p.range,['fromUs','throughUs'])||!clock(p.range.fromUs)||!clock(p.range.throughUs)||
@@ -61,15 +66,23 @@ function syntheticSelect(menu:Menu){
  const ranked=[...menu.options].sort((a,b)=>BigInt(a.atUs)<BigInt(b.atUs)?-1:BigInt(a.atUs)>BigInt(b.atUs)?1:a.number-b.number);
  return {indices:ranked.slice(0,3).map(f=>f.number),wording:'time-first'};
 }
-interface Index {readonly ops:Op[];readonly pending:Map<string,Reserved>;readonly terminal:Set<string>;}
+interface Index {readonly ops:Op[];readonly pending:Map<string,Reserved>;readonly terminal:Set<string>;readonly latestByRange:Map<string,Section>;}
 function index(value:unknown,worldId:string):Index {
  if(!Array.isArray(value)||value.length>MAX_OPS)throw Error('unknown_life_publication_state');
- const pending=new Map<string,Reserved>(),terminal=new Set<string>();
+ const pending=new Map<string,Reserved>(),terminal=new Set<string>(),latestByRange=new Map<string,Section>();
  for(const raw of value){
   if(!raw||typeof raw!=='object'||raw.schemaVersion!==1||typeof raw.id!=='string')throw Error('unknown_life_publication_state');
   if(raw.phase==='reserved'){
-   if(!exact(raw,['schemaVersion','phase','id','packet','menu'])||!packetShape(raw.packet,worldId)||
-    raw.id!==key(worldId,raw.packet.range)||pending.has(raw.id)||!equal(raw.menu,menuFor(raw.packet)))throw Error('invalid_life_publication_attempt');
+   const correction=Object.hasOwn(raw,'correctionOf');
+   const fields=['schemaVersion','phase','id','packet','menu',...(correction?['correctionOf']:[])];
+   if(!exact(raw,fields)||!packetShape(raw.packet,worldId)||pending.has(raw.id)||
+    !equal(raw.menu,menuFor(raw.packet)))throw Error('invalid_life_publication_attempt');
+   const base=key(worldId,raw.packet.range);
+   if(correction){
+    const previous=latestByRange.get(base);
+    if(!previous||raw.correctionOf!==previous.sectionId||raw.id!==correctionKey(base,previous.sectionId)||
+     sameBasis(previous.packet,raw.packet))throw Error('invalid_life_publication_correction');
+   }else if(raw.id!==base)throw Error('invalid_life_publication_attempt');
    pending.set(raw.id,raw as unknown as Reserved);
    continue;
   }
@@ -84,11 +97,14 @@ function index(value:unknown,worldId:string):Index {
     throw Error('invalid_life_publication_section');
    const {schemaVersion,rendererVersion,sectionId,packet,selection,lines}=raw.section;
    if(sectionId!=='valley-life-section-'+hash([schemaVersion,rendererVersion,packet,selection,lines]))throw Error('invalid_life_publication_seal');
+   const base=key(worldId,original.packet.range),latest=latestByRange.get(base);
+   if(original.correctionOf!==latest?.sectionId)throw Error('invalid_life_publication_correction');
+   latestByRange.set(base,raw.section as unknown as Section);
   }else throw Error('invalid_life_publication_transition');
   terminal.add(raw.id);
  }
  if(value.length+pending.size-terminal.size>MAX_OPS)throw Error('unsafe_life_publication_capacity');
- return {ops:value as Op[],pending,terminal};
+ return {ops:value as Op[],pending,terminal,latestByRange};
 }
 function present(db:DatabaseSync):boolean{
  const m=db.prepare('SELECT type FROM sqlite_master WHERE name=?').get(TABLE);
@@ -167,6 +183,10 @@ export class ValleySpiritLifePublisher {
    const state=this.state(),next=[...state.ops,op];
    if(next.length>MAX_OPS||(op.phase==='reserved'&&(state.pending.has(op.id)||
     next.length+state.pending.size-state.terminal.size>=MAX_OPS)))return false;
+   if(op.phase==='reserved'&&op.correctionOf!==undefined){
+    const prior=state.latestByRange.get(key(this.options.worldId,op.packet.range));
+    if(!prior||prior.sectionId!==op.correctionOf||sameBasis(prior.packet,op.packet))return false;
+   }
    index(next,this.options.worldId);
    // Revalidate again inside publication transaction, immediately before write.
    if(op.phase==='published'&&!this.almanac.read(op.section))return false;
@@ -179,11 +199,21 @@ export class ValleySpiritLifePublisher {
   finally{if(open)try{this.db.exec('ROLLBACK');}catch{this.isolated=true;}}
  }
  publish(range:Range,refs:readonly string[]):'published'|'unavailable'{
+  return this.publishVersion(range,refs);
+ }
+ /** Explicit newly grounded edition of this exact range, not a retry of an
+  * unknown send. The prior section may be revoked, but its private identity
+  * and range must still be the immediately preceding authoritative edition. */
+ correct(range:Range,refs:readonly string[],priorSectionId:string):'published'|'unavailable'{
+  if(typeof priorSectionId!=='string'||!/^valley-life-section-[a-f0-9]{64}$/.test(priorSectionId))return 'unavailable';
+  return this.publishVersion(range,refs,priorSectionId);
+ }
+ private publishVersion(range:Range,refs:readonly string[],correctionOf?:string):'published'|'unavailable'{
   if(this.isolated)return 'unavailable';
   const packet=this.almanac.prepare(this.options.worldId,range,refs);
   if(!packet)return 'unavailable';
-  const id=key(this.options.worldId,packet.range),menu=menuFor(packet);
-  if(!this.append({schemaVersion:1,phase:'reserved',id,packet,menu}))return 'unavailable';
+  const base=key(this.options.worldId,packet.range),menu=menuFor(packet),id=correctionOf?correctionKey(base,correctionOf):base;
+  if(!this.append({schemaVersion:1,phase:'reserved',id,packet,menu,...(correctionOf?{correctionOf}:{})}))return 'unavailable';
   if(this.almanac.authorize(packet)){
    const section=this.almanac.ground(packet,syntheticSelect(menu));
    if(section&&this.append({schemaVersion:1,phase:'published',id,section}))return 'published';
@@ -194,10 +224,11 @@ export class ValleySpiritLifePublisher {
  close(){this.db.close();}
 }
 
-function currentLatest(ops:readonly Op[],worldId:string,almanac:ValleySpiritLifeAlmanac):ValleySpiritPublishedLifeView|null {
+function currentLatest(state:Index,worldId:string,almanac:ValleySpiritLifeAlmanac):ValleySpiritPublishedLifeView|null {
  // Latest is chosen before authority lookup. Never substitute an older section
  // when the exact latest disclosure cannot be reauthorized.
- const newest=ops.filter((o):o is Extract<Op,{phase:'published'}>=>o.phase==='published').reverse()
+ const newest=state.ops.filter((o):o is Extract<Op,{phase:'published'}>=>o.phase==='published'&&
+   state.latestByRange.get(key(worldId,o.section.packet.range))===o.section).reverse()
   .sort((a,b)=>BigInt(a.section.packet.range.throughUs)>BigInt(b.section.packet.range.throughUs)?-1:
    BigInt(a.section.packet.range.throughUs)<BigInt(b.section.packet.range.throughUs)?1:0)[0];
  if(!newest)return null;
@@ -231,7 +262,7 @@ export class ValleySpiritLifeViewer {
    const next=read(this.db,worldId);
    if(!prefix(this.seen,next.ops))throw Error('rewound_life_publication_database');
    this.seen=next.ops;
-   const latest=currentLatest(next.ops,worldId,this.almanac);
+   const latest=currentLatest(next,worldId,this.almanac);
    this.options.assertOwned();return latest;
   }catch{this.isolated=true;return null;}
  }

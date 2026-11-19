@@ -219,6 +219,18 @@ export class WorldStore {
    if(world.mode==='formal'){this.terrainKeys.add(terrainRevision(world.map));this.separateLedgers.add(world.id);}
   }catch(error){this.db.exec('ROLLBACK');throw error;}
  }
+ /** Internal read-only seam. Memory fixtures and ordinary/production saves
+  * cannot attest an installed private shadow capability. */
+ developerMvpSpiritShadowReadPort(){
+  const owner=this.developerSpiritFixtureOwner;
+  if(!isDeveloperMvpSpiritFixtureOwner(owner))return null;
+  const assertOwned=()=>{owner.assertOwned();this.assertDeveloperSpiritSeal();};
+  assertOwned();
+  return Object.freeze({
+   database:owner.database,capacity:Object.freeze({...owner.capacity}),assertOwned,
+   readHead:()=>{assertOwned();return this.readWorld(false,false);},
+  });
+ }
  hasMvpSpiritEffectFixture():boolean{return this.mvpSpiritEffectFixture!==undefined;}
  /** Fixture only: re-read and plan under the same synchronous SQLite lock
   * that validates the dedicated append and writes the authoritative rows. */

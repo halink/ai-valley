@@ -10,7 +10,7 @@ export interface ValleySpiritPermissionAuthority {
  * transactions. A journal backup cannot roll back this separate permission anchor. */
 export class SqliteValleySpiritPermissions implements ValleySpiritPermissionAuthority {
  private db:DatabaseSync;
- constructor(database:string,private worldId:string,private assertOwned:()=>void){assertOwned();this.db=new DatabaseSync(database);}
+ constructor(database:string,private worldId:string,private assertOwned:()=>void,readOnly=false){assertOwned();this.db=new DatabaseSync(database,{readOnly});}
  private table():boolean {
   const row=this.db.prepare("SELECT type FROM sqlite_master WHERE name='valley_spirit_permissions'").get();if(!row)return false;
   if(row.type!=='table')throw Error('valley_spirit_permission_schema');

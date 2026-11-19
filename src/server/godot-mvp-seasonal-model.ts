@@ -1,3 +1,4 @@
+import {claimSeasonalAlmanacFixture,openSeasonalAlmanacFixture,type SeasonalAlmanacFixture} from './seasonal-almanac-runtime.js';
 import {OfflineResidentAccountAdmission,type ResidentAccountRound} from './shared-resident-admission.js';
 import {createServer} from 'node:http';
 import {acquireRuntimeOwnership} from './runtime-lock.js';
@@ -55,7 +56,7 @@ function validateSyntheticReply(reply:ModelReply){
 const ready=(w:World,r:Resident)=>r.status==='alive'&&r.residency!=='outside'&&r.canDecide&&r.canExpress&&!r.plan&&!r.activity&&r.decisionDue<=w.minute;
 /** Separate bounded seasonal mode. Caller explicitly pumps the server; the
  * normal rules runner and all pre-existing model entry points stay unchanged. */
-export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal';database:string;port?:number;transport?:MemoryTransport;sharedAccount?:OfflineResidentAccountAdmission}){
+export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal';database:string;port?:number;transport?:MemoryTransport;sharedAccount?:OfflineResidentAccountAdmission;almanacFixture?:SeasonalAlmanacFixture}){
  if(options.mode!=='offline-seasonal')throw Error('seasonal_model_explicit_mode_required');
  if(options.port!==undefined&&(!Number.isInteger(options.port)||options.port<0||options.port>65535))throw Error('seasonal_model_port');
  const transport=options.transport===undefined?undefined:transports.get(options.transport);
@@ -63,11 +64,14 @@ export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal'
  const shared=options.sharedAccount;
  if(shared!==undefined&&(!(shared instanceof OfflineResidentAccountAdmission)||!transport))throw Error('seasonal_model_shared_fixture_required');
  const binding=shared?.fixtureBinding();
+ if(options.almanacFixture!==undefined&&!shared)throw Error('seasonal_almanac_requires_bound_resident_account');
+ const claimedAlmanac=options.almanacFixture&&shared?claimSeasonalAlmanacFixture(options.almanacFixture,shared):undefined;
  // One-shot capability claim, even if startup later fails. No await or
  // listener bind may allow a second world to claim the same synthetic slot.
  if(transport)transport.claimed=true;
  const owner=acquireRuntimeOwnership(options.database);
  let store:WorldStore|undefined,server:ReturnType<typeof createServer>|undefined,closed=false;
+ let almanac:ReturnType<typeof openSeasonalAlmanacFixture>|undefined;
  try{
   owner.assertOwned();
   let inspected:SeasonalLedger|null=null;
@@ -107,6 +111,7 @@ export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal'
    draft.revision=Math.max(w.revision+1,draft.revision);
    store.commit(draft,w.revision,undefined,next);
    w=draft;if(next)ledger=next;
+   almanac?.observe(draft);
   };
   const synchronizePriority=()=>{
    if(shared)shared.setWorldWaiting(w.id,ledger?.requests.at(-1)?.state==='intent'||w.residents.some(r=>ready(w,r)));
@@ -119,6 +124,11 @@ export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal'
    commit(bound,{schemaVersion:2,worldId:w.id,sharedAccountBinding:binding,nextSequence:1,lastWall:wall(),charges:[],requests:[]});
   }
   synchronizePriority();
+  if(claimedAlmanac){
+   // Unknown optional data isolates the almanac without altering resident
+   // accounting, clock behavior, or the previous world commit.
+   try{almanac=openSeasonalAlmanacFixture(owner,w,claimedAlmanac);}catch{claimedAlmanac.abort();}
+  }
   const pump=async ()=>{
    if(closed||!transport||fault||dispatch||ledger?.requests.at(-1)?.state==='intent')return read();
    try{
@@ -205,7 +215,16 @@ export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal'
    return read();
   };
   let closing:Promise<void>|undefined;
-  const close=()=>closing??=(async()=>{closed=true;controller?.abort();try{if(server){server.closeAllConnections();await new Promise<void>(resolve=>server!.close(()=>resolve()));}store?.close();}finally{owner.release();}})();
-  return {status:read,pump,close,server};
- }catch(error){try{if(server?.listening){server.closeAllConnections();await new Promise<void>(resolve=>server!.close(()=>resolve()));}store?.close();}finally{owner.release();}throw error;}
+  const close=()=>closing??=(async()=>{closed=true;controller?.abort();try{almanac?.close();}catch{/* isolate optional state */}try{if(server){server.closeAllConnections();await new Promise<void>(resolve=>server!.close(()=>resolve()));}store?.close();}finally{owner.release();}})();
+  return {status:read,pump,close,server,
+   async pumpAlmanac(){
+    if(closed||!almanac)return {status:'disabled' as const};
+    if(fault||dispatch||ledger?.requests.at(-1)?.state==='intent')return {status:'resident-unresolved' as const};
+    if(w.residents.some(r=>ready(w,r)))return {status:'resident-priority' as const};
+    return almanac.pump(w.minute);
+   },
+   latestAlmanac:()=>closed?null:almanac?.latest()??null,
+   setAlmanacPublicWeatherAllowed:(allowed:boolean)=>!closed&&(almanac?.setPublicWeatherAllowed(allowed)??false),
+  };
+ }catch(error){try{almanac?.close();}catch{/* optional state */}try{if(server?.listening){server.closeAllConnections();await new Promise<void>(resolve=>server!.close(()=>resolve()));}store?.close();}finally{owner.release();}throw error;}
 }

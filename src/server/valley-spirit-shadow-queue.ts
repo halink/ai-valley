@@ -147,6 +147,11 @@ export class ValleySpiritShadowQueue {
     return entry ? {status: "found", entry: structuredClone(entry)} : blocked("not_found");
   }
 
+  /** Bounded cumulative attempts, including terminal rows; no contents leave the queue. */
+  countForQuota(worldId:string):number|null {
+    return worldId===this.worldId&&this.current()?this.state.entries.length:null;
+  }
+
   /** Internal scheduler metadata only. The whole queue is already bounded;
    * never expose source refs, reasons, or site details from this listing. */
   pendingFor(head: {worldId: string; nowMicroMinute: number}, currentPolicy?: ValleySpiritFruitFallPolicy):
