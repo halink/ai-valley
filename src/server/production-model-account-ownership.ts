@@ -63,6 +63,7 @@ function quotaEnrolled(db:DatabaseSync):string|null{
  return rows[0].attachment;
 }
 type OwnerState={registryDirectory:string;scope:string;directory:{dev:number;ino:number};assert:()=>void;marker:()=>string|null;enroll:(binding:string)=>void;claim:(request:string,register:boolean)=>boolean;quota?:QuotaChild;};
+const quotaHandles=new WeakSet<object>();
 const owners=new WeakMap<ProductionModelAccountOwnership,OwnerState>();
 
 function quotaPath(registry:string,scope:string):string{
@@ -97,7 +98,7 @@ export function attachProductionAccountQuotaRehearsal(ownership:ProductionModelA
  const abandon=()=>{if(!closed){closed=true;ledger.close();}};
  try{current();state.enroll(ledger.offlineFixtureBinding());}catch(e){abandon();throw e;}
  state.quota={sealed:()=>sealed,abandon};
- return Object.freeze({
+ const handle=Object.freeze({
   kind:'disconnected-production-account-quota' as const,
   accountScope:state.scope,runId:ownership.runId,
   reserve(request:Parameters<SharedModelAccountLedger['reserve']>[0],at:number){
@@ -121,6 +122,11 @@ export function attachProductionAccountQuotaRehearsal(ownership:ProductionModelA
    ledger.close();closed=true;sealed=true;
   },
  });
+ quotaHandles.add(handle);return handle;
+}
+export type ProductionAccountQuotaRehearsal=ReturnType<typeof attachProductionAccountQuotaRehearsal>;
+export function isProductionAccountQuotaRehearsal(value:unknown):value is ProductionAccountQuotaRehearsal{
+ return value!==null&&typeof value==='object'&&quotaHandles.has(value);
 }
 export function acquireProductionModelAccountOwnership(options:AccountOwnershipOptions):ProductionModelAccountOwnership{
  options={...options};

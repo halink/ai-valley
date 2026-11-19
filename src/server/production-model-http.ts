@@ -1,6 +1,7 @@
 /** Explicitly gated HTTP candidate. Nothing here is imported by main or reads
  * environment files, keys, saves, or network on import/construction. */
-import {modelRequestPayload,type ModelMessage,type ModelReply} from './model-completion.js';
+import {isProductionAccountQuotaRehearsal,type ProductionAccountQuotaRehearsal} from './production-model-account-ownership.js';
+import {modelLimits,modelRequestPayload,type ModelMessage,type ModelReply} from './model-completion.js';
 import {ProductionModelJournal,modelEvidenceHash,type ProductionCandidateContract} from './production-model-journal.js';
 import {PRODUCTION_MODEL_CANDIDATE as P} from './production-model-policy.js';
 import {evaluateProductionHttpAdmission,PRODUCTION_HTTP_LIMITS as L,type ProductionHttpAdmission} from './production-model-admission.js';
@@ -20,7 +21,8 @@ export function createMemoryProductionHttp(){
  type Call={request:Request;headers:Deferred<WireResponse>;body:ReadableStream<Uint8Array>;controller:ReadableStreamDefaultController<Uint8Array>;cancelled:boolean};
  const calls:Call[]=[],transport=Object.freeze({kind:'synthetic-production-http'} as const);
  const observations=new WeakMap<Request,Readonly<{observedAtMs:number;observedMonotonicNs:string}>>();
- transports.set(transport,{claimed:false,kind:transport.kind,invocations:0,invoke:request=>{
+ transports.set(transport,{claimed:false,kind:transport.kind,invocations:0,invoke:(request,beforeDispatch)=>{
+  beforeDispatch();
   // Observe the actual memory invocation, not a later response-poll callback.
   // Native clocks only; the private map binds this immutable record to the
   // original request object in this factory, never a caller-supplied ID/time.
@@ -80,18 +82,23 @@ const reasons=new Set(('clock_invalid model_failed model_stopped manual_stop sig
  'redirect_rejected model_http_401 model_http_402 model_http_403 model_http_429 model_http_failed response_invalid response_too_large response_length_mismatch response_model_mismatch '+
  'credential_invalid credential_unavailable transport_failed admission_budget_invalid admission_time_invalid admission_identity_invalid admission_scope_mismatch authorization_evidence_missing '+
  'previous_request_unreconciled free_price_unverified free_price_expired admission_hash_mismatch admission_record_invalid '+
- 'production_journal_owner_lost production_journal_unusable production_journal_invalid production_journal_stale production_journal_limit unresolved_request_no_retry request_limit dispatch_intent_mismatch').split(' '));
+ 'production_journal_owner_lost production_journal_unusable production_journal_invalid production_journal_stale production_journal_limit unresolved_request_no_retry request_limit dispatch_intent_mismatch shared_quota_unavailable shared_quota_handoff_failed shared_quota_completion_failed').split(' '));
 const safeReason=(error:unknown)=>error instanceof Error&&reasons.has(error.message)?error.message:'model_failed';
 export class ProductionSiliconFlowHttpCandidate{
  private transport:TransportState;private clock:Clock;private failure:string|null;private closed=false;private lastNow:number;
- private healthy=true;private observedResponses=0;private executionGuard?:()=>void;
+ private healthy=true;private observedResponses=0;private executionGuard?:()=>void;private quota?:ProductionAccountQuotaRehearsal;
  private active:{id:number;at:number;controller:AbortController;cancel:()=>void;timer:unknown;armed:boolean}|null=null;
- constructor(private journal:ProductionModelJournal,transport:ProductionHttpTransport,options:{clock?:Clock;executionGuard?:()=>void}={}){
+ constructor(private journal:ProductionModelJournal,transport:ProductionHttpTransport,options:{clock?:Clock;executionGuard?:()=>void;quotaRehearsal?:ProductionAccountQuotaRehearsal}={}){
   const state=transports.get(transport);if(!state||state.claimed)throw new Error('production_transport_invalid');
   const synthetic=state.kind==='synthetic-production-http';
   if(synthetic!== (journal.contract.executionKind==='synthetic-production-candidate'))throw new Error('transport_journal_mismatch');
   if(!synthetic&&state.contractHash!==modelEvidenceHash(journal.contract))throw new Error('transport_contract_mismatch');
   if(!synthetic&&options.clock)throw new Error('live_clock_override_rejected');
+  if(options.quotaRehearsal!==undefined){
+   if(!synthetic||!isProductionAccountQuotaRehearsal(options.quotaRehearsal)||options.quotaRehearsal.runId!==journal.contract.runId)
+    throw Error('shared_quota_requires_bound_synthetic_candidate');
+   this.quota=options.quotaRehearsal;
+  }
   this.executionGuard=options.executionGuard;
   state.claimed=true;this.transport=state;this.clock=options.clock??systemClock;this.lastNow=journal.status().lastObservedAtMs;
   this.failure=journal.status().failure;this.closed=!!this.failure;
@@ -145,12 +152,21 @@ export class ProductionSiliconFlowHttpCandidate{
  }
  async complete(messages:ModelMessage[],options:{model?:string;signal?:AbortSignal}={}):Promise<{id:number;reply:ModelReply}|null>{
   const onAbort=()=>this.stop('signal');
+  let quotaId:string|undefined,handoffAttempted=false;
   try{
    this.check();if(this.active)throw new Error('concurrency_violation');
    if(options.model!==undefined&&options.model!==P.model)throw new Error('model_not_allowed');
    if(options.signal?.aborted)throw new Error('signal');
    const body=modelRequestPayload(P.model,messages,0.25),at=this.now();
-   const id=this.journal.intent(modelEvidenceHash(body),at),controller=new AbortController();
+   const hash=modelEvidenceHash(body),expectedId=this.journal.status().attempts+1;
+   if(this.quota){
+    const requestId='resident-http-'+modelEvidenceHash([this.journal.contract.runId,this.journal.contract.worldId,expectedId,hash]);
+    const limits=modelLimits[P.model];
+    const admitted=this.quota.reserve({requestId,purpose:'resident',inputTokens:Buffer.byteLength(body)+512,outputTokens:limits.answerTokens+limits.thinkingTokens},at);
+    if(admitted.status!=='reserved')throw Error('shared_quota_unavailable');
+    quotaId=requestId;
+   }
+   const id=this.journal.intent(hash,at),controller=new AbortController();
    let cancel!:()=>void;const cancelled=new Promise<null>(resolve=>{cancel=()=>resolve(null);});
    const active={id,at,controller,cancel,timer:undefined as unknown,armed:false};this.active=active;
    options.signal?.addEventListener('abort',onAbort,{once:true});if(options.signal?.aborted)throw new Error('signal');
@@ -162,10 +178,18 @@ export class ProductionSiliconFlowHttpCandidate{
    const request=Object.freeze({id,endpoint:P.endpoint,method:'POST',redirect:'error',body,signal:controller.signal} as const);
    // Invocation may have reached the provider even if it later rejects. Count
    // it once; no catch path performs a retry, fallback or fresh-budget request.
-   this.transport.invocations++;
+   if(!quotaId)this.transport.invocations++;
    const beforeDispatch=()=>{
+    if(this.transport.kind==='synthetic-production-http'&&!quotaId)return;
     this.check();const pending=this.journal.status().pending;
-    if(this.active!==active||pending?.id!==id||pending.phase!=='intent'||pending.requestHash!==modelEvidenceHash(body))throw new Error('dispatch_intent_mismatch');
+    if(this.active!==active||pending?.id!==id||pending.phase!=='intent'||pending.requestHash!==hash||id!==expectedId)throw new Error('dispatch_intent_mismatch');
+    if(quotaId){
+     if(handoffAttempted)throw Error('shared_quota_handoff_failed');
+     handoffAttempted=true;
+     if(!this.quota!.markHandoff(quotaId,this.now()))throw Error('shared_quota_handoff_failed');
+     this.check();
+     this.transport.invocations++;
+    }
    };
    const work=this.transport.invoke(request,beforeDispatch).then(async response=>{
     if(this.closed||this.active!==active){void response.body?.cancel().catch(()=>{});return null;}
@@ -173,11 +197,20 @@ export class ProductionSiliconFlowHttpCandidate{
    });
    const reply=await Promise.race([work,cancelled]);
    if(this.closed||this.active!==active||!reply)return null;this.check();
+   if(quotaId){
+    const inputTokens=reply.usage?.prompt_tokens,outputTokens=reply.usage?.completion_tokens;
+    if(!handoffAttempted||inputTokens===undefined||outputTokens===undefined||
+      !this.quota!.confirmCompletion(quotaId,this.now(),{inputTokens,outputTokens}))throw Error('shared_quota_completion_failed');
+   }
    this.journal.response(id,modelEvidenceHash(reply),this.now());this.observedResponses++;
    this.clock.clearTimer(active.timer);active.armed=false;this.active=null;
    return {id,reply};
   }catch(error){this.stop(safeReason(error));return null;}
-  finally{options.signal?.removeEventListener('abort',onAbort);}
+  finally{
+   options.signal?.removeEventListener('abort',onAbort);
+   if(quotaId&&!handoffAttempted)try{this.quota!.cancelProvenUnsent(quotaId,this.now());}
+    catch{/* Failed release keeps the original durable hold. */}
+  }
  }
  acknowledgeWorldCommit(id:number,fingerprint:string){try{this.check();this.journal.acknowledgeWorldCommit(id,fingerprint,this.now());return true;}
   catch(error){this.stop(safeReason(error));return false;}}
