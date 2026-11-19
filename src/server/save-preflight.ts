@@ -1,3 +1,4 @@
+import {assertFormalBerryMirrorHeader} from './valley-spirit-formal-berry-authority.js';
 import {validateFormalRainProvenance} from '../world/formal-rain-provenance.js';
 import {validateMvpRooms} from '../world/mvp-rooms.js';
 import {readSeasonalLedger,type SeasonalLedger} from './seasonal-model-ledger.js';
@@ -124,11 +125,14 @@ function jsonBlob(body:unknown):unknown {
  try{return JSON.parse(gunzipSync(body,{maxOutputLength:MAX_STATE_BYTES}).toString());}
  catch{fail('save_invalid_landscape_encoding');}
 }
-function inspectDatabase(db:DatabaseSync,rejectClimate:boolean,validateWorld?: (world:Record<string,unknown>)=>void,allowSeasonalModel=false,inspectSeasonalModel?:(s:SeasonalLedger|null)=>void,fixtureSeal?:string):Record<string,unknown>|null {
- const fixtureTable=db.prepare("SELECT name,type FROM sqlite_master WHERE lower(name)='mvp_spirit_developer_fixture'").get();
+function inspectDatabase(db:DatabaseSync,rejectClimate:boolean,validateWorld?: (world:Record<string,unknown>)=>void,allowSeasonalModel=false,inspectSeasonalModel?:(s:SeasonalLedger|null)=>void,fixtureSeal?:string,formalOwner?:DeveloperMvpSpiritFixtureOwner):Record<string,unknown>|null {
+ const fixtureTable=db.prepare("SELECT name,type,sql FROM sqlite_master WHERE lower(name)='mvp_spirit_developer_fixture'").get();
  if(fixtureTable&&!fixtureSeal)fail('save_developer_fixture_requires_owner');
  if(fixtureSeal){
   if(fixtureTable?.name!=='mvp_spirit_developer_fixture'||fixtureTable.type!=='table')fail('save_unknown_developer_fixture');
+  if(formalOwner&&(fixtureTable.sql!=='CREATE TABLE mvp_spirit_developer_fixture (version INTEGER NOT NULL CHECK(version=1), seal TEXT NOT NULL)'||
+   db.prepare("SELECT 1 FROM sqlite_schema WHERE type='trigger' AND lower(tbl_name)='mvp_spirit_developer_fixture'").get()))
+   fail('save_unknown_developer_fixture');
   const seals=db.prepare('SELECT * FROM mvp_spirit_developer_fixture LIMIT 2').all();
   if(seals.length!==1||Object.keys(seals[0]).length!==2||seals[0].version!==1||seals[0].seal!==fixtureSeal)
    fail('save_unknown_developer_fixture');
@@ -138,8 +142,13 @@ function inspectDatabase(db:DatabaseSync,rejectClimate:boolean,validateWorld?: (
  let latest:Record<string,unknown>|null=null;
  for(const row of db.prepare('SELECT id,revision,length(CAST(state AS BLOB)) AS stateBytes, CASE WHEN length(CAST(state AS BLOB))<=? THEN state ELSE NULL END AS state FROM worlds ORDER BY rowid').iterate(MAX_STATE_BYTES)){
   if(typeof row.stateBytes!=='number'||row.stateBytes>MAX_STATE_BYTES)fail('save_state_too_large');
-  const world=decodeSavedWorld(row.state,fixtureSeal!==undefined);
-  if(fixtureSeal){
+  const world=decodeSavedWorld(row.state,fixtureSeal!==undefined&&!formalOwner);
+  if(fixtureSeal&&formalOwner&&(latest!==null||world.mode!=='formal'||typeof world.id!=='string'||
+   !/^valley-formal-[A-Za-z0-9_-]{1,180}$/.test(world.id)||world.mvpSeasonalModelVersion!==undefined||owns(world,'mvpClimate')))
+   fail('save_unknown_developer_fixture');
+  if(formalOwner)assertFormalBerryMirrorHeader(db,formalOwner,String(world.id),world.formalBerryFixtureAnchor,Number(world.revision));
+  else if(owns(world,'formalBerryFixtureAnchor'))fail('formal_berry_fixture_requires_owner');
+  if(fixtureSeal&&!formalOwner){
    if(latest!==null||world.mode!=='validation'||world.mvpSeasonalModelVersion!==undefined||
     typeof world.id!=='string'||!world.id.startsWith('godot-mvp-')||
     !(world as unknown as World).mvpClimate?.rainProvenance)fail('save_unknown_developer_fixture');
@@ -175,6 +184,7 @@ function inspectDatabase(db:DatabaseSync,rejectClimate:boolean,validateWorld?: (
  const seasonal=readSeasonalLedger(db,latest as unknown as World|null,allowSeasonalModel);
  if(!!seasonal!==(latest?.mvpSeasonalModelVersion===1))fail('save_seasonal_model_ledger_missing');
  if(allowSeasonalModel)inspectSeasonalModel?.(seasonal);
+ if(formalOwner&&!latest)assertFormalBerryMirrorHeader(db,formalOwner);
  return latest;
 }
 interface SourceFile {suffix:string;fd:number;stat:BigIntStats}
@@ -222,7 +232,7 @@ function unchanged(path:string,files:ReadonlyArray<SourceFile|null>,suffixes:rea
  */
 export function preflightWorldSave(path:string,options:{requireWorld?:boolean;rejectClimate?:boolean;allowSeasonalModel?:boolean;inspectSeasonalModel?:(s:SeasonalLedger|null)=>void;inspectOptionalAlmanac?:(snapshot:DatabaseSync,world:Record<string,unknown>)=>void;validateWorld?:(world:Record<string,unknown>)=>void;developerSpiritFixtureOwner?:DeveloperMvpSpiritFixtureOwner}={}):Record<string,unknown>|null {
  const fixture=options.developerSpiritFixtureOwner;
- if(fixture!==undefined&&(!isDeveloperMvpSpiritFixtureOwner(fixture)||fixture.database!==path||options.rejectClimate||options.allowSeasonalModel))
+ if(fixture!==undefined&&(!isDeveloperMvpSpiritFixtureOwner(fixture)||fixture.database!==path||(!fixture.formalApprovalKeyPem&&options.rejectClimate)||options.allowSeasonalModel))
   fail('save_developer_fixture_requires_owner');
  if(path===':memory:')return null;
  const suffixes=['','-wal','-journal'] as const;
@@ -244,7 +254,7 @@ export function preflightWorldSave(path:string,options:{requireWorld?:boolean;re
   // readOnly may create SHM on this PRIVATE copy, never on the user's save.
   db=new DatabaseSync(copy,{readOnly:true});
   if(fixture)db.exec('PRAGMA trusted_schema=OFF; PRAGMA query_only=ON');
-  const result=inspectDatabase(db,options.rejectClimate===true,options.validateWorld,options.allowSeasonalModel===true,options.inspectSeasonalModel,fixture?.seal);
+  const result=inspectDatabase(db,options.rejectClimate===true,options.validateWorld,options.allowSeasonalModel===true,options.inspectSeasonalModel,fixture?.seal,fixture?.formalApprovalKeyPem?fixture:undefined);
   if(!result&&options.requireWorld)fail('save_missing_world');
   if(result&&options.inspectOptionalAlmanac){db.exec('PRAGMA trusted_schema=OFF; PRAGMA query_only=ON');options.inspectOptionalAlmanac(db,result);}
   unchanged(path,files,suffixes);

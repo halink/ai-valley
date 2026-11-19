@@ -1,4 +1,4 @@
-import {createHash,createHmac,randomBytes,timingSafeEqual} from 'node:crypto';
+import {createHash,createHmac,createPublicKey,randomBytes,timingSafeEqual} from 'node:crypto';
 import {closeSync,constants,fstatSync,fsyncSync,lstatSync,mkdtempSync,openSync,readSync,realpathSync,statSync,writeFileSync,type BigIntStats} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {basename,dirname,join} from 'node:path';
@@ -10,6 +10,7 @@ const prefix='valley-spirit-dev-';
 const manifestName='fixture-v1.json';
 const databaseName='fixture.sqlite';
 const shape='valley-spirit-private-developer-fixture/v1';
+const formalShape='valley-spirit-private-formal-fixture/v1';
 const active=new WeakSet<DeveloperMvpSpiritFixtureOwner>();
 const attached=new WeakSet<DeveloperMvpSpiritFixtureOwner>();
 const digest=(token:string)=>createHash('sha256').update(token,'ascii').digest('hex');
@@ -25,7 +26,8 @@ function root():string {
  return realpathSync(tmpdir());
 }
 interface Manifest {
- readonly schema:typeof shape;
+ readonly schema:typeof shape|typeof formalShape;
+ readonly approvalKeyPem?:string;
  readonly directoryIdentity:string;
  readonly databaseIdentity:string;
  readonly tokenHash:string;
@@ -38,6 +40,7 @@ export interface DeveloperMvpSpiritFixtureKey {
 }
 export interface DeveloperMvpSpiritFixtureOwner {
  readonly database:string;
+ readonly formalApprovalKeyPem?:string;
  readonly seal:string;
  readonly capacity:MvpGroundFruitCapacity;
  assertOwned():void;
@@ -50,7 +53,19 @@ export function claimDeveloperMvpSpiritFixtureOwner(owner:DeveloperMvpSpiritFixt
  if(!isDeveloperMvpSpiritFixtureOwner(owner)||attached.has(owner))return invalid();
  owner.assertOwned();attached.add(owner);
 }
+function formalApprovalKey(pem:unknown):pem is string {
+ try{return typeof pem==='string'&&pem.length<=256&&
+  /^-----BEGIN PUBLIC KEY-----\r?\n[A-Za-z0-9+/=\r\n]+-----END PUBLIC KEY-----\s*$/.test(pem)&&createPublicKey(pem).asymmetricKeyType==='ed25519';}
+ catch{return false;}
+}
 export function createDeveloperMvpSpiritFixtureKey(capacity:MvpGroundFruitCapacity):DeveloperMvpSpiritFixtureKey {
+ return createKey(capacity);
+}
+export function createDeveloperFormalBerryFixtureKey(capacity:MvpGroundFruitCapacity,approvalKeyPem:string):DeveloperMvpSpiritFixtureKey {
+ if(!formalApprovalKey(approvalKeyPem)||capacity.worldLots<1||capacity.lotsPerTarget<1)return invalid();
+ return createKey(capacity,approvalKeyPem);
+}
+function createKey(capacity:MvpGroundFruitCapacity,approvalKeyPem?:string):DeveloperMvpSpiritFixtureKey {
  if(!validMvpSpiritFixtureCapacity(capacity))return invalid();
  const directory=mkdtempSync(join(root(),prefix));
  const initial=lstatSync(directory,{bigint:true});if(!privateDirectory(initial))return invalid();
@@ -61,7 +76,7 @@ export function createDeveloperMvpSpiritFixtureKey(capacity:MvpGroundFruitCapaci
   const s=fstatSync(fd,{bigint:true});if(!privateFile(s)||s.size!==0n)return invalid();
   databaseIdentity=identity(s);fsyncSync(fd);
  }finally{closeSync(fd);}
- const manifest:Manifest={schema:shape,directoryIdentity:identity(initial),databaseIdentity,tokenHash:digest(token),capacity:{...capacity}};
+ const manifest:Manifest={schema:approvalKeyPem?formalShape:shape,directoryIdentity:identity(initial),databaseIdentity,tokenHash:digest(token),capacity:{...capacity},...(approvalKeyPem?{approvalKeyPem}:{})};
  const metadata=openSync(join(directory,manifestName),constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600);
  try{writeFileSync(metadata,JSON.stringify(manifest),'utf8');fsyncSync(metadata);}finally{closeSync(metadata);}
  const parent=openSync(directory,constants.O_RDONLY|constants.O_DIRECTORY|constants.O_NOFOLLOW);
@@ -87,7 +102,8 @@ function readManifest(path:string):{identity:string;value:Manifest} {
   if(body.length!==Number(opened.size)||final.size!==opened.size||final.ctimeNs!==opened.ctimeNs||final.mtimeNs!==opened.mtimeNs)return invalid();
   let v:Manifest;
   try{v=JSON.parse(body.toString('utf8')) as Manifest;}catch{return invalid();}
-  if(!exact(v,['schema','directoryIdentity','databaseIdentity','tokenHash','capacity'])||v.schema!==shape||!hex(v.tokenHash)||
+  const base=['schema','directoryIdentity','databaseIdentity','tokenHash','capacity'];
+  if(!(v?.schema===shape&&exact(v,base)||v?.schema===formalShape&&exact(v,[...base,'approvalKeyPem'])&&formalApprovalKey(v.approvalKeyPem))||!hex(v.tokenHash)||
    typeof v.directoryIdentity!=='string'||typeof v.databaseIdentity!=='string'||
    !/^\d+:\d+$/.test(v.directoryIdentity)||!/^\d+:\d+$/.test(v.databaseIdentity)||
    !validMvpSpiritFixtureCapacity(v.capacity)||!body.equals(Buffer.from(JSON.stringify(v),'utf8')))return invalid();
@@ -115,6 +131,7 @@ export function acquireDeveloperMvpSpiritFixtureOwner(key:DeveloperMvpSpiritFixt
   const handle=ownership,owner:DeveloperMvpSpiritFixtureOwner=Object.freeze({
    database:handle.database,seal:createHmac('sha256',key.token).update(manifestSnapshot,'utf8').digest('hex'),
    capacity:Object.freeze({...manifest.capacity}),
+   ...(manifest.approvalKeyPem?{formalApprovalKeyPem:manifest.approvalKeyPem}:{}),
    assertOwned(){
     if(!active.has(owner))return invalid();
     handle.assertOwned();

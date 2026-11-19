@@ -1,3 +1,6 @@
+import {draftFormalBerryGround,validateFormalBerryDetachedLedger} from './valley-spirit-formal-berry-draft.js';
+import {FORMAL_BERRY_EFFECT_SCHEMA,assertFormalBerryMirrorHeader,formalBerryEffectAnchor,formalBerryFixtureScope,
+ verifyFormalBerrySignedApproval,type FormalBerryFixtureAnchor,type FormalBerryFixtureEffect} from './valley-spirit-formal-berry-authority.js';
 import {assertFormalRainProvenanceCommit,emptyFormalRainProvenance,forgetFormalRainStep} from '../world/formal-rain-provenance.js';
 import {appendValleySpiritFormalArrivalCustody,readValleySpiritFormalArrivalCustody,verifyValleySpiritFormalArrivalCustody,type ValleySpiritFormalArrivalReceipt} from './valley-spirit-formal-arrival-custody.js';
 import type {AddressedSpeechObservation} from '../world/addressed-speech.js';
@@ -64,12 +67,13 @@ export class WorldStore {
   const fixture=options.mvpSpiritEffectFixture;
   const owner=options.developerSpiritFixtureOwner;
   if(owner!==undefined){
-   if(!isDeveloperMvpSpiritFixtureOwner(owner)||owner.database!==path||!this.allowMvpClimate||
+   if(!isDeveloperMvpSpiritFixtureOwner(owner)||owner.database!==path||
+    (owner.formalApprovalKeyPem?!this.allowFormalRainProvenance:!this.allowMvpClimate)||
     fixture!==undefined||this.seasonalModel||options.dailySnapshots!==undefined)
     throw Error('mvp_spirit_fixture_requires_private_disk_owner');
    claimDeveloperMvpSpiritFixtureOwner(owner);
    this.developerSpiritFixtureOwner=owner;
-   this.mvpSpiritEffectFixture=owner.capacity;
+   if(!owner.formalApprovalKeyPem)this.mvpSpiritEffectFixture=owner.capacity;
   }
   if(fixture!==undefined){
    // Never permit this developer authority against a real or files-backed save.
@@ -104,6 +108,7 @@ export class WorldStore {
   if(needsDeveloperSeal){
    this.db.exec('CREATE TABLE mvp_spirit_developer_fixture (version INTEGER NOT NULL CHECK(version=1), seal TEXT NOT NULL)');
    this.db.prepare('INSERT INTO mvp_spirit_developer_fixture VALUES (1,?)').run(owner!.seal);
+   if(owner!.formalApprovalKeyPem)this.db.exec(FORMAL_BERRY_EFFECT_SCHEMA);
    this.db.exec('COMMIT');
   }
   if(!this.db.prepare("SELECT value FROM archive_meta WHERE key='event_people_v1'").get()){
@@ -161,7 +166,7 @@ export class WorldStore {
   if(!this.allowMvpClimate)rejectMvpClimateForModels(saved);
   if(saved.formalRainProvenance&&!this.allowFormalRainProvenance)throw Error('formal_rain_store_scope');
   if(!this.seasonalModel&&saved.mvpSeasonalModelVersion!==undefined)throw Error('seasonal_model_store_required');
-  if (!saved.terrainKey) return saved;
+  if(!saved.terrainKey){this.readFormalBerryArchive(saved);return saved;}
   const {terrainKey,resourceChanges,resourceCount,ledgerVersion,...world}=saved;
   const terrain=this.db.prepare('SELECT body FROM terrain WHERE hash=?').get(terrainKey) as {body:Uint8Array}|undefined;
   const base=this.resourceBase(world.id);
@@ -182,6 +187,7 @@ export class WorldStore {
    }
    this.separateLedgers.add(world.id);
   }
+  this.readFormalBerryArchive(world as World);
   return world as World;
  }
  private encode(world:World):Buffer {
@@ -232,11 +238,86 @@ export class WorldStore {
   return this.readCommittedFormalRainHead(worldId,id)?.episode??null;
  }
  seasonalLedger(world:World){if(!this.seasonalModel)throw Error('seasonal_model_store_required');return readSeasonalLedger(this.db,world,true);}
+ private readFormalBerryArchive(w:World):readonly FormalBerryFixtureEffect[]{
+  const owner=this.developerSpiritFixtureOwner;
+  if(!owner?.formalApprovalKeyPem){
+   if(Object.hasOwn(w,'formalBerryFixtureAnchor'))throw Error('formal_berry_fixture_requires_owner');
+   return [];
+  }
+  owner.assertOwned();
+  const rows=assertFormalBerryMirrorHeader(this.db,owner,w.id,w.formalBerryFixtureAnchor,w.revision);
+  if(rows.length&&!validateFormalBerryDetachedLedger(w,{schemaVersion:1,worldId:w.id,
+   rainAdoptedMinute:w.formalRainProvenance?.adoptedMinute??-1,capacity:owner.capacity,drafts:rows.map(r=>r.receipt)}))
+   throw Error('formal_berry_fixture_archive_lineage');
+  return rows;
+ }
+ formalBerryFixtureApprovalScope():string|null {
+  const owner=this.developerSpiritFixtureOwner;
+  if(!owner?.formalApprovalKeyPem)return null;
+  owner.assertOwned();this.assertDeveloperSpiritSeal();return formalBerryFixtureScope(owner);
+ }
+ /** Sole write authority. Caller can supply only signed pinned terms, never
+  * a detached draft, DTO result, capacity, or transaction callback. */
+ runDeveloperFormalBerryFixture(input:unknown) {
+  const owner=this.developerSpiritFixtureOwner;
+  if(!owner?.formalApprovalKeyPem)return {status:'disabled'} as const;
+  let approval:unknown;
+  try{approval=structuredClone(input);}catch{return {status:'denied'} as const;}
+  if(!verifyFormalBerrySignedApproval(approval,owner))return {status:'denied'} as const;
+  owner.assertOwned();
+  this.db.exec('BEGIN IMMEDIATE');
+  try{
+   const w=this.readWorld(false,false),terms=approval.terms;
+   if(!w||w.id!==terms.worldId)throw Error('formal_berry_fixture_wrong_world');
+   const rows=this.readFormalBerryArchive(w),prior=rows.find(row=>row.approval.terms.approvalId===terms.approvalId);
+   if(prior){
+    const identical=prior.approval.signature===approval.signature;
+    this.db.exec('COMMIT');
+    return identical?{status:'committed' as const,replay:true,effect:structuredClone(prior)}:{status:'denied' as const};
+   }
+   if(!w.formalRainProvenance||w.revision!==terms.revision||w.clock.paused||
+    w.minute<terms.firstMinute||w.minute>=terms.expiresMinute){
+    this.db.exec('COMMIT');return {status:'denied'} as const;
+   }
+   const planned=draftFormalBerryGround(this,{scope:'formal-berry-detached-draft',enabled:true,capacity:owner.capacity,
+    geography:{scope:'formal-rain-geography-shadow-only',enabled:true,worldId:w.id,episodeId:terms.episodeId,
+     maxAgeGameMinutes:terms.maxAgeGameMinutes,sites:[{sourceId:terms.sourceId,target:terms.target}]}},{
+    schemaVersion:1,worldId:w.id,rainAdoptedMinute:w.formalRainProvenance.adoptedMinute,capacity:owner.capacity,
+    drafts:rows.map(row=>row.receipt),
+   });
+   if(planned.status!=='draft_only'||planned.expectedWorldRevision!==w.revision||planned.receipt.sourceBefore!==terms.sourceBefore){
+    this.db.exec('COMMIT');return {status:'denied'} as const;
+   }
+   const draft=structuredClone(w),source=draft.resources.find(r=>r.id===terms.sourceId);
+   if(!source||source.amount!==terms.sourceBefore||!Number.isSafeInteger(w.revision+1))throw Error('formal_berry_fixture_stock_changed');
+   source.amount=planned.receipt.sourceAfter;draft.revision++;
+   const effect:FormalBerryFixtureEffect={approval,receipt:planned.receipt,committedRevision:draft.revision};
+   const anchor=formalBerryEffectAnchor([...rows,effect]);draft.formalBerryFixtureAnchor=anchor;
+   this.assertWritable(draft);
+   this.db.prepare('INSERT INTO formal_berry_fixture_effects (draft_id,approval_id,body) VALUES (?,?,?)')
+    .run(effect.receipt.draftId,terms.approvalId,JSON.stringify(effect));
+   this.writeCommit(draft,w.revision,undefined,undefined,undefined,anchor);
+   const durable=this.readWorld(false,false);
+   if(!durable||durable.id!==w.id||durable.revision!==draft.revision||
+    durable.resources.find(r=>r.id===terms.sourceId)?.amount!==effect.receipt.sourceAfter||
+    JSON.stringify(durable.formalBerryFixtureAnchor)!==JSON.stringify(anchor))
+    throw Error('formal_berry_fixture_commit_mismatch');
+   this.db.exec('COMMIT');
+   return {status:'committed' as const,replay:false,effect:structuredClone(effect)};
+  }catch(error){this.db.exec('ROLLBACK');throw error;}
+ }
  private assertWritable(world:World):void {
   this.developerSpiritFixtureOwner?.assertOwned();
   assertWorldCompatibility(world,!!this.mvpSpiritEffectFixture);
-  if(this.developerSpiritFixtureOwner&&(world.mode!=='validation'||!world.id.startsWith('godot-mvp-')||!world.mvpClimate?.rainProvenance))
-   throw Error('mvp_spirit_fixture_invalid_world');
+  if(Object.hasOwn(world,'formalBerryFixtureAnchor')&&!this.developerSpiritFixtureOwner?.formalApprovalKeyPem)
+   throw Error('formal_berry_fixture_requires_owner');
+  if(this.developerSpiritFixtureOwner){
+   if(this.developerSpiritFixtureOwner.formalApprovalKeyPem){
+    if(world.mode!=='formal'||!/^valley-formal-[A-Za-z0-9_-]{1,180}$/.test(world.id)||world.mvpClimate)
+     throw Error('formal_berry_fixture_invalid_world');
+   }else if(world.mode!=='validation'||!world.id.startsWith('godot-mvp-')||!world.mvpClimate?.rainProvenance)
+    throw Error('mvp_spirit_fixture_invalid_world');
+  }
   if(!this.allowMvpClimate)rejectMvpClimateForModels(world);
   if(world.formalRainProvenance&&!this.allowFormalRainProvenance)throw Error('formal_rain_store_scope');
   if(!this.seasonalModel&&world.mvpSeasonalModelVersion!==undefined)throw Error('seasonal_model_store_required');
@@ -302,7 +383,7 @@ export class WorldStore {
   * cannot attest an installed private shadow capability. */
  developerMvpSpiritShadowReadPort(){
   const owner=this.developerSpiritFixtureOwner;
-  if(!isDeveloperMvpSpiritFixtureOwner(owner))return null;
+  if(!isDeveloperMvpSpiritFixtureOwner(owner)||owner.formalApprovalKeyPem)return null;
   const assertOwned=()=>{owner.assertOwned();this.assertDeveloperSpiritSeal();};
   assertOwned();
   return Object.freeze({
@@ -356,7 +437,7 @@ export class WorldStore {
   }catch(error){this.db.exec('ROLLBACK');throw error;}
  }
  private writeCommit(world:World,previousRevision:number|null,appended?:AppendedHistory,seasonalLedger?:SeasonalLedger,
-  settlementOperation?:MvpFallenFruitFixtureOperation):void {
+  settlementOperation?:MvpFallenFruitFixtureOperation,formalBerryAnchor?:FormalBerryFixtureAnchor):void {
   this.assertDeveloperSpiritSeal();
   if(this.developerSpiritFixtureOwner){
    const ids=this.db.prepare('SELECT id FROM worlds ORDER BY rowid LIMIT 2').all();
@@ -366,6 +447,11 @@ export class WorldStore {
   const stored=row?decodeSavedWorld(row.state,!!this.mvpSpiritEffectFixture):null;
   if(stored){if(stored.schemaVersion===3&&world.schemaVersion!==3)throw Error('shelter_schema_downgrade');if(stored.mvpSeasonalModelVersion===1&&(!this.seasonalModel||world.mvpSeasonalModelVersion!==1))throw Error('seasonal_model_dependency_downgrade');assertSeasonalKnowledgeAdvance(stored as unknown as World,world);if(Object.prototype.hasOwnProperty.call(stored,'mvpPreservation')&&!world.mvpPreservation)throw Error('preservation_dependency_downgrade');if(Object.prototype.hasOwnProperty.call(stored,'mvpSoil')&&(!world.mvpSoil||(world.mvpClimate?.schemaVersion??0)<2))throw Error('soil_dependency_downgrade');if(Object.prototype.hasOwnProperty.call(stored,'mvpAgriculture')&&(!world.mvpAgriculture||world.mvpClimate?.schemaVersion!==3))throw Error('agriculture_dependency_downgrade');if(!this.allowMvpClimate)rejectMvpClimateForModels(stored);}
   if((row?.revision??null)!==previousRevision)throw new Error('stale_world_revision');
+  if(formalBerryAnchor){
+   if(!this.developerSpiritFixtureOwner?.formalApprovalKeyPem||
+    JSON.stringify(formalBerryAnchor)!==JSON.stringify(world.formalBerryFixtureAnchor))throw Error('formal_berry_fixture_anchor_transition');
+  }else if(JSON.stringify(stored?.formalBerryFixtureAnchor)!==JSON.stringify(world.formalBerryFixtureAnchor))
+   throw Error('formal_berry_fixture_anchor_transition');
   assertFormalRainProvenanceCommit(stored as unknown as World|null,world,this.allowFormalRainProvenance);
   if(this.allowMvpClimate)assertMvpRainProvenanceAdvance(stored as unknown as World|null,world);
   if(this.mvpSpiritEffectFixture)assertMvpSpiritEffectsAdvance(stored as unknown as World|null,world,this.mvpSpiritEffectFixture);
