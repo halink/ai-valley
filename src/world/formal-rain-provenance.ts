@@ -17,7 +17,7 @@ const minute=(v:unknown):v is number=>typeof v==='number'&&Number.isFinite(v)&&v
 const same=(a:unknown,b:unknown)=>JSON.stringify(a)===JSON.stringify(b);
 const native=(w:World)=>w.mode==='formal'&&typeof w.id==='string'&&/^valley-formal-[a-zA-Z0-9_-]{1,180}$/.test(w.id)&&
  !Object.hasOwn(w,'simulationOnly')&&!w.mvpClimate&&(w.weather==='rain'||w.weather==='sun');
-const episodeId=(worldId:string,startedMinute:number)=>'formal-rain:'+createHash('sha256')
+export const formalNativeRainEpisodeId=(worldId:string,startedMinute:number)=>'formal-rain:'+createHash('sha256')
  .update(JSON.stringify([worldId,Math.floor(startedMinute/DAY)])).digest('hex');
 
 export function emptyFormalRainProvenance(w:World):FormalRainProvenance {
@@ -33,7 +33,7 @@ export function validateFormalRainProvenance(w:World):void {
   !Array.isArray(state.closed)||state.closed.length>LIMIT)throw Error('formal_rain_unknown_state');
  let prior=state.adoptedMinute;
  const check=(b:Boundary,keys:string[])=>exact(b,keys)&&minute(b.startedMinute)&&b.startedMinute>prior&&
-  b.startedMinute<=w.minute&&b.episodeId===episodeId(w.id,b.startedMinute);
+  b.startedMinute<=w.minute&&b.episodeId===formalNativeRainEpisodeId(w.id,b.startedMinute);
  for(const x of state.closed){
   if(!x||!check(x,['episodeId','startedMinute','closedMinute'])||!minute(x.closedMinute)||
    Math.floor(x.closedMinute/DAY)<=Math.floor(x.startedMinute/DAY)||x.closedMinute>w.minute)
@@ -70,7 +70,7 @@ export function observeFormalRainEdge(w:World,previousWeather:Weather):void {
  if(!s||Object.hasOwn(w,'simulationOnly')||previousWeather===w.weather)return;
  if(!native(w)||w.clock.paused)throw Error('formal_rain_invalid_engine_edge');
  if(w.weather==='rain'){
-  s.open={episodeId:episodeId(w.id,w.minute),startedMinute:w.minute};
+  s.open={episodeId:formalNativeRainEpisodeId(w.id,w.minute),startedMinute:w.minute};
  }else if(s.open){
   s.closed=[...s.closed,{...s.open,closedMinute:w.minute}].slice(-LIMIT);
   s.open=null;

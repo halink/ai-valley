@@ -29,7 +29,7 @@ function point(w:World,p:Vec):boolean {
 
 /** Physical availability only: no resident awareness, no actual effect state,
  * no budget, no selection menu, and no conversion to an executable proposal. */
-export function readFormalRainShadowEligibility(store:WorldStore,options?:FormalRainShadowEligibilityOptions){
+export function readFormalRainShadowBasis(store:WorldStore,options?:FormalRainShadowEligibilityOptions){
  if(options?.enabled!==true)return {status:'disabled'} as const;
  const unavailable={status:'unavailable'} as const;
  try{
@@ -74,6 +74,14 @@ export function readFormalRainShadowEligibility(store:WorldStore,options?:Formal
     groundEffectCapability:'not-installed' as const});
   }
   return {status:'geography_only' as const,worldId:w.id,revision:w.revision,atMinute:w.minute,
-   rainEpisodeId:episode.episodeId,offers};
+   rainEpisodeId:episode.episodeId,offers,head};
  }catch{return unavailable;}
+}
+
+/** Narrow geography-only view; the detached native draft adapter consumes the
+ * internal same-head basis above instead of reimplementing any site checks. */
+export function readFormalRainShadowEligibility(store:WorldStore,options?:FormalRainShadowEligibilityOptions){
+ const basis=readFormalRainShadowBasis(store,options);
+ if(basis.status!=='geography_only')return basis;
+ const {head:_internal,...view}=basis;return view;
 }
