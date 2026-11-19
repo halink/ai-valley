@@ -241,3 +241,14 @@ schema/reader, and existing optional post-commit callback are unchanged.
 The fixture has an exact world pin and the restricted weather-only listener;
 meal receipts grant no disclosure and are not exposed through a new reader
 route or joined to the ordinary life publisher.
+
+A distinct reviewed-meal fixture can pin an independent Ed25519 reviewer
+public key. After the actual rules producer closes, an explicit private
+reader can reacquire the same sealed save and pin exactly one V2 meal event.
+A signed allow or revoke binds the fixture, world, event, native receipt
+UUID and digest, and the prior grant version; it enters only the existing
+life grant authority. Readback requires that same signature and the exact
+current source grant in a read-only snapshot (no older fallback). It uses
+the existing fixed life renderer and omits the underlying identifiers,
+receipt, signatures and raw event. This does not add publication, a route,
+a general disclosure setting, or an automatic grant.

@@ -1,4 +1,4 @@
-import {AGED_EAT_INVALID,canRunMvpNativeAgedEat,completeMvpNativeAgedEat} from './mvp-aged-fruit-native-eat.js';
+import {AGED_DINING_INVALID,AGED_EAT_INVALID,canRunMvpNativeAgedEat,completeMvpNativeAgedEat,workMvpNativeAgedEat} from './mvp-aged-fruit-native-eat.js';
 import {canRunMvpNativeAgedPickup,completeMvpNativeAgedPickup} from './mvp-aged-fruit-native-pickup.js';
 import {noteMvpNativeMovePhase,noteMvpNativeObservationPhase} from './mvp-native-observation-phase.js';
 import {beginFormalRainStep,observeFormalRainEdge} from './formal-rain-provenance.js';
@@ -292,7 +292,12 @@ function targetFor(world:World,r:Resident,a:Action,definition:string,elapsed=0):
  if(a.type==='mvpAgriculture')return agricultureRoute(world,r,a);
  if(isMvpSeedAction(a)){const error=mvpSeedReason(world,r,a);return error?fail(error):{target:{...mvpSeedPlace(world)!.building.door},duration:a.type==='mvpCollectSeed'?10:30};}
  if(a.type==='mvpDrink'){const error=mvpDrinkReason(world,r);return error?fail(error):{target:{...r.at},duration:5};}
- if(a.type==='mvpAgedFruitEat')return canRunMvpNativeAgedEat(world,r.id,a)?{target:{...r.at},duration:5}:fail(AGED_EAT_INVALID);
+ if(a.type==='mvpAgedFruitEat'){
+  if(!canRunMvpNativeAgedEat(world,r.id,a))return fail(a.dining?AGED_DINING_INVALID:AGED_EAT_INVALID);
+  if(!a.dining)return {target:{...r.at},duration:5};
+  const place=mvpDiningPlace(world,r);
+  return place?{target:{...place.building.door},duration:5}:fail(AGED_DINING_INVALID);
+ }
  if(a.type==='eat'&&a.mvpAtTable){const place=mvpDiningPlace(world,r);if(!place)return fail('当前没有可到达的本人共屋餐位');if(!Object.hasOwn(goods,a.item)||goods[a.item].food<=0||!has(r.inventory,{[a.item]:1}))return fail('没有这份可以食用的实际食品');return {target:{...place.building.door},duration:5};}
  if(a.type==='eat')return Object.hasOwn(goods,a.item)&&goods[a.item].food>0&&has(r.inventory,{[a.item]:1})?{target:r.at,duration:5}:fail('没有这份可以食用的实际食品');
  if(a.type==='gather'){
@@ -604,6 +609,9 @@ function processActivity(world:World,r:Resident,minutes:number,actionFailures?:S
  }
  if(activity.action.type==='health'){const error=healthReason(world,r,activity.action);if(error){failure(world,r,error);syncMedicalTransport(world);return;}}
  const mvpBedError=mvpSleepProblem(world,r);if(mvpBedError){failure(world,r,mvpBedError);return;}
+ if(activity.action.type==='mvpAgedFruitEat'&&activity.action.dining&&!canRunMvpNativeAgedEat(world,r.id,activity.action)){
+  failure(world,r,AGED_DINING_INVALID);return;
+ }
  const interior=moveInRoom(world,r,minutes);syncMedicalTransport(world);syncBodies(world);syncFamilyEscorts(world);if(interior.error){
   // Only a live physical claim conflict creates this code; persisted text cannot
   // grant recovery. This output belongs to this step/draft, never to the save.
@@ -674,8 +682,8 @@ function processActivity(world:World,r:Resident,minutes:number,actionFailures?:S
   // not count this entry step as one of the indoor waiting minutes.
   activity.mvpShelterEnteredAt=world.minute;endDecisionProtection(world,r,'decision');return;
  }
- if(activity.action.type==='mvpAgedFruitEat'&&(!canRunMvpNativeAgedEat(world,r.id,activity.action)||!same(r.at,activity.target))){
-  failure(world,r,AGED_EAT_INVALID);return;
+ if(activity.action.type==='mvpAgedFruitEat'&&!workMvpNativeAgedEat(world,r,activity.action,minutes)){
+  failure(world,r,activity.action.dining?AGED_DINING_INVALID:AGED_EAT_INVALID);return;
  }
  if(activity.action.type==='mvpPreservation'){const problem=preservationReason(world,r,activity.action,true);if(problem){failure(world,r,problem);return;}activity.mvpPreservationWorked=(activity.mvpPreservationWorked??0)+Math.min(minutes,activity.remaining);}
  if(activity.action.type==='mvpAgriculture'){const problem=agricultureReason(world,r,activity.action,true);if(problem){failure(world,r,problem);return;}}

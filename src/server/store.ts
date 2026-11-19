@@ -1083,13 +1083,13 @@ export class WorldStore {
    }catch(error){this.db.exec('ROLLBACK');throw error;}
   }catch{return null;}
  }
- stepDeveloperMvpAgedHeldFruitMinute(worldId:string,expectedRevision:number,eating?:true){
+ stepDeveloperMvpAgedHeldFruitMinute(worldId:string,expectedRevision:number,eating?:true|'shared-table'){
   const owner=this.developerSpiritFixtureOwner;
   if(!this.sealedAgedBirthExecution||!owner||this.nativeWeatherCredit||!Number.isSafeInteger(expectedRevision)||expectedRevision<1)return null;
   try{
    owner.assertOwned();this.assertDeveloperSpiritSeal();this.db.exec('BEGIN IMMEDIATE');
    try{
-    const outcome=advanceSealedAgedHeldFruitMinute(this.db,owner,decodeAgedBirthPredecessor,worldId,expectedRevision,eating===true);
+    const outcome=advanceSealedAgedHeldFruitMinute(this.db,owner,decodeAgedBirthPredecessor,worldId,expectedRevision,eating==='shared-table'?'shared-table':eating===true);
     owner.assertOwned();this.db.exec('COMMIT');return outcome;
    }catch(error){this.db.exec('ROLLBACK');throw error;}
   }catch{return null;}

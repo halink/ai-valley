@@ -59,7 +59,8 @@ export function assertWorldCompatibility(value:unknown,allowMvpSpiritEffectFixtu
   const arrangement=record(r.plan)?r.plan:null;
   const plan=arrangement&&Array.isArray(arrangement.actions)?arrangement.actions:[];
   const activity=record(r.activity)?r.activity:null;
-  if(plan.some(a=>record(a)&&(a.type==='mvpAgedFruitPickup'||a.type==='mvpAgedFruitEat'))||activity&&record(activity.action)&&(activity.action.type==='mvpAgedFruitPickup'||activity.action.type==='mvpAgedFruitEat'))
+  if(plan.some(a=>record(a)&&(a.type==='mvpAgedFruitPickup'||a.type==='mvpAgedFruitEat'))||
+   activity&&(owns(activity,'mvpAgedEatWorkStartedAt')||record(activity.action)&&(activity.action.type==='mvpAgedFruitPickup'||activity.action.type==='mvpAgedFruitEat')))
    fail('save_sealed_aged_pickup_requires_private_archive');
   const pending=plan.some(a=>record(a)&&a.type==='mvpShelter');
   const shelter=activity&&record(activity.action)&&activity.action.type==='mvpShelter';

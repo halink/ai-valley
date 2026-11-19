@@ -75,8 +75,9 @@ export function actionRoom(w:World,r:Resident,a:Activity):{building:Building;key
  const action=a.action;if(action.type==='mvpShelter')return mvpShelterRoom(w,r);let id:string|undefined,key='table',group=r.id,target:Vec|undefined;
  // Unilateral decisions stay where the actor is; they do not approach a partner or chase oneself.
  if(action.type==='separate'||action.type==='respond'&&!action.accept&&w.proposals.find(p=>p.id===action.proposalId)?.actorId===r.id||action.type==='respond'&&!action.accept&&w.proposals.some(p=>p.id===action.proposalId&&p.kind==='care'&&p.targetId===r.id))return null;
- if(action.type==='eat'&&action.mvpAtTable&&w.mvpRooms?.version===1){
+ if((action.type==='eat'&&action.mvpAtTable||action.type==='mvpAgedFruitEat'&&action.dining)&&w.mvpRooms?.version===1){
   const seat=mvpDiningSeat(w,r);if(!seat)return null;
+  if(action.type==='mvpAgedFruitEat'&&(!action.dining||action.dining.buildingId!==seat.building.id||action.dining.key!==seat.key||action.dining.seat.x!==seat.at.x||action.dining.seat.y!==seat.at.y))return null;
   return {building:seat.building,key:seat.key,group,target:seat.at};
  }else if(action.type==='mvpInspect'){
   id=MVP_HALL;key=action.station==='seed'?'mvp-seed':'kitchen';

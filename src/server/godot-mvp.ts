@@ -1,4 +1,4 @@
-import {AGED_EAT_INVALID,captureMvpNativeAgedEat,selectMvpNativeAgedEat,type NativeAgedEatSelection} from '../world/mvp-aged-fruit-native-eat.js';
+import {AGED_DINING_INVALID,AGED_EAT_INVALID,captureMvpNativeAgedEat,selectMvpNativeAgedEat,type NativeAgedEatSelection} from '../world/mvp-aged-fruit-native-eat.js';
 import {captureMvpNativeAgedPickup,selectMvpNativeAgedPickup,type NativeAgedPickupSelection} from '../world/mvp-aged-fruit-native-pickup.js';
 import {nativeWeatherHourTransition} from './valley-spirit-weather-credit.js';
 import {captureMvpNativeObservationPhase} from '../world/mvp-native-observation-phase.js';
@@ -139,7 +139,7 @@ export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string
  const food=(r.inventory.meal??0)>=1?'meal':newFood??((r.inventory.turnip??0)>=(reserveRoot?2:1)?'turnip':(r.inventory.fruit??0)>=1?'fruit':(r.inventory.berry??0)>=1?'berry':'preserve');
  if(food==='berry'||food==='preserve'){
   const aged=selectMvpNativeAgedEat(w,r);
-  if(aged)return {action:aged,reason:'无更高优先的本人食物或餐位，留在原处吃仍未到期的随身果实'};
+  if(aged)return {action:aged,reason:aged.type==='mvpAgedFruitEat'&&aged.dining?'带着仍未到期的本人随身果实，前往本人的共屋餐位':'无更高优先的本人食物或餐位，留在原处吃仍未到期的随身果实'};
  }
  if(r.hunger>=35&&r.hunger<80&&r.energy>=70&&(mvpThirst(w,r)??0)<50-1e-9&&(r.inventory[food]??0)>=1){const action:Action={type:'eat',item:food,mvpAtTable:true};if(mvpCanStart(w,r,action))return {action,reason:'带着自己的食物回共屋餐桌进食，不共享或凭空补充口粮'};}
  if(r.hunger>=35&&(r.inventory[food]??0)>=1)return {action:{type:'eat',item:food},reason:'饥饿且带有一整份自有食物，优先餐食、根菜和鲜果，缺少鲜食时可吃本人罐藏'};
@@ -331,7 +331,7 @@ function advanceMvpRuleMinuteDraft(world:World,current:World,serial:number,decis
   if(fresh&&actionFailures.some(f=>f.code==='resource_stock_depleted_before_gather'&&f.actionType==='gather'&&
    f.actorId===failed.id&&f.planId===fresh.planId&&f.resourceId===fresh.resourceId&&f.quantity===fresh.quantity&&f.available<fresh.quantity))continue;
   if(action?.type==='talk'&&actionFailures.some(f=>f.actorId===failed.id&&f.planId===activityPlans.get(failed.id)&&f.actionType==='talk'&&f.code==='room_slot_contended'))continue;
-  if(action?.type==='mvpAgedFruitEat'&&failed.lastFailure===AGED_EAT_INVALID)continue;
+  if(action?.type==='mvpAgedFruitEat'&&(failed.lastFailure===AGED_EAT_INVALID||failed.lastFailure===AGED_DINING_INVALID))continue;
   if(action?.type==='mvpAgriculture'||action?.type==='mvpPreservation'||shelterWorkers.has(failed.id))continue;
   if(action&&isMvpSeedAction(action)&&['灶堂有限种源已领完','这处实际工位正在被另一项劳动占用'].includes(failed.lastFailure!))continue;
   const source=action?.type==='gather'?world.resources.find(s=>s.id===action.resourceId):undefined;

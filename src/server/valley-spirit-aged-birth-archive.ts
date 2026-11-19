@@ -275,11 +275,12 @@ interface AgedHeldExpiry {
  readonly bornUs:string;readonly expiresUs:string;readonly beforeUs:string;readonly settledUs:string;
  readonly pickupEventId:string;readonly expiryEventId:string;readonly fromRevision:number;readonly revision:number;readonly heldDebit:1;
 }
-function nativeHeldMinute(head:World,prior:World,held:AgedHeldItem,eatEnabled=false){
+type HeldEatMode=false|true|'shared-table';
+function nativeHeldMinute(head:World,prior:World,held:AgedHeldItem,eatEnabled:HeldEatMode=false){
  const owner=head.residents.find(r=>r.id===held.residentId);
  if(!owner||owner.status!=='alive'||!(owner.health>0)||owner.residency==='outside'||owner.regionalLocation||
   parseClimateUs(head.mvpClimate!.lastUs)>=parseClimateUs(held.expiresUs))return null;
- const native=detachedNativeMinute(head,prior,undefined,undefined,eatEnabled?{residentId:held.residentId,effectId:held.effectId,expiresUs:held.expiresUs}:undefined);
+ const native=detachedNativeMinute(head,prior,undefined,undefined,eatEnabled?{residentId:held.residentId,effectId:held.effectId,expiresUs:held.expiresUs,...(eatEnabled==='shared-table'?{table:true as const}:{})}:undefined);
  if(!native)return null;
  const current=native.draft.residents.find(r=>r.id===held.residentId);
  // Estate and cross-location ownership custody are not implemented.
@@ -317,13 +318,15 @@ interface AgedHeldEaten {
  readonly pickupEventId:string;readonly nativePlanId:string;readonly eventId:string;readonly startedUs:string;readonly settledUs:string;
  readonly hungerBefore:number;readonly hungerAfter:number;readonly nutrition:number;readonly workMinutes:5;readonly heldDebit:1;
  readonly fromRevision:number;readonly revision:number;
+ readonly dining?: {readonly buildingId:string;readonly key:string;readonly seat:Vec};
 }
 function settleNativeHeldEating(
  head:World,held:AgedHeldItem,native:NonNullable<ReturnType<typeof nativeHeldMinute>>,
 ){
  const {eaten,draft,owner,current}=native;
  if(!eaten||eaten.residentId!==held.residentId||eaten.settledUs!==draft.mvpClimate!.lastUs||
-  parseClimateUs(eaten.settledUs)>=parseClimateUs(held.expiresUs)||current.plan||current.activity||current.inside!==null||
+  parseClimateUs(eaten.settledUs)>=parseClimateUs(held.expiresUs)||current.plan||current.activity||
+  (eaten.dining?(current.inside!==eaten.dining.buildingId||!current.roomAt||!same(current.roomAt,eaten.dining.seat)):current.inside!==null)||
   !equal(owner.inventory,current.inventory)||!draft.processed.includes('plan:'+eaten.planId))return null;
  const marker=head.mvpClimate!.spiritEffects;
  const event=emitLedgerEvent(draft,{kind:'system',actors:[],place:current.at,text:'一份未到期的随身果实被实际食用。'}) as
@@ -333,12 +336,12 @@ function settleNativeHeldEating(
   effectId:held.effectId,creditId:held.creditId,sourceInstanceId:held.sourceInstanceId,birthProofDigest:held.birthProofDigest,bornUs:held.bornUs,expiresUs:held.expiresUs,
   pickupEventId:held.pickupEventId,nativePlanId:eaten.planId,eventId:event.id,startedUs:eaten.startedUs,settledUs:eaten.settledUs,
   hungerBefore:eaten.hungerBefore,hungerAfter:eaten.hungerAfter,nutrition:eaten.nutrition,workMinutes:5,heldDebit:1,
-  fromRevision:head.revision,revision:draft.revision});
+  fromRevision:head.revision,revision:draft.revision,...(eaten.dining?{dining:eaten.dining}:{})});
  event.mvpAgedHeldFruitEaten={version:2,effectId:held.effectId};
  Object.assign(draft.mvpClimate!,{spiritEffects:{...marker,held:null,heldEaten:fact}});
  return {event,fact};
 }
-function nativeHeldContinuationDraft(head:World,prior:World,held:AgedHeldItem,sequence:number,eatEnabled=false){
+function nativeHeldContinuationDraft(head:World,prior:World,held:AgedHeldItem,sequence:number,eatEnabled:HeldEatMode=false){
  if(sequence<1||sequence>maxHeldTicks)return null;
  const native=nativeHeldMinute(head,prior,held,eatEnabled);
  if(!native)return null;
@@ -355,7 +358,7 @@ function nativeHeldContinuationDraft(head:World,prior:World,held:AgedHeldItem,se
   effectId:held.effectId,holderId:held.residentId,bornUs:held.bornUs,expiresUs:held.expiresUs,beforeUs,afterUs,
   fromRevision:head.revision,toRevision:draft.revision,beforeDigest:hash(JSON.stringify(head)),afterDigest:hash(JSON.stringify(draft)),
   eventIds:Object.freeze(events.map(e=>e.id)),expiry:terminal?.fact??null};
- const fact=eatEnabled?Object.freeze({version:2,...basis,eaten:eaten?.fact??null}):Object.freeze({version:1,...basis});
+ const fact=eatEnabled?Object.freeze({version:eatEnabled==='shared-table'?3:2,...basis,eaten:eaten?.fact??null}):Object.freeze({version:1,...basis});
  return {world:draft,events,fact,eaten:eaten?.fact??null};
 }
 function exactExpiryArchiveSuffix(db:DatabaseSync,worldId:string,birthSeq:unknown,expected:readonly WorldEvent[]):boolean {
@@ -404,7 +407,7 @@ function readVerifiedSealedAgedBirth(
  if(actual.id!==derived.event.id||actual.world_id!==derived.world.id||actual.at!==derived.event.at||actual.body!==JSON.stringify(derived.event))return fail();
  let world=derived.world,expiry:AgedFruitExpiry|null=null,tickCount=0;
  const discoveries=new Map<string,AgedFruitDiscovery>(),arrivals=new Map<string,AgedGroundArrival>();
- let held:AgedHeldItem|null=null,heldExpiry:AgedHeldExpiry|null=null,heldEaten:AgedHeldEaten|null=null,heldTickCount=0,heldEatEnabled=false;
+ let held:AgedHeldItem|null=null,heldExpiry:AgedHeldExpiry|null=null,heldEaten:AgedHeldEaten|null=null,heldTickCount=0,heldEatEnabled:HeldEatMode=false;
  if(expiryHeader&&tickHeader||heldHeader&&!tickHeader||!heldHeader&&pickupEvents.length||heldExpiryHeader&&heldTickHeader||(heldExpiryHeader||heldTickHeader)&&!heldHeader||(!heldExpiryHeader&&!heldTickHeader)&&heldExpiryEvents.length||!heldTickHeader&&heldEatenEvents.length)return fail();
  if(tickHeader){
   if(tickHeader.type!=='table'||tickHeader.sql!==tickSql||
@@ -440,8 +443,9 @@ function readVerifiedSealedAgedBirth(
     for(const step of rows){
      if(heldExpiry||heldEaten||step.sequence!==++heldTickCount||typeof step.body!=='string')return fail();
      const format=JSON.parse(step.body);
-     if(!obj(format)||(format.version!==1&&format.version!==2)||heldEatEnabled&&format.version!==2)return fail();
-     heldEatEnabled=format.version===2;
+     if(!obj(format)||(format.version!==1&&format.version!==2&&format.version!==3)||
+      heldEatEnabled!==false&&format.version!==(heldEatEnabled==='shared-table'?3:2))return fail();
+     heldEatEnabled=format.version===3?'shared-table':format.version===2;
      const next=nativeHeldContinuationDraft(world,prior,held,heldTickCount,heldEatEnabled);
      if(!next||step.body!==JSON.stringify(next.fact))return fail();
      world=next.world;heldExpiry=next.fact.expiry;heldEaten=next.eaten;replayEvents.push(...next.events);
@@ -600,11 +604,11 @@ export function advanceSealedAgedHeldFruitExpiry(
 /** Explicit private continuation; the generic/ordinary state reader never
  * sees the V2 dependency. The held item has no ordinary food representation. */
 export function advanceSealedAgedHeldFruitMinute(
- db:DatabaseSync,owner:DeveloperMvpSpiritFixtureOwner,decode:DecodePredecessor,worldId:string,expectedRevision:number,eatEnabled=false,
+ db:DatabaseSync,owner:DeveloperMvpSpiritFixtureOwner,decode:DecodePredecessor,worldId:string,expectedRevision:number,eatEnabled:HeldEatMode=false,
 ){
  const prior=readVerifiedSealedAgedBirth(db,owner,decode);
  if(!prior?.held||prior.world.id!==worldId||prior.world.revision!==expectedRevision||prior.heldExpiry||
-  prior.heldEaten||prior.heldEatEnabled&&!eatEnabled||prior.heldTickCount>=maxHeldTicks)return null;
+  prior.heldEaten||prior.heldEatEnabled!==false&&prior.heldEatEnabled!==eatEnabled||prior.heldTickCount>=maxHeldTicks)return null;
  const next=nativeHeldContinuationDraft(prior.world,prior.prior,prior.held,prior.heldTickCount+1,eatEnabled);
  if(!next)return null;
  const previous=rawHead(db),state=gzipSync(JSON.stringify(next.world),{level:1}),body=JSON.stringify(next.fact);

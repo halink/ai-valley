@@ -24,7 +24,7 @@ export type Action = DomainAction & {observedTarget?:PersonObservation};
 type DomainAction = import('./mvp-seasonal.js').SeasonalInspectAction
  | {type:'mvpShelter'}
  | {type:'mvpAgedFruitPickup';effectId:string;discoveryId:string}
- | {type:'mvpAgedFruitEat';effectId:string}
+ | {type:'mvpAgedFruitEat';effectId:string;dining?:{buildingId:string;key:string;seat:Vec}}
  | import('./mvp-preservation.js').PreservationAction
  | import('./mvp-seeds.js').MvpSeedAction
  | import('./mvp-agriculture.js').AgricultureAction
@@ -94,7 +94,7 @@ type DomainAction = import('./mvp-seasonal.js').SeasonalInspectAction
  | {type:'lodge';buildingId:string}
  | {type:'settle';buildingId:string};
 export interface Plan {id:string;actorId:string;actorRevision:number;createdAt:number;definition:string;intention:string;actions:Action[];}
-export interface Activity {mvpPreservationExecutionId?:string;mvpPreservationWorked?:number;mvpShelterEnteredAt?:number;mvpAgricultureExecutionId?:string;mvpWaterExecutionId?:string;mvpBed?:{buildingId:string;index:number};appointmentStartedAt?:number;appointmentWork?:{from:number;through:number;minutes:number};foodSourceShareWork?:{from:number;through:number;minutes:number};foodGiftWork?:{from:number;through:number;minutes:number};presenceWork?:{from:number;through:number;minutes:number;provider:PersonObservation;person:PersonObservation};room?:import('./rooms.js').RoomJourney;planId:string;action:Action;startedAt:number;remaining:number;path:Vec[];target:Vec;definition:string;cargo?:{bodyId:string;graveId?:string;storageId?:string;storageSlot?:number;pickedUp:boolean;pickupRemaining?:number};travelProgress?:number;}
+export interface Activity {mvpAgedEatWorkStartedAt?:number;mvpPreservationExecutionId?:string;mvpPreservationWorked?:number;mvpShelterEnteredAt?:number;mvpAgricultureExecutionId?:string;mvpWaterExecutionId?:string;mvpBed?:{buildingId:string;index:number};appointmentStartedAt?:number;appointmentWork?:{from:number;through:number;minutes:number};foodSourceShareWork?:{from:number;through:number;minutes:number};foodGiftWork?:{from:number;through:number;minutes:number};presenceWork?:{from:number;through:number;minutes:number;provider:PersonObservation;person:PersonObservation};room?:import('./rooms.js').RoomJourney;planId:string;action:Action;startedAt:number;remaining:number;path:Vec[];target:Vec;definition:string;cargo?:{bodyId:string;graveId?:string;storageId?:string;storageSlot?:number;pickedUp:boolean;pickupRemaining?:number};travelProgress?:number;}
 export type CompletedAction = {type:Action['type'];at:number;minutes?:number;energy?:number};
 export interface Resident {mvpSeasonalKnowledge?:import('./mvp-seasonal.js').SeasonalKnowledge;foodSourceKnowledge?:import('./food-source-sharing.js').FoodSourceKnowledge;regionalLocation?:RegionalLocation;knownDocks?:string[];physiologyDefinition?:string;
  decisionProtection?:import('./decision-protection.js').DecisionProtection;
