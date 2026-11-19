@@ -128,7 +128,7 @@ function index<T extends {readonly worldId:string}>(values:readonly T[],worldId:
  }
  return out;
 }
-function counts<T>(values:Iterable<T>,key:(v:T)=>string):Count[]{
+export function countValleySpiritFacts<T>(values:Iterable<T>,key:(v:T)=>string):Count[]{
  const agg=new Map<string,number>();
  for(const v of values){const k=key(v);agg.set(k,(agg.get(k)??0)+1);}
  return [...agg].sort(([a],[b])=>a<b?-1:a>b?1:0).map(([key,count])=>({key,count}));
@@ -173,10 +173,10 @@ export function projectValleySpiritFairness(input:ValleySpiritFairnessInput):Val
   }
   return {
    status:'ready',schemaVersion:1,worldId,audience:'internal-audit',
-   proposalDirections:{count:proposals.size,byTarget:counts(proposals.values(),p=>p.targetId)},
-   actualEffects:{count:effects.size,byTarget:counts(effects.values(),e=>e.targetId)},
-   actualDiscoveries:{count:discoveries.size,byResident:counts(discoveries.values(),d=>d.residentId)},
-   actualPickups:{count:pickups.size,byResident:counts(pickups.values(),p=>p.residentId)},
+   proposalDirections:{count:proposals.size,byTarget:countValleySpiritFacts(proposals.values(),p=>p.targetId)},
+   actualEffects:{count:effects.size,byTarget:countValleySpiritFacts(effects.values(),e=>e.targetId)},
+   actualDiscoveries:{count:discoveries.size,byResident:countValleySpiritFacts(discoveries.values(),d=>d.residentId)},
+   actualPickups:{count:pickups.size,byResident:countValleySpiritFacts(pickups.values(),p=>p.residentId)},
   };
  }catch{return unavailable;}
 }

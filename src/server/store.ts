@@ -1,3 +1,4 @@
+import {projectCommittedFormalBerryFairness} from './valley-spirit-formal-berry-fairness.js';
 import {completeDeveloperFormalBerryPickup} from './valley-spirit-formal-berry-pickup.js';
 import {DAY} from '../world/time.js';
 import {projectDeveloperFormalBerryDiscovery} from './valley-spirit-formal-berry-discovery.js';
@@ -253,6 +254,21 @@ export class WorldStore {
    rainAdoptedMinute:w.formalRainProvenance?.adoptedMinute??-1,capacity:owner.capacity,drafts:rows.map(r=>r.receipt)}))
    throw Error('formal_berry_fixture_archive_lineage');
   return rows;
+ }
+ /** Read-only internal audit of the exact sealed fixture head. The same
+  * SQLite snapshot is used for world, plan receipts and the effect archive. */
+ readDeveloperFormalBerryFairness(worldId:string){
+  const owner=this.developerSpiritFixtureOwner;
+  if(!owner?.formalApprovalKeyPem)return {status:'unavailable',code:'not-a-sealed-formal-fixture'} as const;
+  try{
+   owner.assertOwned();this.db.exec('BEGIN');
+   try{
+    const world=this.readWorld(false,false);
+    const audit=world?.id===worldId?projectCommittedFormalBerryFairness(world,this.readFormalBerryArchive(world)):
+     {status:'unavailable',code:'no-matching-formal-head'} as const;
+    this.db.exec('COMMIT');return audit;
+   }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }catch{return {status:'unavailable',code:'invalid-formal-custody'} as const;}
  }
  /** Explicit private resident projection; reads only committed ground. */
  readDeveloperFormalBerryDiscovery(worldId:string,residentId:string){
