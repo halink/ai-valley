@@ -42,3 +42,17 @@ provider-account attestation. A source revocation invalidates both gates.
 This check does not update the quota ledger, create a request, authorize
 transport, resolve an unknown handoff, or grant publication. Existing
 single-key preparation fixtures do not acquire this capability.
+
+An explicitly opened synthetic-only lane can exercise that boundary on the
+actual offline Formal resident runtime's original quota handle. It requires a
+separate, synthetic-domain account signature; a preparation signature never
+upgrades. Waiting residents and unknown requests veto the weather lane before
+the handoff. A same-file durable source marker, written only after verifying
+both signatures and then checked again immediately before the quota handoff,
+prevents retries of the same source after a new signature, run or fixture-side
+quota registry. The handoff target is compiled-in memory. Failure after the
+source marker conservatively consumes the opportunity without implying it was
+sent; uncertain handoffs retain the quota's hold or unknown record. Completion
+requires an explicit synthetic receipt. This is not a provider call, a live
+account qualification, a durable public yearbook, or protection against an
+out-of-band rollback of all authoritative files.

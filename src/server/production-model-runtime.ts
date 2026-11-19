@@ -23,6 +23,19 @@ interface OfflineResidentCanonicalQuota {
 }
 const taken=new WeakSet<ProductionAccountQuotaRehearsal>();
 const boundResidentJournals=new WeakSet<ProductionModelJournal>();
+interface FormalSyntheticWeatherBinding {
+ readonly store:WorldStore;readonly ownership:ProductionModelAccountOwnership;readonly quota:ProductionAccountQuotaRehearsal;
+ readonly signal:AbortSignal;
+ policy():SharedModelAccountPolicy;
+ running():boolean;
+}
+// Only a factory-created, shared-quota offline bridge is eligible. Neither a
+// runtime-shaped object nor a different account/registry can substitute here.
+const formalSyntheticWeatherBindings=new WeakMap<object,FormalSyntheticWeatherBinding>();
+export function formalSyntheticWeatherBinding(bridge:unknown){
+ return bridge!==null&&typeof bridge==='object'?formalSyntheticWeatherBindings.get(bridge):undefined;
+}
+
 export function createProductionModelOfflineRuntime(input:RuntimeOptions&{sharedQuota?:Readonly<OfflineResidentCanonicalQuota>}){
  const options={...input},attachment=options.sharedQuota;
  if(options.journal.contract.executionKind!=='synthetic-production-candidate'||options.transport.kind!=='synthetic-production-http')
@@ -79,6 +92,7 @@ function createRuntimeBridge(options:RuntimeOptions,reviewed?:ProductionHttpAdmi
  const deadline=reviewed?boundStart+Math.min(maxWallMs,reviewed.pricing.validUntilMs-boundWall,journal.contract.deadlineAtMs-boundWall):null;
  let lastMonotonic=boundStart;
  let runtime:ValleyRuntime|undefined,closed=false,failure:string|null=null;
+ const weatherStop=shared?new AbortController():undefined;
  const executionGuard=()=>{
   if(!reviewed)return;
   if(closed||failure)throw new Error(failure??'model_stopped');
@@ -173,6 +187,7 @@ function createRuntimeBridge(options:RuntimeOptions,reviewed?:ProductionHttpAdmi
    }catch(error){fail(candidate.status().failure??'model_decision_failed');candidate.stop('model_failed');throw error;}
   },{mode:'formal',dayMinutes:20,modelSlots:1,decisionCommitted,observeResidentQuotaWaiting:shared?updateWait:undefined,
    acceptanceLifecycle:{stopping:control=>{
+    weatherStop?.abort();
     if(!updateWait(false))return;
     if(failure||journal.status().failure)return;
     try{journal.beginRuntimeStop(control.reason!,Date.now());}catch(error){fail('runtime_stop_persistence_failed');throw error;}
@@ -205,12 +220,12 @@ function createRuntimeBridge(options:RuntimeOptions,reviewed?:ProductionHttpAdmi
    liveExecutionEnabled:!!reviewed&&boundsValid()&&!closed&&!failure&&!journal.status().failure&&ownedRuntime.acceptanceStopStatus()?.phase==='running',
    providerBudgetEnforced:false as const,pricingBasis:reviewed?'caller-supplied-unverified-record' as const:'synthetic' as const,
    pricingVerifiedBySoftware:false as const,actualProviderCostCny:null,readyForProduction:false as const,acceptancePassed:null});
-  return {runtime:ownedRuntime,status,
+  const bridge={runtime:ownedRuntime,status,
    close(){
     if(closed)return status();
     // Revoke the bridge before cancellation; late replies cannot be parsed or
     // acknowledged. Runtime stop is synchronous but a remote abort is not proof.
-    closed=true;
+    closed=true;weatherStop?.abort();
     try{ownedRuntime.stop();updateWait(false);
      if(controlFailed())fail('runtime_control_failed');
      if(journal.status().pending)fail('unresolved_request_no_retry');
@@ -219,5 +234,10 @@ function createRuntimeBridge(options:RuntimeOptions,reviewed?:ProductionHttpAdmi
     finally{store.commit=original;owners.delete(store);}
     return status();
    }};
+  if(shared&&weatherStop)formalSyntheticWeatherBindings.set(bridge,Object.freeze({store,...shared,signal:weatherStop.signal,
+   policy:()=>structuredClone(shared.policy),
+   running:()=>!closed&&!weatherStop.signal.aborted&&!failure&&!journal.status().failure&&
+    ownedRuntime.acceptanceStopStatus()?.phase==='running'}));
+  return bridge;
  }catch(error){fail('runtime_initialization_failed');candidate.stop('model_failed');store.commit=original;owners.delete(store);throw error;}
 }
