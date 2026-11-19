@@ -7,6 +7,7 @@ import {createHash} from 'node:crypto';
 import {constants,openSync,closeSync,fsyncSync,fstatSync,lstatSync} from 'node:fs';
 import {isAbsolute,resolve,join,dirname} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
+import {SharedModelAccountLedger,type SharedModelAccountPolicy} from './shared-model-account.js';
 import {acquireRuntimeOwnership,type RuntimeOwnership} from './runtime-lock.js';
 export type AccountOwnershipOptions={registryDirectory:string;accountScope:string;runId:string};
 type Registry={db:DatabaseSync;lock:RuntimeOwnership;close:()=>void};
@@ -51,9 +52,67 @@ export interface ProductionModelAccountOwnership{
  /** Release OS resources but deliberately retain unresolved durable reservation. */
  abandon():void;
 }
+type QuotaChild={sealed:()=>boolean;abandon:()=>void};
+const QUOTA_MARKER_SQL='CREATE TABLE account_quota_binding (slot INTEGER PRIMARY KEY CHECK(slot=1), version INTEGER NOT NULL, attachment TEXT NOT NULL)';
+function quotaEnrolled(db:DatabaseSync):string|null{
+ const table=db.prepare("SELECT type,sql FROM sqlite_schema WHERE name='account_quota_binding'").get();
+ if(!table)return null;
+ if(table.type!=='table'||table.sql!==QUOTA_MARKER_SQL)throw Error('model_account_quota_marker_invalid');
+ const rows=db.prepare('SELECT slot,version,attachment FROM account_quota_binding LIMIT 2').all();
+ if(rows.length!==1||rows[0].slot!==1||rows[0].version!==1||typeof rows[0].attachment!=='string'||!/^[0-9a-f]{64}$/.test(rows[0].attachment))throw Error('model_account_quota_marker_invalid');
+ return rows[0].attachment;
+}
+type OwnerState={registryDirectory:string;scope:string;directory:{dev:number;ino:number};assert:()=>void;marker:()=>string|null;enroll:(binding:string)=>void;quota?:QuotaChild;};
+const owners=new WeakMap<ProductionModelAccountOwnership,OwnerState>();
+
+/** Disconnected same-host bridge. This is a cooperating registry's account
+ * scope, not a provider login/billing attestation and not permission to send.
+ * No paths, policy IDs or synthetic provider claims are supplied by the worker.
+ * Only the current branded in-process ownership lease may attach it. */
+export function attachProductionAccountQuotaRehearsal(ownership:ProductionModelAccountOwnership,input:{
+ mode:'disconnected-rehearsal';policy:SharedModelAccountPolicy;create:boolean;now:number;
+}){
+ const state=owners.get(ownership);
+ if(!state||state.quota||input?.mode!=='disconnected-rehearsal'||input.policy?.accountId!==state.scope)throw Error('model_account_quota_binding_invalid');
+ const assert=()=>{
+  state.assert();
+  const d=lstatSync(state.registryDirectory);
+  if(!d.isDirectory()||d.isSymbolicLink()||d.dev!==state.directory.dev||d.ino!==state.directory.ino||
+     d.uid!==process.getuid?.()||(d.mode&0o777)!==0o700)throw Error('model_account_quota_registry_changed');
+ };
+ assert();
+ if(input.create&&state.marker())throw Error('model_account_quota_create_after_enrollment');
+ const name=createHash('sha256').update('siliconflow-shared-quota-v1\0'+state.scope).digest('hex')+'.quota.sqlite';
+ const ledger=new SharedModelAccountLedger(join(state.registryDirectory,name),input.policy,{create:input.create,now:input.now});
+ let sealed=false,closed=false;
+ const current=()=>{assert();if(closed)throw Error('model_account_quota_handle_closed');};
+ const abandon=()=>{if(!closed){closed=true;ledger.close();}};
+ try{current();state.enroll(ledger.offlineFixtureBinding());}catch(e){abandon();throw e;}
+ state.quota={sealed:()=>sealed,abandon};
+ return Object.freeze({
+  kind:'disconnected-production-account-quota' as const,
+  accountScope:state.scope,runId:ownership.runId,
+  reserve(...args:Parameters<SharedModelAccountLedger['reserve']>){current();return ledger.reserve(...args);},
+  setResidentWaiting(...args:Parameters<SharedModelAccountLedger['setResidentWaiting']>){current();return ledger.setResidentWaiting(...args);},
+  markHandoff(...args:Parameters<SharedModelAccountLedger['markHandoff']>){current();return ledger.markHandoff(...args);},
+  cancelProvenUnsent(...args:Parameters<SharedModelAccountLedger['cancelProvenUnsent']>){current();return ledger.cancelProvenUnsent(...args);},
+  confirmCompletion(...args:Parameters<SharedModelAccountLedger['confirmCompletion']>){current();return ledger.confirmCompletion(...args);},
+  summary(at:number){current();return ledger.summary(at);},
+  /** Confirms only this local quota handle is pending free. The existing
+   * supervisor must still separately verify child, world and journal clean. */
+  sealPendingFree(at:number){
+   current();
+   const s=ledger.summary(at);
+   if(s.held||s.unknown||s.waitingResidents)throw Error('model_account_quota_unresolved');
+   ledger.close();closed=true;sealed=true;
+  },
+ });
+}
 export function acquireProductionModelAccountOwnership(options:AccountOwnershipOptions):ProductionModelAccountOwnership{
- const r=openRegistry(options);let closed=false;
+ options={...options};
+ const r=openRegistry(options);let closed=false,enrolled:string|null=null;
  try{
+  enrolled=quotaEnrolled(r.db);
   const row=r.db.prepare('SELECT active_run FROM account_meta').get() as {active_run:string|null};
   if(row.active_run!==null)throw Error('model_account_unresolved_run');
   r.db.exec('BEGIN IMMEDIATE');
@@ -63,12 +122,44 @@ export function acquireProductionModelAccountOwnership(options:AccountOwnershipO
  }catch(e){r.close();throw e;}
  const assertOwned=()=>{if(closed)throw Error('model_account_ownership_closed');r.lock.assertOwned();
   if((r.db.prepare('SELECT active_run FROM account_meta').get() as {active_run:string|null}).active_run!==options.runId)throw Error('model_account_ownership_changed');};
- return {accountScope:options.accountScope,runId:options.runId,assertOwned,
-  closeClean(){assertOwned();r.db.exec('BEGIN IMMEDIATE');try{
+ let state:OwnerState;
+ try{
+  const directory=openSync(dirname(r.lock.database),constants.O_RDONLY|constants.O_DIRECTORY);
+  try{
+   const st=fstatSync(directory);
+   state={registryDirectory:options.registryDirectory,scope:options.accountScope,directory:{dev:st.dev,ino:st.ino},assert:()=>{
+     assertOwned();
+     if(quotaEnrolled(r.db)!==enrolled)throw Error('model_account_quota_marker_changed');
+    },
+    marker:()=>enrolled,
+    enroll(binding){
+     assertOwned();
+     if(quotaEnrolled(r.db)!==enrolled)throw Error('model_account_quota_marker_changed');
+     if(enrolled&&binding!==enrolled)throw Error('model_account_quota_file_binding_mismatch');
+     if(!enrolled){
+      r.db.exec('BEGIN IMMEDIATE');
+      try{r.db.exec(QUOTA_MARKER_SQL);r.db.prepare('INSERT INTO account_quota_binding VALUES (1,1,?)').run(binding);r.db.exec('COMMIT');enrolled=binding;}
+      catch(error){r.db.exec('ROLLBACK');throw error;}
+     }
+    },
+   };
+   quotaEnrolled(r.db);
+  }finally{closeSync(directory);}
+ }catch(error){r.close();throw error;}
+ const ensureQuota=()=>{
+  assertOwned();
+  if(quotaEnrolled(r.db)!==enrolled)throw Error('model_account_quota_marker_changed');
+  if(enrolled&&!state.quota)throw Error('model_account_quota_attachment_required');
+ };
+ const result:ProductionModelAccountOwnership=Object.freeze({accountScope:options.accountScope,runId:options.runId,assertOwned:ensureQuota,
+  closeClean(){ensureQuota();if(state.quota&&!state.quota.sealed())throw Error('model_account_quota_not_sealed');
+   r.db.exec('BEGIN IMMEDIATE');try{
    r.db.prepare("UPDATE account_runs SET resolution='clean-local-completion' WHERE run=?").run(options.runId);
    r.db.exec('UPDATE account_meta SET active_run=NULL; COMMIT');
   }catch(e){r.db.exec('ROLLBACK');throw e;}closed=true;r.close();},
-  abandon(){if(closed)return;closed=true;r.close();}};
+  abandon(){if(closed)return;closed=true;try{state.quota?.abandon();}finally{r.close();}}});
+ owners.set(result,state);
+ return result;
 }
 /** Trusted administrative recovery, never called automatically on restart. This
  * records the caller's externally verified disposition; software cannot prove

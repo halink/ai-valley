@@ -11,6 +11,7 @@ const AgricultureObservation = preload("res://agriculture_observation.gd")
 const PreservationObservation = preload("res://preservation_observation.gd")
 const ValleySpirit = preload("res://valley_spirit.gd")
 const ValleySpiritArchive = preload("res://valley_spirit_archive.gd")
+const ValleySpiritLife = preload("res://valley_spirit_life.gd")
 const SoilObservation = preload("res://soil_observation.gd")
 const GardenObservation = preload("res://garden_observation.gd")
 const MovementFeed = preload("res://completed_movement.gd")
@@ -33,6 +34,8 @@ var meal_observation: Variant
 var valley_spirit_snapshot: Dictionary = {}
 var spirit_archive_context: Dictionary = {}
 var spirit_archive_request: HTTPRequest
+var spirit_life_context: Dictionary = {}
+var spirit_life_request: HTTPRequest
 var relationship_history: Variant
 var selected_resident := ""
 var selected_building := ""
@@ -82,6 +85,7 @@ func _ready() -> void:
 	hud.place_labels_changed.connect(valley.set_place_labels)
 	hud.spirit_archive_requested.connect(_request_spirit_archive)
 	hud.spirit_almanac_requested.connect(_request_spirit_almanac)
+	hud.spirit_life_requested.connect(_request_spirit_life)
 	http = HTTPRequest.new()
 	http.timeout = 8.0
 	http.body_size_limit = 33554432
@@ -107,6 +111,7 @@ func _connect_server(origin: String) -> void:
 	connected = false
 	active_endpoint = url
 	_set_archive_authority({})
+	_set_spirit_life_authority({})
 	mode_text = "等待新的世界快照"
 	movement_feed.reset()
 	resident_movement.reset()
@@ -150,7 +155,10 @@ func _received(result: int, code: int, _headers: PackedStringArray, body: Packed
 	if not Snapshot.validate(parsed).is_empty():
 		_connection_lost("收到无效的世界快照")
 		return
-	if not world.is_empty() and world.id == parsed.world.id and parsed.world.revision < world.revision:
+	var buffered_world: Dictionary = pending_snapshot.get("world", {})
+	var older_than_applied: bool = not world.is_empty() and world.id == parsed.world.id and parsed.world.revision < world.revision
+	var older_than_buffered: bool = not buffered_world.is_empty() and buffered_world.id == parsed.world.id and parsed.world.revision < buffered_world.revision
+	if older_than_applied or older_than_buffered:
 		_connection_lost("收到早于当前画面的快照，正在重试")
 		return
 	if parsed.world.map.width * parsed.world.map.height > 4096 or parsed.world.residents.size() > 64 or parsed.world.get("resources", []).size() > 256 or parsed.world.get("buildings", []).size() > 64:
@@ -158,6 +166,7 @@ func _received(result: int, code: int, _headers: PackedStringArray, body: Packed
 		return
 	if doorway_active:
 		_quarantine_pending_spirit_projection(parsed)
+		_quarantine_pending_spirit_life(parsed)
 		pending_snapshot = parsed
 		return
 	_apply_snapshot(parsed)
@@ -188,6 +197,7 @@ func _apply_snapshot(parsed: Dictionary) -> void:
 	if mode.get("fault") == "unresolved_model_request": source_tag = "保护停表"
 	connected = true
 	_set_archive_authority(ValleySpiritArchive.authority(valley_spirit_snapshot))
+	_set_spirit_life_authority(ValleySpiritLife.context(parsed))
 	if not continuous:
 		notice_until = 0
 		hud.show_feedback("")
@@ -260,6 +270,7 @@ func _connection_lost(reason: String) -> void:
 	var was_connected := connected
 	connected = false
 	_set_archive_authority({})
+	_set_spirit_life_authority({})
 	observation = {}
 	relationship_history = null
 	mode_text = "数据过期 · 当前决策来源未知"
@@ -560,6 +571,50 @@ func _spirit_almanac_received(result: int, code: int, _headers: PackedStringArra
 		display = ValleySpiritArchive.almanac_presentation(JSON.parse_string(body.get_string_from_utf8()), spirit_archive_context)
 	if display.is_empty(): display = "年鉴暂不可读；不保留旧数据。"
 	hud.show_spirit_almanac(true, false, display)
+
+func _quarantine_pending_spirit_life(parsed: Dictionary) -> void:
+	if not ValleySpiritLife.same_authority(spirit_life_context, ValleySpiritLife.context(parsed)):
+		_set_spirit_life_authority({})
+
+func _set_spirit_life_authority(next: Dictionary) -> void:
+	var stable := ValleySpiritLife.same_authority(spirit_life_context, next)
+	spirit_life_context = next
+	if stable: return
+	if spirit_life_request != null:
+		spirit_life_request.cancel_request()
+		spirit_life_request.queue_free()
+		spirit_life_request = null
+	hud.show_spirit_life(not next.is_empty(), false, "")
+
+func _request_spirit_life() -> void:
+	if not connected or spirit_life_context.is_empty() or spirit_life_request != null: return
+	var request := HTTPRequest.new()
+	request.timeout = 6.0
+	request.body_size_limit = 65536
+	request.max_redirects = 0
+	add_child(request)
+	spirit_life_request = request
+	request.request_completed.connect(_spirit_life_received.bind(request, spirit_life_context.duplicate()))
+	hud.show_spirit_life(true, true, "正在查阅生活年鉴…")
+	var endpoint := active_endpoint + "/ai-town/api/valley-spirit/almanac/life/latest?worldId=" + str(spirit_life_context.worldId).uri_encode()
+	if request.request(endpoint) != OK:
+		_spirit_life_received(HTTPRequest.RESULT_CANT_CONNECT, 0, PackedStringArray(), PackedByteArray(), request, spirit_life_context)
+
+func _spirit_life_received(result: int, code: int, _headers: PackedStringArray, body: PackedByteArray, request: HTTPRequest, expected: Dictionary) -> void:
+	if request != spirit_life_request: return
+	spirit_life_request = null
+	request.queue_free()
+	if not connected or not ValleySpiritLife.same_authority(expected, spirit_life_context):
+		return
+	var text := ""
+	if result == HTTPRequest.RESULT_SUCCESS and code == 200:
+		text = ValleySpiritLife.presentation(JSON.parse_string(body.get_string_from_utf8()), spirit_life_context)
+	if text.is_empty():
+		# The attached view denied the latest read or its response was not current.
+		# Do not offer cached data; only a newly received marker can restore access.
+		_set_spirit_life_authority({})
+		return
+	hud.show_spirit_life(true, false, text)
 
 func _update_hud() -> void:
 	hud.show_spirit(ValleySpirit.text(valley_spirit_snapshot, connected))

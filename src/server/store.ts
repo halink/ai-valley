@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 import {readSeasonalLedger,writeSeasonalLedger,type SeasonalLedger} from './seasonal-model-ledger.js';
 import {assertSeasonalKnowledgeAdvance} from '../world/mvp-seasonal-knowledge.js';
 import {rejectMvpClimateForModels} from '../world/mvp-climate-state.js';
@@ -227,7 +228,7 @@ export class WorldStore {
   const assertOwned=()=>{owner.assertOwned();this.assertDeveloperSpiritSeal();};
   assertOwned();
   return Object.freeze({
-   database:owner.database,capacity:Object.freeze({...owner.capacity}),assertOwned,
+   database:owner.database,scopeId:createHash('sha256').update(owner.seal).digest('hex'),capacity:Object.freeze({...owner.capacity}),assertOwned,
    readHead:()=>{assertOwned();return this.readWorld(false,false);},
   });
  }

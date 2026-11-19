@@ -1,3 +1,4 @@
+import {observerSocialAppointmentEvent} from '../shared/social-appointments.js';
 import {VALLEY_VERSION} from '../shared/version.js';
 import {FAST_DAY_MINUTES} from '../world/time.js';
 import {parseHistoryQuery,HistoryQueryError} from './history-query.js';
@@ -69,7 +70,7 @@ export function createObserverServer(runtime:ValleyRuntime,store:WorldStore,root
   if(pathname==='/ai-town/api/health'){json({ok:true,version:VALLEY_VERSION,mode:runtime.world.mode,revision:runtime.world.revision,clockPaused:runtime.world.clock.paused,modelConfigured:runtime.world.metrics.configured,
    ...(productionModelPolicy?{ready:false,modelExecution:productionModelPolicy}:{} ),...(selfHostedStatus?{selfHosted:selfHostedStatus()}:{} )});return;}
   if(pathname==='/ai-town/api/history/page'){
-   try{json({...store.historyPage(runtime.world.id,parseHistoryQuery(url.searchParams)),observedRevision:runtime.world.revision});}catch(error){json({error:error instanceof HistoryQueryError?error.message:'history_unavailable'},error instanceof HistoryQueryError?400:500);}return;
+   try{const page=store.historyPage(runtime.world.id,parseHistoryQuery(url.searchParams));json({...page,events:page.events.map(observerSocialAppointmentEvent),observedRevision:runtime.world.revision});}catch(error){json({error:error instanceof HistoryQueryError?error.message:'history_unavailable'},error instanceof HistoryQueryError?400:500);}return;
   }
   const biographyPath=pathname.match(/^\/ai-town\/api\/people\/([^/]+)\/biography$/);
   if(biographyPath){
@@ -77,11 +78,11 @@ export function createObserverServer(runtime:ValleyRuntime,store:WorldStore,root
    const w=runtime.world,r=w.residents.find(r=>r.id===id);if(!r){json({error:'person_not_found'},404);return;}
    const archive=store.personArchive(w.id,id),history=store.historyPage(w.id,{personId:id,limit:40,populationOnly:true});
    const partners=archive.partners.slice();for(const tie of r.relations.filter(t=>t.partner))if(!partners.some(p=>p.personId===tie.targetId&&p.endedAt===null))partners.push({personId:tie.targetId,kind:tie.partner!,startedAt:null,endedAt:null,sourceEvents:[]});
-   const result:Biography={worldId:w.id,person:{id:r.id,name:r.name,bornAt:r.bornAt,status:r.status,residency:r.residency,deathAt:r.deathAt,deathCause:r.deathCause,deathDetail:r.deathDetail,homeId:r.homeId,parents:[...r.parents],adoptiveParents:[...(r.adoptiveParents??[])],guardianIds:[...r.guardianIds]},...archive,partners,history:{...history,observedRevision:w.revision}};json(result);return;
+   const result:Biography={worldId:w.id,person:{id:r.id,name:r.name,bornAt:r.bornAt,status:r.status,residency:r.residency,deathAt:r.deathAt,deathCause:r.deathCause,deathDetail:r.deathDetail,homeId:r.homeId,parents:[...r.parents],adoptiveParents:[...(r.adoptiveParents??[])],guardianIds:[...r.guardianIds]},...archive,partners,history:{...history,events:history.events.map(observerSocialAppointmentEvent),observedRevision:w.revision}};json(result);return;
   }
   if(pathname==='/ai-town/api/history'){
    const before=Number(url.searchParams.get('before')??Number.MAX_SAFE_INTEGER);if(!Number.isFinite(before)){json({error:'invalid_cursor'},400);return;}
-   json({events:store.history(runtime.world.id,before)});return;
+   json({events:store.history(runtime.world.id,before).map(observerSocialAppointmentEvent)});return;
   }
   if(pathname==='/ai-town/api/events'){
    if(req.method==='HEAD'){res.writeHead(200,eventHeaders);res.end();return;}

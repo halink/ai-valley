@@ -13,6 +13,7 @@ import {adoptMvpAgriculture,agricultureObservation,agricultureReason,plantTarget
 import {CULTIVARS,cultivarKeys,temperatureFactor} from '../shared/mvp-agriculture.js';
 import {adoptMvpSoil,soilObservation} from '../world/mvp-soil.js';
 import {adoptMvpResources,mvpResourceItem} from '../world/mvp-resources.js';
+import {minuteToClimateUs} from '../world/mvp-climate.js';
 import {adoptMvpClimate,validateMvpClimate} from '../world/mvp-climate-state.js';
 import {inheritReceiptHistory} from '../world/receipts.js';
 import {adoptMvpSeeds,isMvpSeedAction} from '../world/mvp-seeds.js';
@@ -343,6 +344,13 @@ export function createMvpSession(options:{world?:World;commit?:(world:World,prev
  };
  return {get world(){return world;},snapshot,advance};
 }
+function currentLifeView(viewer:ValleySpiritLifeViewer|undefined,world:World|undefined):ValleySpiritPublishedLifeView|null{
+ try{
+  if(!viewer||!world||world.mode!=='validation'||Object.hasOwn(world,'simulationOnly'))return null;
+  const view=viewer.latest(world.id);
+  return view&&BigInt(view.range.throughUs)<=BigInt(minuteToClimateUs(world.minute))?view:null;
+ }catch{return null;}
+}
 export function createMvpServer(session:Pick<ReturnType<typeof createMvpSession>,'snapshot'>&Partial<Pick<ReturnType<typeof createMvpSession>,'world'>>,options:{webRoot?:string;valleySpiritSource?:(sourceRef:string)=>unknown;valleySpiritArchive?:ValleySpiritJournal['archive'];valleySpiritReaders?:ValleySpiritPublicReaders;valleySpiritLifeViewer?:ValleySpiritLifeViewer}={}):Server {
  return createServer((req,res)=>{
   res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');
@@ -354,7 +362,7 @@ export function createMvpServer(session:Pick<ReturnType<typeof createMvpSession>
    try{
     const params=new URL(req.url,'http://localhost').searchParams,worldId=params.get('worldId');
     if(options.valleySpiritLifeViewer&&[...params.keys()].length===1&&worldId&&session.world?.id===worldId)
-     data=options.valleySpiritLifeViewer.latest(worldId);
+     data=currentLifeView(options.valleySpiritLifeViewer,session.world);
    }catch{/* fail closed */}
    res.writeHead(data?200:404,{'Content-Type':'application/json; charset=utf-8'});
    res.end(JSON.stringify(data??{status:'unavailable'}));return;
@@ -397,6 +405,13 @@ export function createMvpServer(session:Pick<ReturnType<typeof createMvpSession>
    res.writeHead(source?200:404,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(source??{status:'unavailable'}));return;
   }
   if(req.url!=='/ai-town/api/world'){res.writeHead(404);res.end('Not found');return;}
-  res.writeHead(200,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(session.snapshot()));
+  const snapshot=session.snapshot(),world=session.world;
+  // An opt-in fixture can advertise the exact current section without exposing
+  // text or sources. Ordinary server starts omit this marker entirely.
+  const life=world&&world.id===snapshot.world.id&&world.revision===snapshot.world.revision&&world.minute===snapshot.world.minute
+   ?currentLifeView(options.valleySpiritLifeViewer,world):null;
+  const body=life?{...snapshot,valleySpiritLifeYearbook:{schemaVersion:1,status:'ready',generatedBy:life.generatedBy,worldId:life.worldId,
+   worldRevision:snapshot.world.revision,atMinute:snapshot.world.minute,sectionId:life.sectionId}}:snapshot;
+  res.writeHead(200,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(body));
  });
 }

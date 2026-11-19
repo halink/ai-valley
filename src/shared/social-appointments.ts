@@ -1,4 +1,4 @@
-import type {Action,Vec} from './types.js';
+import type {Action,Vec,WorldEvent} from './types.js';
 /** A two-adult, once-only public rendezvous, separate from a live group discussion. */
 export type SocialAppointmentAction=
  | {type:'socialAppointment';operation:'offer';personId:string;buildingId:string;startsIn:number;windowMinutes:number;receiptId:string}
@@ -13,4 +13,24 @@ export interface SocialAppointment {
  known:Record<string,AppointmentKnowledge>;visits:AppointmentVisit[];metAt:number|null;eventIds:string[];
 }
 export interface SocialAppointments {nextSerial:number;records:SocialAppointment[];}
+/** Private engine receipt attached only to a successful formal attend terminal
+ * event. The accepted event pins the immutable rendezvous terms revision. */
+export interface SocialAppointmentArrivalFact {
+ readonly schemaVersion:1;
+ readonly worldId:string;
+ readonly appointmentId:string;
+ readonly offeredEventId:string;
+ readonly acceptedTermsEventId:string;
+ readonly residentId:string;
+ readonly planId:string;
+ readonly executionStartedAt:number;
+ readonly arrivedAt:number;
+ readonly terminalEventId:string;
+}
+/** Keep actual plan and consent provenance out of ordinary observer feeds. */
+export function observerSocialAppointmentEvent(event:WorldEvent):WorldEvent {
+ if(!Object.hasOwn(event,'socialAppointmentArrival'))return event;
+ const {socialAppointmentArrival:_internal,...publicEvent}=event;
+ return publicEvent;
+}
 export const isSocialAppointmentStop=(a:Action):a is SocialAppointmentAction & {operation:'decline'|'withdraw'}=>a.type==='socialAppointment'&&(a.operation==='decline'||a.operation==='withdraw');

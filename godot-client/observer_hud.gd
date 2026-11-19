@@ -13,6 +13,7 @@ signal reconnect_requested(origin: String)
 signal place_labels_changed(enabled: bool)
 signal spirit_archive_requested
 signal spirit_almanac_requested
+signal spirit_life_requested
 
 const Art = preload("res://valley_interface_style.gd")
 const ValleyJournal = preload("res://valley_journal.gd")
@@ -96,6 +97,8 @@ var spirit_text: Label
 var spirit_archive_button: Button
 var spirit_almanac_button: Button
 var spirit_almanac_text: Label
+var spirit_life_button: Button
+var spirit_life_text: Label
 var spirit_archive_text: Label
 var people_list: VBoxContainer
 var places_list: VBoxContainer
@@ -348,6 +351,12 @@ func _build_drawer() -> void:
 	spirit_almanac_text = _label(panes.spirit, "", 15, Art.INK, true)
 	spirit_almanac_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	spirit_almanac_text.hide()
+	spirit_life_button = _button(panes.spirit, "生活年鉴（离线）", func(): spirit_life_requested.emit(), "PaperButton", 16)
+	spirit_life_button.hide()
+	spirit_life_text = _label(panes.spirit, "", 15, Art.INK)
+	spirit_life_text.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
+	spirit_life_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	spirit_life_text.hide()
 	drawer.hide()
 
 func _build_resident_pane(pane: VBoxContainer) -> void:
@@ -812,3 +821,13 @@ func show_spirit_almanac(available: bool, busy: bool, text: String) -> void:
 		spirit_almanac_text.text = text
 		spirit_almanac_text.visible = not text.is_empty()
 		_queue_layout()
+
+
+func show_spirit_life(available: bool, busy: bool, text: String) -> void:
+	var text_visible := not text.is_empty()
+	var layout_changed := spirit_life_button.visible != available or spirit_life_text.text != text or spirit_life_text.visible != text_visible
+	spirit_life_button.visible = available
+	spirit_life_button.disabled = busy
+	spirit_life_text.text = text
+	spirit_life_text.visible = text_visible
+	if layout_changed: _queue_layout()

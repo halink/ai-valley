@@ -16,7 +16,7 @@ import {procurementCapable,publicCargoDeliveryReason} from './public-food-procur
 import {initializeSocialAppointments,advanceSocialAppointments,socialAppointmentReason,socialAppointmentTarget,socialAppointmentTravelReason,socialAppointmentWork,completeSocialAppointment,socialAppointmentReceiptId,recordSocialAppointmentFailure} from './social-appointments.js';
 import {isSocialAppointmentStop} from '../shared/social-appointments.js';
 import {observeFoodSources,foodSourceShareReason,foodSourceShareTarget,completeFoodSourceShare,foodSourceShareWork,foodSourceShareReceiptId} from './food-source-sharing.js';
-import {readSpeechTone,readSpeechText} from '../shared/speech-tone.js';
+import {captureAddressedSpeech,completeAddressedSpeech,type AddressedSpeechObservation} from './addressed-speech.js';
 import {barterTerms,sameBarterTerms} from '../shared/barter.js';
 import {barterActionReason} from './barter.js';
 import {canSeeOutdoorPoint} from './outdoor-observation.js';
@@ -498,17 +498,7 @@ function completeAtomic(world:World,r:Resident,a:Action,definition:string,elapse
  if(a.type==='build'){
   const valid=buildAllowed(world,r,a,definition);if(!valid.ok||!valid.building)return valid.error??'无法建造';consume(r.inventory,def.cost??{});world.buildings.push(valid.building);r.knownBuildings.push(valid.building.id);r.skills.building+=0.1;record(`${r.name}用自己的材料完成了${valid.building.name}。`,'construction');return null;
  }
- if(a.type==='talk'){
-  const target=world.residents.find(v=>v.id===a.targetId);if(!target||!canContactSocialTarget(world,r,target)||!r.canExpress)return '对方已经不在能够交谈的位置';
-  const previous=[...world.events].reverse().find(e=>e.kind==='conversation'&&e.conversationId?.startsWith('conversation-')&&(e.roomId??null)===r.inside&&e.actors.includes(r.id)&&e.actors.includes(target.id)&&world.minute-e.at<45&&(r.inside?!!e.roomAt&&!!r.roomAt&&distance(e.roomAt,r.roomAt)<5:distance(e.place,r.at)<5));
-  const conversationId=previous?.conversationId??`conversation-${world.id}-${world.revision+1}`;
-  const speechTone=readSpeechTone(a.tone),speechText=readSpeechText(a.text.slice(0,320));
-  const event=emitEvent(world,{kind:'conversation',actors:[r.id,target.id],place:{...r.at},conversationId,...(speechTone?{speechTone}:{}),...(speechText!==undefined?{speechText}:{}),text:`${r.name}：${a.text.slice(0,320)}`});
-  // Hearing a chosen tone is a fact; the listener decides its personal meaning separately.
-  for(const [from,to] of [[r,target],[target,r]]){let relation=from.relations.find(v=>v.targetId===to.id);if(!relation){relation={targetId:to.id,affection:0,trust:0,conflict:0,evidence:[]};from.relations.push(relation);}relation.evidence.push(event.id);if(relation.evidence.length>80)relation.evidence=relation.evidence.slice(-80);}
-  if(!target.plan&&!target.activity)target.decisionDue=Math.min(target.decisionDue,world.minute);
-  return null;
- }
+ if(a.type==='talk')return completeAddressedSpeech(world,r,a);
  if(a.type==='offer'){
   const error=barterActionReason(world,r,a,elapsed);if(error)return error;
   const target=world.residents.find(v=>v.id===a.targetId);if(!target||!canContactSocialTarget(world,r,target))return '须另一位在场的实际当事人，不能与自己虚构交换';
@@ -769,6 +759,12 @@ export function stepWorld(world:World,minutes:number,options:{actionFailures?:St
 /** Optional observer-only receipts; simulation and saved state are unchanged. */
 export function stepWorldWithFoodEvidence(world:World,minutes:number,options:Parameters<typeof stepWorld>[2]={}):DirectEatingObservation {
  return captureDirectEating(world,()=>stepWorld(world,minutes,options));
+}
+
+/** Fresh private delivery evidence for this exact draft step. No read of old
+ * events/memories and no implicit persistence or sharing with observers. */
+export function stepWorldWithAddressedSpeech(world:World,minutes:number,options:Parameters<typeof stepWorld>[2]={}):AddressedSpeechObservation {
+ return captureAddressedSpeech(world,()=>stepWorld(world,minutes,options));
 }
 
 /** Read-only forecast of actions actually present in the resident's normal menu.

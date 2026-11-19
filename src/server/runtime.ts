@@ -1,3 +1,4 @@
+import {observerSocialAppointmentEvent} from '../shared/social-appointments.js';
 import {rejectMvpClimateForModels} from '../world/mvp-climate-state.js';
 import {mvpObservation} from './mvp-observation.js';
 import {forkCompletedMovement} from '../world/completed-movement.js';
@@ -219,7 +220,7 @@ export class ValleyRuntime {
  mvpObservation(){return mvpObservation(this.world,this.unresolvedRequestIds(),this.providers.map(p=>p.blockedUntil),this.selfHostedUnresolved());}
  snapshot():Snapshot{
   const {usageWindow:_usageWindow,...metrics}=this.world.metrics;
-  const publicWorld={...this.world,metrics,events:this.world.events.slice(-180),processed:[]};
+  const publicWorld={...this.world,metrics,events:this.world.events.slice(-180).map(observerSocialAppointmentEvent),processed:[]};
   const active=this.world.mode==='formal'
    ? [this.world.scenario==='frontier'?'9 位开拓居民、四季与代际生活；来访、迁居和成家各由本人决定':'创始居民、四季与代际生活；真实迁入、成家、离开与死亡',...(this.world.frontierHazards?[this.world.frontierHazards.weather?.enabled?'野兽与天气灾害可造成实际险情，居民自行退避、入屋或修护':'野兽可造成实际险情；新天气预警未启用，既有险情与修护继续保留']:[]),'实际到场的课堂、工作、诊疗、托育、养老与公共服务','农田、牧场、有限鱼群、沿岸休息、温室与原料加工','独立议价、私营雇佣、公共财政、外贸、陆运与船程','分阶段建造、兼容改版、道路桥梁、码头与墓园','共同生活财产、借贷、遗产原址保全与纪念','按会话阅读对话，查阅完整年表、人物生平和关系图','只读观察，无观众时仍处理居民的模型决定'] : capabilities.active;
   const pending=this.world.mode==='formal'

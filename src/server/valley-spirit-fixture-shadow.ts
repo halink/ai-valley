@@ -1,18 +1,26 @@
 import type {World} from '../shared/types.js';
 import {projectMvpSpiritActiveGround} from '../world/mvp-spirit-effects.js';
 import {WorldStore} from './store.js';
-import {isEnabledValleySpiritFruitFallPolicy,valleySpiritFruitFallOpportunityId} from './valley-spirit-proposal.js';
+import {isEnabledValleySpiritFruitFallPolicy,preflightValleySpiritFruitFall,valleySpiritFruitFallOpportunityId} from './valley-spirit-proposal.js';
 import {ValleySpiritJournal,publicWeatherProjection} from './valley-spirit.js';
 import {SqliteValleySpiritPermissions} from './valley-spirit-permissions.js';
 import {prepareValleySpiritShadowOffers,type ValleySpiritShadowManifest,type ValleySpiritShadowOffers} from './valley-spirit-shadow-offers.js';
 import {ValleySpiritShadowQueue} from './valley-spirit-shadow-queue.js';
 import {ValleySpiritShadowWorkflow} from './valley-spirit-shadow-workflow.js';
+import {
+ developerMvpFruitFallAssessmentDigest,readDeveloperMvpFruitFallVerificationPolicy,
+ verifyDeveloperMvpFruitFallSignedApproval,type DeveloperMvpFruitFallVerificationPolicy,
+} from './valley-spirit-fixture-signed-approval.js';
+import {
+ reconcileMvpFruitFallAttachmentFixture,runMvpFruitFallAttachmentFixture,type MvpFruitFallFixtureApproval,
+} from './valley-spirit-fruit-fall-fixture.js';
 
 export interface DeveloperMvpSpiritShadowOptions {
  readonly scope:'sealed-developer-shadow-only';
  readonly enabled:boolean;
  readonly manifest:ValleySpiritShadowManifest;
  readonly maxProposalCount:number;
+ readonly g2?:DeveloperMvpFruitFallVerificationPolicy;
 }
 const unavailable={status:'unavailable'} as const;
 const off={status:'disabled'} as const;
@@ -29,10 +37,13 @@ export function openDeveloperMvpSpiritShadow(store:WorldStore,options?:Developer
  if(options?.enabled!==true)return off;
  let permissions:SqliteValleySpiritPermissions|undefined;
  try{
-  if(!exact(options,['scope','enabled','manifest','maxProposalCount'])||
+  const fields=['scope','enabled','manifest','maxProposalCount',...(Object.hasOwn(options,'g2')?['g2']:[])];
+  if(!exact(options,fields)||
      options.scope!=='sealed-developer-shadow-only'||!Number.isSafeInteger(options.maxProposalCount)||
      options.maxProposalCount<1||options.maxProposalCount>256)return unavailable;
   const config=structuredClone(options),manifest=config.manifest;
+  const verifier=config.g2===undefined?null:readDeveloperMvpFruitFallVerificationPolicy(config.g2);
+  if(config.g2!==undefined&&!verifier)return unavailable;
   if(!(store instanceof WorldStore)||!manifest||!isEnabledValleySpiritFruitFallPolicy(manifest.policy))return unavailable;
   const port=WorldStore.prototype.developerMvpSpiritShadowReadPort.call(store);
   if(!port||!sameCapacity(manifest.capacity,port.capacity))return unavailable;
@@ -102,6 +113,67 @@ export function openDeveloperMvpSpiritShadow(store:WorldStore,options?:Developer
    const now=captureOwned();
    return now?{worldId:now.world.id,nowMicroMinute:now.nowMicroMinute}:null;
   });
+  const currentGrant=(proposal:{sourceRefs:readonly string[];permissionVersion:number})=>{
+   const packet=journal.publicNarrationInput(proposal.sourceRefs);
+   return !!packet&&packet.worldId===manifest.worldId&&packet.permissionVersion===proposal.permissionVersion&&
+    journal.isCurrentPublicInput(packet);
+  };
+  /** Reconstruct the exact signed/advisory basis, using current private
+   * sources. No caller supplied proposal or raw writable world is accepted. */
+  const signedEntry=(value:unknown)=>{
+   if(closed||!verifier)return null;
+   const terms=verifyDeveloperMvpFruitFallSignedApproval(value,verifier.key);
+   if(!terms||terms.fixtureScopeId!==port.scopeId||terms.maxCommittedEffects>verifier.maxCommittedEffects)return null;
+   const row=queue.get(terms.proposalId),head=captureOwned();
+   if(row.status!=='found'||row.entry.assessment.status!=='validated_shadow'||!head)return null;
+   const {proposal,policy}=row.entry;
+   if(developerMvpFruitFallAssessmentDigest(row.entry)!==terms.assessmentDigest||
+      terms.firstMicroMinute<row.entry.assessment.checkedAtMicroMinute||
+      terms.firstMicroMinute<proposal.validFromMicroMinute||terms.expiresMicroMinute>proposal.validUntilMicroMinute||
+      head.nowMicroMinute<terms.firstMicroMinute||head.nowMicroMinute>=terms.expiresMicroMinute||
+      policy.version!==manifest.policy.version||policy.shadowEnabled!==manifest.policy.shadowEnabled||
+      policy.maxAgeGameMinutes!==manifest.policy.maxAgeGameMinutes||
+      policy.minimumCooldownGameMinutes!==manifest.policy.minimumCooldownGameMinutes||!currentGrant(proposal))return null;
+   return {terms,proposal,policy,head};
+  };
+  const applySigned=(value:unknown)=>{
+   if(!verifier||closed)return off;
+   try{
+    const pinned=structuredClone(value),basis=signedEntry(pinned);
+    if(!basis)return unavailable;
+    const {terms,proposal,policy,head}=basis;
+    const prior=head.world.mvpClimate!.spiritEffects!.applied.find(e=>e.receipt.opportunityId===proposal.opportunityId);
+    if(prior){
+     if(prior.receipt.proposalId!==proposal.proposalId||prior.receipt.approvalId!==terms.approvalId)return unavailable;
+     return reconcileMvpFruitFallAttachmentFixture(store,proposal);
+    }
+    const candidate=manifest.sites.find(site=>{
+     if(`ground:${site.target.x}:${site.target.y}`!==proposal.targetId)return false;
+     const source=head.world.resources.find(r=>r.id===site.sourceId);
+     return !!source&&`mvp-fruit:${source.id}:${source.at.x}:${source.at.y}`===proposal.sourceResourceInstanceId;
+    });
+    if(!candidate)return unavailable;
+    const approval:MvpFruitFallFixtureApproval={
+     scope:'isolated-sqlite-fruit-fall-fixture',enabled:true,policy,pinnedOption:{
+      worldId:proposal.worldId,menuVersion:proposal.menuVersion,inputSnapshotId:proposal.inputSnapshotId,
+      permissionVersion:proposal.permissionVersion,sourceRefs:proposal.sourceRefs,rainEventId:proposal.rainEventId,
+      sourceResourceInstanceId:proposal.sourceResourceInstanceId,targetId:proposal.targetId,quantity:proposal.quantity,
+      validFromMicroMinute:proposal.validFromMicroMinute,validUntilMicroMinute:proposal.validUntilMicroMinute,
+     },schedule:{type:'fruit_fall',worldId:proposal.worldId,proposalId:proposal.proposalId,opportunityId:proposal.opportunityId,
+      approvalId:terms.approvalId,firstMicroMinute:terms.firstMicroMinute,expiresMicroMinute:terms.expiresMicroMinute},
+     currentPermissionVersion:proposal.permissionVersion,sourceResourceId:candidate.sourceId,target:{...candidate.target},
+     maxCommittedEffects:terms.maxCommittedEffects,
+    };
+    return runMvpFruitFallAttachmentFixture(store,proposal,approval,undefined,current=>{
+     const fresh=signedEntry(pinned);
+     if(!fresh||fresh.head.world.id!==current.id||fresh.head.world.revision!==current.revision)return false;
+     const ready=capture();
+     if(ready.status!=='ready')return false;
+     const evidence=ready.reader.readFruitFallEvidence(proposal);
+     return preflightValleySpiritFruitFall(proposal,evidence,policy).status==='validated_shadow';
+    });
+   }catch{return unavailable;}
+  };
   return {
    status:'ready' as const,
    preview:()=>{const used=queue.countForQuota(manifest.worldId);return used!==null&&used<config.maxProposalCount?workflow.preview():null;},
@@ -110,6 +182,16 @@ export function openDeveloperMvpSpiritShadow(store:WorldStore,options?:Developer
    assess:(id:string)=>workflow.assess(id),
    expire:(id:string)=>workflow.expire(id),
    sweepPending:()=>workflow.sweepPending(),
+   approvalBasis(id:string){
+    if(!verifier||closed)return null;
+    try{
+     const row=queue.get(id);
+     if(row.status!=='found'||!currentGrant(row.entry.proposal))return null;
+     const assessmentDigest=developerMvpFruitFallAssessmentDigest(row.entry);
+     return assessmentDigest?{type:'fruit_fall' as const,fixtureScopeId:port.scopeId,proposalId:id,assessmentDigest}:null;
+    }catch{return null;}
+   },
+   applySigned,
    close(){if(!closed){closed=true;db.close();}},
   };
  }catch{

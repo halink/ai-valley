@@ -133,9 +133,22 @@ export function completeSocialAppointment(w:World,r:Resident,a:SocialAppointment
  const c=records(w).find(c=>c.id===a.appointmentId)!;
  if(a.operation==='accept'){c.acceptedAt=w.minute;c.status='accepted';notice(w,c,r,'accepted',`${r.name}当面独立接受日常约见${c.id}：${c.placeName}，${c.start}至${c.end}分钟。未开始赴约，不打断任何人的生活安排。`,'social-appointment/accept@1');return null;}
  if(a.operation==='attend'){
+  const activity=r.activity!;
+  // Appointment terms are immutable in v1; the verified acceptance event,
+  // not the later mutable status of the record, is their consent revision.
+  const offered=w.events.find(e=>c.eventIds.includes(e.id)&&e.audit?.rule==='social-appointment/offer@1');
+  const accepted=w.events.find(e=>c.eventIds.includes(e.id)&&e.audit?.rule==='social-appointment/accept@1');
+  // Missing disclosure evidence must not change the already-validated normal
+  // attendance. Older in-flight state and previews may lack a plan receipt.
+  const canCertify=!Object.hasOwn(w,'simulationOnly')&&!!activity.planId&&r.plan?.id===activity.planId&&
+   r.plan.actorId===r.id&&hasReceipt(w,'plan:'+activity.planId)&&
+   Number.isFinite(activity.appointmentStartedAt)&&activity.appointmentStartedAt!<=work.from+1e-7;
   if(!visit(c,r.id))c.visits.push({personId:r.id,arrivedAt:w.minute,leftAt:null,waitedMinutes:0});
   const other=person(w,r.id===c.proposerId?c.personId:c.proposerId),seen=!!other&&atSite(c,other)&&contact(w,r,other);
-  event(w,c,r,`${r.name}实际走到日常约见${c.id}的${c.placeName}，${w.minute<c.start?'尚未到约定开始时刻':'已在原约见窗口内'}；此刻${seen?'在这里见到原当事人':'在这里没有见到原当事人，缺席原因未知'}。等候、交谈或离开仍须本人决定。`,[r.id]);
+  const terminal=event(w,c,r,`${r.name}实际走到日常约见${c.id}的${c.placeName}，${w.minute<c.start?'尚未到约定开始时刻':'已在原约见窗口内'}；此刻${seen?'在这里见到原当事人':'在这里没有见到原当事人，缺席原因未知'}。等候、交谈或离开仍须本人决定。`,[r.id]);
+  if(canCertify&&offered&&accepted)terminal.socialAppointmentArrival={schemaVersion:1,worldId:w.id,appointmentId:c.id,offeredEventId:offered.id,
+   acceptedTermsEventId:accepted.id,residentId:r.id,planId:activity.planId,executionStartedAt:activity.appointmentStartedAt!,
+   arrivedAt:w.minute,terminalEventId:terminal.id};
  }else event(w,c,r,`${r.name}在日常约见${c.id}的原地点实际等候${work.minutes}分钟；这不说明另一方在远处发生了什么。`,[r.id]);
  return null;
 }

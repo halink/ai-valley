@@ -86,6 +86,7 @@ function mirrorOwnReceipt(execution:ValleySpiritFruitFallExecution|null,mirror?:
 /** No adoption, read, or write when approval is omitted or explicitly off. */
 export function runMvpFruitFallAttachmentFixture(
  store:WorldStore,proposal:ValleySpiritFruitFallProposal,approval?:MvpFruitFallFixtureApproval,mirror?:MvpFruitFallFixtureMirror,
+ requireCurrent?:(head:World)=>boolean,
 ):MvpFruitFallFixtureResult {
  if(!approval||approval.enabled!==true)return mirrorOwnReceipt({status:'disabled'},mirror);
  let approved:MvpFruitFallFixtureApproval;
@@ -94,6 +95,7 @@ export function runMvpFruitFallAttachmentFixture(
  type CommitResult=ReturnType<ValleySpiritFruitFallAuthority['commitOnce']>;
  const authority:ValleySpiritFruitFallAuthority={...reader(store),commitOnce(effectId,plan){
   return store.runMvpSpiritEffectFixture<CommitResult>(proposal.worldId,(current,capacity)=>{
+   if(requireCurrent&&!requireCurrent(current))return {result:{status:'rejected',reason:'revalidation'}};
    const state=current.mvpClimate!.spiritEffects!;
    if(state.applied.some(entry=>entry.receipt.effectId===effectId))return {result:{status:'recorded'}};
    if(current.clock.paused)return {result:{status:'rejected',reason:'schedule'}};

@@ -50,3 +50,11 @@ uses disposable synthetic registries and subprocesses. The initial suite covers
 live contention, clean release/run-ID reuse rejection, SIGKILL recovery refusal,
 explicit disposition, unrelated scopes, and canonical/symlink path rejection.
 See the review document for independent findings and final verification scope.
+
+## Canonical quota binding rehearsal
+
+A separate opt-in bridge attaches the durable shared resident/yearbook quota to the original in-process account ownership object. It refuses copied handles, mismatched account scopes, caller-supplied quota paths, and a moved canonical registry. The quota file derives from the same canonical registry/scope as the process reservation. After enrollment the registry requires an attached quota handle even on later runs; an old launcher cannot pass its normal ownership check without it.
+
+The handle cannot certify a clean local release until resident waiters, reservations, and unknown handoffs in its own durable file are clear. That check is additional to the supervisor's independently checked child termination and world/journal completion; neither one attests actual account identity, bill, or remote request. Clearing an unresolved process record explicitly does not erase quota uncertainty, and reopening cannot recreate a missing previously allocated quota file or substitute a copied file with the same quota/policy. Authorized backup migration needs an explicit recovery design; inode pinning is not an authenticated cross-host identity. No default callers attach the handle, and the guarded supervisor/provider dispatch is not wired to it.
+
+Rehearsal-only, isolated local unit evidence: forged and mismatched handles refused; shared resident priority and completed metering; canonical owner lifecycle; pending quota blocked clean release; across reopen and process-level reconciliation, prior unresolved quota remains and legacy path cannot bypass enrollment. No real account, credential, transport or provider call.
