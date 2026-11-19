@@ -1,5 +1,6 @@
 import {createHash} from 'node:crypto';
 import {openPrivateNativeWeatherPacketReaderOnOwner} from './valley-spirit-native-weather-packet.js';
+import {openPrivateWeatherRehearsalStore} from './valley-spirit-private-weather-store.js';
 import {openDisconnectedWeatherUseGrant} from './valley-spirit-weather-use-grant.js';
 import {isProductionAccountQuotaRehearsal,type ProductionAccountQuotaRehearsal} from './production-model-account-ownership.js';
 import type {DeveloperMvpSpiritFixtureOwner} from './valley-spirit-fixture-files.js';
@@ -36,7 +37,8 @@ export function createDisconnectedWeatherMemory():MemoryTransport {
 /** Explicit standalone rehearsal only. Resident candidate may share this exact
  * branded quota object; this does not attach either lane to a production run. */
 export function openDisconnectedWeatherRehearsal(owner:DeveloperMvpSpiritFixtureOwner,
- quota:ProductionAccountQuotaRehearsal,worldId:string,policy:SharedModelAccountPolicy,transport:MemoryTransport){
+ quota:ProductionAccountQuotaRehearsal,worldId:string,policy:SharedModelAccountPolicy,transport:MemoryTransport,options?:Readonly<{storage:'durable-private'}>){
+ if(options!==undefined&&(options.storage!=='durable-private'||Object.keys(options).length!==1))throw Error('private_weather_store_option');
  const state=memory.get(transport);
  if(!state||state.attached||!isProductionAccountQuotaRehearsal(quota))
   throw Error('disconnected_weather_rehearsal_capability');
@@ -44,10 +46,13 @@ export function openDisconnectedWeatherRehearsal(owner:DeveloperMvpSpiritFixture
  let reader:ReturnType<typeof openPrivateNativeWeatherPacketReaderOnOwner>;
  try{reader=openPrivateNativeWeatherPacketReaderOnOwner(owner,worldId);}
  catch(e){grant.close();throw e;}
+ let durable:ReturnType<typeof openPrivateWeatherRehearsalStore>|undefined;
+ try{if(options)durable=openPrivateWeatherRehearsalStore(owner,grant.context);}
+ catch(e){try{reader.close();}finally{grant.close();}throw e;}
  state.attached=true;
  let closed=false,active=false,uncertain=false,abort:(()=>void)|undefined;
  let sandbox:ValleySpiritAlmanacEntry[]=[];
- const almanac=new ValleySpiritAlmanac({
+ const almanac=new ValleySpiritAlmanac(durable??{
   read:()=>structuredClone(sandbox),
   replace(previous,next){
    if(next.length>MAX_CALLS||!validateValleySpiritAlmanacEntries(next)||
@@ -116,7 +121,8 @@ export function openDisconnectedWeatherRehearsal(owner:DeveloperMvpSpiritFixture
   context:grant.context,
   recordGrant:grant.record,
   async rehearse(range:Range):Promise<Outcome>{
-   if(closed||active||uncertain)return 'proven-unsent';
+   // A durable rehearsal must stage all sends through its edition CAS.
+   if(durable||closed||active||uncertain)return 'proven-unsent';
    try{
     const selection=structuredClone(range),packet=reader.packet(selection);
     if(!packet)return 'proven-unsent';
@@ -152,6 +158,6 @@ export function openDisconnectedWeatherRehearsal(owner:DeveloperMvpSpiritFixture
   editionStatus(range:Pick<Range,'fromMinute'|'throughMinute'>){
    return closed?{status:'unavailable' as const}:almanac.schedulingState({...range,worldId});
   },
-  close(){if(!closed){closed=true;abort?.();try{reader.close();}finally{grant.close();}}}
+  close(){if(!closed){closed=true;abort?.();try{reader.close();}finally{try{grant.close();}finally{durable?.close();}}}}
  });
 }

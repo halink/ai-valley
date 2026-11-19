@@ -149,3 +149,13 @@ The public weather epoch and exact source projection are rechecked after the
 response. A positively canceled pre-handoff hold can be marked unsent; lost
 post-handoff outcomes stay unknown in the canonical quota ledger. No publish
 or private reading of generated prose is attached to this rehearsal.
+
+An explicit `storage: 'durable-private'` rehearsal uses a separate bounded SQLite
+CAS namespace on the sealed developer world, bound to the disconnected grant's
+fixture/world/account/run/policy context. It accepts only canonical synthetic
+intent, unknown, grounded, or discarded entries and legal transitions. It
+exposes only existing edition status, not rendered drafts or publication. In
+durable mode all sending passes through edition staging; ordinary in-memory
+rehearsal remains the default. Restart does not retry unfinished or grounded
+entries, or reconstruct completion when the separate quota database settled
+before the edition transaction. No ordinary/public almanac table is affected.
