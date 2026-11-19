@@ -35,7 +35,7 @@ const MAX_STATE_BYTES=256*1024*1024;
 /** Validate only the compatibility envelope, not every game's domain rule. */
 export function assertWorldCompatibility(value:unknown,allowMvpSpiritEffectFixture=false):asserts value is Record<string,unknown> {
  if(!record(value))fail('save_invalid_world');
- if(Array.isArray(value.events)&&value.events.some(e=>record(e)&&(owns(e,'mvpAgedFruitBirth')||owns(e,'mvpAgedFruitExpiry')||owns(e,'mvpAgedFruitPickup'))))fail('save_sealed_aged_birth_requires_private_archive');
+ if(Array.isArray(value.events)&&value.events.some(e=>record(e)&&(owns(e,'mvpAgedFruitBirth')||owns(e,'mvpAgedFruitExpiry')||owns(e,'mvpAgedFruitPickup')||owns(e,'mvpAgedHeldFruitExpiry'))))fail('save_sealed_aged_birth_requires_private_archive');
  // Reject presence, not a recognized version/truthy value. No upgrade escape.
  if(owns(value,'simulationOnly'))fail('save_simulation_only');
  if(owns(value,'mvpSeasonalModelVersion')&&(value.mvpSeasonalModelVersion!==1||value.mode!=='validation'))fail('save_seasonal_model_schema');
