@@ -77,6 +77,9 @@ export function syntheticValleySpiritAlmanacAdmission(reserve:ValleySpiritAlmana
  const admission=Object.freeze({reserve});
  OFFLINE_ADMISSIONS.add(admission);return admission;
 }
+/** Internal identity sentinel for compiled-in synthetic reservations only.
+ * Unknown or failed cancellation must throw instead, preserving sent-unknown. */
+export const syntheticAlmanacProvenUnsent=Symbol('synthetic-almanac-proven-unsent');
 function originOf(admission:ValleySpiritAlmanacAdmission):ValleySpiritAlmanacOrigin {
  return {schemaVersion:ORIGIN_SCHEMA,kind:OFFLINE_ADMISSIONS.has(admission)?'offline-synthetic':'unverified-admission'};
 }
@@ -252,6 +255,10 @@ export class ValleySpiritAlmanac {
     }
     started=true;
     const response=await reservation.send(frozenPacket(packet),()=>permit(packet,this.authority));
+    if(response===syntheticAlmanacProvenUnsent&&OFFLINE_ADMISSIONS.has(admission)){
+     this.transition(entryId,'sent-unknown','discarded',null,'not-sent');
+     return null;
+    }
     if(!permit(packet,this.authority)){
      this.transition(entryId,'sent-unknown','discarded',null,'permission');
      return null;

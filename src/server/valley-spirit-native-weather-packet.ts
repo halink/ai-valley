@@ -70,6 +70,7 @@ export function openPrivateNativeWeatherPacketReaderOnOwner(owner:DeveloperMvpSp
    }
   };
   return Object.freeze({
+   almanacAuthority:Object.freeze(authority),
    /** Only the canonical allowlisted packet escapes this reader. */
    packet(range:Omit<ValleySpiritAlmanacRange,'worldId'>){
     const p=createValleySpiritAlmanacPacket({...range,worldId},authority);

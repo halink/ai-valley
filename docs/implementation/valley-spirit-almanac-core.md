@@ -139,3 +139,13 @@ transaction across that yield. Unknown outcome is retained in the existing
 ledger without automatic retry or a second shadow ledger. The mock records its
 full allowlisted packet and digest in memory; this does not prove external
 delivery, real account identity, or a common official world/runtime.
+
+In the same sealed rehearsal, `groundEdition` exercises the existing almanac
+editor with a bounded private in-memory CAS, never the public almanac SQLite
+store. The editor's entry ID and exact packet digest are bound before the mock
+handoff. Only a settled synthetic completion returns deterministic, typed,
+source-cited conditions to the existing grounding path; no free text enters.
+The public weather epoch and exact source projection are rechecked after the
+response. A positively canceled pre-handoff hold can be marked unsent; lost
+post-handoff outcomes stay unknown in the canonical quota ledger. No publish
+or private reading of generated prose is attached to this rehearsal.
