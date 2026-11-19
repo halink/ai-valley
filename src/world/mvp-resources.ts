@@ -21,6 +21,12 @@ export interface MvpFruitRenewalWitness extends FruitRenewalSample {
  readonly worldRevision:number;
 }
 const renewalCapture=new WeakMap<World,FruitRenewalSample[]>();
+const nativeRenewalWitnesses=new WeakSet<MvpFruitRenewalWitness>();
+/** In-process provenance only: this proves capture at the native credit, not
+ * durability, retention of stock, or permission to use it. */
+export function isNativeMvpFruitRenewalWitness(value:unknown):value is MvpFruitRenewalWitness {
+ return typeof value==='object'&&value!==null&&nativeRenewalWitnesses.has(value as MvpFruitRenewalWitness);
+}
 const natural=(n:number)=>Number.isSafeInteger(n)&&n>=0;
 const supportedRenewalHead=(w:World)=>w.mode==='validation'&&!Object.hasOwn(w,'simulationOnly')&&
  /^godot-mvp-[A-Za-z0-9_-]{1,180}$/.test(w.id)&&natural(w.revision)&&hasMvpHamlet(w)&&!!w.mvpResources;
@@ -42,14 +48,24 @@ export function captureMvpFruitRenewalStep(w:World,step:()=>void):()=>readonly M
  const samples:FruitRenewalSample[]=[];
  renewalCapture.set(w,samples);
  try{step();}finally{renewalCapture.delete(w);}
+ const nativeEndRevision=w.revision;
+ let staged:readonly MvpFruitRenewalWitness[]|undefined;
  return ()=>{
   if(!samples.length||w.id!==worldId||!supportedRenewalHead(w)||w.minute!==start+1||
-   w.revision<=previousRevision||w.mvpResources!.lastMinute!==w.minute||!w.mvpClimate||
+   w.revision!==nativeEndRevision||w.revision<=previousRevision||w.mvpResources!.lastMinute!==w.minute||!w.mvpClimate||
    w.mvpClimate.lastMinute!==w.minute)return [];
   const atUs=minuteToClimateUs(w.minute);
   if(w.mvpClimate.lastUs!==atUs||samples.some(sample=>sample.atUs!==atUs))return [];
   const worldRevision=w.revision;
-  return Object.freeze(samples.map(sample=>Object.freeze({...sample,worldId,worldRevision})));
+  // Repeat reads of the same stage keep their identity. A later head must
+  // never rebrand this credit under a different revision.
+  if(staged)return staged[0].worldRevision===worldRevision?staged:[];
+  staged=Object.freeze(samples.map(sample=>{
+   const witness=Object.freeze({...sample,worldId,worldRevision});
+   nativeRenewalWitnesses.add(witness);
+   return witness;
+  }));
+  return staged;
  };
 }
 export function mvpResourceItem(w:World,r:Resource):'berry'|'fruit'|'water'|'wood'|'stone'{
