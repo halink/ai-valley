@@ -375,14 +375,14 @@ export function createMvpSession(options:{observeSessionWeather?:true;world?:Wor
  };
  return {get world(){return world;},snapshot,advance};
 }
-function currentLifeView(viewer:ValleySpiritLifeViewer|undefined,world:World|undefined):ValleySpiritPublishedLifeView|null{
+function currentLifeView(viewer:Pick<ValleySpiritLifeViewer,'latest'>|undefined,world:World|undefined):ValleySpiritPublishedLifeView|null{
  try{
   if(!viewer||!world||world.mode!=='validation'||Object.hasOwn(world,'simulationOnly'))return null;
   const view=viewer.latest(world.id);
   return view&&BigInt(view.range.throughUs)<=BigInt(minuteToClimateUs(world.minute))?view:null;
  }catch{return null;}
 }
-export function createMvpServer(session:Pick<ReturnType<typeof createMvpSession>,'snapshot'>&Partial<Pick<ReturnType<typeof createMvpSession>,'world'>>,options:{webRoot?:string;valleySpiritSource?:(sourceRef:string)=>unknown;valleySpiritArchive?:ValleySpiritJournal['archive'];valleySpiritReaders?:ValleySpiritPublicReaders;valleySpiritLifeViewer?:ValleySpiritLifeViewer}={}):Server {
+export function createMvpServer(session:Pick<ReturnType<typeof createMvpSession>,'snapshot'>&Partial<Pick<ReturnType<typeof createMvpSession>,'world'>>,options:{webRoot?:string;valleySpiritSource?:(sourceRef:string)=>unknown;valleySpiritArchive?:ValleySpiritJournal['archive'];valleySpiritReaders?:ValleySpiritPublicReaders;valleySpiritLifeViewer?:Pick<ValleySpiritLifeViewer,'latest'>}={}):Server {
  return createServer((req,res)=>{
   res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');
   if(options.webRoot&&serveGodotWeb(req,res,options.webRoot))return;
