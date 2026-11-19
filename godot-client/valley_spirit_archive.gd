@@ -1,6 +1,7 @@
 extends RefCounted
 
 const HOURS := 24
+const ALMANAC_ID_PREFIX := "valley-almanac-"
 const MAX_MINUTE := 1000000000.0
 const MAX_VERSION := 9007199254740991.0
 const WEATHER := {"sun":"晴", "cloud":"阴", "rain":"雨", "snow":"雪", "mixed":"雨雪混合"}
@@ -124,6 +125,14 @@ static func _matches_almanac_v1_text(text: Variant, minute: float, field_label: 
 	return float(raw_minute) == minute
 
 
+# These checks validate the presentation contract, not provider authenticity.
+static func _valid_almanac_id(value: Variant) -> bool:
+	if not value is String or value.length() != ALMANAC_ID_PREFIX.length() + 64 or not value.begins_with(ALMANAC_ID_PREFIX): return false
+	for ch in value.substr(ALMANAC_ID_PREFIX.length()):
+		if not ch in "0123456789abcdef": return false
+	return true
+
+
 # Never use provider prose or display unpublished/foreign data.
 static func almanac_presentation(value: Variant, context: Dictionary) -> String:
 	if context.is_empty() or not value is Dictionary or not _eq_string(value.get("worldId"), context.worldId) or not _eq_number(value.get("permissionVersion"), context.permissionVersion):
@@ -135,6 +144,21 @@ static func almanac_presentation(value: Variant, context: Dictionary) -> String:
 	if not _exact(entry, ["mode", "origin", "entryId", "textVersion", "supersedes", "fromMinute", "throughMinute", "projectionVersion", "permissionVersion", "coverage", "unselectedHourBuckets", "rendering", "facts", "atmosphere"]): return ""
 	if not _eq_string(entry.mode, "curated-verified-weather") or not _eq_string(entry.coverage, "selected-actual-points-only") or not _eq_number(entry.projectionVersion, 1) or not _eq_number(entry.permissionVersion, context.permissionVersion): return ""
 	if not _number(entry.fromMinute, 0, context.atMinute) or not _number(entry.throughMinute, entry.fromMinute, context.atMinute) or not _integer(entry.textVersion, 1, 10000): return ""
+	if not _valid_almanac_id(entry.entryId): return ""
+	if entry.textVersion == 1:
+		if entry.supersedes != null: return ""
+	# A correction may redact a predecessor that is no longer public.
+	elif entry.supersedes != null and (not _valid_almanac_id(entry.supersedes) or entry.supersedes == entry.entryId):
+		return ""
+	var first_hour := floori(float(entry.fromMinute) / 60.0)
+	var last_hour := floori(float(entry.throughMinute) / 60.0)
+	if last_hour - first_hour >= HOURS or not entry.unselectedHourBuckets is Array or entry.unselectedHourBuckets.size() > last_hour - first_hour: return ""
+	var unselected := {}
+	var previous := first_hour - 1
+	for bucket in entry.unselectedHourBuckets:
+		if not _integer(bucket, previous + 1, last_hour): return ""
+		previous = int(bucket)
+		unselected[previous] = true
 	if not entry.facts is Array or entry.facts.is_empty() or entry.facts.size() > 24: return ""
 	if not _exact(entry.origin, ["schemaVersion", "kind"]) or not _eq_number(entry.origin.schemaVersion, 1): return ""
 	var attribution := ""
@@ -157,6 +181,7 @@ static func almanac_presentation(value: Variant, context: Dictionary) -> String:
 	for fact in entry.facts:
 		if not _exact(fact, ["sourceRef", "minute", "field", "value", "text"]) or not _number(fact.minute, entry.fromMinute, entry.throughMinute) or not fact.field is String: return ""
 		var hour := floori(float(fact.minute) / 60.0)
+		if unselected.has(hour): return ""
 		var expected_ref := "%s/weather-%d-%d" % [context.worldId, context.permissionVersion, hour]
 		if not _eq_string(fact.sourceRef, expected_ref): return ""
 		var key: String = expected_ref + ":" + fact.field
