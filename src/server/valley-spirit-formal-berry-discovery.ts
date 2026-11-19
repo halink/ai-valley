@@ -1,11 +1,10 @@
-import {createHash} from 'node:crypto';
 import type {Vec,World} from '../shared/types.js';
 import {formalBerryCommonGround} from '../world/formal-berry-location.js';
 import {canSeeOutdoorPoint} from '../world/outdoor-observation.js';
 import {passenger} from '../world/medical-transport.js';
 import {findPath,distance} from '../world/navigation.js';
 import {activeCases} from '../world/health.js';
-import {validateFormalGroundBerryFoodBirth,type FormalBerryFixtureEffect} from './valley-spirit-formal-berry-authority.js';
+import {formalBerryObservationId,validateFormalGroundBerryFoodBirth,type FormalBerryFixtureEffect} from './valley-spirit-formal-berry-authority.js';
 
 const SIGHT=12,MAX=4;
 interface Seen {
@@ -33,7 +32,7 @@ export function projectDeveloperFormalBerryDiscovery(
    }))return [];
   const location=formalBerryCommonGround(w);if(location.unsafe(r.at))return [];
   const view:Seen[]=[];
-  const nearby=rows.filter(effect=>effect.foodBirth&&validateFormalGroundBerryFoodBirth(w,effect)&&
+  const nearby=rows.filter(effect=>!effect.pickup&&effect.foodBirth&&validateFormalGroundBerryFoodBirth(w,effect)&&
    w.minute>=effect.foodBirth.producedAt&&w.minute<effect.foodBirth.expiresAt&&distance(r.at,effect.receipt.target)<=SIGHT)
    .sort((a,b)=>distance(r.at,a.receipt.target)-distance(r.at,b.receipt.target)||a.receipt.target.y-b.receipt.target.y||
     a.receipt.target.x-b.receipt.target.x||a.receipt.draftId.localeCompare(b.receipt.draftId));
@@ -47,7 +46,7 @@ export function projectDeveloperFormalBerryDiscovery(
     checked.set(key,visible);
    }
    if(!visible)continue;
-   const observationId='formal-berry-seen:'+createHash('sha256').update(JSON.stringify([w.id,r.id,receipt.draftId])).digest('hex');
+   const observationId=formalBerryObservationId(w.id,r.id,receipt.draftId);
    view.push(Object.freeze({kind:'observed-ground-berry',observationId,at:Object.freeze({...at}),item:'berry',quantity:1,executionAuthorized:false}));
    if(view.length>=MAX)break;
   }

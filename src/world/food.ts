@@ -113,3 +113,19 @@ export function advanceFood(w:World):void{
 
 /** Nutrition belongs to the physical lots being eaten, including older definitions. */
 export function foodValue(w:World,container:string,item:Item,quantity=1){let left=quantity,total=0;for(const lot of [...(w.food?.lots[container]?.[item]??[])].sort((a,b)=>a.expiresAt-b.expiresAt||a.producedAt-b.producedAt)){const q=Math.min(left,lot.quantity),value=(w.definitions[lot.definition]?.data.nutrition as Record<string,number>|undefined)?.[item]??goods[item].food;total+=q*value;left-=q;if(left<=0)break;}return total+left*goods[item].food;}
+
+/** Transfer one externally held formal fixture lot without freshening it.
+ * The sealed caller owns proof and the atomic ground debit. No repair,
+ * implicit share, normal production receipt or immediate consumption. */
+export function acceptNativeFormalBerryLot(w:World,residentId:string,lot:FoodLot):boolean{
+ if(w.mode!=='formal'||Object.hasOwn(w,'simulationOnly')||!w.food||lot.quantity!==1||
+  lot.producedAt>w.minute||lot.expiresAt<=w.minute||!w.definitions[lot.definition]||active.has(w))return false;
+ const r=w.residents.find(p=>p.id===residentId);
+ if(!r)return false;
+ const held=r.inventory.berry??0,id='person:'+residentId,lots=w.food.lots[id]?.berry??[];
+ if(!Number.isSafeInteger(held)||held<0||!Number.isSafeInteger(held+1)||
+  lots.some(v=>v.quantity<=0||v.expiresAt<=w.minute)||lots.reduce((n,l)=>n+l.quantity,0)!==held)return false;
+ const ledger=w.food.lots[id]??={};
+ merge(ledger.berry??=[],{quantity:1,producedAt:lot.producedAt,expiresAt:lot.expiresAt,definition:lot.definition});
+ r.inventory.berry=held+1;return true;
+}

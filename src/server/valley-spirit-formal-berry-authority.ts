@@ -35,11 +35,20 @@ export interface FormalBerryGroundFoodBirth {
  readonly sourceId:string;readonly supplyReceiptId:string;readonly quantity:1;
  readonly producedAt:number;readonly expiresAt:number;readonly definition:string;
 }
+export interface FormalBerryFixturePickup {
+ readonly version:1;readonly supplyReceiptId:string;readonly residentId:string;readonly observationId:string;readonly planId:string;
+ readonly observedRevision:number;readonly observedAt:number;readonly pickedAt:number;readonly committedRevision:number;
+}
+export const formalBerryObservationId=(worldId:string,residentId:string,draftId:string)=>
+ 'formal-berry-seen:'+digest(JSON.stringify([worldId,residentId,draftId]));
+export const formalBerryPickupPlanId=(observationId:string,revision:number)=>
+ 'formal-berry-pickup:'+digest(JSON.stringify([observationId,revision]));
 export interface FormalBerryFixtureEffect {
  readonly approval:FormalBerrySignedApproval;
  readonly receipt:FormalBerryDetachedReceipt;
  readonly committedRevision:number;
  readonly foodBirth?:FormalBerryGroundFoodBirth;
+ readonly pickup?:FormalBerryFixturePickup;
 }
 function foodBirthMatchesReceipt(food:unknown,r:FormalBerryDetachedReceipt):food is FormalBerryGroundFoodBirth {
  return exact(food,['schemaVersion','origin','item','sourceId','supplyReceiptId','quantity','producedAt','expiresAt','definition'])&&
@@ -97,7 +106,7 @@ export function formalBerryEffectAnchor(rows:readonly FormalBerryFixtureEffect[]
  return {version:1,count:rows.length,digest:digest(JSON.stringify(rows))};
 }
 export function assertFormalBerryMirrorHeader(db:DatabaseSync,owner:DeveloperMvpSpiritFixtureOwner,
- worldId?:string,anchor?:unknown,revision?:number):readonly FormalBerryFixtureEffect[] {
+ worldId?:string,anchor?:unknown,revision?:number,headMinute?:number):readonly FormalBerryFixtureEffect[] {
  const table=db.prepare("SELECT sql,type FROM sqlite_schema WHERE name='formal_berry_fixture_effects' COLLATE NOCASE").get();
  const trigger=db.prepare("SELECT 1 FROM sqlite_schema WHERE type='trigger' AND tbl_name IN ('formal_berry_fixture_effects','mvp_spirit_developer_fixture') COLLATE NOCASE").get();
  if(!owner.formalApprovalKeyPem||table?.type!=='table'||table.sql!==FORMAL_BERRY_EFFECT_SCHEMA||trigger)
@@ -108,7 +117,8 @@ export function assertFormalBerryMirrorHeader(db:DatabaseSync,owner:DeveloperMvp
  const rows=raw.map(value=>{
   if(typeof value.body!=='string')throw Error('formal_berry_fixture_archive_encoding');
   const saved:unknown=JSON.parse(value.body);
-  const keys=['approval','receipt','committedRevision',...(saved&&typeof saved==='object'&&Object.hasOwn(saved,'foodBirth')?['foodBirth']:[])];
+  const keys=['approval','receipt','committedRevision',...(saved&&typeof saved==='object'&&Object.hasOwn(saved,'foodBirth')?['foodBirth']:[]),
+   ...(saved&&typeof saved==='object'&&Object.hasOwn(saved,'pickup')?['pickup']:[])];
   if(!exact(saved,keys)||!verifyFormalBerrySignedApproval(saved.approval,owner)||
    !nat(saved.committedRevision)||saved.committedRevision<=floor||saved.committedRevision>Number(revision))
    throw Error('formal_berry_fixture_archive_approval');
@@ -120,6 +130,19 @@ export function assertFormalBerryMirrorHeader(db:DatabaseSync,owner:DeveloperMvp
    (t.schema===VERSION?(!foodBirthMatchesReceipt(saved.foodBirth,r)||saved.foodBirth.definition!==t.foodDefinition||
     saved.foodBirth.expiresAt!==saved.foodBirth.producedAt+t.foodLifeDays!*DAY):Object.hasOwn(saved,'foodBirth')))
    throw Error('formal_berry_fixture_archive_binding');
+  if(Object.hasOwn(saved,'pickup')){
+   const p=saved.pickup,f=saved.foodBirth as FormalBerryGroundFoodBirth|undefined;
+   if(!f||!exact(p,['version','supplyReceiptId','residentId','observationId','planId','observedRevision','observedAt','pickedAt','committedRevision'])||
+    p.version!==1||p.supplyReceiptId!==r.draftId||typeof p.residentId!=='string'||!p.residentId.length||p.residentId.length>200||
+    p.observationId!==formalBerryObservationId(t.worldId,p.residentId,r.draftId)||
+    !nat(p.observedRevision)||p.observedRevision<saved.committedRevision||!nat(p.committedRevision)||
+    p.committedRevision<=p.observedRevision||p.committedRevision>Number(revision)||
+    p.planId!==formalBerryPickupPlanId(String(p.observationId),p.observedRevision)||
+    !minute(p.observedAt)||!minute(p.pickedAt)||p.observedAt<f.producedAt||p.observedAt>=p.pickedAt||
+    p.pickedAt>=f.expiresAt||p.pickedAt>Number(headMinute)||p.pickedAt-p.observedAt>24||
+    !db.prepare('SELECT 1 FROM receipts WHERE world_id=? AND receipt=?').get(t.worldId,'plan:'+p.planId))
+    throw Error('formal_berry_fixture_archive_pickup');
+  }
   floor=saved.committedRevision;return saved as unknown as FormalBerryFixtureEffect;
  });
  if(rows.length){

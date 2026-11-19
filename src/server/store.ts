@@ -1,3 +1,4 @@
+import {completeDeveloperFormalBerryPickup} from './valley-spirit-formal-berry-pickup.js';
 import {DAY} from '../world/time.js';
 import {projectDeveloperFormalBerryDiscovery} from './valley-spirit-formal-berry-discovery.js';
 import {draftFormalBerryGround,validateFormalBerryDetachedLedger} from './valley-spirit-formal-berry-draft.js';
@@ -247,7 +248,7 @@ export class WorldStore {
    return [];
   }
   owner.assertOwned();
-  const rows=assertFormalBerryMirrorHeader(this.db,owner,w.id,w.formalBerryFixtureAnchor,w.revision);
+  const rows=assertFormalBerryMirrorHeader(this.db,owner,w.id,w.formalBerryFixtureAnchor,w.revision,w.minute);
   if(rows.length&&!validateFormalBerryDetachedLedger(w,{schemaVersion:1,worldId:w.id,
    rainAdoptedMinute:w.formalRainProvenance?.adoptedMinute??-1,capacity:owner.capacity,drafts:rows.map(r=>r.receipt)}))
    throw Error('formal_berry_fixture_archive_lineage');
@@ -262,6 +263,40 @@ export class WorldStore {
    if(!world||world.id!==worldId)return [];
    return projectDeveloperFormalBerryDiscovery(world,this.readFormalBerryArchive(world),residentId);
   }catch{return [];}
+ }
+ /** Safe developer-only step, not an actor-addressed transfer endpoint.
+  * Recompute a resident's private choice from the locked authoritative head. */
+ stepDeveloperFormalBerryPickup(worldId:string){
+  const owner=this.developerSpiritFixtureOwner;
+  if(!owner?.formalApprovalKeyPem)return {status:'disabled'} as const;
+  owner.assertOwned();
+  this.db.exec('BEGIN IMMEDIATE');
+  try{
+   const w=this.readWorld(false,false);
+   if(!w||w.id!==worldId){this.db.exec('COMMIT');return {status:'no_pickup'} as const;}
+   const rows=this.readFormalBerryArchive(w),draft=structuredClone(w),planned=completeDeveloperFormalBerryPickup(draft,rows);
+   const arrivalBefore=new Set(w.events.filter(e=>Object.hasOwn(e,'socialAppointmentArrival')).map(e=>e.id));
+   if(!planned||draft.events.some(e=>Object.hasOwn(e,'socialAppointmentArrival')&&!arrivalBefore.has(e.id))){
+    // The private roll-forward is not an alternative to formal arrival custody.
+    this.db.exec('ROLLBACK');return {status:'no_pickup'} as const;
+   }
+   const {effect,pickup,previousInventory}=planned,anchor=formalBerryEffectAnchor(
+    rows.map(row=>row.receipt.draftId===effect.receipt.draftId?effect:row));
+   draft.formalBerryFixtureAnchor=anchor;
+   this.assertWritable(draft);
+   const update=this.db.prepare('UPDATE formal_berry_fixture_effects SET body=? WHERE draft_id=? AND approval_id=?')
+    .run(JSON.stringify(effect),effect.receipt.draftId,effect.approval.terms.approvalId);
+   if(update.changes!==1)throw Error('formal_berry_fixture_pickup_stock_changed');
+   this.writeCommit(draft,w.revision,undefined,undefined,undefined,anchor);
+   const after=this.readWorld(false,false),food=effect.foodBirth!;
+   const exactLot=(world:World)=>world.food?.lots['person:'+pickup.residentId]?.berry?.find(l=>
+    l.definition===food.definition&&l.producedAt===food.producedAt&&l.expiresAt===food.expiresAt)?.quantity??0;
+   if(!after||after.revision!==draft.revision||JSON.stringify(after.formalBerryFixtureAnchor)!==JSON.stringify(anchor)||
+    after.residents.find(r=>r.id===pickup.residentId)?.inventory.berry!==previousInventory+1||
+    exactLot(after)!==exactLot(draft)||exactLot(after)<1)
+    throw Error('formal_berry_fixture_pickup_commit_mismatch');
+   this.db.exec('COMMIT');forgetFormalRainStep(draft);return {status:'picked' as const,receipt:structuredClone(pickup)};
+  }catch(error){this.db.exec('ROLLBACK');throw error;}
  }
  formalBerryFixtureApprovalScope():string|null {
   const owner=this.developerSpiritFixtureOwner;

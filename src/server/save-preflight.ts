@@ -146,7 +146,7 @@ function inspectDatabase(db:DatabaseSync,rejectClimate:boolean,validateWorld?: (
   if(fixtureSeal&&formalOwner&&(latest!==null||world.mode!=='formal'||typeof world.id!=='string'||
    !/^valley-formal-[A-Za-z0-9_-]{1,180}$/.test(world.id)||world.mvpSeasonalModelVersion!==undefined||owns(world,'mvpClimate')))
    fail('save_unknown_developer_fixture');
-  if(formalOwner)assertFormalBerryMirrorHeader(db,formalOwner,String(world.id),world.formalBerryFixtureAnchor,Number(world.revision));
+  if(formalOwner)assertFormalBerryMirrorHeader(db,formalOwner,String(world.id),world.formalBerryFixtureAnchor,Number(world.revision),Number(world.minute));
   else if(owns(world,'formalBerryFixtureAnchor'))fail('formal_berry_fixture_requires_owner');
   if(fixtureSeal&&!formalOwner){
    if(latest!==null||world.mode!=='validation'||world.mvpSeasonalModelVersion!==undefined||
