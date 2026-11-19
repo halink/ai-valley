@@ -8,6 +8,9 @@ static func text(snapshot: Dictionary, connected: bool) -> String:
 	if snapshot.get("publicProjectionPending") == true: return "记录更新中…"
 	var value: Variant = snapshot.get("valleySpirit")
 	var world: Variant = snapshot.get("world")
+	if value == null and world is Dictionary:
+		var session_text := _session_weather(snapshot.get("valleySpiritSessionWeather"), world)
+		if not session_text.is_empty(): return session_text
 	if not value is Dictionary or value.get("schemaVersion") != 1 or not world is Dictionary:
 		return "暂无天气记录。"
 	if value.get("status") == "revoked": return "天气记录已撤回。"
@@ -23,4 +26,30 @@ static func text(snapshot: Dictionary, connected: bool) -> String:
 		if line.is_empty(): return "天气记录暂不可用。"
 		lines.append(line)
 	if value.records.is_empty(): lines.append("暂无天气记录。")
+	return "\n".join(lines)
+
+
+# This snapshot-local view never authorizes archive or life reads.
+static func _session_weather(value: Variant, world: Dictionary) -> String:
+	if not WeatherArchive._exact(value, ["schemaVersion", "worldId", "worldRevision", "atMinute", "readings"]): return ""
+	var world_id: Variant = world.get("id")
+	if not world_id is String or not world_id.begins_with("godot-mvp-"): return ""
+	if not WeatherArchive._eq_number(value.schemaVersion, 1) or not WeatherArchive._eq_string(value.worldId, world_id): return ""
+	if not WeatherArchive._integer(world.get("revision"), 0, WeatherArchive.MAX_VERSION) or not WeatherArchive._eq_number(value.worldRevision, world.revision): return ""
+	if not WeatherArchive._number(world.get("minute"), 0, WeatherArchive.MAX_MINUTE) or not WeatherArchive._eq_number(value.atMinute, world.minute): return ""
+	if not value.readings is Array or value.readings.is_empty() or value.readings.size() > 6: return ""
+	var lines := PackedStringArray(["本次天气"])
+	var last_hour := -1
+	var last_minute := -1.0
+	for fact in value.readings:
+		if not WeatherArchive._exact(fact, ["minute", "condition", "temperatureDeciC", "relativeHumidityPermille"]): return ""
+		if not WeatherArchive._number(fact.minute, 0, world.minute): return ""
+		var hour := floori(fact.minute / 60.0)
+		if hour <= last_hour: return ""
+		var line := WeatherArchive.weather_line(fact)
+		if line.is_empty(): return ""
+		lines.append(line)
+		last_hour = hour
+		last_minute = fact.minute
+	if last_minute != world.minute: return ""
 	return "\n".join(lines)

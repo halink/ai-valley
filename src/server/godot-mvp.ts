@@ -2,7 +2,7 @@ import {captureAddressedSpeech,type AddressedSpeechObservation} from '../world/a
 import type {ValleySpiritLifeViewer,ValleySpiritPublishedLifeView} from './valley-spirit-life-publisher.js';
 import {captureValleySpiritMvpMealStep,type ValleySpiritMvpMealWitness} from './valley-spirit-meal-custody.js';
 import {parseValleySpiritAlmanacId,parseValleySpiritTopicWindow,type ValleySpiritPublicReaders} from './valley-spirit-reader.js';
-import {parseWeatherArchiveQuery,type ValleySpiritJournal} from './valley-spirit.js';
+import {parseWeatherArchiveQuery,publicWeatherProjection,type PublicWeatherFact,type ValleySpiritJournal} from './valley-spirit.js';
 import {mvpMealObservation} from './mvp-meal-observation.js';
 import {seasonalPersonalWeather} from './mvp-seasonal-context.js';
 import {personallyFeelsRain,shelterRoomWithinIdleTime,MVP_IDLE_WAIT_MINUTES} from '../world/mvp-shelter.js';
@@ -254,7 +254,10 @@ function chooseAgricultureRule(w:World,r:Resident):{action:Action;reason:string}
  return null;
 }
 function calendarSeason(w:World){return ['spring','summer','autumn','winter'][Math.floor(w.minute/1440/28)%4];}
-export function createMvpSession(options:{world?:World;commit?:(world:World,previousRevision:number,speech?:AddressedSpeechObservation)=>void;persistent?:boolean;captureAddressedSpeechCustody?:true;observeCommittedMeals?:(witnesses:readonly ValleySpiritMvpMealWitness[])=>void}={}){
+type SessionWeatherReading=Pick<PublicWeatherFact,'minute'|'condition'|'temperatureDeciC'|'relativeHumidityPermille'>;
+type SessionWeather={schemaVersion:1;worldId:string;worldRevision:number;atMinute:number;readings:SessionWeatherReading[]};
+
+export function createMvpSession(options:{observeSessionWeather?:true;world?:World;commit?:(world:World,previousRevision:number,speech?:AddressedSpeechObservation)=>void;persistent?:boolean;captureAddressedSpeechCustody?:true;observeCommittedMeals?:(witnesses:readonly ValleySpiritMvpMealWitness[])=>void}={}){
  let world=structuredClone(options.world??createMvpWorld());
  if(options.world)inheritReceiptHistory(options.world,world);
  const initialRevision=world.revision;
@@ -263,7 +266,26 @@ export function createMvpSession(options:{world?:World;commit?:(world:World,prev
  enableCompletedMovement(world);
  let serial=0,fault:string|null=null;
  const decisions:Record<string,number>={};
- const snapshot=():Snapshot&{roomViews:ReturnType<typeof roomObservation>}&{observation:ReturnType<typeof mvpObservation>;relationshipHistory:ReturnType<typeof relationshipObservation>}&{movement:ReturnType<typeof completedMovementSnapshot>;residentMovement:ReturnType<typeof residentMovementSnapshot>}&{mvp:{driver:'local-rules';notice:string;ephemeral:boolean;fault:string|null;phases:Record<string,MvpPhase>;decisions:Record<string,number>;environment:NonNullable<World['mvpClimate']>['current'];soil:ReturnType<typeof soilObservation>;agriculture:ReturnType<typeof agricultureObservation>;preservation:ReturnType<typeof preservationObservation>;residentWeather:{schemaVersion:1;atMinute:number;resident:Record<string,ReturnType<typeof seasonalPersonalWeather>>};mealObservation:ReturnType<typeof mvpMealObservation>;nutritionBuffer:ReturnType<typeof mvpNutritionBuffer>[]}}=>({
+ // Session observations never mint archive or life authority and never persist.
+ const observesWeather=options.observeSessionWeather===true&&!options.world&&!options.persistent&&!options.commit;
+ let sessionWeather:SessionWeather|undefined;
+ function observeCommittedWeather() {
+  if(!observesWeather)return;
+  const fact=publicWeatherProjection(world);
+  if(!fact){sessionWeather=undefined;return;}
+  const {worldId,worldRevision,minute,condition,temperatureDeciC,relativeHumidityPermille}=fact;
+  const readings=sessionWeather?.readings??[];
+  const last=readings.at(-1);
+  const current={minute,condition,temperatureDeciC,relativeHumidityPermille};
+  if(!last||Math.floor(last.minute/60)!==Math.floor(minute/60))readings.push(current);
+  else readings[readings.length-1]=current;
+  if(readings.length>6)readings.shift();
+  sessionWeather={schemaVersion:1,worldId,worldRevision,atMinute:minute,readings};
+ }
+ observeCommittedWeather();
+ const snapshot=():Snapshot&{roomViews:ReturnType<typeof roomObservation>}&{observation:ReturnType<typeof mvpObservation>;relationshipHistory:ReturnType<typeof relationshipObservation>}&{movement:ReturnType<typeof completedMovementSnapshot>;residentMovement:ReturnType<typeof residentMovementSnapshot>}&{valleySpiritSessionWeather?:SessionWeather;mvp:{driver:'local-rules';notice:string;ephemeral:boolean;fault:string|null;phases:Record<string,MvpPhase>;decisions:Record<string,number>;environment:NonNullable<World['mvpClimate']>['current'];soil:ReturnType<typeof soilObservation>;agriculture:ReturnType<typeof agricultureObservation>;preservation:ReturnType<typeof preservationObservation>;residentWeather:{schemaVersion:1;atMinute:number;resident:Record<string,ReturnType<typeof seasonalPersonalWeather>>};mealObservation:ReturnType<typeof mvpMealObservation>;nutritionBuffer:ReturnType<typeof mvpNutritionBuffer>[]}}=>({
+  ...(sessionWeather?.worldId===world.id&&sessionWeather.worldRevision===world.revision&&sessionWeather.atMinute===world.minute
+   ?{valleySpiritSessionWeather:structuredClone(sessionWeather)}:{}),
   roomViews:roomObservation(world),observation:mvpObservation(world,[],[]),relationshipHistory:relationshipObservation(world),movement:completedMovementSnapshot(world),residentMovement:residentMovementSnapshot(world),world:structuredClone(world),serverTime:new Date().toISOString(),version:VALLEY_VERSION,mapRevision:'godot-mvp-map-4',
   capabilities:{active:['小地图只读观察','本地规则采集/进食/休息闭环','有限面对面规则问候','独立选择的食水交换','同源气候与田地水账','三品种温水生长与实际耕收','本人感知与共屋短时避雨','本人名义两日营养缓冲','真实罐藏与批次到期（鲜食腐坏未模拟）',...(options.persistent?['规则存档与恢复']:[])],pending:['真实模型决策验收','全年冬储充分性','最终绘本素材']},
   // Read the published, validated point state. Legacy crop rain is separate;
@@ -345,6 +367,7 @@ export function createMvpSession(options:{world?:World;commit?:(world:World,prev
     if(optional.stageMealWitnesses)try{witnesses=optional.stageMealWitnesses();}catch{/* optional custody */}
     if(speech?.receipts.length)options.commit?.(world,current.revision,speech);
     else options.commit?.(world,current.revision);
+    try{observeCommittedWeather();}catch{sessionWeather=undefined;}
     if(witnesses.length)try{options.observeCommittedMeals?.(witnesses);}catch{/* committed world is independent */}
     }catch(error){world=current;serial=previousSerial;for(const key of Object.keys(decisions))delete decisions[key];Object.assign(decisions,previousDecisions);throw error;}
    }

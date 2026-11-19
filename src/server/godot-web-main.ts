@@ -6,7 +6,7 @@ import {createMvpSession,createMvpServer} from './godot-mvp.js';
 if(process.argv.length!==2)throw Error('No configuration arguments supported');
 const webRoot=fileURLToPath(new URL('../../output/godot-web/',import.meta.url));
 if(!existsSync(join(webRoot,'.ready')))throw Error('No verified Web export. Run npm run build:godot:web first.');
-const session=createMvpSession();
+const session=createMvpSession({observeSessionWeather:true});
 const server=createMvpServer(session,{webRoot});
 let timer:ReturnType<typeof setInterval>|undefined;
 const stop=()=>{if(timer)clearInterval(timer);server.closeAllConnections();server.close();};

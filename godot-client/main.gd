@@ -184,7 +184,7 @@ func _apply_snapshot(parsed: Dictionary) -> void:
 	meal_observation = mode.get("mealObservation")
 	var perceptions: Variant = mode.get("residentWeather")
 	resident_weather = perceptions if perceptions is Dictionary else {}
-	valley_spirit_snapshot = {"world":{"id":world.id,"revision":world.revision,"minute":world.minute},"valleySpirit":parsed.get("valleySpirit")}
+	valley_spirit_snapshot = {"world":{"id":world.id,"revision":world.revision,"minute":world.minute},"valleySpirit":parsed.get("valleySpirit"),"valleySpiritSessionWeather":parsed.get("valleySpiritSessionWeather")}
 	valley.agriculture_observation = agriculture_observation.get("plots", {})
 	valley.environment_preview = environment_preview
 	source_tag = "世界已暂停" if mode.get("fault") == "unresolved_model_request" else ""
