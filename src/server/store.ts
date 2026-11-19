@@ -1,3 +1,4 @@
+import {prepareSealedMvpAdjacentMinute} from './godot-mvp.js';
 import {appendNativeWeatherCredit} from './valley-spirit-weather-credit.js';
 import {probeMvpFallenFruitAdjacentEngineEdge} from './valley-spirit-mvp-fallen-fruit-approach.js';
 import {appendFormalDueIntent,formalDueCurrent,formalDueInputs,makeFormalDueCheckpoint,prepareFormalDueIntent,
@@ -622,46 +623,54 @@ export class WorldStore {
   this.assertWritable(world);
   this.db.exec('BEGIN IMMEDIATE');
   try{
-   const previous=this.writeCommit(world,previousRevision,appended,seasonalLedger);
-   if(this.nativeWeatherCredit&&previousRevision!==null&&world.mode==='validation'){
-    this.developerSpiritFixtureOwner!.assertOwned();
-    this.db.exec('SAVEPOINT optional_native_weather_credit');
-    try{
-     appendNativeWeatherCredit(this.db,previous,world,previousRevision);
-     this.db.exec('RELEASE optional_native_weather_credit');
-    }catch{
-     this.db.exec('ROLLBACK TO optional_native_weather_credit');
-     this.db.exec('RELEASE optional_native_weather_credit');
-    }
-   }
-   let speech:readonly ValleySpiritLifeReceipt[]=[];
-   if(Array.isArray(proof?.receipts)&&proof.receipts.length){
-    this.db.exec('SAVEPOINT optional_speech_custody');
-    try{
-     speech=appendValleySpiritSpeechCustody(this.db,world,previousRevision,proof);
-     this.db.exec('RELEASE optional_speech_custody');
-    }catch{
-     // Unknown optional custody must not corrupt or block the world log.
-     this.db.exec('ROLLBACK TO optional_speech_custody');
-     this.db.exec('RELEASE optional_speech_custody');
-     speech=[];
-    }
-   }
-   if(!this.allowMvpClimate&&!this.seasonalModel&&world.mode==='formal'&&appended?.events.some(e=>Object.hasOwn(e,'socialAppointmentArrival'))){
-    this.db.exec('SAVEPOINT optional_formal_arrival_custody');
-    try{
-     appendValleySpiritFormalArrivalCustody(this.db,world,previousRevision,appended.events);
-     this.db.exec('RELEASE optional_formal_arrival_custody');
-    }catch{
-     this.db.exec('ROLLBACK TO optional_formal_arrival_custody');
-     this.db.exec('RELEASE optional_formal_arrival_custody');
-    }
-   }
+   const speech=this.writeDraftWithCustody(world,previousRevision,appended,seasonalLedger,proof);
    this.db.exec('COMMIT');
    forgetFormalRainStep(world);
    if(world.mode==='formal'){this.terrainKeys.add(terrainRevision(world.map));this.separateLedgers.add(world.id);}
    return speech;
   }catch(error){this.db.exec('ROLLBACK');throw error;}
+ }
+ /** Same write and receipt custody for normal and sealed-internal transactions. */
+ private writeDraftWithCustody(world:World,previousRevision:number|null,appended?:AppendedHistory,seasonalLedger?:SeasonalLedger,
+  proof?:AddressedSpeechObservation,strict=false):readonly ValleySpiritLifeReceipt[]{
+  const previous=this.writeCommit(world,previousRevision,appended,seasonalLedger);
+  if(this.nativeWeatherCredit&&previousRevision!==null&&world.mode==='validation'){
+   this.developerSpiritFixtureOwner!.assertOwned();
+   this.db.exec('SAVEPOINT optional_native_weather_credit');
+   try{
+    appendNativeWeatherCredit(this.db,previous,world,previousRevision);
+    this.db.exec('RELEASE optional_native_weather_credit');
+   }catch{
+    this.db.exec('ROLLBACK TO optional_native_weather_credit');
+    this.db.exec('RELEASE optional_native_weather_credit');
+    if(strict)throw Error('mvp_adjacent_weather_custody_unavailable');
+   }
+  }
+  let speech:readonly ValleySpiritLifeReceipt[]=[];
+  if(Array.isArray(proof?.receipts)&&proof.receipts.length){
+   this.db.exec('SAVEPOINT optional_speech_custody');
+   try{
+    speech=appendValleySpiritSpeechCustody(this.db,world,previousRevision,proof);
+    this.db.exec('RELEASE optional_speech_custody');
+   }catch{
+    // Unknown optional custody must not corrupt or block the world log.
+    this.db.exec('ROLLBACK TO optional_speech_custody');
+    this.db.exec('RELEASE optional_speech_custody');
+    if(strict)throw Error('mvp_adjacent_speech_custody_unavailable');
+    speech=[];
+   }
+  }
+  if(!this.allowMvpClimate&&!this.seasonalModel&&world.mode==='formal'&&appended?.events.some(e=>Object.hasOwn(e,'socialAppointmentArrival'))){
+   this.db.exec('SAVEPOINT optional_formal_arrival_custody');
+   try{
+    appendValleySpiritFormalArrivalCustody(this.db,world,previousRevision,appended.events);
+    this.db.exec('RELEASE optional_formal_arrival_custody');
+   }catch{
+    this.db.exec('ROLLBACK TO optional_formal_arrival_custody');
+    this.db.exec('RELEASE optional_formal_arrival_custody');
+   }
+  }
+  return speech;
  }
  /** Internal read-only seam. Memory fixtures and ordinary/production saves
   * cannot attest an installed private shadow capability. */
@@ -717,6 +726,38 @@ export class WorldStore {
     this.db.exec('COMMIT');return result;
    }catch(error){this.db.exec('ROLLBACK');throw error;}
   }catch{return unavailable;}
+ }
+ /** Developer-sealed only. Advance one native minute only if the resident
+  * actually takes the proposed edge and all custody can be preserved. */
+ stepDeveloperMvpFallenFruitAdjacentEdge(worldId:string){
+  const owner=this.developerSpiritFixtureOwner,unavailable={status:'unavailable'} as const;
+  if(!owner||owner.formalApprovalKeyPem)return unavailable;
+  owner.assertOwned();this.db.exec('BEGIN IMMEDIATE');
+  try{
+   const current=this.readWorld(false,false);
+   if(!current||current.id!==worldId){this.db.exec('COMMIT');return unavailable;}
+   assertDeveloperMvpEffectArchive(this.db,current);
+   const next=prepareSealedMvpAdjacentMinute(current);
+   if(!next){this.db.exec('COMMIT');return unavailable;}
+   const before=new Set(current.events.map(e=>e.id));
+   const appended=next.draft.events.filter(e=>!before.has(e.id));
+   // Meal custody currently lives behind a distinct observer; do not commit
+   // it via this path. Spoken dialogue needs exact same-step custody.
+   const speechIds=next.speech?.receipts.map(r=>r.eventId)??[],spoken=appended.filter(e=>e.speechText!==undefined);
+   const speechCount=speechIds.length;
+   if(next.mealWitnesses.length||appended.some(e=>e.mvpMeal||e.socialAppointmentArrival||e.mvpFruitFall)||
+    spoken.length!==speechCount||new Set(speechIds).size!==speechCount||spoken.some(e=>!speechIds.includes(e.id))){
+    this.db.exec('ROLLBACK');return unavailable;
+   }
+   this.assertWritable(next.draft);
+   const speech=this.writeDraftWithCustody(next.draft,current.revision,undefined,undefined,next.speech,true);
+   if(speech.length!==speechCount)throw Error('mvp_adjacent_speech_custody_unconfirmed');
+   const durable=this.readWorld(false,false),r=durable?.residents.find(r=>r.id===next.approach.residentId);
+   if(!durable||durable.revision!==next.draft.revision||durable.minute!==next.draft.minute||r?.activity?.planId!==next.planId||
+    !durable.processed.includes('plan:'+next.planId))throw Error('mvp_adjacent_edge_commit_mismatch');
+   this.db.exec('COMMIT');
+   return {status:'edge_committed',pickupAuthorized:false,steppedMinute:durable.minute,planId:next.planId} as const;
+  }catch(error){this.db.exec('ROLLBACK');throw error;}
  }
  /** No runtime route: the fixture operation is recalculated from a fresh
   * authoritative head under one SQLite lock, never by accepting a draft. */

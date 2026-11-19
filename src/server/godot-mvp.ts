@@ -1,3 +1,5 @@
+import {planMvpFallenFruitAdjacentApproach,unsafeMvpApproachEndpoint} from './valley-spirit-mvp-fallen-fruit-approach.js';
+import {observeMvpFallenFruit} from '../world/mvp-fallen-fruit-resident.js';
 import {captureAddressedSpeech,type AddressedSpeechObservation} from '../world/addressed-speech.js';
 import type {ValleySpiritLifeViewer,ValleySpiritPublishedLifeView} from './valley-spirit-life-publisher.js';
 import {captureValleySpiritMvpMealStep,type ValleySpiritMvpMealWitness} from './valley-spirit-meal-custody.js';
@@ -35,7 +37,7 @@ import {randomUUID} from 'node:crypto';
 import {createServer,type Server} from 'node:http';
 import {createWorld} from '../world/seed.js';
 import {stepWorld,submitPlan,planStartError} from '../world/engine.js';
-import {distance} from '../world/navigation.js';
+import {distance,same} from '../world/navigation.js';
 import {barterTerms} from '../shared/barter.js';
 import {canContactSocialTarget} from '../world/social-observation.js';
 import {berryApproachPath,canContactBerry} from '../world/berry-observation.js';
@@ -260,11 +262,18 @@ type SessionWeather={schemaVersion:1;worldId:string;worldRevision:number;atMinut
 interface RuleMinuteCapture {meals:boolean;fruitFlow:boolean;fruitRenewal:boolean;addressedSpeech:boolean;}
 /** Existing resident choices and exactly one engine minute on an existing
  * detached draft. No caller-supplied action, commit, split tick or delivery. */
-function advanceMvpRuleMinuteDraft(world:World,current:World,serial:number,decisions:Record<string,number>,capture:RuleMinuteCapture){
+function advanceMvpRuleMinuteDraft(world:World,current:World,serial:number,decisions:Record<string,number>,capture:RuleMinuteCapture,approach?:NonNullable<ReturnType<typeof planMvpFallenFruitAdjacentApproach>>){
  const newGather=new Map<string,{planId:string;resourceId:string;quantity:number}>();
  for(const r of world.residents){
   if(r.status!=='alive'||r.activity||r.plan)continue;
-  const choice=chooseMvpAction(world,r);
+  let choice=chooseMvpAction(world,r);
+  if(approach?.residentId===r.id){
+   const live=planMvpFallenFruitAdjacentApproach(world);
+   if(choice.idleFallback!==true||!live||live.residentId!==r.id||live.residentRevision!==approach.residentRevision||
+    live.discoveryId!==approach.discoveryId||!same(live.from,approach.from)||!same(live.to,approach.to))
+    throw Error('mvp_adjacent_idle_or_basis_changed');
+   choice={action:{type:'move',to:{...approach.to}},reason:'本人已发现一格外的落果，闲候前走到同一地面'};
+  }
   const planId=`mvp-rule-${world.id}-${world.revision}-${r.id}-${++serial}`;
   const result=submitPlan(world,{id:planId,actorId:r.id,actorRevision:r.revision,createdAt:world.minute,definition:mvpPlanDefinition(world,choice.action),intention:'本地规则：'+choice.reason,actions:[choice.action]});
   if(!result.ok)throw new Error(`MVP plan rejected for ${r.id}: ${result.error}`);
@@ -340,6 +349,33 @@ function advanceMvpRuleMinuteDraft(world:World,current:World,serial:number,decis
  let fruitFlow:MvpFruitFlowBatch|null=null;
  if(readFlow)try{fruitFlow=readFlow();}catch{/* optional observation */}
  return {serial,speech,witnesses,renewal,fruitFlow};
+}
+
+/** Internal exact native minute for the sealed store only. Input is the
+ * authoritative head, not a resident ID, coordinates, plan, or callback. */
+export function prepareSealedMvpAdjacentMinute(current:World){
+ const approach=planMvpFallenFruitAdjacentApproach(current);
+ if(!approach)return null;
+ const draft=structuredClone(current);
+ inheritReceiptHistory(current,draft);enableCompletedMovement(draft);
+ const base=completedMovementSnapshot(draft);
+ if(!base)return null;
+ try{
+  const result=advanceMvpRuleMinuteDraft(draft,current,0,{},{
+   meals:true,fruitFlow:false,fruitRenewal:false,addressedSpeech:true,
+  },approach);
+  const after=completedMovementSnapshot(draft),r=draft.residents.find(p=>p.id===approach.residentId);
+  const edges=after?.steps.filter(e=>e.actorId===approach.residentId&&e.seq>base.lastSeq);
+  if(draft.minute!==current.minute+1||after?.epoch!==base.epoch||edges?.length!==1||
+   edges[0].minute!==draft.minute||!same(edges[0].from,approach.from)||!same(edges[0].to,approach.to)||
+   !r?.activity||r.activity.action.type!=='move'||!same(r.activity.action.to,approach.to)||r.activity.path.length||
+   !draft.processed.includes('plan:'+r.activity.planId)||r.lastFailure||r.inside!==null||!same(r.at,approach.to)||unsafeMvpApproachEndpoint(draft,approach.to)||
+   !observeMvpFallenFruit(draft,r.id).some(s=>s.discoveryId===approach.discoveryId)||
+   JSON.stringify(draft.mvpClimate?.spiritEffects)!==JSON.stringify(current.mvpClimate?.spiritEffects)||
+   JSON.stringify(draft.mvpClimate?.spiritFruitSettlement)!==JSON.stringify(current.mvpClimate?.spiritFruitSettlement))
+   return null;
+  return {draft,approach,speech:result.speech,mealWitnesses:result.witnesses,planId:r.activity.planId};
+ }catch{return null;}
 }
 
 export function createMvpSession(options:{observeSessionWeather?:true;world?:World;commit?:(world:World,previousRevision:number,speech?:AddressedSpeechObservation)=>void;persistent?:boolean;captureAddressedSpeechCustody?:true;observeCommittedMeals?:(witnesses:readonly ValleySpiritMvpMealWitness[])=>void;observeCommittedFruitRenewal?:(witnesses:readonly MvpFruitRenewalWitness[])=>void;observeCommittedFruitFlow?:(flow:MvpFruitFlowBatch)=>void}={}){

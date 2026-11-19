@@ -13,7 +13,7 @@ interface Approach {
  readonly residentId:string;readonly residentRevision:number;
  readonly effectId:string;readonly discoveryId:string;readonly from:Readonly<Vec>;readonly to:Readonly<Vec>;
 }
-const unsafe=(w:World,p:Vec)=>w.frontierHazards?.disasters.some(h=>h.phase==='active'&&disasterContains(h,p))??false;
+export const unsafeMvpApproachEndpoint=(w:World,p:Vec)=>w.frontierHazards?.disasters.some(h=>h.phase==='active'&&disasterContains(h,p))??false;
 const unavailable={status:'unavailable'} as const;
 
 /** Typed, detached eligibility from current physical custody and the person's
@@ -27,8 +27,8 @@ export function planMvpFallenFruitAdjacentApproach(w:World):Approach|null{
   if(!live?.items.length)return null;
   const settled=new Set(state.pickups.map(p=>p.effectId));
   for(const r of w.residents.slice(0,8)){
-   if(r.status!=='alive'||!r.canDecide||!r.canExpress||unsafe(w,r.at)||!mvpFallenFruitOptionalActionPermitted(w,r))continue;
-   const seen=observeMvpFallenFruit(w,r.id,settled).find(s=>distance(r.at,s.at)===1&&!unsafe(w,s.at)&&
+   if(r.status!=='alive'||!r.canDecide||!r.canExpress||unsafeMvpApproachEndpoint(w,r.at)||!mvpFallenFruitOptionalActionPermitted(w,r))continue;
+   const seen=observeMvpFallenFruit(w,r.id,settled).find(s=>distance(r.at,s.at)===1&&!unsafeMvpApproachEndpoint(w,s.at)&&
     state.discoveries.some(d=>d.residentId===r.id&&d.effectId===s.effectId&&d.discoveryId===s.discoveryId)&&
     findPath(w,r.at,s.at,false,1)?.length===1);
    if(!seen)continue;
@@ -60,7 +60,7 @@ export function probeMvpFallenFruitAdjacentEngineEdge(w:World){
   const after=completedMovementSnapshot(draft),edges=after?.steps.filter(e=>e.actorId===r.id&&e.seq>baseline.lastSeq);
   if(after?.epoch!==baseline.epoch||edges?.length!==1||!same(edges[0].from,a.from)||!same(edges[0].to,a.to)||
    edges[0].minute!==a.basisMinute+1||r.activity?.planId!==planId||r.activity.path.length!==0||
-   r.lastFailure||r.inside!==null||!same(r.at,a.to)||unsafe(draft,a.to)||
+   r.lastFailure||r.inside!==null||!same(r.at,a.to)||unsafeMvpApproachEndpoint(draft,a.to)||
    !observeMvpFallenFruit(draft,r.id).some(s=>s.discoveryId===a.discoveryId))return unavailable;
   return {status:'detached_engine_edge',durable:false,pickupAuthorized:false,approach:a,steppedMinute:edges[0].minute} as const;
  }catch{return unavailable;}
