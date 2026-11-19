@@ -5,7 +5,53 @@ import {hasMvpHamlet} from '../shared/mvp-hamlet.js';
 import {physiology} from './physiology.js';
 import {distance,reachableTiles,same,walkable} from './navigation.js';
 import {emitEvent} from './events.js';
+import {minuteToClimateUs} from './mvp-climate.js';
 const DAY=1440;
+
+interface FruitRenewalSample {
+ readonly sourceId:string;
+ readonly sourceAt:Readonly<Vec>;
+ readonly amountBefore:number;
+ readonly amountAfter:number;
+ readonly naturallyRenewed:number;
+ readonly atUs:string;
+}
+export interface MvpFruitRenewalWitness extends FruitRenewalSample {
+ readonly worldId:string;
+ readonly worldRevision:number;
+}
+const renewalCapture=new WeakMap<World,FruitRenewalSample[]>();
+const natural=(n:number)=>Number.isSafeInteger(n)&&n>=0;
+const supportedRenewalHead=(w:World)=>w.mode==='validation'&&!Object.hasOwn(w,'simulationOnly')&&
+ /^godot-mvp-[A-Za-z0-9_-]{1,180}$/.test(w.id)&&natural(w.revision)&&hasMvpHamlet(w)&&!!w.mvpResources;
+function noteNativeFruitRenewal(w:World,r:Resource,before:number,gain:number):void {
+ const samples=renewalCapture.get(w);
+ if(!samples||r.kind!=='bush'||r.foodItem!=='fruit'||!/^mvp-supply-fruit-[0-9]+$/.test(r.id)||
+  w.mvpResources?.addedResourceIds.filter(id=>id===r.id).length!==1||w.resources.filter(source=>source.id===r.id).length!==1||
+  !natural(before)||!natural(r.amount)||!natural(gain)||gain===0||r.amount-before!==gain||
+  !natural(r.at.x)||!natural(r.at.y)||r.at.x>=w.map.width||r.at.y>=w.map.height)return;
+ samples.push(Object.freeze({sourceId:r.id,sourceAt:Object.freeze({x:r.at.x,y:r.at.y}),amountBefore:before,amountAfter:r.amount,
+  naturallyRenewed:gain,atUs:minuteToClimateUs(w.minute)}));
+}
+
+/** Private scoped capture for one real step. Samples are staged only after the
+ * final draft revision is known; the session must deliver only after commit. */
+export function captureMvpFruitRenewalStep(w:World,step:()=>void):()=>readonly MvpFruitRenewalWitness[] {
+ if(!supportedRenewalHead(w)||renewalCapture.has(w)){step();return ()=>[];}
+ const worldId=w.id,previousRevision=w.revision,start=w.minute;
+ const samples:FruitRenewalSample[]=[];
+ renewalCapture.set(w,samples);
+ try{step();}finally{renewalCapture.delete(w);}
+ return ()=>{
+  if(!samples.length||w.id!==worldId||!supportedRenewalHead(w)||w.minute!==start+1||
+   w.revision<=previousRevision||w.mvpResources!.lastMinute!==w.minute||!w.mvpClimate||
+   w.mvpClimate.lastMinute!==w.minute)return [];
+  const atUs=minuteToClimateUs(w.minute);
+  if(w.mvpClimate.lastUs!==atUs||samples.some(sample=>sample.atUs!==atUs))return [];
+  const worldRevision=w.revision;
+  return Object.freeze(samples.map(sample=>Object.freeze({...sample,worldId,worldRevision})));
+ };
+}
 export function mvpResourceItem(w:World,r:Resource):'berry'|'fruit'|'water'|'wood'|'stone'{
  return r.kind==='bush'?(w.mvpResources&&r.foodItem==='fruit'?'fruit':'berry'):r.kind==='spring'?'water':r.kind==='tree'?'wood':'stone';
 }
@@ -105,6 +151,8 @@ export function advanceMvpResources(w:World):void{
   if(r.amount>=r.max||occupied){p.progress=0;continue;}
   p.progress+=elapsed*p.perDay/DAY;
   const units=Math.floor(p.progress+1e-10),rest=Math.max(0,p.progress-units);
-  const gain=Math.min(units,r.max-r.amount);r.amount+=gain;p.progress=r.amount>=r.max?0:rest;
+  const before=r.amount,gain=Math.min(units,r.max-before);r.amount+=gain;p.progress=r.amount>=r.max?0:rest;
+  // Observe the actual credited units before any other stock operation can be mistaken for renewal.
+  if(gain>0&&renewalCapture.has(w))try{noteNativeFruitRenewal(w,r,before,gain);}catch{/* observation cannot alter renewal */}
  }
 }
