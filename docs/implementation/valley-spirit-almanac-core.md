@@ -207,3 +207,16 @@ samples, and an empty witness can survive restart without backfill. Existing
 source grant epochs still govern collection and strict packet reading. Neither
 standard startup nor the speech-only fixture is affected; the fixture retains
 its objective-weather-only loopback, with no model or publication.
+
+A disjoint zero-effect same-save G0 fixture can pin one validation world, a
+synthetic canonical account scope/fingerprint, and separate send/editorial
+keys. Its hour credit additionally requires a one-commit, identity-bound
+native rules-minute witness for the exact prior and draft persisted JSON state,
+including private fields (only temporary in-process digests are retained). A
+detached WorldStore write with the same clock and projection cannot generate
+credit, nor can mutation of the draft after the minute was captured.
+The private rules producer closes before the same sealed file is reopened for
+disconnected quota rehearsal and independent editorial review. No state,
+sidecar, or credit is copied between saves. This proves the sealed source-to-
+review chain under a single save, not a formal resident runtime or a real
+provider/public authorization.

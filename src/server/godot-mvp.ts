@@ -1,4 +1,5 @@
 import {captureMvpNativeAgedPickup,selectMvpNativeAgedPickup,type NativeAgedPickupSelection} from '../world/mvp-aged-fruit-native-pickup.js';
+import {nativeWeatherHourTransition} from './valley-spirit-weather-credit.js';
 import {captureMvpNativeObservationPhase} from '../world/mvp-native-observation-phase.js';
 import {planMvpFallenFruitAdjacentApproach,unsafeMvpApproachEndpoint} from './valley-spirit-mvp-fallen-fruit-approach.js';
 import {observeMvpFallenFruit} from '../world/mvp-fallen-fruit-resident.js';
@@ -35,7 +36,7 @@ import {enableCompletedMovement,forkCompletedMovement,completedMovementSnapshot,
 /** Small, disposable engineering MVP. Rules choose actions; the existing world
  * engine owns pathfinding, needs, elapsed work and resource/food settlement.
  * This is NOT LLM autonomy, a formal save, or a longevity acceptance run. */
-import {randomUUID} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {createServer,type Server} from 'node:http';
 import {createWorld} from '../world/seed.js';
 import {stepWorld,submitPlan,planStartError} from '../world/engine.js';
@@ -422,7 +423,24 @@ export function followsPostCommitMvpFruitFlow(previous:MvpFruitFlowBatch,next:Mv
  const before=postCommitFruitFlows.get(previous),after=postCommitFruitFlows.get(next);
  return !!before&&!!after&&before.sessionToken===after.sessionToken&&after.deliveredSequence===before.deliveredSequence+1;
 }
-export function createMvpSession(options:{observeSessionWeather?:true;world?:World;commit?:(world:World,previousRevision:number,speech?:AddressedSpeechObservation)=>void;persistent?:boolean;captureAddressedSpeechCustody?:true;observeCommittedMeals?:(witnesses:readonly ValleySpiritMvpMealWitness[])=>void;observeCommittedFruitRenewal?:(witnesses:readonly MvpFruitRenewalWitness[])=>void;observeCommittedFruitFlow?:(flow:MvpFruitFlowBatch)=>void}={}){
+const sameSaveNativeWeatherMinutes=new WeakMap<World,Readonly<{before:string;after:string}>>();
+// Validation saves persist the complete JSON World. Bind to that exact
+// serialized content (including private state, order, and all arrays), using
+// a process-local digest only. A SQLite decode preserves that JSON shape.
+// Undefined fields omitted by persistence do not authorize extra state.
+const sameSaveWorldFingerprint=(w:World)=>createHash('sha256').update('same-save-native-minute/v1\0')
+ .update(JSON.stringify(w),'utf8').digest('hex');
+function sealNativeWeatherMinute(previous:World,draft:World){
+ if(draft.id===previous.id&&draft.revision>previous.revision&&nativeWeatherHourTransition(previous.minute,draft.minute))
+  sameSaveNativeWeatherMinutes.set(draft,Object.freeze({before:sameSaveWorldFingerprint(previous),after:sameSaveWorldFingerprint(draft)}));
+}
+/** Detached/altered state cannot reuse a native minute marker, even when the
+ * public projection, identifiers, and clock are all identical. */
+export function isSameSaveNativeWeatherMinute(previous:World,draft:World):boolean{
+ const observed=sameSaveNativeWeatherMinutes.get(draft);
+ return !!observed&&observed.before===sameSaveWorldFingerprint(previous)&&observed.after===sameSaveWorldFingerprint(draft);
+}
+export function createMvpSession(options:{observeSessionWeather?:true;world?:World;commit?:(world:World,previousRevision:number,speech?:AddressedSpeechObservation)=>void;persistent?:boolean;captureAddressedSpeechCustody?:true;captureSameSaveNativeWeather?:true;observeCommittedMeals?:(witnesses:readonly ValleySpiritMvpMealWitness[])=>void;observeCommittedFruitRenewal?:(witnesses:readonly MvpFruitRenewalWitness[])=>void;observeCommittedFruitFlow?:(flow:MvpFruitFlowBatch)=>void}={}){
  const fruitFlowSessionToken=Symbol();let deliveredFruitFlowSequence=0;
  let world=structuredClone(options.world??createMvpWorld());
  if(options.world)inheritReceiptHistory(options.world,world);
@@ -475,8 +493,11 @@ export function createMvpSession(options:{observeSessionWeather?:true;world?:Wor
     });
     serial=minute.serial;
     const {speech,witnesses,renewal,fruitFlow}=minute;
-    if(speech?.receipts.length)options.commit?.(world,current.revision,speech);
-    else options.commit?.(world,current.revision);
+    if(options.persistent&&options.commit&&options.captureSameSaveNativeWeather)sealNativeWeatherMinute(current,world);
+    try{
+     if(speech?.receipts.length)options.commit?.(world,current.revision,speech);
+     else options.commit?.(world,current.revision);
+    }finally{if(options.captureSameSaveNativeWeather)sameSaveNativeWeatherMinutes.delete(draft);}
     try{observeCommittedWeather();}catch{sessionWeather=undefined;}
     if(witnesses.length)try{options.observeCommittedMeals?.(witnesses);}catch{/* committed world is independent */}
     if(renewal.length)try{options.observeCommittedFruitRenewal?.(renewal);}catch{/* committed world is independent */}

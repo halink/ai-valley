@@ -19,6 +19,8 @@ const sourceAgeShape='valley-spirit-private-source-age-fixture/v1';
 const reviewedShape='valley-spirit-private-yearbook-review-fixture/v1';
 const weatherEditorialShape='valley-spirit-private-weather-editorial-fixture/v1';
 const weatherUseShape='valley-spirit-private-weather-use-fixture/v1';
+const sameSaveG0Shape='valley-spirit-private-rules-g0-weather-review-fixture/v1';
+const rulesAccountScope=(v:unknown):v is string=>typeof v==='string'&&/^[A-Za-z0-9][A-Za-z0-9:_-]{0,126}$/.test(v);
 const speechWeatherShape='valley-spirit-private-rules-speech-weather-fixture/v1';
 const speechShape='valley-spirit-private-rules-speech-fixture/v1';
 const speechWorld=(v:unknown):v is string=>typeof v==='string'&&/^godot-mvp-[A-Za-z0-9_-]{1,160}$/.test(v);
@@ -37,11 +39,12 @@ function root():string {
  return realpathSync(tmpdir());
 }
 interface Manifest {
- readonly schema:typeof shape|typeof formalShape|typeof formalShadowShape|typeof reviewedShape|typeof sourceAgeShape|typeof weatherUseShape|typeof weatherEditorialShape|typeof agedPlacementShape|typeof agedReviewShape|typeof speechShape|typeof speechWeatherShape;
+ readonly schema:typeof shape|typeof formalShape|typeof formalShadowShape|typeof reviewedShape|typeof sourceAgeShape|typeof weatherUseShape|typeof weatherEditorialShape|typeof agedPlacementShape|typeof agedReviewShape|typeof speechShape|typeof speechWeatherShape|typeof sameSaveG0Shape;
  readonly approvalKeyPem?:string;
  readonly yearbookReviewerKeyPem?:string;
  readonly rulesSpeechWorldId?:string;
  readonly rulesWeatherHourCredit?:true;
+ readonly rulesWeatherAccountScope?:string;
  readonly weatherUse?:Readonly<{keyPem:string;accountFingerprint:string;editorialKeyPem?:string}>;
  readonly sourceAge?:Readonly<{keyPem:string;policy:SealedMvpSourceAgePolicy}>;
  readonly agedPlacementKeyPem?:string;
@@ -63,6 +66,7 @@ export interface DeveloperMvpSpiritFixtureOwner {
  readonly yearbookReviewerKeyPem?:string;
  readonly rulesSpeechWorldId?:string;
  readonly rulesWeatherHourCredit?:true;
+ readonly rulesWeatherAccountScope?:string;
  readonly weatherUse?:Readonly<{keyPem:string;accountFingerprint:string;editorialKeyPem?:string}>;
  readonly sourceAge?:Readonly<{keyPem:string;policy:SealedMvpSourceAgePolicy}>;
  readonly agedPlacementKeyPem?:string;
@@ -144,7 +148,13 @@ export function createDeveloperRulesSpeechWeatherFixtureKey(worldId:string):Deve
  if(!speechWorld(worldId))return invalid();
  return createKey({worldLots:0,lotsPerTarget:0},undefined,undefined,undefined,undefined,undefined,undefined,undefined,worldId,true);
 }
-function createKey(capacity:MvpGroundFruitCapacity,approvalKeyPem?:string,shadowKeyPem?:string,yearbookReviewerKeyPem?:string,sourceAge?:Manifest['sourceAge'],weatherUse?:Manifest['weatherUse'],agedPlacementKeyPem?:string,agedG1ReviewerKeyPem?:string,rulesSpeechWorldId?:string,rulesWeatherHourCredit?:true):DeveloperMvpSpiritFixtureKey {
+export function createDeveloperSameSaveG0FixtureKey(worldId:string,accountScope:string,accountFingerprint:string,
+ sendKeyPem:string,editorialKeyPem:string):DeveloperMvpSpiritFixtureKey {
+ if(!speechWorld(worldId)||!rulesAccountScope(accountScope)||!hex(accountFingerprint)||!independentKeys(sendKeyPem,editorialKeyPem))return invalid();
+ return createKey({worldLots:0,lotsPerTarget:0},undefined,undefined,undefined,undefined,
+  {keyPem:sendKeyPem,accountFingerprint,editorialKeyPem},undefined,undefined,worldId,true,accountScope);
+}
+function createKey(capacity:MvpGroundFruitCapacity,approvalKeyPem?:string,shadowKeyPem?:string,yearbookReviewerKeyPem?:string,sourceAge?:Manifest['sourceAge'],weatherUse?:Manifest['weatherUse'],agedPlacementKeyPem?:string,agedG1ReviewerKeyPem?:string,rulesSpeechWorldId?:string,rulesWeatherHourCredit?:true,rulesWeatherAccountScope?:string):DeveloperMvpSpiritFixtureKey {
  if(!validMvpSpiritFixtureCapacity(capacity))return invalid();
  const directory=mkdtempSync(join(root(),prefix));
  const initial=lstatSync(directory,{bigint:true});if(!privateDirectory(initial))return invalid();
@@ -155,7 +165,7 @@ function createKey(capacity:MvpGroundFruitCapacity,approvalKeyPem?:string,shadow
   const s=fstatSync(fd,{bigint:true});if(!privateFile(s)||s.size!==0n)return invalid();
   databaseIdentity=identity(s);fsyncSync(fd);
  }finally{closeSync(fd);}
- const manifest:Manifest={schema:rulesWeatherHourCredit?speechWeatherShape:rulesSpeechWorldId?speechShape:agedG1ReviewerKeyPem?agedReviewShape:agedPlacementKeyPem?agedPlacementShape:weatherUse?.editorialKeyPem?weatherEditorialShape:weatherUse?weatherUseShape:sourceAge?sourceAgeShape:yearbookReviewerKeyPem?reviewedShape:shadowKeyPem?formalShadowShape:approvalKeyPem?formalShape:shape,directoryIdentity:identity(initial),databaseIdentity,tokenHash:digest(token),capacity:{...capacity},...(approvalKeyPem?{approvalKeyPem}:{}),...(shadowKeyPem?{shadowKeyPem}:{}),...(yearbookReviewerKeyPem?{yearbookReviewerKeyPem}:{}),...(sourceAge?{sourceAge}:{}),...(weatherUse?{weatherUse}:{}),...(agedPlacementKeyPem?{agedPlacementKeyPem}:{}),...(agedG1ReviewerKeyPem?{agedG1ReviewerKeyPem}:{}),...(rulesSpeechWorldId?{rulesSpeechWorldId}:{}),...(rulesWeatherHourCredit?{rulesWeatherHourCredit}:{})};
+ const manifest:Manifest={schema:rulesWeatherAccountScope?sameSaveG0Shape:rulesWeatherHourCredit?speechWeatherShape:rulesSpeechWorldId?speechShape:agedG1ReviewerKeyPem?agedReviewShape:agedPlacementKeyPem?agedPlacementShape:weatherUse?.editorialKeyPem?weatherEditorialShape:weatherUse?weatherUseShape:sourceAge?sourceAgeShape:yearbookReviewerKeyPem?reviewedShape:shadowKeyPem?formalShadowShape:approvalKeyPem?formalShape:shape,directoryIdentity:identity(initial),databaseIdentity,tokenHash:digest(token),capacity:{...capacity},...(approvalKeyPem?{approvalKeyPem}:{}),...(shadowKeyPem?{shadowKeyPem}:{}),...(yearbookReviewerKeyPem?{yearbookReviewerKeyPem}:{}),...(sourceAge?{sourceAge}:{}),...(weatherUse?{weatherUse}:{}),...(agedPlacementKeyPem?{agedPlacementKeyPem}:{}),...(agedG1ReviewerKeyPem?{agedG1ReviewerKeyPem}:{}),...(rulesSpeechWorldId?{rulesSpeechWorldId}:{}),...(rulesWeatherHourCredit?{rulesWeatherHourCredit}:{}),...(rulesWeatherAccountScope?{rulesWeatherAccountScope}:{})};
  const metadata=openSync(join(directory,manifestName),constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600);
  try{writeFileSync(metadata,JSON.stringify(manifest),'utf8');fsyncSync(metadata);}finally{closeSync(metadata);}
  const parent=openSync(directory,constants.O_RDONLY|constants.O_DIRECTORY|constants.O_NOFOLLOW);
@@ -193,6 +203,10 @@ function readManifest(path:string):{identity:string;value:Manifest} {
    v?.schema===sourceAgeShape&&exact(v,[...base,'sourceAge'])&&exact(v.sourceAge,['keyPem','policy'])&&
     formalApprovalKey(v.sourceAge!.keyPem)&&validSealedMvpSourceAgePolicy(v.sourceAge!.policy)||
    v?.schema===weatherEditorialShape&&exact(v,[...base,'weatherUse'])&&exact(v.weatherUse,['keyPem','accountFingerprint','editorialKeyPem'])&&
+    independentKeys(v.weatherUse!.keyPem,v.weatherUse!.editorialKeyPem)&&hex(v.weatherUse!.accountFingerprint)||
+   v?.schema===sameSaveG0Shape&&exact(v,[...base,'rulesSpeechWorldId','rulesWeatherHourCredit','rulesWeatherAccountScope','weatherUse'])&&
+    speechWorld(v.rulesSpeechWorldId)&&v.rulesWeatherHourCredit===true&&rulesAccountScope(v.rulesWeatherAccountScope)&&
+    v.capacity?.worldLots===0&&v.capacity?.lotsPerTarget===0&&exact(v.weatherUse,['keyPem','accountFingerprint','editorialKeyPem'])&&
     independentKeys(v.weatherUse!.keyPem,v.weatherUse!.editorialKeyPem)&&hex(v.weatherUse!.accountFingerprint)||
    v?.schema===speechWeatherShape&&exact(v,[...base,'rulesSpeechWorldId','rulesWeatherHourCredit'])&&speechWorld(v.rulesSpeechWorldId)&&
     v.rulesWeatherHourCredit===true&&v.capacity?.worldLots===0&&v.capacity?.lotsPerTarget===0||
@@ -232,6 +246,7 @@ export function acquireDeveloperMvpSpiritFixtureOwner(key:DeveloperMvpSpiritFixt
    capacity:Object.freeze({...manifest.capacity}),
    ...(manifest.approvalKeyPem?{formalApprovalKeyPem:manifest.approvalKeyPem}:{}),
    ...(manifest.yearbookReviewerKeyPem?{yearbookReviewerKeyPem:manifest.yearbookReviewerKeyPem}:{}),
+   ...(manifest.rulesWeatherAccountScope?{rulesWeatherAccountScope:manifest.rulesWeatherAccountScope}:{}),
    ...(manifest.rulesWeatherHourCredit?{rulesWeatherHourCredit:true as const}:{}),
    ...(manifest.rulesSpeechWorldId?{rulesSpeechWorldId:manifest.rulesSpeechWorldId}:{}),
    ...(manifest.weatherUse?{weatherUse:Object.freeze({...manifest.weatherUse})}:{}),

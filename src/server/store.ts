@@ -12,8 +12,8 @@ import {ValleySpiritShadowQueue} from './valley-spirit-shadow-queue.js';
 import {minuteToClimateUs} from '../world/mvp-climate.js';
 import {makeSealedMvpSourceAgeTerms,verifySealedMvpSourceAge} from './valley-spirit-mvp-source-age.js';
 import {readCurrentSealedMvpSourceCommitment,readCurrentSealedMvpSourceCredit,writeSealedMvpSourceCredit} from './valley-spirit-mvp-source-credit.js';
-import {prepareSealedMvpAdjacentMinute,prepareSealedMvpEcologyMinute,prepareSealedMvpFruitCreditMinute} from './godot-mvp.js';
-import {appendNativeWeatherCredit} from './valley-spirit-weather-credit.js';
+import {isSameSaveNativeWeatherMinute,prepareSealedMvpAdjacentMinute,prepareSealedMvpEcologyMinute,prepareSealedMvpFruitCreditMinute} from './godot-mvp.js';
+import {appendNativeWeatherCredit,nativeWeatherHourTransition} from './valley-spirit-weather-credit.js';
 import {probeMvpFallenFruitAdjacentEngineEdge} from './valley-spirit-mvp-fallen-fruit-approach.js';
 import {appendFormalDueIntent,formalDueCurrent,formalDueInputs,makeFormalDueCheckpoint,prepareFormalDueIntent,
  readFormalDueRows,writeFormalDueCheckpoint,type FormalDueCheckpoint,type FormalDueIntent} from './valley-spirit-formal-due.js';
@@ -684,6 +684,9 @@ export class WorldStore {
   const previous=this.writeCommit(world,previousRevision,appended,seasonalLedger);
   if(this.nativeWeatherCredit&&previousRevision!==null&&world.mode==='validation'){
    this.developerSpiritFixtureOwner!.assertOwned();
+   if(this.developerSpiritFixtureOwner!.rulesWeatherAccountScope!==undefined&&previous&&
+      nativeWeatherHourTransition(previous.minute,world.minute)&&!isSameSaveNativeWeatherMinute(previous,world))
+    throw Error('mvp_same_save_native_weather_proof_required');
    this.db.exec('SAVEPOINT optional_native_weather_credit');
    try{
     appendNativeWeatherCredit(this.db,previous,world,previousRevision,this.developerSpiritFixtureOwner!.rulesWeatherHourCredit===true);

@@ -34,6 +34,7 @@ function progresses(old:readonly ValleySpiritAlmanacEntry[],next:readonly Valley
 export function privateWeatherRehearsalScope(owner:DeveloperMvpSpiritFixtureOwner,context:DisconnectedWeatherUseContext){
  if(!isDeveloperMvpSpiritFixtureOwner(owner)||!owner.weatherUse||
     context.accountFingerprint!==owner.weatherUse.accountFingerprint||
+    owner.rulesWeatherAccountScope!==undefined&&(context.accountScope!==owner.rulesWeatherAccountScope||context.worldId!==owner.rulesSpeechWorldId)||
     context.fixtureScopeId!==createHash('sha256').update('disconnected-weather-fixture/v1\0'+owner.seal).digest('hex'))
   throw Error('private_weather_store_scope');
  owner.assertOwned();

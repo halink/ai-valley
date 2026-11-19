@@ -72,7 +72,7 @@ export async function startPersistentRulesMvp(options:{database:string;port:numb
   if(adopted||soilAdopted||agricultureAdopted||rainAdopted)world.revision++;
   if(!saved||upgraded||adopted||soilAdopted||agricultureAdopted||rainAdopted)store.commit(world,previous);
   let lastCommittedMinute=world.minute;
-  session=createMvpSession({world,persistent:true,captureAddressedSpeechCustody:speechPin?true:undefined,commit:(draft,revision,speech)=>{
+  session=createMvpSession({world,persistent:true,captureAddressedSpeechCustody:speechPin?true:undefined,captureSameSaveNativeWeather:privateOwner?.rulesWeatherAccountScope?true:undefined,commit:(draft,revision,speech)=>{
    owner!.assertOwned();
    if(speechPin){
     if(draft.id!==speechPin.worldId)throw Error('mvp_rules_private_speech_world');

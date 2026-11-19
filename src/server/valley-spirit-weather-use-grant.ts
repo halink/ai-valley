@@ -87,6 +87,8 @@ export function openDisconnectedWeatherUseGrant(owner:DeveloperMvpSpiritFixtureO
  if(!world(worldId)||!isDeveloperMvpSpiritFixtureOwner(owner)||!owner.weatherUse||!isProductionAccountQuotaRehearsal(quota))
   throw Error('disconnected_weather_grant_scope');
  owner.assertOwned();
+ if(owner.rulesWeatherAccountScope!==undefined&&(owner.rulesWeatherAccountScope!==quota.accountScope||owner.rulesSpeechWorldId!==worldId))
+  throw Error('disconnected_weather_grant_scope');
  const frozenPolicy=structuredClone(policy);
  if(!quota.matchesPolicy(frozenPolicy)||quota.accountScope!==frozenPolicy.accountId)throw Error('disconnected_weather_grant_policy');
  const key=createPublicKey(owner.weatherUse.keyPem);
