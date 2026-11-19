@@ -1,5 +1,5 @@
 import {DatabaseSync} from 'node:sqlite';
-import {acquireDeveloperMvpSpiritFixtureOwner,type DeveloperMvpSpiritFixtureKey} from './valley-spirit-fixture-files.js';
+import {acquireDeveloperMvpSpiritFixtureOwner,isDeveloperMvpSpiritFixtureOwner,type DeveloperMvpSpiritFixtureOwner,type DeveloperMvpSpiritFixtureKey} from './valley-spirit-fixture-files.js';
 import {createValleySpiritAlmanacPacket,MAX_ALMANAC_WEATHER_SOURCES,type ValleySpiritAlmanacAuthority,type ValleySpiritAlmanacRange} from './valley-spirit-almanac.js';
 import {readNativeValidationWeatherHead} from './valley-spirit-native-basis.js';
 import {readValleySpiritWeatherPermission} from './valley-spirit-permissions.js';
@@ -11,6 +11,16 @@ import {verifyNativeWeatherCreditBatch} from './valley-spirit-weather-credit.js'
 export function openPrivateNativeWeatherPacketReader(fixture:DeveloperMvpSpiritFixtureKey,worldId:string){
  if(typeof worldId!=='string'||!/^godot-mvp-[A-Za-z0-9_-]{1,160}$/.test(worldId))throw Error('native_weather_packet_world_invalid');
  const owner=acquireDeveloperMvpSpiritFixtureOwner(fixture);
+ try{
+  const reader=openPrivateNativeWeatherPacketReaderOnOwner(owner,worldId);
+  return Object.freeze({packet:reader.packet,close(){try{reader.close();}finally{owner.release();}}});
+ }catch(e){owner.release();throw e;}
+}
+/** Internal companion reader. Borrows only the genuine branded owner. */
+export function openPrivateNativeWeatherPacketReaderOnOwner(owner:DeveloperMvpSpiritFixtureOwner,worldId:string){
+ if(typeof worldId!=='string'||!/^godot-mvp-[A-Za-z0-9_-]{1,160}$/.test(worldId)||!isDeveloperMvpSpiritFixtureOwner(owner))
+  throw Error('native_weather_packet_owner_invalid');
+ owner.assertOwned();
  let db:DatabaseSync|undefined;
  try{
   if(owner.formalApprovalKeyPem||owner.formalShadowKeyPem)throw Error('native_weather_packet_invalid_owner');
@@ -70,8 +80,8 @@ export function openPrivateNativeWeatherPacketReader(fixture:DeveloperMvpSpiritF
    },
    close(){
     if(closed)return;closed=true;
-    try{sqlite.close();}finally{owner.release();}
+    sqlite.close();
    }
   });
- }catch(e){try{db?.close();}finally{owner.release();}throw e;}
+ }catch(e){db?.close();throw e;}
 }

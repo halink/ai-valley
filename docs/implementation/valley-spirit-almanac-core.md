@@ -128,3 +128,14 @@ observed history rewind. Closing or rotating the public weather grant denies
 old use even if the purpose signature remains valid. No quota is booked, no
 outbound transport opens, and the record proves neither real account identity
 nor any production authorization.
+
+An explicitly disconnected weather rehearsal can now borrow the same sealed
+validation owner for source and purpose verification, and the exact canonical
+quota handle also accepted by the synthetic resident dispatcher. It yields
+after a real durable hold, rebuilds and hashes the exact packet, and rechecks
+the unchanged signed purpose/source versions and resident waiting immediately
+before handing off to a compiled-in memory transport. There is no database
+transaction across that yield. Unknown outcome is retained in the existing
+ledger without automatic retry or a second shadow ledger. The mock records its
+full allowlisted packet and digest in memory; this does not prove external
+delivery, real account identity, or a common official world/runtime.
