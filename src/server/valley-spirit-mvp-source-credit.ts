@@ -99,5 +99,5 @@ export function readCurrentSealedMvpSourceCommitment(db:DatabaseSync,seal:string
  const c=currentCredit(db,seal,world);
  if(!c)return null;
  const creditId=digest(JSON.stringify(['valley-spirit-sealed-source-credit/v1',...fields.map(field=>c[field])]));
- return {worldId:c.worldId,creditId,bornUs:c.bornUs};
+ return {worldId:c.worldId,creditId,bornUs:c.bornUs,sourceId:c.sourceId,sourceAt:{x:c.x,y:c.y}};
 }

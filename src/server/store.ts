@@ -1,3 +1,6 @@
+import {makeSealedAgedPlacementTerms,sealedAgedPlacementAgeDigest,sealedAgedPlacementScope,verifiesSealedAgedPlacementEncoding} from './valley-spirit-aged-placement-terms.js';
+import {valleySpiritFruitFallOpportunityId} from '../shared/valley-spirit-effects.js';
+import {resolveMvpRainEpisode} from '../world/mvp-rain-provenance.js';
 import {projectSealedMvpFairness} from './valley-spirit-mvp-fairness-read.js';
 import {ValleySpiritShadowQueue} from './valley-spirit-shadow-queue.js';
 import {minuteToClimateUs} from '../world/mvp-climate.js';
@@ -28,10 +31,10 @@ import {readSeasonalLedger,writeSeasonalLedger,type SeasonalLedger} from './seas
 import {assertSeasonalKnowledgeAdvance} from '../world/mvp-seasonal-knowledge.js';
 import {rejectMvpClimateForModels} from '../world/mvp-climate-state.js';
 import {assertMvpRainProvenanceAdvance} from '../world/mvp-rain-provenance.js';
-import {assertMvpSpiritEffectsAdvance,validMvpSpiritFixtureCapacity} from '../world/mvp-spirit-effects.js';
+import {assertMvpSpiritEffectsAdvance,projectMvpSpiritActiveGround,validMvpSpiritFixtureCapacity} from '../world/mvp-spirit-effects.js';
 import {assertMvpFallenFruitFixtureTransition,planMvpFallenFruitFixtureStep,
  type MvpFallenFruitFixtureOperation,type MvpFallenFruitFixtureResult} from './valley-spirit-resident-fruit-fixture.js';
-import type {MvpGroundFruitCapacity} from '../world/mvp-ground-fruit.js';
+import {inspectMvpGroundFruitPlacement,type MvpGroundFruitCapacity} from '../world/mvp-ground-fruit.js';
 import type {Biography,HistoryPage,HistoryQuery} from '../shared/history.js';
 import {normalizeHistory,historyKey,readHistoryCursor,makeHistoryCursor} from './history-query.js';
 import {DatabaseSync} from 'node:sqlite';
@@ -822,6 +825,42 @@ export class WorldStore {
    const terms=credit?makeSealedMvpSourceAgeTerms(credit.worldId,credit.creditId,credit.bornUs,owner.sourceAge.policy):null;
    const result=terms?(proof===undefined?{status:'signing-input' as const,terms}:
     verifySealedMvpSourceAge(owner.sourceAge.keyPem,terms,proof)?{status:'verified-age-metadata' as const,terms}:null):null;
+   this.db.exec('COMMIT');return result;
+  }catch(error){this.db.exec('ROLLBACK');throw error;}
+ }
+ /** Canonical custody handoff only. The assessment digest is caller-carried
+  * and strictly unverified until an aged G1 authority is implemented. */
+ readDeveloperMvpAgedPlacementTerms(
+  worldId:string,request:Readonly<{rainEventId:string;target:{x:number;y:number};proposalId:string;approvalId:string;
+   claimedAssessmentDigest:string;firstUs:string;untilUs:string}>,ageProof:unknown,encodingProof?:unknown,
+ ){
+  const owner=this.developerSpiritFixtureOwner;
+  if(!owner?.sourceAge||!owner.agedPlacementKeyPem||owner.formalApprovalKeyPem)return null;
+  owner.assertOwned();this.assertDeveloperSpiritSeal();this.db.exec('BEGIN');
+  try{
+   const w=this.readWorld(false,false);
+   const result=(()=>{
+    if(!w||w.id!==worldId||w.clock.paused||!w.mvpClimate)return null;
+    assertDeveloperMvpEffectArchive(this.db,w);
+    const credit=readCurrentSealedMvpSourceCommitment(this.db,owner.seal,w);
+    const age=credit&&makeSealedMvpSourceAgeTerms(worldId,credit.creditId,credit.bornUs,owner.sourceAge!.policy);
+    if(!credit||!age||!verifySealedMvpSourceAge(owner.sourceAge!.keyPem,age,ageProof))return null;
+    const rain=resolveMvpRainEpisode(w,request.rainEventId),ground=projectMvpSpiritActiveGround(w);
+    const placement=ground&&inspectMvpGroundFruitPlacement(w,ground,credit.sourceId,request.target,owner.capacity);
+    if(!rain||!placement)return null;
+    const sourceInstanceId=placement.source.resourceInstanceId;
+    const terms=makeSealedAgedPlacementTerms({
+     fixtureScopeId:sealedAgedPlacementScope(owner.seal),worldId,worldRevision:w.revision,atUs:w.mvpClimate.lastUs,
+     creditId:credit.creditId,ageTermsDigest:sealedAgedPlacementAgeDigest(age),bornUs:age.bornUs,expiresUs:age.expiresUs,
+     sourceId:credit.sourceId,sourceInstanceId,rainEventId:rain.rainEventId,targetId:placement.target.id,
+     proposalId:request.proposalId,opportunityId:valleySpiritFruitFallOpportunityId(worldId,rain.rainEventId,sourceInstanceId),
+     approvalId:request.approvalId,claimedAssessmentDigest:request.claimedAssessmentDigest,firstUs:request.firstUs,untilUs:request.untilUs,
+    });
+    if(!terms)return null;
+    return encodingProof===undefined?{status:'signing-input-g1-unverified' as const,terms}:
+     verifiesSealedAgedPlacementEncoding(owner.agedPlacementKeyPem!,terms,encodingProof)
+      ?{status:'signature-valid-g1-unverified' as const,terms}:null;
+   })();
    this.db.exec('COMMIT');return result;
   }catch(error){this.db.exec('ROLLBACK');throw error;}
  }
