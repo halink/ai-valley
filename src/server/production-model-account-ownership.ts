@@ -62,9 +62,17 @@ function quotaEnrolled(db:DatabaseSync):string|null{
  if(rows.length!==1||rows[0].slot!==1||rows[0].version!==1||typeof rows[0].attachment!=='string'||!/^[0-9a-f]{64}$/.test(rows[0].attachment))throw Error('model_account_quota_marker_invalid');
  return rows[0].attachment;
 }
-type OwnerState={registryDirectory:string;scope:string;directory:{dev:number;ino:number};assert:()=>void;marker:()=>string|null;enroll:(binding:string)=>void;quota?:QuotaChild;};
+type OwnerState={registryDirectory:string;scope:string;directory:{dev:number;ino:number};assert:()=>void;marker:()=>string|null;enroll:(binding:string)=>void;claim:(request:string,register:boolean)=>boolean;quota?:QuotaChild;};
 const owners=new WeakMap<ProductionModelAccountOwnership,OwnerState>();
 
+function quotaPath(registry:string,scope:string):string{
+ const name=createHash('sha256').update('siliconflow-shared-quota-v1\0'+scope).digest('hex')+'.quota.sqlite';
+ return join(registry,name);
+}
+function scopedRequest(scope:string,request:string):string{
+ if(typeof request!=='string'||!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,126}$/.test(request))throw Error('model_account_quota_request_invalid');
+ return 'production-run-'+createHash('sha256').update(JSON.stringify([scope,request])).digest('hex');
+}
 /** Disconnected same-host bridge. This is a cooperating registry's account
  * scope, not a provider login/billing attestation and not permission to send.
  * No paths, policy IDs or synthetic provider claims are supplied by the worker.
@@ -82,8 +90,8 @@ export function attachProductionAccountQuotaRehearsal(ownership:ProductionModelA
  };
  assert();
  if(input.create&&state.marker())throw Error('model_account_quota_create_after_enrollment');
- const name=createHash('sha256').update('siliconflow-shared-quota-v1\0'+state.scope).digest('hex')+'.quota.sqlite';
- const ledger=new SharedModelAccountLedger(join(state.registryDirectory,name),input.policy,{create:input.create,now:input.now});
+ const ledger=new SharedModelAccountLedger(quotaPath(state.registryDirectory,state.scope),input.policy,{create:input.create,now:input.now});
+ const scoped=(request:string)=>scopedRequest(state.scope,request);
  let sealed=false,closed=false;
  const current=()=>{assert();if(closed)throw Error('model_account_quota_handle_closed');};
  const abandon=()=>{if(!closed){closed=true;ledger.close();}};
@@ -92,11 +100,17 @@ export function attachProductionAccountQuotaRehearsal(ownership:ProductionModelA
  return Object.freeze({
   kind:'disconnected-production-account-quota' as const,
   accountScope:state.scope,runId:ownership.runId,
-  reserve(...args:Parameters<SharedModelAccountLedger['reserve']>){current();return ledger.reserve(...args);},
+  reserve(request:Parameters<SharedModelAccountLedger['reserve']>[0],at:number){
+   current();
+   const key=scoped(request.requestId);
+   if(!state.claim(key,true))return {status:'duplicate' as const};
+   const admitted=ledger.reserve({...request,requestId:key},at);
+   return admitted.status==='reserved'?{...admitted,requestId:request.requestId}:admitted;
+  },
   setResidentWaiting(...args:Parameters<SharedModelAccountLedger['setResidentWaiting']>){current();return ledger.setResidentWaiting(...args);},
-  markHandoff(...args:Parameters<SharedModelAccountLedger['markHandoff']>){current();return ledger.markHandoff(...args);},
-  cancelProvenUnsent(...args:Parameters<SharedModelAccountLedger['cancelProvenUnsent']>){current();return ledger.cancelProvenUnsent(...args);},
-  confirmCompletion(...args:Parameters<SharedModelAccountLedger['confirmCompletion']>){current();return ledger.confirmCompletion(...args);},
+  markHandoff(request:string,...args: [at:number]){current();const key=scoped(request);return state.claim(key,false)&&ledger.markHandoff(key,...args);},
+  cancelProvenUnsent(request:string,...args: [at:number]){current();const key=scoped(request);return state.claim(key,false)&&ledger.cancelProvenUnsent(key,...args);},
+  confirmCompletion(request:string,...args: [at:number,usage?:{inputTokens:number;outputTokens:number}]){current();const key=scoped(request);return state.claim(key,false)&&ledger.confirmCompletion(key,...args);},
   summary(at:number){current();return ledger.summary(at);},
   /** Confirms only this local quota handle is pending free. The existing
    * supervisor must still separately verify child, world and journal clean. */
@@ -132,6 +146,7 @@ export function acquireProductionModelAccountOwnership(options:AccountOwnershipO
      if(quotaEnrolled(r.db)!==enrolled)throw Error('model_account_quota_marker_changed');
     },
     marker:()=>enrolled,
+    claim(request,register){assertOwned();return quotaClaim(r.db,request,options.runId,register);},
     enroll(binding){
      assertOwned();
      if(quotaEnrolled(r.db)!==enrolled)throw Error('model_account_quota_marker_changed');
@@ -173,9 +188,91 @@ export function reconcileProductionModelAccountOwnership(options:AccountOwnershi
  const r=openRegistry(options);
  try{
   if((r.db.prepare('SELECT active_run FROM account_meta').get() as {active_run:string|null}).active_run!==options.runId)throw Error('model_account_reconciliation_run_mismatch');
+  if(checkedRecoveryTable(r.db)&&r.db.prepare('SELECT 1 FROM account_quota_recovery WHERE recorded<>1 LIMIT 1').get())
+   throw Error('model_account_quota_recovery_incomplete');
   r.db.exec('BEGIN IMMEDIATE');try{
    r.db.prepare('UPDATE account_runs SET resolution=?,evidence=? WHERE run=?').run(options.resolution,options.evidenceReference,options.runId);
    r.db.exec('UPDATE account_meta SET active_run=NULL; COMMIT');
   }catch(e){r.db.exec('ROLLBACK');throw e;}
  }finally{r.close();}
+}
+
+
+const QUOTA_CLAIM_SQL='CREATE TABLE account_quota_claim (request TEXT PRIMARY KEY, run TEXT NOT NULL, FOREIGN KEY(run) REFERENCES account_runs(run))';
+function quotaClaim(db:DatabaseSync,request:string,run:string,register:boolean):boolean{
+ const schema=db.prepare("SELECT type,sql FROM sqlite_schema WHERE name='account_quota_claim'").get();
+ if(!schema&&!register)return false;
+ if(schema&&(schema.type!=='table'||schema.sql!==QUOTA_CLAIM_SQL||db.prepare("SELECT 1 FROM sqlite_schema WHERE tbl_name='account_quota_claim' AND type='trigger'").get()))throw Error('model_account_quota_claim_schema');
+ if(schema){
+  const prior=db.prepare('SELECT run FROM account_quota_claim WHERE request=?').get(request);
+  if(prior)return prior.run===run;
+  if(!register)return false;
+  if(Number(db.prepare('SELECT count(*) AS n FROM account_quota_claim').get()?.n)>=4096)throw Error('model_account_quota_claim_limit');
+ }
+ // Pin before a quota row can be allocated. A crash between stores may leave
+ // an unconsumed claim; its identity cannot be reused by a different run.
+ db.exec('BEGIN IMMEDIATE');
+ try{
+  if(!schema)db.exec(QUOTA_CLAIM_SQL);
+  db.prepare('INSERT INTO account_quota_claim VALUES (?,?)').run(request,run);
+  db.exec('COMMIT');
+  return true;
+ }catch(error){db.exec('ROLLBACK');throw error;}
+}
+const QUOTA_RECOVERY_SQL='CREATE TABLE account_quota_recovery (request TEXT PRIMARY KEY, evidence TEXT NOT NULL, completed_at INTEGER NOT NULL, input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, recorded INTEGER NOT NULL)';
+function checkedRecoveryTable(db:DatabaseSync){
+ const table=db.prepare("SELECT type,sql FROM sqlite_schema WHERE name='account_quota_recovery'").get();
+ if(table&&(table.type!=='table'||table.sql!==QUOTA_RECOVERY_SQL||db.prepare("SELECT 1 FROM sqlite_schema WHERE tbl_name='account_quota_recovery' AND type='trigger'").get()))throw Error('model_account_quota_recovery_schema');
+ return !!table;
+}
+const safeToken=(n:unknown):n is number=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=0&&n<=100_000_000;
+
+/** Operator-only disconnected recovery. Evidence is a reference to prior
+ * independent account review, not vendor authentication. Never creates a run,
+ * reaches transport, releases the process owner, or refunds an unknown send. */
+export function recordRehearsalQuotaCompletion(options:AccountOwnershipOptions&{
+ mode:'disconnected-rehearsal';policy:SharedModelAccountPolicy;requestId:string;evidenceReference:string;
+ completedAt:number;usage:{inputTokens:number;outputTokens:number};
+}):'recorded'|'already-recorded' {
+ if(options?.mode!=='disconnected-rehearsal'||options.policy?.accountId!==options.accountScope||
+  !/^sha256:[0-9a-f]{64}$/.test(options.evidenceReference)||!Number.isSafeInteger(options.completedAt)||options.completedAt<0||
+  !safeToken(options.usage?.inputTokens)||!safeToken(options.usage?.outputTokens))throw Error('model_account_quota_recovery_invalid');
+ const request=scopedRequest(options.accountScope,options.requestId);
+ const r=openRegistry(options);
+ let ledger:SharedModelAccountLedger|undefined;
+ try{
+  r.lock.assertOwned();
+  if(r.db.prepare('SELECT active_run FROM account_meta').get()?.active_run!==options.runId)throw Error('model_account_quota_recovery_run_mismatch');
+  const binding=quotaEnrolled(r.db);
+  if(!binding)throw Error('model_account_quota_not_enrolled');
+  ledger=new SharedModelAccountLedger(quotaPath(options.registryDirectory,options.accountScope),options.policy,{create:false,now:options.completedAt});
+  if(ledger.offlineFixtureBinding()!==binding)throw Error('model_account_quota_file_binding_mismatch');
+  if(!quotaClaim(r.db,request,options.runId,false))throw Error('model_account_quota_recovery_request_mismatch');
+  const requestState=ledger.requestState(request);
+  if(!requestState||!['sent-unknown','complete'].includes(requestState.phase))throw Error('model_account_quota_recovery_request_mismatch');
+  const table=checkedRecoveryTable(r.db);
+  const existing=table?r.db.prepare('SELECT evidence,completed_at,input_tokens,output_tokens,recorded FROM account_quota_recovery WHERE request=?').get(request):null;
+  const {inputTokens,outputTokens}=options.usage;
+  if(existing&&(existing.evidence!==options.evidenceReference||existing.completed_at!==options.completedAt||
+      existing.input_tokens!==inputTokens||existing.output_tokens!==outputTokens||![0,1].includes(Number(existing.recorded))))throw Error('model_account_quota_recovery_conflict');
+  if(!existing){
+   if(requestState.phase!=='sent-unknown')throw Error('model_account_quota_recovery_request_mismatch');
+   r.db.exec('BEGIN IMMEDIATE');
+   try{
+    if(!table)r.db.exec(QUOTA_RECOVERY_SQL);
+    r.db.prepare('INSERT INTO account_quota_recovery VALUES (?,?,?,?,?,0)').run(request,options.evidenceReference,options.completedAt,inputTokens,outputTokens);
+    r.db.exec('COMMIT');
+   }catch(error){r.db.exec('ROLLBACK');throw error;}
+  }
+  r.lock.assertOwned();
+  if(requestState.phase==='sent-unknown'){
+   if(existing?.recorded===1||!ledger.confirmCompletion(request,options.completedAt,{inputTokens,outputTokens}))throw Error('model_account_quota_recovery_unresolved');
+  }
+  const completed=ledger.completedCharge(request);
+  if(completed?.endedAt!==options.completedAt||completed.inputTokens!==inputTokens||completed.outputTokens!==outputTokens)throw Error('model_account_quota_recovery_completion_conflict');
+  if(existing?.recorded===1)return 'already-recorded';
+  r.lock.assertOwned();
+  if(r.db.prepare('UPDATE account_quota_recovery SET recorded=1 WHERE request=? AND recorded=0').run(request).changes!==1)throw Error('model_account_quota_recovery_conflict');
+  return 'recorded';
+ }finally{try{ledger?.close();}finally{r.close();}}
 }

@@ -1,3 +1,4 @@
+import {appendValleySpiritFormalArrivalCustody,readValleySpiritFormalArrivalCustody,verifyValleySpiritFormalArrivalCustody,type ValleySpiritFormalArrivalReceipt} from './valley-spirit-formal-arrival-custody.js';
 import type {AddressedSpeechObservation} from '../world/addressed-speech.js';
 import {appendValleySpiritSpeechCustody,readValleySpiritSpeechCustody,verifyValleySpiritSpeechCustody} from './valley-spirit-speech-custody.js';
 import type {ValleySpiritLifeReceipt} from './valley-spirit-life-facts.js';
@@ -230,6 +231,12 @@ export class WorldStore {
  verifyCommittedMvpAddressedSpeech(receipt:Readonly<ValleySpiritLifeReceipt>):boolean{
   return this.allowMvpClimate&&!this.seasonalModel&&verifyValleySpiritSpeechCustody(this.db,receipt);
  }
+ readCommittedFormalArrival(worldId:string,eventId:string):ValleySpiritFormalArrivalReceipt|null{
+  return !this.allowMvpClimate&&!this.seasonalModel?readValleySpiritFormalArrivalCustody(this.db,worldId,eventId):null;
+ }
+ verifyCommittedFormalArrival(receipt:Readonly<ValleySpiritFormalArrivalReceipt>):boolean{
+  return !this.allowMvpClimate&&!this.seasonalModel&&verifyValleySpiritFormalArrivalCustody(this.db,receipt);
+ }
  private commitTransaction(world:World,previousRevision:number|null,appended?:AppendedHistory,seasonalLedger?:SeasonalLedger,
   proof?:AddressedSpeechObservation):readonly ValleySpiritLifeReceipt[]{
   this.assertWritable(world);
@@ -247,6 +254,16 @@ export class WorldStore {
      this.db.exec('ROLLBACK TO optional_speech_custody');
      this.db.exec('RELEASE optional_speech_custody');
      speech=[];
+    }
+   }
+   if(!this.allowMvpClimate&&!this.seasonalModel&&world.mode==='formal'&&appended?.events.some(e=>Object.hasOwn(e,'socialAppointmentArrival'))){
+    this.db.exec('SAVEPOINT optional_formal_arrival_custody');
+    try{
+     appendValleySpiritFormalArrivalCustody(this.db,world,previousRevision,appended.events);
+     this.db.exec('RELEASE optional_formal_arrival_custody');
+    }catch{
+     this.db.exec('ROLLBACK TO optional_formal_arrival_custody');
+     this.db.exec('RELEASE optional_formal_arrival_custody');
     }
    }
    this.db.exec('COMMIT');

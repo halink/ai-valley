@@ -1,5 +1,5 @@
-import type {FormalOpportunity,Resident,World,Vec} from '../shared/types.js';
-import type {SocialAppointment,SocialAppointmentAction,AppointmentKnowledge} from '../shared/social-appointments.js';
+import type {FormalOpportunity,Resident,World,Vec,WorldEvent} from '../shared/types.js';
+import type {SocialAppointment,SocialAppointmentAction,AppointmentKnowledge,SocialAppointmentArrivalFact} from '../shared/social-appointments.js';
 import {isSocialAppointmentStop} from '../shared/social-appointments.js';
 import {knownAgeYears} from './time.js';
 import {canObserve} from './knowledge.js';
@@ -21,6 +21,13 @@ const adult=(w:World,r:Resident|undefined):r is Resident=>!!r&&r.status==='alive
 const carried=(w:World,r:Resident)=>!!travellingFamily(w,r.id)||!!familyPassenger(w,r.id)||!!w.ferries?.trips.some(t=>t.aboard.includes(r.id))||!!w.health?.transports.some(t=>t.phase==='carrying'&&(t.patientId===r.id||t.carrierId===r.id));
 const contact=(w:World,a:Resident,b:Resident)=>adult(w,a)&&adult(w,b)&&!carried(w,a)&&!carried(w,b)&&canContactSocialTarget(w,a,b)&&canContactSocialTarget(w,b,a);
 const unavailable='本人未能在此办理原约见；远方情况、原因和位置仍未知';
+const freshArrivals=new WeakMap<WorldEvent,SocialAppointmentArrivalFact>();
+/** Custody intake only: serialized, imported, and copied events are not fresh
+ * engine evidence, even if their stored typed marker looks valid. */
+export function isFreshSocialAppointmentArrival(event:WorldEvent):boolean {
+ const fresh=freshArrivals.get(event);
+ return !!fresh&&event.socialAppointmentArrival===fresh;
+}
 export const socialAppointmentReceiptId=(r:Resident)=>`appointment:${r.id}:${r.revision}`;
 export function initializeSocialAppointments(w:World){if(w.mode==='formal')w.socialAppointments??={nextSerial:1,records:[]};}
 function binding(c:SocialAppointment){return JSON.stringify([c.id,c.proposerId,c.personId,c.buildingId,c.place,c.placeName,c.offeredAt,c.start,c.end,c.receiptId,c.births,c.names]);}
@@ -146,9 +153,12 @@ export function completeSocialAppointment(w:World,r:Resident,a:SocialAppointment
   if(!visit(c,r.id))c.visits.push({personId:r.id,arrivedAt:w.minute,leftAt:null,waitedMinutes:0});
   const other=person(w,r.id===c.proposerId?c.personId:c.proposerId),seen=!!other&&atSite(c,other)&&contact(w,r,other);
   const terminal=event(w,c,r,`${r.name}实际走到日常约见${c.id}的${c.placeName}，${w.minute<c.start?'尚未到约定开始时刻':'已在原约见窗口内'}；此刻${seen?'在这里见到原当事人':'在这里没有见到原当事人，缺席原因未知'}。等候、交谈或离开仍须本人决定。`,[r.id]);
-  if(canCertify&&offered&&accepted)terminal.socialAppointmentArrival={schemaVersion:1,worldId:w.id,appointmentId:c.id,offeredEventId:offered.id,
-   acceptedTermsEventId:accepted.id,residentId:r.id,planId:activity.planId,executionStartedAt:activity.appointmentStartedAt!,
-   arrivedAt:w.minute,terminalEventId:terminal.id};
+  if(canCertify&&offered&&accepted){
+   const proof=Object.freeze({schemaVersion:1 as const,worldId:w.id,appointmentId:c.id,offeredEventId:offered.id,
+    acceptedTermsEventId:accepted.id,residentId:r.id,planId:activity.planId,executionStartedAt:activity.appointmentStartedAt!,
+    arrivedAt:w.minute,terminalEventId:terminal.id});
+   terminal.socialAppointmentArrival=proof;freshArrivals.set(terminal,proof);
+  }
  }else event(w,c,r,`${r.name}在日常约见${c.id}的原地点实际等候${work.minutes}分钟；这不说明另一方在远处发生了什么。`,[r.id]);
  return null;
 }

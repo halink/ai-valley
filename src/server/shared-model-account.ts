@@ -230,6 +230,12 @@ export class SharedModelAccountLedger {
   const r=this.read().requests.find(row=>row.id===requestId);
   return r?{phase:r.phase,purpose:r.purpose}:null;
  }
+ /** Recovery comparison only; reported fields are null when no usage arrived. */
+ completedCharge(requestId:string){
+  if(!id(requestId))throw Error('model_account_request_id_invalid');
+  const r=this.read().requests.find(row=>row.id===requestId);
+  return r?.phase==='complete'?{endedAt:r.endedAt,inputTokens:r.usedInput,outputTokens:r.usedOutput}:null;
+ }
  summary(at:number) {
   const s=this.read();
   if(!count(at)||at<s.now)throw Error('model_account_clock_rollback');

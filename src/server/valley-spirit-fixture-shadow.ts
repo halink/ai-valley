@@ -6,6 +6,7 @@ import {ValleySpiritJournal,publicWeatherProjection} from './valley-spirit.js';
 import {SqliteValleySpiritPermissions} from './valley-spirit-permissions.js';
 import {prepareValleySpiritShadowOffers,type ValleySpiritShadowManifest,type ValleySpiritShadowOffers} from './valley-spirit-shadow-offers.js';
 import {ValleySpiritShadowQueue} from './valley-spirit-shadow-queue.js';
+import {DeveloperSpiritDueQueue} from './valley-spirit-fixture-due.js';
 import {ValleySpiritShadowWorkflow} from './valley-spirit-shadow-workflow.js';
 import {
  developerMvpFruitFallAssessmentDigest,readDeveloperMvpFruitFallVerificationPolicy,
@@ -59,9 +60,9 @@ export function openDeveloperMvpSpiritShadow(store:WorldStore,options?:Developer
   if(!initial||!view)return unavailable;
   const db=permissions=new SqliteValleySpiritPermissions(port.database,manifest.worldId,port.assertOwned,true);
   // Opening a shadow view is not permission to initialize or enable weather.
-  if(!db.read()?.publicWeather){db.close();return unavailable;}
+  const grant=db.read();if(!grant||(!grant.publicWeather&&!verifier)){db.close();return unavailable;}
   const journal=new ValleySpiritJournal(port.database,view,port.assertOwned,db);
-  if(!journal.publicWeatherPermission()?.publicWeather){db.close();return unavailable;}
+  if(!journal.publicWeatherPermission()?.publicWeather&&!verifier){db.close();return unavailable;}
   const queue=new ValleySpiritShadowQueue(port.database,manifest.worldId,port.assertOwned);
   let closed=false;
   const capture=():ValleySpiritShadowOffers=>{
@@ -120,7 +121,7 @@ export function openDeveloperMvpSpiritShadow(store:WorldStore,options?:Developer
   };
   /** Reconstruct the exact signed/advisory basis, using current private
    * sources. No caller supplied proposal or raw writable world is accepted. */
-  const signedEntry=(value:unknown)=>{
+  const signedEntry=(value:unknown,allowFuture=false)=>{
    if(closed||!verifier)return null;
    const terms=verifyDeveloperMvpFruitFallSignedApproval(value,verifier.key);
    if(!terms||terms.fixtureScopeId!==port.scopeId||terms.maxCommittedEffects>verifier.maxCommittedEffects)return null;
@@ -130,7 +131,7 @@ export function openDeveloperMvpSpiritShadow(store:WorldStore,options?:Developer
    if(developerMvpFruitFallAssessmentDigest(row.entry)!==terms.assessmentDigest||
       terms.firstMicroMinute<row.entry.assessment.checkedAtMicroMinute||
       terms.firstMicroMinute<proposal.validFromMicroMinute||terms.expiresMicroMinute>proposal.validUntilMicroMinute||
-      head.nowMicroMinute<terms.firstMicroMinute||head.nowMicroMinute>=terms.expiresMicroMinute||
+      (!allowFuture&&head.nowMicroMinute<terms.firstMicroMinute)||head.nowMicroMinute>=terms.expiresMicroMinute||
       policy.version!==manifest.policy.version||policy.shadowEnabled!==manifest.policy.shadowEnabled||
       policy.maxAgeGameMinutes!==manifest.policy.maxAgeGameMinutes||
       policy.minimumCooldownGameMinutes!==manifest.policy.minimumCooldownGameMinutes||!currentGrant(proposal))return null;
@@ -174,6 +175,8 @@ export function openDeveloperMvpSpiritShadow(store:WorldStore,options?:Developer
     });
    }catch{return unavailable;}
   };
+  let due:DeveloperSpiritDueQueue|undefined,dueReader:DeveloperSpiritDueQueue|undefined;
+  const schedule=()=>due??=(new DeveloperSpiritDueQueue(port.database,port.scopeId,port.assertOwned));
   return {
    status:'ready' as const,
    preview:()=>{const used=queue.countForQuota(manifest.worldId);return used!==null&&used<config.maxProposalCount?workflow.preview():null;},
@@ -192,7 +195,53 @@ export function openDeveloperMvpSpiritShadow(store:WorldStore,options?:Developer
     }catch{return null;}
    },
    applySigned,
-   close(){if(!closed){closed=true;db.close();}},
+   scheduleSigned(value:unknown){
+    if(!verifier||closed)return off;
+    try{
+     const basis=signedEntry(value,true);
+     if(!basis||!value||typeof value!=='object'||!("signature" in value)||typeof value.signature!=='string')return unavailable;
+     return {status:schedule().enqueue({terms:basis.terms,signature:value.signature})};
+    }catch{return unavailable;}
+   },
+   scheduledStatus(approvalId:string){
+    if(!verifier||closed)return null;
+    try{
+     const reader=dueReader??=new DeveloperSpiritDueQueue(port.database,port.scopeId,port.assertOwned,true);
+     return reader.view(approvalId,(approval,effectId)=>{
+      const head=port.readHead();
+      if(!verifyDeveloperMvpFruitFallSignedApproval(approval,verifier.key)||!head||head.id!==manifest.worldId)return false;
+      const terms=approval.terms;
+      const matches=head.mvpClimate?.spiritEffects?.applied.filter(e=>e.receipt.approvalId===terms.approvalId&&
+        e.receipt.proposalId===terms.proposalId)??[];
+      return matches.length===1&&matches[0].receipt.effectId===effectId;
+     });
+    }catch{return null;}
+   },
+   sweepScheduled(){
+    if(!verifier||closed)return off;
+    try{
+     const before=captureOwned();if(!before)return unavailable;
+     const result=schedule().sweep(before.nowMicroMinute,approval=>{
+      const head=captureOwned();if(!head)return {state:'retry_blocked'};
+      if(!verifyDeveloperMvpFruitFallSignedApproval(approval,verifier.key))return {state:'retry_blocked'};
+      // Receipt outranks local expiry and current grants: this is read-only
+      // reconciliation of a previously committed, exact approval receipt.
+      const matches=head.world.mvpClimate!.spiritEffects!.applied.filter(e=>
+       e.receipt.approvalId===approval.terms.approvalId&&e.receipt.proposalId===approval.terms.proposalId);
+      if(matches.length>1)return {state:'retry_blocked'};
+      if(matches.length===1)return {state:'committed',effectId:matches[0].receipt.effectId};
+      if(head.nowMicroMinute>=approval.terms.expiresMicroMinute)return {state:'expired'};
+      if(head.world.mvpClimate!.spiritEffects!.applied.some(e=>e.receipt.proposalId===approval.terms.proposalId))return {state:'denied'};
+      const applied=applySigned(approval);
+      if(!('execution' in applied)||applied.execution===null)return {state:'retry_blocked'};
+      if(applied.execution.status==='applied')return {state:'committed',effectId:applied.execution.receipt.effectId};
+      if(applied.execution.status==='rejected'||applied.execution.status==='duplicate')return {state:'denied'};
+      return {state:'retry_blocked'};
+     });
+     return {status:'swept' as const,...result};
+    }catch{return unavailable;}
+   },
+   close(){if(!closed){closed=true;try{due?.close();}finally{try{dueReader?.close();}finally{db.close();}}}},
   };
  }catch{
   try{permissions?.close();}catch{/* retain original fail-closed result */}
