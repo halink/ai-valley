@@ -5,6 +5,7 @@ import {agedG1ReviewSigningBytes,agedG1ReviewTerms} from './valley-spirit-aged-g
 import type {buildSealedMvpAgedG1Basis} from './valley-spirit-aged-g1.js';
 
 const purpose='sealed-aged-mvp-birth-review-only/v2';
+const executionPurpose='sealed-aged-mvp-one-birth-execution/v2';
 const fields=['purpose','fixtureScopeId','worldId','worldRevision','atUs','proposalId','opportunityId','effectId','approvalId',
  'permissionVersion','epoch','creditId','ageTermsDigest','assessmentDigest','g1ReviewDigest','bornUs','expiresUs','rainDigest',
  'sourceId','sourceInstanceId','targetId','quantity','firstUs','untilUs'] as const;
@@ -18,8 +19,8 @@ const matches=(v:unknown,p:RegExp)=>typeof v==='string'&&p.test(v);
 const nat=(v:unknown):v is number=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=0;
 const requestFields=['approvalId','firstUs','untilUs'] as const;
 
-export function agedBirthReviewSigningBytes(v:unknown):Buffer|null {
- if(!exact(v,fields)||v.purpose!==purpose||v.quantity!==1||!nat(v.worldRevision)||v.worldRevision<1||
+function signingBytes(v:unknown,domain:string):Buffer|null {
+ if(!exact(v,fields)||v.purpose!==domain||v.quantity!==1||!nat(v.worldRevision)||v.worldRevision<1||
   !nat(v.permissionVersion)||v.permissionVersion<1||!nat(v.epoch)||
   !matches(v.worldId,/^godot-mvp-[A-Za-z0-9_-]{1,180}$/u)||
   !['fixtureScopeId','creditId','ageTermsDigest','assessmentDigest','g1ReviewDigest','rainDigest'].every(k=>matches(v[k],dense))||
@@ -33,6 +34,11 @@ export function agedBirthReviewSigningBytes(v:unknown):Buffer|null {
  }catch{return null;}
 }
 
+export const agedBirthReviewSigningBytes=(v:unknown)=>signingBytes(v,purpose);
+export const agedBirthExecutionSigningBytes=(v:unknown)=>signingBytes(v,executionPurpose);
+export function makeAgedBirthExecutionTerms(reviewTerms:NonNullable<ReturnType<typeof makeAgedBirthReviewTerms>>){
+ return Object.freeze({...reviewTerms,purpose:executionPurpose});
+}
 /** Only a preflight identity. Deliberately not an execution-signature domain. */
 export function makeAgedBirthReviewTerms(
  g1:NonNullable<ReturnType<typeof buildSealedMvpAgedG1Basis>>,epoch:number,verifiedReview:unknown,request:unknown,
@@ -57,12 +63,26 @@ export function makeAgedBirthReviewTerms(
  return agedBirthReviewSigningBytes(terms)?terms:null;
 }
 
-export function verifiesAgedBirthReview(keyPem:string,expected:unknown,signed:unknown):boolean {
+function verifies(keyPem:string,expected:unknown,signed:unknown,encode:(v:unknown)=>Buffer|null):boolean {
  if(!exact(signed,['terms','signature'])||typeof signed.signature!=='string'||!sig.test(signed.signature))return false;
  try{
-  const wanted=agedBirthReviewSigningBytes(expected),actual=agedBirthReviewSigningBytes(signed.terms);
+  const wanted=encode(expected),actual=encode(signed.terms);
   const signature=Buffer.from(signed.signature,'base64url'),key=createPublicKey(keyPem);
   return !!wanted&&!!actual&&wanted.equals(actual)&&signature.length===64&&signature.toString('base64url')===signed.signature&&
    key.asymmetricKeyType==='ed25519'&&verify(null,wanted,key,signature);
  }catch{return false;}
 }
+export const verifiesAgedBirthReview=(key:string,expected:unknown,signed:unknown)=>verifies(key,expected,signed,agedBirthReviewSigningBytes);
+export const verifiesAgedBirthExecution=(key:string,expected:unknown,signed:unknown)=>verifies(key,expected,signed,agedBirthExecutionSigningBytes);
+export function bindsAgedBirthG1Review(effect:Record<string,unknown>,proof:unknown):boolean {
+ if(!exact(proof,['terms','signature'])||!matches(proof.signature,sig)||
+  !proof.terms||typeof proof.terms!=='object')return false;
+ const review=proof.terms as Record<string,unknown>;
+ const keys=['fixtureScopeId','worldId','worldRevision','atUs','proposalId','opportunityId','permissionVersion','creditId','ageTermsDigest','assessmentDigest','epoch'] as const;
+ const signed=agedG1ReviewSigningBytes(review);
+ try{return review.purpose==='sealed-aged-mvp-g1-review-only/v1'&&keys.every(k=>effect[k]===review[k])&&!!signed&&
+  parseClimateUs(effect.untilUs)<=parseClimateUs(review.untilUs)&&hash([signed.toString('base64url'),proof.signature])===effect.g1ReviewDigest;}
+ catch{return false;}
+}
+export const agedBirthRainDigest=(rain:{rainEventId:string;startedUs:string;firstRainUs:string;endedUs:string})=>
+ hash([rain.rainEventId,rain.startedUs,rain.firstRainUs,rain.endedUs]);

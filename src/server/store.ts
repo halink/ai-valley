@@ -1,4 +1,6 @@
-import {makeAgedBirthReviewTerms,verifiesAgedBirthReview} from './valley-spirit-aged-birth-review.js';
+import {assertAgedBirthSqlAuthority,readOwnedSealedAgedBirthReceipt,readSealedAgedBirthArchive,rejectSealedAgedBirthOnGenericPath,
+ sameAgedBirthProofs,writeSealedAgedBirth,type AgedBirthProofs} from './valley-spirit-aged-birth-archive.js';
+import {makeAgedBirthExecutionTerms,makeAgedBirthReviewTerms,verifiesAgedBirthExecution,verifiesAgedBirthReview} from './valley-spirit-aged-birth-review.js';
 import {agedG1ReviewTerms,agedG1RevokeTerms,advanceAgedG1ReviewEpoch,initializeAgedG1ReviewEpoch,
  readAgedG1ReviewEpoch,verifiesAgedG1Review} from './valley-spirit-aged-g1-review.js';
 import {buildSealedMvpAgedG1Basis} from './valley-spirit-aged-g1.js';
@@ -52,6 +54,12 @@ import type {DailySnapshotConfig} from './acceptance-daily-snapshots.js';
 import {attachReceiptHistory} from '../world/receipts.js';
 import {assertDeveloperMvpEffectArchive,assertWorldCompatibility,decodeSavedWorld,preflightWorldSave} from './save-preflight.js';
 import {claimDeveloperMvpSpiritFixtureOwner,isDeveloperMvpSpiritFixtureOwner,type DeveloperMvpSpiritFixtureOwner} from './valley-spirit-fixture-files.js';
+function decodeAgedBirthPredecessor(state:Uint8Array):World {
+ return decodeSavedWorld(state,true) as unknown as World;
+}
+export function readSealedMvpAgedBirthReceipt(owner:DeveloperMvpSpiritFixtureOwner){
+ return readOwnedSealedAgedBirthReceipt(owner,decodeAgedBirthPredecessor);
+}
 export interface AppendedHistory {
  events: WorldEvent[];
  processed: string[];
@@ -84,16 +92,20 @@ export class WorldStore {
  private readonly allowFormalRainProvenance:boolean;
  private readonly seasonalModel:boolean;
  private readonly mvpSpiritEffectFixture?:MvpGroundFruitCapacity;
+ private readonly sealedAgedBirthExecution:boolean;
  private readonly developerSpiritFixtureOwner?:DeveloperMvpSpiritFixtureOwner;
  private agedG1ObservedEpoch:number|undefined;
  private agedG1EpochIsolated=false;
- constructor(path:string,options:{formalRainProvenance?:true;dailySnapshots?:DailySnapshotConfig;allowMvpClimate?:boolean;seasonalModel?:true;mvpSpiritEffectFixture?:MvpGroundFruitCapacity;developerSpiritFixtureOwner?:DeveloperMvpSpiritFixtureOwner;nativeWeatherCredit?:true}={}){
+ constructor(path:string,options:{formalRainProvenance?:true;dailySnapshots?:DailySnapshotConfig;allowMvpClimate?:boolean;seasonalModel?:true;mvpSpiritEffectFixture?:MvpGroundFruitCapacity;developerSpiritFixtureOwner?:DeveloperMvpSpiritFixtureOwner;nativeWeatherCredit?:true;sealedAgedBirthExecution?:true}={}){
   this.allowMvpClimate=options.allowMvpClimate===true;
   this.allowFormalRainProvenance=options.formalRainProvenance===true&&!this.allowMvpClimate&&!options.seasonalModel;
   this.seasonalModel=options.seasonalModel===true;
   this.nativeWeatherCredit=options.nativeWeatherCredit===true;
   const fixture=options.mvpSpiritEffectFixture;
   const owner=options.developerSpiritFixtureOwner;
+  this.sealedAgedBirthExecution=options.sealedAgedBirthExecution===true;
+  if(this.sealedAgedBirthExecution&&(!owner?.agedG1ReviewerKeyPem||!owner.agedPlacementKeyPem||!owner.sourceAge))
+   throw Error('sealed_aged_birth_execution_owner_required');
   if(this.nativeWeatherCredit&&(!owner||owner.formalApprovalKeyPem))throw Error('native_weather_credit_requires_sealed_validation_owner');
   if(owner!==undefined){
    if(!isDeveloperMvpSpiritFixtureOwner(owner)||owner.database!==path||
@@ -194,6 +206,7 @@ export class WorldStore {
  private readWorld(working:boolean,indexedReceipts:boolean):World|null {
   this.developerSpiritFixtureOwner?.assertOwned();
   this.assertDeveloperSpiritSeal();
+  if(this.developerSpiritFixtureOwner)rejectSealedAgedBirthOnGenericPath(this.db);
   const row=this.db.prepare('SELECT state FROM worlds ORDER BY rowid DESC LIMIT 1').get() as {state:string|Uint8Array}|undefined;
   if (!row) return null;
   const saved=decodeSavedWorld(row.state,!!this.mvpSpiritEffectFixture) as unknown as World & {terrainKey?:string;resourceChanges:Array<[number,Resource]>;resourceCount:number;ledgerVersion?:1};
@@ -625,9 +638,11 @@ export class WorldStore {
   return this.commitTransaction(world,previousRevision,undefined,undefined,proof);
  }
  readCommittedMvpAddressedSpeech(worldId:string,eventId:string):ValleySpiritLifeReceipt|null{
+  if(this.developerSpiritFixtureOwner)rejectSealedAgedBirthOnGenericPath(this.db);
   return this.allowMvpClimate&&!this.seasonalModel?readValleySpiritSpeechCustody(this.db,worldId,eventId):null;
  }
  verifyCommittedMvpAddressedSpeech(receipt:Readonly<ValleySpiritLifeReceipt>):boolean{
+  if(this.developerSpiritFixtureOwner)rejectSealedAgedBirthOnGenericPath(this.db);
   return this.allowMvpClimate&&!this.seasonalModel&&verifyValleySpiritSpeechCustody(this.db,receipt);
  }
  readCommittedFormalArrival(worldId:string,eventId:string):ValleySpiritFormalArrivalReceipt|null{
@@ -885,6 +900,65 @@ export class WorldStore {
    }catch(error){this.db.exec('ROLLBACK');throw error;}
   }catch{return null;}
  }
+ private deriveAgedBirthTerms(owner:DeveloperMvpSpiritFixtureOwner,w:World,proposalId:string,age:unknown,g1:unknown,
+  request:unknown,epoch:number){
+  const effects=w.mvpClimate?.spiritEffects,settlement=w.mvpClimate?.spiritFruitSettlement;
+  const basis=effects?.version===1&&effects.applied.length===0&&effects.ground.items.length===0&&
+   settlement&&settlement.discoveries.length===0&&settlement.pickups.length===0?
+    buildSealedMvpAgedG1Basis(this.db,owner,w,proposalId,age):null;
+  return basis&&verifiesAgedG1Review(owner.agedG1ReviewerKeyPem!,agedG1ReviewTerms(basis,epoch),g1)?
+   makeAgedBirthReviewTerms(basis,epoch,g1,request):null;
+ }
+ /** Explicit private opt-in only. Sign again in the distinct execution
+  * domain; a birth review signature can never authorize a write. */
+ readDeveloperMvpAgedBirthExecutionTerms(worldId:string,proposalId:string,ageProof:unknown,g1Proof:unknown,request:unknown){
+  const owner=this.developerSpiritFixtureOwner;
+  if(!this.sealedAgedBirthExecution||!owner)return null;
+  try{
+   const input=structuredClone({ageProof,g1Proof,request});
+   owner.assertOwned();this.assertDeveloperSpiritSeal();this.db.exec('BEGIN');
+   try{
+    assertAgedBirthSqlAuthority(this.db);
+    const w=this.readWorld(false,false),epoch=this.checkedAgedG1ReviewEpoch(owner.seal);
+    if(w&&w.id===worldId)assertDeveloperMvpEffectArchive(this.db,w);
+    const terms=w?.id===worldId?this.deriveAgedBirthTerms(owner,w,proposalId,input.ageProof,input.g1Proof,input.request,epoch):null;
+    this.db.exec('COMMIT');this.agedG1ObservedEpoch=epoch;
+    return terms?{status:'execution-signing-input' as const,terms:makeAgedBirthExecutionTerms(terms)}:null;
+   }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }catch{return null;}
+ }
+ /** First and only aged birth. All G1, expiry, land/capacity and signed
+  * conditions are re-derived under the same lock as the dedicated CAS. */
+ executeDeveloperMvpAgedBirth(worldId:string,proposalId:string,request:unknown,proofs:AgedBirthProofs){
+  const owner=this.developerSpiritFixtureOwner;
+  if(!this.sealedAgedBirthExecution||!owner)return null;
+  try{
+   const input=structuredClone({request,proofs});
+   if(!input.proofs||Object.keys(input.proofs).length!==3||
+    !['age','g1','execution'].every(k=>Object.hasOwn(input.proofs,k)))return null;
+   owner.assertOwned();this.assertDeveloperSpiritSeal();this.db.exec('BEGIN IMMEDIATE');
+   try{
+    const archived=readSealedAgedBirthArchive(this.db,owner,decodeAgedBirthPredecessor);
+    if(archived){
+     const t=(archived.proofs.execution as {terms:Record<string,unknown>}).terms;
+     const r=input.request as Record<string,unknown>|null;
+     const replay=archived.receipt.worldId===worldId&&t.proposalId===proposalId&&r&&Object.keys(r).length===3&&
+      r.approvalId===t.approvalId&&r.firstUs===t.firstUs&&r.untilUs===t.untilUs&&sameAgedBirthProofs(archived.proofs,input.proofs);
+     this.db.exec('COMMIT');return replay?{status:'committed' as const,replay:true,receipt:archived.receipt}:null;
+    }
+    const w=this.readWorld(false,false),epoch=this.checkedAgedG1ReviewEpoch(owner.seal);
+    if(w&&w.id===worldId)assertDeveloperMvpEffectArchive(this.db,w);
+    const basis=w?.id===worldId?this.deriveAgedBirthTerms(owner,w,proposalId,input.proofs.age,input.proofs.g1,input.request,epoch):null;
+    const wanted=basis&&makeAgedBirthExecutionTerms(basis);
+    if(!w||!wanted||!verifiesAgedBirthExecution(owner.agedPlacementKeyPem!,wanted,input.proofs.execution)){
+     this.db.exec('ROLLBACK');return null;
+    }
+    const receipt=writeSealedAgedBirth(this.db,owner,w,input.proofs,decodeAgedBirthPredecessor);
+    owner.assertOwned();this.db.exec('COMMIT');this.agedG1ObservedEpoch=epoch;
+    return {status:'committed' as const,replay:false,receipt};
+   }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }catch{return null;}
+ }
  /** Triple-key review of one exact sealed candidate, still non-executable.
   * The genuine age, current permission, assessment and reviewer epoch are
   * revalidated from the same read snapshot; no ground schema is adopted. */
@@ -1045,6 +1119,7 @@ export class WorldStore {
  private writeCommit(world:World,previousRevision:number|null,appended?:AppendedHistory,seasonalLedger?:SeasonalLedger,
   settlementOperation?:MvpFallenFruitFixtureOperation,formalBerryAnchor?:FormalBerryFixtureAnchor):World|null {
   this.assertDeveloperSpiritSeal();
+  if(this.developerSpiritFixtureOwner)rejectSealedAgedBirthOnGenericPath(this.db);
   if(this.developerSpiritFixtureOwner){
    const ids=this.db.prepare('SELECT id FROM worlds ORDER BY rowid LIMIT 2').all();
    if(ids.length>1||ids.length===1&&ids[0].id!==world.id)throw Error('mvp_spirit_fixture_world_changed');
@@ -1093,10 +1168,12 @@ export class WorldStore {
   return this.dailySnapshots.report(world);
  }
  history(worldId:string,before:number,limit=100):WorldEvent[]{
+  if(this.developerSpiritFixtureOwner)rejectSealedAgedBirthOnGenericPath(this.db);
   const rows=this.db.prepare('SELECT body FROM events WHERE world_id=? AND at<? ORDER BY at DESC,id DESC LIMIT ?').all(worldId,before,Math.min(200,limit)) as Array<{body:string}>;
   return rows.map(row=>JSON.parse(row.body));
  }
  historyPage(worldId:string,input:HistoryQuery={}):HistoryPage {
+  if(this.developerSpiritFixtureOwner)rejectSealedAgedBirthOnGenericPath(this.db);
   const q=normalizeHistory(input),key=historyKey(q),before=readHistoryCursor(q.cursor,worldId,key);
   const identity=q.animalId??q.personId,table=q.animalId?'event_animals':'event_people',column=q.animalId?'animal_id':'person_id';
   const source=identity?`${table} p JOIN events e ON e.id=p.event_id AND e.world_id=p.world_id`:'events e',sequence=identity?'p.event_seq':'e.rowid',where=identity?['p.world_id=?',`p.${column}=?`,'p.event_seq<?']:['e.world_id=?','e.rowid<?'],args:Array<string|number>=identity?[worldId,identity,before]:[worldId,before];
@@ -1112,6 +1189,7 @@ export class WorldStore {
   const hasMore=rows.length>q.limit,selected=rows.slice(0,q.limit);return {worldId,events:selected.map(row=>JSON.parse(row.body)),hasMore,nextCursor:hasMore?makeHistoryCursor(selected.at(-1)!.seq,worldId,key):null};
  }
  personArchive(worldId:string,id:string){
+  if(this.developerSpiritFixtureOwner)rejectSealedAgedBirthOnGenericPath(this.db);
   const row=this.db.prepare('SELECT count(*) AS count,min(e.at) AS first,max(e.at) AS last FROM event_people p JOIN events e ON e.id=p.event_id WHERE p.world_id=? AND p.person_id=?').get(worldId,id) as {count:number;first:number|null;last:number|null};
   const changes=this.db.prepare("SELECT e.body FROM event_people p JOIN events e ON e.id=p.event_id WHERE p.world_id=? AND p.person_id=? AND (json_extract(e.body,'$.populationChange') IN ('dating','marriage','separate') OR json_extract(e.body,'$.relationshipEnd') IS NOT NULL) ORDER BY e.rowid").all(worldId,id) as {body:string}[];
   const partners:Biography['partners']=[];for(const row of changes){const e=JSON.parse(row.body) as WorldEvent,other=e.actors.find(actor=>actor!==id);if(!other)continue;const current=[...partners].reverse().find(p=>p.personId===other&&p.endedAt===null&&!p.endReason);if(e.relationshipEnd){const end=e.relationshipEnd;if(current){current.kind=end.kind;current.marriedAt??=end.marriedAt;current.endedAt=end.endedAt;current.endReason=end.reason;current.sourceEvents.push(e.id);}else partners.push({personId:other,kind:end.kind,startedAt:end.startedAt,marriedAt:end.marriedAt,endedAt:end.endedAt,endReason:end.reason,sourceEvents:[e.id]});}else if(e.populationChange==='separate'){if(current){current.endedAt=e.at;current.sourceEvents.push(e.id);}else partners.push({personId:other,kind:'unspecified',startedAt:null,endedAt:e.at,sourceEvents:[e.id]});}else if(e.populationChange==='marriage'){if(current){current.kind='married';current.marriedAt=e.at;current.sourceEvents.push(e.id);}else partners.push({personId:other,kind:'married',marriedAt:e.at,startedAt:null,endedAt:null,sourceEvents:[e.id]});}else partners.push({personId:other,kind:'dating',startedAt:e.at,endedAt:null,sourceEvents:[e.id]});}

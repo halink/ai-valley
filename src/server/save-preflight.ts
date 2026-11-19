@@ -1,3 +1,4 @@
+import {rejectSealedAgedBirthOnGenericPath} from './valley-spirit-aged-birth-archive.js';
 import {assertFormalBerryMirrorHeader} from './valley-spirit-formal-berry-authority.js';
 import {validateFormalRainProvenance} from '../world/formal-rain-provenance.js';
 import {validateMvpRooms} from '../world/mvp-rooms.js';
@@ -34,6 +35,7 @@ const MAX_STATE_BYTES=256*1024*1024;
 /** Validate only the compatibility envelope, not every game's domain rule. */
 export function assertWorldCompatibility(value:unknown,allowMvpSpiritEffectFixture=false):asserts value is Record<string,unknown> {
  if(!record(value))fail('save_invalid_world');
+ if(Array.isArray(value.events)&&value.events.some(e=>record(e)&&owns(e,'mvpAgedFruitBirth')))fail('save_sealed_aged_birth_requires_private_archive');
  // Reject presence, not a recognized version/truthy value. No upgrade escape.
  if(owns(value,'simulationOnly'))fail('save_simulation_only');
  if(owns(value,'mvpSeasonalModelVersion')&&(value.mvpSeasonalModelVersion!==1||value.mode!=='validation'))fail('save_seasonal_model_schema');
@@ -144,6 +146,7 @@ function inspectDatabase(db:DatabaseSync,rejectClimate:boolean,validateWorld?: (
   if(seals.length!==1||Object.keys(seals[0]).length!==2||seals[0].version!==1||seals[0].seal!==fixtureSeal)
    fail('save_unknown_developer_fixture');
  }
+ try{rejectSealedAgedBirthOnGenericPath(db,fixtureSeal!==undefined);}catch{fail('save_sealed_aged_birth_requires_private_archive');}
  const table=db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='worlds'").get();
  if(!table)fail('save_missing_worlds_table');
  let latest:Record<string,unknown>|null=null;
