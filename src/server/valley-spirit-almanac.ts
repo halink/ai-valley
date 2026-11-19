@@ -216,6 +216,19 @@ function publicView(e:ValleySpiritAlmanacEntry) {
  const p=e.packet,r=structuredClone(e.rendered);
  return {mode:'curated-verified-weather' as const,origin:{...e.origin},entryId:e.entryId,textVersion:e.textVersion,supersedes:e.supersedes,fromMinute:p.fromMinute,throughMinute:p.throughMinute,projectionVersion:p.projectionVersion,permissionVersion:p.permissionVersion,coverage:p.coverage,unselectedHourBuckets:[...p.unselectedHourBuckets],rendering:{rendererVersion:r.rendererVersion,wording:e.draft.wording},facts:r.facts,atmosphere:r.atmosphere};
 }
+/** Pure first-edition builder for the independently reviewed offline
+ * release path. It performs no transport, admission, write or grant. */
+export function composeOfflineWeatherEdition(range:ValleySpiritAlmanacRange,authority:ValleySpiritAlmanacAuthority){
+ const packet=createValleySpiritAlmanacPacket(range,authority);
+ if(!packet)return null;
+ const draft=groundValleySpiritAlmanacDraft(packet,{claims:packet.points.map(p=>({sourceRef:p.sourceRef,field:'condition',value:p.condition})),
+  atmosphere:'plain',wording:'time-first'});
+ if(!draft)return null;
+ const origin:ValleySpiritAlmanacOrigin={schemaVersion:ORIGIN_SCHEMA,kind:'offline-synthetic'};
+ const entry:ValleySpiritAlmanacEntry={schemaVersion:ALMANAC_ENTRY_SCHEMA,entryId:identity(packet,1,origin),textVersion:1,supersedes:null,
+  packet,phase:'published',draft,failure:null,rendered:renderAlmanacTextV1(packet,draft),origin};
+ return {entry,view:publicView(entry)!};
+}
 export class ValleySpiritAlmanac {
  constructor(private readonly store:ValleySpiritAlmanacStore,private readonly authority:ValleySpiritAlmanacAuthority){}
  private read():ValleySpiritAlmanacEntry[] {
