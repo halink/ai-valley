@@ -132,15 +132,16 @@ export class WorldStore {
   this.sealedAgedBirthExecution=options.sealedAgedBirthExecution===true;
   if(this.sealedAgedBirthExecution&&(!owner?.agedG1ReviewerKeyPem||!owner.agedPlacementKeyPem||!owner.sourceAge))
    throw Error('sealed_aged_birth_execution_owner_required');
-  if(this.nativeWeatherCredit&&(!owner||owner.formalApprovalKeyPem||owner.rulesMealWorldId))throw Error('native_weather_credit_requires_sealed_validation_owner');
+  if(this.nativeWeatherCredit&&(!owner||owner.formalApprovalKeyPem||owner.formalWeatherPurpose||owner.rulesMealWorldId))throw Error('native_weather_credit_requires_sealed_validation_owner');
   if(owner!==undefined){
    if(!isDeveloperMvpSpiritFixtureOwner(owner)||owner.database!==path||
-    (owner.formalApprovalKeyPem?!this.allowFormalRainProvenance:!this.allowMvpClimate)||
+    (owner.formalApprovalKeyPem||owner.formalWeatherPurpose?!this.allowFormalRainProvenance:!this.allowMvpClimate)||
+    (owner.formalWeatherPurpose&&this.formalAppointmentChoiceCustody)||
     fixture!==undefined||this.seasonalModel||options.dailySnapshots!==undefined)
     throw Error('mvp_spirit_fixture_requires_private_disk_owner');
    claimDeveloperMvpSpiritFixtureOwner(owner);
    this.developerSpiritFixtureOwner=owner;
-   if(!owner.formalApprovalKeyPem)this.mvpSpiritEffectFixture=owner.capacity;
+   if(!owner.formalApprovalKeyPem&&!owner.formalWeatherPurpose)this.mvpSpiritEffectFixture=owner.capacity;
   }
   if(fixture!==undefined){
    // Never permit this developer authority against a real or files-backed save.
@@ -649,7 +650,9 @@ export class WorldStore {
   if(Object.hasOwn(world,'formalBerryFixtureAnchor')&&!this.developerSpiritFixtureOwner?.formalApprovalKeyPem)
    throw Error('formal_berry_fixture_requires_owner');
   if(this.developerSpiritFixtureOwner){
-   if(this.developerSpiritFixtureOwner.formalApprovalKeyPem){
+   const weatherOnly=this.developerSpiritFixtureOwner.formalWeatherPurpose;
+   if(weatherOnly&&(world.id!==weatherOnly.worldId||Object.hasOwn(world,'simulationOnly')))throw Error('formal_weather_preparation_world_scope');
+   if(this.developerSpiritFixtureOwner.formalApprovalKeyPem||weatherOnly){
     if(world.mode!=='formal'||!/^valley-formal-[A-Za-z0-9_-]{1,180}$/.test(world.id)||world.mvpClimate)
      throw Error('formal_berry_fixture_invalid_world');
    }else if(world.mode!=='validation'||!world.id.startsWith('godot-mvp-')||!world.mvpClimate?.rainProvenance)

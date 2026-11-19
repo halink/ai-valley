@@ -19,3 +19,15 @@ forecasts, MVP climate, and the G1 review grant cannot supply a missing fact.
 The read assumes the owned world store's native commit custody, not resistance
 to an out-of-band whole-save rewrite. It has no disclosure authority, model
 transport, route, writer, or ordinary startup hook.
+
+A separate zero-effect temporary Formal fixture may pin one world and an
+independent Ed25519 key for **offline weather preparation only**. Its seal
+allows the native Formal rain store without any G2 effect key, effect schema
+or G1 grant; pre-existing sealed archives are unchanged and not migrated.
+A bounded journal pins one retained closed-rain source per fixture and accepts
+only its exact signed allow/revoke epochs within a bounded game-time window.
+One SQLite snapshot ties the current grant and the retained native source
+digest to a minimal packet of versions, world/source IDs and observed start
+and close. Stale versions, wrong scope/source, expiry and missing evidence
+are unavailable. Neither preparing nor revoking a packet creates transport,
+account admission, disclosure, model, or publication authority.
