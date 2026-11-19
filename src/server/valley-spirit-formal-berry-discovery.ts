@@ -5,9 +5,7 @@ import {canSeeOutdoorPoint} from '../world/outdoor-observation.js';
 import {passenger} from '../world/medical-transport.js';
 import {findPath,distance} from '../world/navigation.js';
 import {activeCases} from '../world/health.js';
-import {goods} from '../shared/items.js';
-import {DAY} from '../world/time.js';
-import type {FormalBerryFixtureEffect} from './valley-spirit-formal-berry-authority.js';
+import {validateFormalGroundBerryFoodBirth,type FormalBerryFixtureEffect} from './valley-spirit-formal-berry-authority.js';
 
 const SIGHT=12,MAX=4;
 interface Seen {
@@ -19,17 +17,6 @@ interface Seen {
  readonly executionAuthorized:false;
 }
 
-/** The current fixture birth schema did not store a dated food lot. Accept
- * only the unambiguous single baseline definition; an installed alternative
- * makes freshness unknown, even if the active pointer later goes back. */
-function baselineLife(w:World):number|null {
- const key='food/life@1',def=w.definitions[key];
- const contenders=Object.values(w.definitions).filter(d=>d.id==='food/life');
- const days=(def?.data.days as Record<string,unknown>|undefined)?.berry;
- return (w.activeDefinitions['food/life']??key)===key&&contenders.length===1&&
-  def?.id==='food/life'&&def.version===1&&def.kind==='life'&&days===goods.berry.life?goods.berry.life*DAY:null;
-}
-
 /** Pure private projection from store-owned, already-validated receipt rows.
  * It is not an action option, a durable discovery or a view for another actor. */
 export function projectDeveloperFormalBerryDiscovery(
@@ -37,7 +24,6 @@ export function projectDeveloperFormalBerryDiscovery(
 ):readonly Seen[]{
  try{
   if(w.mode!=='formal'||w.clock.paused||Object.hasOwn(w,'simulationOnly')||!w.formalBerryFixtureAnchor)return [];
-  const life=baselineLife(w);if(life===null)return [];
   const people=w.residents.filter(r=>r.id===residentId);
   const r=people.length===1?people[0]:undefined;
   if(!r||r.regionalLocation||passenger(w,r.id)||!(r.energy>0)||!(r.health>0)||
@@ -47,7 +33,8 @@ export function projectDeveloperFormalBerryDiscovery(
    }))return [];
   const location=formalBerryCommonGround(w);if(location.unsafe(r.at))return [];
   const view:Seen[]=[];
-  const nearby=rows.filter(({receipt})=>w.minute>=receipt.placedMinute&&w.minute<receipt.placedMinute+life&&distance(r.at,receipt.target)<=SIGHT)
+  const nearby=rows.filter(effect=>effect.foodBirth&&validateFormalGroundBerryFoodBirth(w,effect)&&
+   w.minute>=effect.foodBirth.producedAt&&w.minute<effect.foodBirth.expiresAt&&distance(r.at,effect.receipt.target)<=SIGHT)
    .sort((a,b)=>distance(r.at,a.receipt.target)-distance(r.at,b.receipt.target)||a.receipt.target.y-b.receipt.target.y||
     a.receipt.target.x-b.receipt.target.x||a.receipt.draftId.localeCompare(b.receipt.draftId));
   const checked=new Map<string,boolean>();

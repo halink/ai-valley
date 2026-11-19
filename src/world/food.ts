@@ -50,6 +50,15 @@ function fresh(w:World,i:Item,quantity:number):FoodLot{
  if(!definition||definition.id!=='food/life'||!Number.isFinite(days)||days!<0)throw new Error('invalid_food_life_definition');
  return {quantity,producedAt:w.minute,expiresAt:w.minute+days!*DAY,definition:key};
 }
+/** Reads the same installed native food-life rule as ordinary gathering.
+ * No initialization, no stock credit and no inventory mutation. */
+export function pinNativeFormalBerryLot(w:World):FoodLot|null{
+ if(w.mode!=='formal'||Object.hasOwn(w,'simulationOnly'))return null;
+ try{
+  const lot=fresh(w,'berry',1);
+  return Number.isFinite(lot.producedAt)&&Number.isFinite(lot.expiresAt)&&lot.expiresAt>lot.producedAt?lot:null;
+ }catch{return null;}
+}
 export function initializeFood(w:World):void{
  if(w.mode!=='formal')return;
  w.definitions['food/life@1']??={id:'food/life',version:1,kind:'life',dependencies:[],data:{days:Object.fromEntries(perishable.filter(i=>i!=='gameMeat').map(i=>[i,goods[i].life])),nutrition:Object.fromEntries(itemKeys.filter(i=>i!=='gameMeat'&&i!=='spearKit').map(i=>[i,goods[i].food]))}};

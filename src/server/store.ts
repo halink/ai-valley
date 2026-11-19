@@ -1,7 +1,8 @@
+import {DAY} from '../world/time.js';
 import {projectDeveloperFormalBerryDiscovery} from './valley-spirit-formal-berry-discovery.js';
 import {draftFormalBerryGround,validateFormalBerryDetachedLedger} from './valley-spirit-formal-berry-draft.js';
 import {FORMAL_BERRY_EFFECT_SCHEMA,assertFormalBerryMirrorHeader,formalBerryEffectAnchor,formalBerryFixtureScope,
- verifyFormalBerrySignedApproval,type FormalBerryFixtureAnchor,type FormalBerryFixtureEffect} from './valley-spirit-formal-berry-authority.js';
+ verifyFormalBerrySignedApproval,pinFormalGroundBerryFoodBirth,type FormalBerryFixtureAnchor,type FormalBerryFixtureEffect} from './valley-spirit-formal-berry-authority.js';
 import {assertFormalRainProvenanceCommit,emptyFormalRainProvenance,forgetFormalRainStep} from '../world/formal-rain-provenance.js';
 import {appendValleySpiritFormalArrivalCustody,readValleySpiritFormalArrivalCustody,verifyValleySpiritFormalArrivalCustody,type ValleySpiritFormalArrivalReceipt} from './valley-spirit-formal-arrival-custody.js';
 import type {AddressedSpeechObservation} from '../world/addressed-speech.js';
@@ -299,10 +300,13 @@ export class WorldStore {
    if(planned.status!=='draft_only'||planned.expectedWorldRevision!==w.revision||planned.receipt.sourceBefore!==terms.sourceBefore){
     this.db.exec('COMMIT');return {status:'denied'} as const;
    }
+   const foodBirth=pinFormalGroundBerryFoodBirth(w,planned.receipt);
+   if(!foodBirth||terms.schema!=='sealed-formal-berry-approval/v2'||terms.foodDefinition!==foodBirth.definition||
+    foodBirth.expiresAt!==foodBirth.producedAt+terms.foodLifeDays!*DAY){this.db.exec('COMMIT');return {status:'denied'} as const;}
    const draft=structuredClone(w),source=draft.resources.find(r=>r.id===terms.sourceId);
    if(!source||source.amount!==terms.sourceBefore||!Number.isSafeInteger(w.revision+1))throw Error('formal_berry_fixture_stock_changed');
    source.amount=planned.receipt.sourceAfter;draft.revision++;
-   const effect:FormalBerryFixtureEffect={approval,receipt:planned.receipt,committedRevision:draft.revision};
+   const effect:FormalBerryFixtureEffect={approval,receipt:planned.receipt,committedRevision:draft.revision,foodBirth};
    const anchor=formalBerryEffectAnchor([...rows,effect]);draft.formalBerryFixtureAnchor=anchor;
    this.assertWritable(draft);
    this.db.prepare('INSERT INTO formal_berry_fixture_effects (draft_id,approval_id,body) VALUES (?,?,?)')
