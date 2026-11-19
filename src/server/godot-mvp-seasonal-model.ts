@@ -1,3 +1,4 @@
+import {OfflineResidentAccountAdmission,type ResidentAccountRound} from './shared-resident-admission.js';
 import {createServer} from 'node:http';
 import {acquireRuntimeOwnership} from './runtime-lock.js';
 import {preflightWorldSave} from './save-preflight.js';
@@ -45,14 +46,23 @@ function modelWorld(w:World){
   throw Error('seasonal_model_legacy_provider_history');
 }
 const wall=()=>{const value=Date.now();if(!Number.isSafeInteger(value)||value<0)throw Error('seasonal_model_wall_clock');return value;};
+function validateSyntheticReply(reply:ModelReply){
+ const counts=[reply?.usage?.prompt_tokens,reply?.usage?.completion_tokens] as const;
+ if(counts.some(v=>v!==undefined&&(!Number.isSafeInteger(v)||v<0)))throw Error('seasonal_model_reply_usage');
+ if(typeof reply?.content!=='string'||Buffer.byteLength(reply.content)>32_000||reply.finish!==null&&typeof reply.finish!=='string')throw Error('seasonal_model_reply_shape');
+ return counts;
+}
 const ready=(w:World,r:Resident)=>r.status==='alive'&&r.residency!=='outside'&&r.canDecide&&r.canExpress&&!r.plan&&!r.activity&&r.decisionDue<=w.minute;
 /** Separate bounded seasonal mode. Caller explicitly pumps the server; the
  * normal rules runner and all pre-existing model entry points stay unchanged. */
-export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal';database:string;port?:number;transport?:MemoryTransport}){
+export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal';database:string;port?:number;transport?:MemoryTransport;sharedAccount?:OfflineResidentAccountAdmission}){
  if(options.mode!=='offline-seasonal')throw Error('seasonal_model_explicit_mode_required');
  if(options.port!==undefined&&(!Number.isInteger(options.port)||options.port<0||options.port>65535))throw Error('seasonal_model_port');
  const transport=options.transport===undefined?undefined:transports.get(options.transport);
  if(options.transport!==undefined&&(!transport||transport.claimed))throw Error('seasonal_model_transport_untrusted');
+ const shared=options.sharedAccount;
+ if(shared!==undefined&&(!(shared instanceof OfflineResidentAccountAdmission)||!transport))throw Error('seasonal_model_shared_fixture_required');
+ const binding=shared?.fixtureBinding();
  // One-shot capability claim, even if startup later fails. No await or
  // listener bind may allow a second world to claim the same synthetic slot.
  if(transport)transport.claimed=true;
@@ -62,6 +72,12 @@ export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal'
   owner.assertOwned();
   let inspected:SeasonalLedger|null=null;
   const saved=preflightWorldSave(owner.database,{requireWorld:true,allowSeasonalModel:true,inspectSeasonalModel:s=>{inspected=s;},validateWorld:v=>modelWorld(v as unknown as World)});
+  // Cross-store binding is checked on the private preflight copy before
+  // either the existing world or any resident/account state is changed.
+  const previous=inspected as SeasonalLedger|null;
+  if(shared&&saved&&!previous)throw Error('seasonal_model_shared_fixture_fresh_save_required');
+  if(transport&&(previous?.schemaVersion===2?binding!==previous.sharedAccountBinding:!!shared&&!!previous))throw Error('seasonal_model_shared_account_mismatch');
+  if(shared&&previous&&!shared.verifyWorldRecovery(previous.requests.map(r=>({round:{worldId:previous.worldId,residentId:r.actorId,roundId:r.id},worldTerminal:r.state!=='intent'}))))throw Error('seasonal_model_shared_recovery_unresolved');
   let w:World;
   if(saved){
    if(transport){store=new WorldStore(owner.database,{allowMvpClimate:true,seasonalModel:true});w=store.load()!;}
@@ -72,6 +88,7 @@ export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal'
   let fault:string|null=null,budgetWaiting=false,dispatch:Promise<ModelReply>|null=null,controller:AbortController|null=null;
   const read=()=>({mode:'offline-seasonal' as const,driver:'synthetic-model-decisions' as const,
    liveModel:'blocked' as const,realModelCalls:0,account:policy.account,slots:policy.slots,
+   ...(ledger?.schemaVersion===2?{sharedAdmission:'durable-offline' as const}:{}),
    paused:closed||!transport||!!fault||budgetWaiting||ledger?.requests.at(-1)?.state==='intent',
    status:closed?'closed':fault??(ledger?.requests.at(-1)?.state==='intent'?(dispatch?'awaiting-synthetic-response':'sent-unknown'):(budgetWaiting?'synthetic-budget-wait':transport?'ready':'no-synthetic-provider')),
    minute:w.minute,phases:w.residents.map(mvpPhase),
@@ -91,14 +108,28 @@ export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal'
    store.commit(draft,w.revision,undefined,next);
    w=draft;if(next)ledger=next;
   };
+  const synchronizePriority=()=>{
+   if(shared)shared.setWorldWaiting(w.id,ledger?.requests.at(-1)?.state==='intent'||w.residents.some(r=>ready(w,r)));
+  };
+  if(shared&&binding&&!ledger){
+   // Bind world with a zero-request manifest first so a crash before the
+   // first dispatch cannot rotate the world/round identity or fall back.
+   const bound=structuredClone(w);bound.schemaVersion=2;bound.mvpSeasonalModelVersion=1;
+   bound.clock={...bound.clock,paused:true,reason:'等待已绑定的离线合成决定'};
+   commit(bound,{schemaVersion:2,worldId:w.id,sharedAccountBinding:binding,nextSequence:1,lastWall:wall(),charges:[],requests:[]});
+  }
+  synchronizePriority();
   const pump=async ()=>{
    if(closed||!transport||fault||dispatch||ledger?.requests.at(-1)?.state==='intent')return read();
    try{
     const now=wall();
+    // Conservative during any synchronous world write and failures. Lower
+    // optional priority pressure only after persisted world state says so.
+    shared?.setWorldWaiting(w.id,true);
     if(ledger&&now<ledger.lastWall)throw Error('seasonal_model_wall_clock_reversal');
     const actor=w.residents.filter(r=>ready(w,r)).sort((a,b)=>a.decisionDue-b.decisionDue||a.id.localeCompare(b.id))[0];
     if(!actor){
-     const draft=structuredClone(w);draft.clock={...draft.clock,paused:false,reason:null};stepWorld(draft,1);commit(draft);return read();
+     const draft=structuredClone(w);draft.clock={...draft.clock,paused:false,reason:null};stepWorld(draft,1);commit(draft);synchronizePriority();return read();
     }
     if((ledger?.requests.length??0)>=1000)throw Error('seasonal_model_request_limit');
     const context=seasonalModelContext(w,actor),prepared=prepareModelDecision(context,undefined,policy.model);
@@ -111,19 +142,44 @@ export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal'
     const base:SeasonalLedger=ledger?structuredClone(ledger):{schemaVersion:1,worldId:w.id,nextSequence:1,lastWall:now,charges:[],requests:[]};
     const request:SeasonalRequest={id:w.id+':seasonal-model:'+base.nextSequence++,actorId:actor.id,actorRevision:actor.revision,minute:w.minute,worldRevision:w.revision,at:now,contextVersion:MODEL_CONTEXT_VERSION,menuVersion:MODEL_MENU_VERSION,menuDigest:modelDigest(JSON.stringify(prepared.choices)),payload,digest:modelDigest(payload),state:'intent',finishedAt:null,usage:null};
     base.requests.push(request);base.lastWall=now;base.charges=budget.snapshot();
-    const waiting=structuredClone(w);waiting.schemaVersion=2;waiting.mvpSeasonalModelVersion=1;waiting.clock={...waiting.clock,paused:true,reason:'等待离线合成决定'};
-    commit(waiting,base); // FULL SQLite intent and budget BEFORE memory dispatch
-    owner.assertOwned();
-    controller=new AbortController();
-    const signal=AbortSignal.any([controller.signal,AbortSignal.timeout(150_000)]);
-    dispatch=transport.invoke(Object.freeze({id:request.id,actorId:request.actorId,payload}),signal);
-    const reply=await dispatch;
+    const saveIntent=()=>{
+     const waiting=structuredClone(w);waiting.schemaVersion=2;waiting.mvpSeasonalModelVersion=1;waiting.clock={...waiting.clock,paused:true,reason:'等待离线合成决定'};
+     commit(waiting,base); // FULL SQLite world intent BEFORE memory dispatch
+     return true;
+    };
+    const invoke=()=>{
+     owner.assertOwned();
+     controller=new AbortController();
+     const signal=AbortSignal.any([controller.signal,AbortSignal.timeout(150_000)]);
+     dispatch=transport.invoke(Object.freeze({id:request.id,actorId:request.actorId,payload}),signal);
+     return dispatch;
+    };
+    let reply:ModelReply;
+    if(shared){
+     const round:ResidentAccountRound={worldId:w.id,residentId:actor.id,roundId:request.id};
+     shared.queue(round);
+     const admitted=await shared.attempt({
+      round,estimate:{inputTokens:charge.input,outputTokens:charge.output},
+      authorize:()=>{owner.assertOwned();return !closed;},
+      beforeHandoff:saveIntent,
+      simulate:async()=>{
+       const result=await invoke();
+       const counts=validateSyntheticReply(result);
+       const usage=counts[0]!==undefined||counts[1]!==undefined?{inputTokens:counts[0]??charge.input,outputTokens:counts[1]??charge.output}:undefined;
+       return {completion:'synthetic-complete' as const,result,usage};
+      },
+     });
+     if(closed)return read();
+     if(admitted.status!=='complete'){
+      budgetWaiting=admitted.status==='deferred';
+      if(!budgetWaiting)fault=ledger?.requests.at(-1)?.state==='intent'?'sent-unknown':'seasonal_model_shared_recovery_unresolved';
+      return read();
+     }
+     reply=admitted.result;
+    }else{saveIntent();reply=await invoke();}
     if(closed)return read(); // late reply cannot acknowledge a stopped process
     const finished=wall();if(finished<now)throw Error('seasonal_model_wall_clock_reversal');
-    const usage=reply?.usage;
-    const counts=[usage?.prompt_tokens,usage?.completion_tokens];
-    if(counts.some(v=>v!==undefined&&(!Number.isSafeInteger(v)||v<0)))throw Error('seasonal_model_reply_usage');
-    if(typeof reply?.content!=='string'||Buffer.byteLength(reply.content)>32_000||reply.finish!==null&&typeof reply.finish!=='string')throw Error('seasonal_model_reply_shape');
+    const counts=validateSyntheticReply(reply);
     const validUsage=typeof counts[0]==='number'||typeof counts[1]==='number'?{...(typeof counts[0]==='number'?{inputTokens:counts[0]}:{}),...(typeof counts[1]==='number'?{outputTokens:counts[1]}:{})}:null;
     finishSeasonalCharge(budget,charge,finished,validUsage);
     const draft=structuredClone(w),person=draft.residents.find(r=>r.id===request.actorId);
@@ -139,7 +195,8 @@ export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal'
     draft.clock={...draft.clock,paused:false,reason:null};
     const next=structuredClone(base),terminal=next.requests.at(-1)!;terminal.state=accepted?'accepted':'rejected';terminal.finishedAt=finished;terminal.usage=validUsage;
     next.lastWall=finished;next.charges=budget.snapshot();
-    commit(draft,next); // accepted plan + terminal receipt + charge in same tx
+    commit(draft,next); // accepted plan + terminal receipt + replay charge in same tx
+    synchronizePriority();
    }catch{
     // If intent committed, unknown remains in durable storage. No retry or
     // fabricated usage on crash, failed storage, malformed wire or close.

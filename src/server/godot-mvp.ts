@@ -1,3 +1,4 @@
+import type {ValleySpiritLifeViewer,ValleySpiritPublishedLifeView} from './valley-spirit-life-publisher.js';
 import {captureValleySpiritMvpMealStep,type ValleySpiritMvpMealWitness} from './valley-spirit-meal-custody.js';
 import {parseValleySpiritAlmanacId,parseValleySpiritTopicWindow,type ValleySpiritPublicReaders} from './valley-spirit-reader.js';
 import {parseWeatherArchiveQuery,type ValleySpiritJournal} from './valley-spirit.js';
@@ -342,11 +343,22 @@ export function createMvpSession(options:{world?:World;commit?:(world:World,prev
  };
  return {get world(){return world;},snapshot,advance};
 }
-export function createMvpServer(session:Pick<ReturnType<typeof createMvpSession>,'snapshot'>,options:{webRoot?:string;valleySpiritSource?:(sourceRef:string)=>unknown;valleySpiritArchive?:ValleySpiritJournal['archive'];valleySpiritReaders?:ValleySpiritPublicReaders}={}):Server {
+export function createMvpServer(session:Pick<ReturnType<typeof createMvpSession>,'snapshot'>&Partial<Pick<ReturnType<typeof createMvpSession>,'world'>>,options:{webRoot?:string;valleySpiritSource?:(sourceRef:string)=>unknown;valleySpiritArchive?:ValleySpiritJournal['archive'];valleySpiritReaders?:ValleySpiritPublicReaders;valleySpiritLifeViewer?:ValleySpiritLifeViewer}={}):Server {
  return createServer((req,res)=>{
   res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');
   if(options.webRoot&&serveGodotWeb(req,res,options.webRoot))return;
   if(req.method!=='GET'){res.writeHead(405,{'Allow':'GET'});res.end('Read-only MVP');return;}
+  const lifeAlmanacPath='/ai-town/api/valley-spirit/almanac/life/latest';
+  if(req.url===lifeAlmanacPath||req.url?.startsWith(lifeAlmanacPath+'?')){
+   let data:ValleySpiritPublishedLifeView|null=null;
+   try{
+    const params=new URL(req.url,'http://localhost').searchParams,worldId=params.get('worldId');
+    if(options.valleySpiritLifeViewer&&[...params.keys()].length===1&&worldId&&session.world?.id===worldId)
+     data=options.valleySpiritLifeViewer.latest(worldId);
+   }catch{/* fail closed */}
+   res.writeHead(data?200:404,{'Content-Type':'application/json; charset=utf-8'});
+   res.end(JSON.stringify(data??{status:'unavailable'}));return;
+  }
   const latestAlmanacPath='/ai-town/api/valley-spirit/almanac/latest';
   if(req.url===latestAlmanacPath||req.url?.startsWith(latestAlmanacPath+'?')){
    let data:ReturnType<ValleySpiritPublicReaders['latestAlmanac']>|{status:'invalid'}={status:'unavailable'};

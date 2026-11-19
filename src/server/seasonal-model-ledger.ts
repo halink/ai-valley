@@ -18,7 +18,8 @@ export interface SeasonalRequest {
  contextVersion:1;menuVersion:1;menuDigest:string;payload:string;digest:string;state:'intent'|'accepted'|'rejected';finishedAt:number|null;
  usage:SeasonalUsage|null;
 }
-export interface SeasonalLedger {schemaVersion:1;worldId:string;nextSequence:number;lastWall:number;charges:ModelCharge[];requests:SeasonalRequest[];}
+type LedgerFields={worldId:string;nextSequence:number;lastWall:number;charges:ModelCharge[];requests:SeasonalRequest[]};
+export type SeasonalLedger=LedgerFields&({schemaVersion:1}|{schemaVersion:2;sharedAccountBinding:string});
 export function readSeasonalLedger(db:DatabaseSync,world:Pick<World,'id'|'revision'|'minute'>|null,allowed:boolean):SeasonalLedger|null {
  const schema=db.prepare("SELECT type,sql FROM sqlite_schema WHERE name=?").get(table);
  if(!schema)return null;
@@ -31,9 +32,10 @@ export function readSeasonalLedger(db:DatabaseSync,world:Pick<World,'id'|'revisi
 }
 export function validateSeasonalLedger(x:unknown,world:Pick<World,'id'|'revision'|'minute'>):asserts x is SeasonalLedger {
  const invalid=()=>{throw Error('seasonal_model_ledger_invalid');};
- if(!exact(x,['schemaVersion','worldId','nextSequence','lastWall','charges','requests']))return invalid();
+ const names=['schemaVersion','worldId','nextSequence','lastWall','charges','requests'];
+ if(!object(x)||(x.schemaVersion===1?!exact(x,names):x.schemaVersion!==2||!exact(x,[...names,'sharedAccountBinding'])||typeof x.sharedAccountBinding!=='string'||!/^[0-9a-f]{64}$/.test(x.sharedAccountBinding)))return invalid();
  const s=x as unknown as SeasonalLedger;
- if(s.schemaVersion!==1||s.worldId!==world.id||!count(s.lastWall)||!Array.isArray(s.charges)||!Array.isArray(s.requests)||s.requests.length>1000||s.nextSequence!==s.requests.length+1||s.charges.length>seasonalModelPolicy.rpm)return invalid();
+ if(s.worldId!==world.id||!count(s.lastWall)||!Array.isArray(s.charges)||!Array.isArray(s.requests)||s.requests.length>1000||s.nextSequence!==s.requests.length+1||s.charges.length>seasonalModelPolicy.rpm)return invalid();
  let pending=false,previousWall=-1;
  let replay:ModelCharge[]=[];
  for(const [i,r] of s.requests.entries()){
@@ -52,7 +54,7 @@ export function validateSeasonalLedger(x:unknown,world:Pick<World,'id'|'revision
   }
   replay=budget.snapshot();
  }
- if(previousWall!==s.lastWall||JSON.stringify(replay)!==JSON.stringify(s.charges))return invalid();
+ if((s.requests.length?previousWall!==s.lastWall:s.schemaVersion!==2)||JSON.stringify(replay)!==JSON.stringify(s.charges))return invalid();
  let open=0;
  for(const c of s.charges){
   if(!object(c)||!['startedAt','input','output'].every(k=>count(c[k]))||c.startedAt>s.lastWall||Object.keys(c).some(k=>!['startedAt','finishedAt','input','output'].includes(k))||c.finishedAt!==undefined&&(!count(c.finishedAt)||c.finishedAt<c.startedAt||c.finishedAt>s.lastWall))return invalid();
@@ -71,12 +73,13 @@ export function writeSeasonalLedger(db:DatabaseSync,next:SeasonalLedger,prior:Se
   const n=prior.requests.length;
   const previous=prior.requests.at(-1),last=next.requests.at(-1);
   const same=(a:unknown,b:unknown)=>JSON.stringify(a)===JSON.stringify(b);
-  if(next.lastWall<prior.lastWall||!(
+  if(next.schemaVersion!==prior.schemaVersion||next.schemaVersion===2&&prior.schemaVersion===2&&next.sharedAccountBinding!==prior.sharedAccountBinding||
+   next.lastWall<prior.lastWall||!(
    previous?.state==='intent'?next.requests.length===n&&last?.state!=='intent'&&same(prior.requests.slice(0,-1),next.requests.slice(0,-1))&&same(previous,{...last,state:'intent',finishedAt:null,usage:null})
    :next.requests.length===n+1&&last?.state==='intent'&&same(prior.requests,next.requests.slice(0,-1))
   ))throw Error('seasonal_model_ledger_transition');
  }else{
-  if(next.requests.length!==1||next.requests[0].state!=='intent')throw Error('seasonal_model_ledger_transition');
+  if(next.schemaVersion===2?next.requests.length!==0:next.requests.length!==1||next.requests[0].state!=='intent')throw Error('seasonal_model_ledger_transition');
   db.exec('CREATE TABLE seasonal_model_ledger (slot INTEGER PRIMARY KEY CHECK(slot=1), body TEXT NOT NULL)');
  }
  db.prepare('INSERT INTO seasonal_model_ledger(slot,body) VALUES(1,?) ON CONFLICT(slot) DO UPDATE SET body=excluded.body').run(JSON.stringify(next));

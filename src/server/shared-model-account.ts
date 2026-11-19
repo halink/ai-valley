@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
 import {lstatSync} from 'node:fs';
 import {acquireRuntimeOwnership,type RuntimeOwnership} from './runtime-lock.js';
@@ -212,7 +213,18 @@ export class SharedModelAccountLedger {
   });
  }
  accountIdentity():string{return this.policy.accountId;}
+ /** Offline fixture scope. A different file/inode or policy cannot reopen a
+  * bound fixture world. This does not attest production-account identity. */
+ offlineFixtureBinding():string{
+  this.read();
+  return createHash('sha256').update(JSON.stringify([this.policyText,this.identity.dev,this.identity.ino])).digest('hex');
+ }
  /** Internal recovery lookup. No response text or private resident state. */
+ requestStates(requestIds:readonly string[]):Map<string,{phase:Phase;purpose:ModelAccountPurpose}> {
+  if(!Array.isArray(requestIds)||requestIds.length>MAX_REQUESTS||requestIds.some(s=>!id(s)))throw Error('model_account_request_id_invalid');
+  const wanted=new Set(requestIds);
+  return new Map(this.read().requests.filter(r=>wanted.has(r.id)).map(r=>[r.id,{phase:r.phase,purpose:r.purpose}]));
+ }
  requestState(requestId:string):{phase:Phase;purpose:ModelAccountPurpose}|null {
   if(!id(requestId))throw Error('model_account_request_id_invalid');
   const r=this.read().requests.find(row=>row.id===requestId);

@@ -16,6 +16,9 @@ interface RoundOptions<T> {
  estimate:Usage;
  /** Must be current both before reserving and before the actual handoff. */
  authorize:()=>boolean;
+ /** World owner persists the exact stable world-side intent after admission
+  * and before any handoff. Throwing leaves the held reservation for recovery. */
+ beforeHandoff?:()=>boolean;
  /** Offline local simulation only. A returned completion certifies that this
   * invocation has finished. Throwing is ambiguous and leaves quota held. */
  simulate:()=>Promise<{completion:'synthetic-complete';result:T;usage?:Usage}>;
@@ -26,6 +29,20 @@ interface RoundOptions<T> {
 export class OfflineResidentAccountAdmission {
  constructor(private readonly ledger:SharedModelAccountLedger,private readonly now:()=>number){
   if(!/^offline-[A-Za-z0-9_-]{1,80}$/.test(ledger.accountIdentity()))throw Error('resident_account_offline_fixture_required');
+ }
+ fixtureBinding():string{return this.ledger.offlineFixtureBinding();}
+ verifyWorldRecovery(rounds:readonly {round:ResidentAccountRound;worldTerminal:boolean}[]):boolean {
+  const ids=rounds.map(item=>roundKey(item.round)),account=this.ledger.requestStates(ids);
+  return rounds.every((item,index)=>{
+   const stored=account.get(ids[index]);
+   return stored?.purpose==='resident'&&(!item.worldTerminal||stored.phase==='complete');
+  });
+ }
+ /** The bounded runtime holds this sentinel while any resident is ready (or
+  * its decision unresolved). It has no relation to which request is charged. */
+ setWorldWaiting(worldId:string,waiting:boolean):void {
+  if(!key(worldId))throw Error('resident_account_world_invalid');
+  this.ledger.setResidentWaiting('resident-world-'+createHash('sha256').update(worldId).digest('hex'),waiting,this.now());
  }
  queue(round:ResidentAccountRound):void {
   // All runnable decision rounds should register before optional work can ask
@@ -50,6 +67,8 @@ export class OfflineResidentAccountAdmission {
    if(!options.authorize())return {status:this.abandonUnsent(options.round)?'proven-unsent':'account-blocked'};
    const reserved=this.ledger.reserve({requestId:id,purpose:'resident',residentDecisionId:id,inputTokens:options.estimate.inputTokens,outputTokens:options.estimate.outputTokens},this.now());
    if(reserved.status!=='reserved')return {status:reserved.status==='account-capacity'?'deferred':'account-blocked'};
+   if(!options.authorize())return {status:this.abandonUnsent(options.round)?'proven-unsent':'account-blocked'};
+   if(options.beforeHandoff&&options.beforeHandoff()!==true)return {status:this.abandonUnsent(options.round)?'proven-unsent':'account-blocked'};
    if(!options.authorize())return {status:this.abandonUnsent(options.round)?'proven-unsent':'account-blocked'};
    // Before any transport call, persist the point of no safe retry. Should
    // cancellation/authorization change after that, err as possibly sent.
