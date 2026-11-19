@@ -1,4 +1,4 @@
-import {assertAgedBirthSqlAuthority,readOwnedSealedAgedBirthReceipt,readSealedAgedBirthArchive,rejectSealedAgedBirthOnGenericPath,
+import {assertAgedBirthSqlAuthority,readOwnedSealedAgedBirthReceipt,readOwnedSealedAgedFruitSight,readSealedAgedBirthArchive,rejectSealedAgedBirthOnGenericPath,
  sameAgedBirthProofs,writeSealedAgedBirth,type AgedBirthProofs} from './valley-spirit-aged-birth-archive.js';
 import {makeAgedBirthExecutionTerms,makeAgedBirthReviewTerms,verifiesAgedBirthExecution,verifiesAgedBirthReview} from './valley-spirit-aged-birth-review.js';
 import {agedG1ReviewTerms,agedG1RevokeTerms,advanceAgedG1ReviewEpoch,initializeAgedG1ReviewEpoch,
@@ -59,6 +59,9 @@ function decodeAgedBirthPredecessor(state:Uint8Array):World {
 }
 export function readSealedMvpAgedBirthReceipt(owner:DeveloperMvpSpiritFixtureOwner){
  return readOwnedSealedAgedBirthReceipt(owner,decodeAgedBirthPredecessor);
+}
+export function readSealedMvpAgedFruitSight(owner:DeveloperMvpSpiritFixtureOwner,worldId:string,residentId:string){
+ return readOwnedSealedAgedFruitSight(owner,decodeAgedBirthPredecessor,worldId,residentId);
 }
 export interface AppendedHistory {
  events: WorldEvent[];

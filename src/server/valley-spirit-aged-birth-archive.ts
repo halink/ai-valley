@@ -1,3 +1,5 @@
+import {parseClimateUs} from '../world/mvp-climate.js';
+import {canPerceiveMvpCommonFruitPoint} from '../world/mvp-fallen-fruit-resident.js';
 import {createHash} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
 import {gzipSync} from 'node:zlib';
@@ -104,7 +106,7 @@ function rawHead(db:DatabaseSync){
  return {id:rows[0].id,revision:rows[0].revision,state:rows[0].state};
 }
 
-export function readSealedAgedBirthArchive(
+function readVerifiedSealedAgedBirth(
  db:DatabaseSync,owner:DeveloperMvpSpiritFixtureOwner,decode:DecodePredecessor,
 ){
  assertAgedBirthSqlAuthority(db);
@@ -131,7 +133,12 @@ export function readSealedAgedBirthArchive(
  if(current.id!==derived.world.id||current.revision!==derived.world.revision||
   !equalBytes(current.state,gzipSync(JSON.stringify(derived.world),{level:1}))||
   actual.id!==derived.event.id||actual.world_id!==derived.world.id||actual.at!==derived.event.at||actual.body!==JSON.stringify(derived.event))return fail();
- return {receipt:derived.receipt,proofs:stored as unknown as AgedBirthProofs};
+ return {world:derived.world,point:derived.event.place,receipt:derived.receipt,proofs:stored as unknown as AgedBirthProofs};
+}
+
+export function readSealedAgedBirthArchive(db:DatabaseSync,owner:DeveloperMvpSpiritFixtureOwner,decode:DecodePredecessor){
+ const value=readVerifiedSealedAgedBirth(db,owner,decode);
+ return value?{receipt:value.receipt,proofs:value.proofs}:null;
 }
 
 /** Called under sealed store BEGIN IMMEDIATE, only after live independent
@@ -168,12 +175,34 @@ export function sameAgedBirthProofs(a:AgedBirthProofs,b:AgedBirthProofs):boolean
  return sameProof(a.age,b.age)&&sameProof(a.g1,b.g1,agedG1ReviewSigningBytes)&&
   sameProof(a.execution,b.execution,agedBirthExecutionSigningBytes);
 }
-export function readOwnedSealedAgedBirthReceipt(owner:DeveloperMvpSpiritFixtureOwner,decode:DecodePredecessor){
+function readOwnedSealedAgedBirth<T>(
+ owner:DeveloperMvpSpiritFixtureOwner,decode:DecodePredecessor,project:(value:NonNullable<ReturnType<typeof readVerifiedSealedAgedBirth>>)=>T,
+):T|null{
  if(!isDeveloperMvpSpiritFixtureOwner(owner)||!owner.sourceAge||!owner.agedG1ReviewerKeyPem||!owner.agedPlacementKeyPem)return null;
  owner.assertOwned();
  const db=new DatabaseSync(owner.database,{readOnly:true});
  try{db.exec('PRAGMA trusted_schema=OFF; PRAGMA query_only=ON; BEGIN');
-  const receipt=readSealedAgedBirthArchive(db,owner,decode)?.receipt??null;
-  owner.assertOwned();db.exec('COMMIT');return receipt;
+  const value=readVerifiedSealedAgedBirth(db,owner,decode);
+  const result=value?project(value):null;
+  owner.assertOwned();db.exec('COMMIT');return result;
  }finally{db.close();}
+}
+export function readOwnedSealedAgedBirthReceipt(owner:DeveloperMvpSpiritFixtureOwner,decode:DecodePredecessor){
+ return readOwnedSealedAgedBirth(owner,decode,value=>value.receipt);
+}
+/** One resident's private, read-only possible sight. No durable discovery,
+ * transfer intent, authority, notifications, or raw world leaves the reader. */
+export function readOwnedSealedAgedFruitSight(
+ owner:DeveloperMvpSpiritFixtureOwner,decode:DecodePredecessor,worldId:string,residentId:string,
+){
+ if(typeof worldId!=='string'||typeof residentId!=='string'||worldId.length>200||residentId.length>200)return null;
+ try{
+  return readOwnedSealedAgedBirth(owner,decode,({world,point,receipt})=>{
+   if(world.id!==worldId||!world.mvpClimate)return null;
+   const now=parseClimateUs(world.mvpClimate.lastUs);
+   if(now<parseClimateUs(receipt.bornUs)||now>=parseClimateUs(receipt.expiresUs)||
+    !canPerceiveMvpCommonFruitPoint(world,residentId,point))return null;
+   return Object.freeze({status:'visible' as const,at:Object.freeze({...point})});
+  });
+ }catch{return null;}
 }

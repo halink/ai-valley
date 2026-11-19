@@ -50,22 +50,36 @@ export interface MvpFallenFruitPickupIntent {
 }
 export type MvpFallenFruitDecisionSlot = 'idle-fallback'|'ordinary-action';
 
-function context(w:World,residentId:string):{resident:Resident;items:readonly MvpGroundFruit[]}|undefined {
- if(Object.hasOwn(w,'simulationOnly')||w.mode!=='validation'||!natural(w.revision)||!w.mvpClimate?.spiritEffects||
-  w.mvpClimate.lastUs!==minuteToClimateUs(w.minute))return;
+function fruitObserver(w:World,residentId:string):Resident|undefined {
+ if(Object.hasOwn(w,'simulationOnly')||w.mode!=='validation'||!natural(w.revision)||
+  w.mvpClimate?.lastUs!==minuteToClimateUs(w.minute))return;
  const matches=w.residents.filter(r=>r.id===residentId);
  if(matches.length!==1)return;
  const resident=matches[0];
  if(!natural(resident.revision)||resident.regionalLocation||!canObserveOutdoors(w,resident)||passenger(w,resident.id)||!(resident.health>0))return;
+ return resident;
+}
+function context(w:World,residentId:string):{resident:Resident;items:readonly MvpGroundFruit[]}|undefined {
+ const resident=fruitObserver(w,residentId);
+ if(!resident||!w.mvpClimate?.spiritEffects)return;
  validateMvpSpiritEffects(w);
  return {resident,items:w.mvpClimate.spiritEffects.ground.items};
 }
-
-function observes(w:World,r:Resident,lot:MvpGroundFruit):boolean {
- if(!canSeeOutdoorPoint(w,r,lot.at,SIGHT_AND_ROUTE_STEPS)||!canAccessMvpGroundFruitTile(w,lot.at))return false;
+function observesPoint(w:World,r:Resident,point:Vec):boolean {
+ if(!canSeeOutdoorPoint(w,r,point,SIGHT_AND_ROUTE_STEPS)||!canAccessMvpGroundFruitTile(w,point))return false;
  const restricted=reservedLandRights(w);
- return findPath(w,r.at,lot.at,false,SIGHT_AND_ROUTE_STEPS,(_from,to)=>
+ return findPath(w,r.at,point,false,SIGHT_AND_ROUTE_STEPS,(_from,to)=>
   !restricted.some(right=>inLand({...right.at,width:right.width,height:right.height},to)))!==null;
+}
+const observes=(w:World,r:Resident,lot:MvpGroundFruit)=>observesPoint(w,r,lot.at);
+
+/** Geometry/perception only. Callers must establish separately that a real,
+ * live common lot exists at this point. Does not create knowledge. */
+export function canPerceiveMvpCommonFruitPoint(w:World,residentId:string,point:Vec):boolean {
+ try{
+  const resident=fruitObserver(w,residentId);
+  return !!resident&&observesPoint(w,resident,point);
+ }catch{return false;}
 }
 
 function sighting(w:World,r:Resident,lot:MvpGroundFruit):MvpFallenFruitSighting {
