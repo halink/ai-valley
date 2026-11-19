@@ -67,3 +67,13 @@ a request. A consumed opportunity without this row proves no settlement.
 The world-side audit and the quota ledger are separate transactions: if the
 quota settles but the audit write fails, the result is audit-unavailable, not
 an invitation to retry, infer success, or recreate a historical witness.
+
+An explicitly reviewed three-key fixture may turn a currently paired-verified
+memory audit into one private, deterministic closed-rain sentence. The exact
+same live handle verifies the source epoch and both time windows, and an
+independent third key signs the exact rendered digest, source, packet and audit.
+It does not make a second dispatch, include model-authored prose or infer
+hourly readings, temperature, humidity or residents' reactions. The reviewed
+text exists only in that handle, disappears on revoke, failure, expiry or
+close, and is never restored from a reopened audit or shown on an ordinary
+player surface.

@@ -240,6 +240,27 @@ function spentSource(db:DatabaseSync,fixtureScope:string,sourceDigest:string):bo
   throw Error('formal_weather_handoff_history');
  return true;
 }
+const REVIEW_SCHEMA='sealed-formal-weather-memory-editorial/v1';
+const reviewKeys=['schema','fixtureScope','worldId','episodeId','sourceEpoch','auditDigest','packetDigest',
+ 'rendererVersion','revision','renderedDigest'] as const;
+export interface FormalWeatherEditorialTerms {
+ schema:typeof REVIEW_SCHEMA;fixtureScope:string;worldId:string;episodeId:string;sourceEpoch:number;
+ auditDigest:string;packetDigest:string;rendererVersion:1;revision:1;renderedDigest:string;
+}
+export function encodeFormalWeatherEditorial(input:unknown):Buffer|null{
+ if(!exact(input,reviewKeys)||input.schema!==REVIEW_SCHEMA||!hex(input.fixtureScope)||!world(input.worldId)||
+    !episode(input.episodeId)||!integer(input.sourceEpoch)||input.sourceEpoch<1||input.sourceEpoch>=CAP||
+    !hex(input.auditDigest)||!hex(input.packetDigest)||input.rendererVersion!==1||input.revision!==1||!hex(input.renderedDigest))return null;
+ return Buffer.from(JSON.stringify(['formal-offline-memory-private-editorial-only',...reviewKeys.map(k=>input[k])]));
+}
+function renderFormalWeatherDraft(packet:FormalMemoryPacket){
+ const claim=Object.freeze({kind:'observed-closed-rain' as const,sourceRef:packet.sourceRef,
+  startedMinute:packet.startedMinute,closedMinute:packet.closedMinute});
+ // Match the existing almanac's time-first register, but never pretend a
+ // native interval is an MVP weather point or has temperature/humidity.
+ const text=`第 ${claim.startedMinute} 至 ${claim.closedMinute} 游戏分钟，记录到一段已结束的降雨。`;
+ return Object.freeze({origin:'deterministic-after-confirmed-memory' as const,claim,text});
+}
 const AUDIT='valley_spirit_formal_weather_memory_audit';
 const AUDIT_DDL=`CREATE TABLE ${AUDIT}(singleton INTEGER NOT NULL PRIMARY KEY CHECK(singleton=1), witness TEXT NOT NULL, witness_digest TEXT NOT NULL)`;
 const auditKeys=['schemaVersion','mode','fixtureScope','packet','packetDigest','episodeId','sourceDigest','sourceAuthorizationDigest',
@@ -249,6 +270,7 @@ const hash=(v:string|Buffer)=>createHash('sha256').update(v).digest('hex');
 const memoryRequestId=(seal:string,p:FormalMemoryPacket)=>'formal-weather-memory-'+hash(JSON.stringify([
  seal,p.worldId,p.sourceRef,p.startedMinute,p.closedMinute]));
 type PairedCompletion=NonNullable<ReturnType<ProductionAccountQuotaRehearsal['proveOfflineAlmanacCompletion']>>;
+type FormalWeatherDraft=Readonly<{terms:Readonly<FormalWeatherEditorialTerms>;rendered:ReturnType<typeof renderFormalWeatherDraft>}>;
 type FormalAuditStatus='unavailable'|'not-recorded'|'settlement-unproven'|'locally-recorded'|'paired-verified';
 function auditRow(db:DatabaseSync){
  const entry=db.prepare('SELECT type,sql FROM sqlite_schema WHERE name=?').get(AUDIT);
@@ -362,24 +384,8 @@ function openFormalWeatherAccountSnapshot(store:WorldStore,owner:DeveloperMvpSpi
    if(result&&stagedDigest)pairedAuditDigest=stagedDigest;
    return result;
  };
- return Object.freeze({
-  terms(startsAt:number,expiresAt:number){
-   return read((_p,primary,now)=>{
-    const t=terms(primary,startsAt,expiresAt);
-    return encodeFormalWeatherAccountPreparation(t)&&now>=startsAt&&now<expiresAt?Object.freeze(t):null;
-   });
-  },
-  packet:(input:unknown)=>packet(input),
-  check:(input:unknown)=>packet(input,'check'),
-  consume(input:unknown){
-   const result=packet(input,'consume');if(result)sawSpent=true;return result;
-  },
-  afterConsume:(input:unknown)=>packet(input,'after-consume'),
-  recordAudit(input:unknown,id:string,expectedPacket:FormalMemoryPacket,proof:PairedCompletion){
-   return !!packet(input,'audit',{proof,expectedPacket,id});
-  },
-  auditStatus():FormalAuditStatus{
-   return read<FormalAuditStatus>((p,_primary,_now,log)=>{
+ const inspect=(onDraft?:(packet:FormalMemoryPacket,auditDigest:string,packetDigest:string)=>void):FormalAuditStatus=>{
+   const inspected=read<FormalAuditStatus>((p,primary,now,log)=>{
     const spent=spentSource(db,fixtureScope,p.sourceDigest),row=auditRow(db);
     if(!row)return pairedAuditDigest!==undefined?'unavailable':spent?'settlement-unproven':'not-recorded';
     const r=row.value;
@@ -401,10 +407,43 @@ function openFormalWeatherAccountSnapshot(store:WorldStore,owner:DeveloperMvpSpi
     if(pairedAuditDigest!==undefined){
      if(pairedAuditDigest!==row.digest)return 'unavailable';
      const proof=quota.proveOfflineAlmanacCompletion(String(r.requestId),r.completedAt,Number(r.inputTokens),1);
-     return proof?.runId===r.accountRunId&&proof.binding===r.quotaBinding?'paired-verified':'unavailable';
+     if(proof?.runId!==r.accountRunId||proof.binding!==r.quotaBinding)return 'unavailable';
+     if(primary.terms.version===historical.terms.version&&now>=r.startsAt&&now<r.expiresAt&&Date.now()<r.expiresAt)
+      onDraft?.(projected,row.digest,String(r.packetDigest));
+     return 'paired-verified';
     }
     return 'locally-recorded';
-   })??'unavailable';
+   });
+   return inspected??'unavailable';
+ };
+
+ return Object.freeze({
+  terms(startsAt:number,expiresAt:number){
+   return read((_p,primary,now)=>{
+    const t=terms(primary,startsAt,expiresAt);
+    return encodeFormalWeatherAccountPreparation(t)&&now>=startsAt&&now<expiresAt?Object.freeze(t):null;
+   });
+  },
+  packet:(input:unknown)=>packet(input),
+  check:(input:unknown)=>packet(input,'check'),
+  consume(input:unknown){
+   const result=packet(input,'consume');if(result)sawSpent=true;return result;
+  },
+  afterConsume:(input:unknown)=>packet(input,'after-consume'),
+  recordAudit(input:unknown,id:string,expectedPacket:FormalMemoryPacket,proof:PairedCompletion){
+   return !!packet(input,'audit',{proof,expectedPacket,id});
+  },
+  auditStatus:()=>inspect(),
+  draft():FormalWeatherDraft|null{
+   let candidate:FormalWeatherDraft|null=null;
+   const status=inspect((packet,auditDigest,packetDigest)=>{
+    const rendered=renderFormalWeatherDraft(packet);
+    const terms:FormalWeatherEditorialTerms={schema:REVIEW_SCHEMA,fixtureScope,worldId,episodeId:pinnedEpisodeId,
+     sourceEpoch:packet.permissionVersion,auditDigest,packetDigest,rendererVersion:1,revision:1,
+     renderedDigest:hash(JSON.stringify([REVIEW_SCHEMA,1,rendered]))};
+    candidate=Object.freeze({terms:Object.freeze(terms),rendered});
+   });
+   return status==='paired-verified'?candidate:null;
   },
   close(){if(!closed){closed=true;db.close();}} // Store owns the lease.
  });
@@ -424,9 +463,18 @@ export function openFormalWeatherMemoryHandoff(bridge:unknown,owner:DeveloperMvp
  const {store,ownership,quota,signal}=bound;
  const snapshot=openFormalWeatherAccountSnapshot(store,owner,ownership,quota,bound.policy(),pinnedEpisodeId,true);
  let closed=false,active=false,uncertain=false,spentHere=false;
+ const reviewerPem=owner.formalWeatherPurpose?.reviewerKeyPem;
+ const reviewer=reviewerPem?createPublicKey(reviewerPem):undefined;
+ let approvedDigest:string|undefined;
+ const currentDraft=()=>{
+  let draft:FormalWeatherDraft|null=null;
+  try{if(reviewer&&!closed&&bound.running())draft=snapshot.draft();}catch{/* fail closed */}
+  if(!draft||approvedDigest!==undefined&&approvedDigest!==hash(encodeFormalWeatherEditorial(draft.terms)!))approvedDigest=undefined;
+  return draft;
+ };
  let delivered:FormalMemoryPacket|undefined,resolveMemory:((ok:boolean)=>void)|undefined;
  const close=()=>{if(!closed){
-  closed=true;signal.removeEventListener('abort',close);resolveMemory?.(false);snapshot.close();
+  closed=true;approvedDigest=undefined;signal.removeEventListener('abort',close);resolveMemory?.(false);snapshot.close();
  }};
  signal.addEventListener('abort',close,{once:true});
  const eligible=()=>{
@@ -438,6 +486,22 @@ export function openFormalWeatherMemoryHandoff(bridge:unknown,owner:DeveloperMvp
   terms:snapshot.terms,
   delivery:()=>delivered??null,
   auditStatus:snapshot.auditStatus,
+  privateDraft:currentDraft,
+  approvePrivateDraft(input:unknown):boolean{
+   if(!reviewer)return false;
+   let signed:unknown;try{signed=structuredClone(input);}catch{return false;}
+   if(!exact(signed,['terms','signature'])||typeof signed.signature!=='string'||!/^[A-Za-z0-9_-]{86}$/.test(signed.signature))return false;
+   const bytes=encodeFormalWeatherEditorial(signed.terms),sig=Buffer.from(signed.signature,'base64url');
+   if(!bytes||sig.length!==64||sig.toString('base64url')!==signed.signature||!verify(null,bytes,reviewer,sig))return false;
+   const draft=currentDraft(),expected=draft&&encodeFormalWeatherEditorial(draft.terms);
+   if(!expected?.equals(bytes))return false;
+   approvedDigest=hash(bytes);return true;
+  },
+  readReviewedPrivateDraft(){
+   const draft=currentDraft();
+   return draft&&approvedDigest===hash(encodeFormalWeatherEditorial(draft.terms)!)?
+    Object.freeze({mode:'private-reviewed-formal-memory-draft' as const,...draft}):null;
+  },
   confirm(){resolveMemory?.(true);},
   lose(){resolveMemory?.(false);},
   async rehearse(input:unknown):Promise<FormalMemoryOutcome>{
