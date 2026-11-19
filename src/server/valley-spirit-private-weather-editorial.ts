@@ -103,6 +103,10 @@ export function openPrivateWeatherEditorial(owner:DeveloperMvpSpiritFixtureOwner
    Object.freeze(rendered.facts);Object.freeze(rendered.atmosphere);
    return Object.freeze({terms:Object.freeze(terms),rendered:Object.freeze(rendered)});
   };
+  const reviewed=(log:Signed[],rows:ReturnType<typeof readPrivateWeatherRehearsalSnapshot>['rows'])=>{
+   const last=log.at(-1),c=last?candidate(rows,last.terms.priorEntryId):null;
+   return last&&c&&JSON.stringify(last.terms)===JSON.stringify(c.terms)?c:null;
+  };
   return Object.freeze({
    preview(){return tx(false,(log,rows)=>({result:candidate(rows,log.at(-1)?.terms.entryId??null)}));},
    approve(input:unknown):boolean{
@@ -120,9 +124,19 @@ export function openPrivateWeatherEditorial(owner:DeveloperMvpSpiritFixtureOwner
    },
    read(){
     return tx(false,(log,rows)=>{
-     const last=log.at(-1),c=last?candidate(rows,last.terms.priorEntryId):null;
-     return {result:last&&c&&JSON.stringify(last.terms)===JSON.stringify(c.terms)?
-      Object.freeze({mode:'private-reviewed-offline-synthetic' as const,entryId:c.terms.entryId,rendered:c.rendered}):null};
+     const c=reviewed(log,rows);
+     return {result:c?Object.freeze({mode:'private-reviewed-offline-synthetic' as const,entryId:c.terms.entryId,rendered:c.rendered}):null};
+    });
+   },
+   readForDeveloperDisplay(pinnedEntryId:string){
+    if(!id(pinnedEntryId))return null;
+    return tx(false,(log,rows)=>{
+     const c=reviewed(log,rows);
+     if(!c||c.terms.entryId!==pinnedEntryId)return {result:null};
+     const facts=c.rendered.facts.map(({minute,field,value})=>Object.freeze({minute,field,value}));
+     return {result:Object.freeze({schemaVersion:1 as const,mode:'private-reviewed-offline-weather' as const,
+      entryId:pinnedEntryId,worldId:fixed.worldId,textVersion:c.terms.textVersion,permissionVersion:c.terms.permissionVersion,
+      rendererVersion:c.terms.rendererVersion,facts:Object.freeze(facts)})};
     });
    },
    close(){if(!closed){closed=true;db.close();}}

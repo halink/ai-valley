@@ -171,3 +171,13 @@ edition can be read; send authority is not editorial authority. Missing JSON
 merely hides the edition until the exact witness can be verified again. A
 revoked or rotated public weather grant blocks on read; no ordinary database,
 public release, or automatic retraction writes are performed.
+
+An explicit programmatic developer listener can read one pinned, independently
+reviewed synthetic weather entry at `GET /developer/weather-review` on an
+ephemeral IPv4 loopback port. It has no ordinary server/CLI hook, recognizes
+only the exact peer/Host/path, rejects credentials, and rechecks the authenticated
+latest entry and current sources in the private editor's read transaction for
+every GET. Its versioned DTO contains only IDs, versions and typed weather
+facts (minute, field, value), never source links, rendered prose, approvals,
+World or publishing capability. A revoked/latest-ineligible/missing witness
+returns the same unavailable response and never writes permanent withdrawal.
