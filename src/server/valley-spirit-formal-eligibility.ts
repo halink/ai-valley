@@ -1,13 +1,10 @@
 import {FORMAL_HEIGHT,FORMAL_WIDTH} from '../shared/formal-regions.js';
-import {inLand,reservedLandRights} from '../shared/land-rights.js';
 import {pastureEdgeOpen} from '../shared/pasture-access.js';
-import {disasterContains} from '../shared/frontier-hazards.js';
 import type {Vec,World} from '../shared/types.js';
-import {distance,reachableTilesFrom,same,walkable} from '../world/navigation.js';
-import {pastureContains} from '../world/pasture.js';
-import {productionParcels} from '../world/production.js';
+import {distance,reachableTilesFrom,walkable} from '../world/navigation.js';
 import {DAY} from '../world/time.js';
 import {WorldStore} from './store.js';
+import {formalBerryCommonGround} from '../world/formal-berry-location.js';
 
 const MAX_SITES=8,MAX_MAP_AREA=FORMAL_WIDTH*FORMAL_HEIGHT,MAX_AGE=28*DAY; // audit bounds, not production policy
 const nat=(v:unknown):v is number=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=0;
@@ -50,13 +47,8 @@ export function readFormalRainShadowBasis(store:WorldStore,options?:FormalRainSh
    !point(w,w.map.entrance)||!walkable(w,w.map.entrance)||[...o.sites].some(s=>
     !s||!exact(s,['sourceId','target'])||typeof s.sourceId!=='string'||!/^bush-\d{1,8}-\d{1,8}$/.test(s.sourceId)||!point(w,s.target)))
    return unavailable;
-  const reserved=reservedLandRights(w),parcels=productionParcels(w).filter(p=>p.ownerId!=='commons'),
-   yards=Object.values(w.construction?.yards??{}),hazards=w.frontierHazards?.disasters.filter(d=>d.phase==='active')??[];
-  const common=(p:Vec)=>!w.plots.some(plot=>same(plot.at,p))&&!w.graves.some(g=>same(g.at,p))&&
-   !w.buildings.some(b=>same(b.door,p))&&!pastureContains(w,p)&&
-   !reserved.some(r=>inLand({...r.at,width:r.width,height:r.height},p))&&
-   !parcels.some(r=>inLand(r,p))&&!yards.some(r=>inLand(r,p))&&!hazards.some(h=>disasterContains(h,p));
-  if(hazards.some(h=>disasterContains(h,w.map.entrance)))return unavailable;
+  const ground=formalBerryCommonGround(w);
+  if(ground.unsafe(w.map.entrance))return unavailable;
   const reach=reachableTilesFrom(w,w.map.entrance),idx=(p:Vec)=>p.y*w.map.width+p.x;
   const seen=new Set<string>(),offers=[];
   for(const {sourceId,target} of o.sites){
@@ -64,9 +56,8 @@ export function readFormalRainShadowBasis(store:WorldStore,options?:FormalRainSh
    if(matching.length!==1)continue;
    const r=matching[0];
    if(r.kind!=='bush'||r.foodItem!==undefined||!point(w,r.at)||r.id!==`bush-${r.at.x}-${r.at.y}`||
-    !nat(r.amount)||r.amount<1||!nat(r.max)||r.amount>r.max||!common(r.at)||!walkable(w,r.at)||
-    !common(target)||!walkable(w,target)||same(target,w.map.entrance)||w.map.tiles[idx(target)]!=='grass'||
-    w.resources.some(resource=>same(resource.at,target))||distance(r.at,target)!==1||
+    !nat(r.amount)||r.amount<1||!nat(r.max)||r.amount>r.max||!ground.common(r.at)||!walkable(w,r.at)||
+    !ground.landing(target)||distance(r.at,target)!==1||
     !pastureEdgeOpen(w,r.at,target)||!reach[idx(r.at)]||!reach[idx(target)])continue;
    const key=JSON.stringify([sourceId,target.x,target.y]);if(seen.has(key))continue;seen.add(key);
    offers.push({kind:'formal-wild-berry-geography' as const,sourceId,target:{...target},

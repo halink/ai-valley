@@ -1,3 +1,4 @@
+import {projectDeveloperFormalBerryDiscovery} from './valley-spirit-formal-berry-discovery.js';
 import {draftFormalBerryGround,validateFormalBerryDetachedLedger} from './valley-spirit-formal-berry-draft.js';
 import {FORMAL_BERRY_EFFECT_SCHEMA,assertFormalBerryMirrorHeader,formalBerryEffectAnchor,formalBerryFixtureScope,
  verifyFormalBerrySignedApproval,type FormalBerryFixtureAnchor,type FormalBerryFixtureEffect} from './valley-spirit-formal-berry-authority.js';
@@ -250,6 +251,16 @@ export class WorldStore {
    rainAdoptedMinute:w.formalRainProvenance?.adoptedMinute??-1,capacity:owner.capacity,drafts:rows.map(r=>r.receipt)}))
    throw Error('formal_berry_fixture_archive_lineage');
   return rows;
+ }
+ /** Explicit private resident projection; reads only committed ground. */
+ readDeveloperFormalBerryDiscovery(worldId:string,residentId:string){
+  const owner=this.developerSpiritFixtureOwner;
+  if(!owner?.formalApprovalKeyPem||typeof residentId!=='string'||residentId.length>200)return [];
+  try{
+   const world=this.readWorld(false,false);
+   if(!world||world.id!==worldId)return [];
+   return projectDeveloperFormalBerryDiscovery(world,this.readFormalBerryArchive(world),residentId);
+  }catch{return [];}
  }
  formalBerryFixtureApprovalScope():string|null {
   const owner=this.developerSpiritFixtureOwner;
