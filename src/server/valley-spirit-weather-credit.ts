@@ -23,15 +23,19 @@ function digest(f:PublicWeatherFact):string {
   f.worldRevision,f.minute,f.atUs,f.condition,f.temperatureDeciC,f.relativeHumidityPermille,f.cloudPermille,f.windPermille,
   f.daylightPermille,f.precipitationPermille])).digest('hex');
 }
+/** The explicit rules fixture records only real commits at a new hour. */
+export function nativeWeatherHourTransition(before:number,after:number):boolean {
+ return Number.isSafeInteger(after)&&after>=60&&after%60===0&&after===before+1;
+}
 /** Internal: invoked only from the sealed WorldStore commit SAVEPOINT. No file reads/writes. */
-export function appendNativeWeatherCredit(db:DatabaseSync,previous:World|null,world:World,previousRevision:number):void {
+export function appendNativeWeatherCredit(db:DatabaseSync,previous:World|null,world:World,previousRevision:number,hoursOnly=false):void {
  if(!previous||previous.clock.paused||world.clock.paused)return;
  const before=publicWeatherProjection(previous),f=publicWeatherProjection(world);
  // The world write validated its compare-and-swap before this SAVEPOINT.
  // Native plan submission may increment revision multiple times in one clock minute.
  if(!before||!f||before.worldId!==f.worldId||before.worldRevision!==previousRevision||
     f.worldRevision<=before.worldRevision||f.minute!==before.minute+1||
-    BigInt(f.atUs)-BigInt(before.atUs)!==1_000_000n)return;
+    BigInt(f.atUs)-BigInt(before.atUs)!==1_000_000n||hoursOnly&&!nativeWeatherHourTransition(before.minute,f.minute))return;
  const grant=readValleySpiritWeatherPermission(db,f.worldId);
  if(!grant?.publicWeather)return;
  const id=publicWeatherEntryId(f,grant.version);

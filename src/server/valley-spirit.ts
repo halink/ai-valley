@@ -105,9 +105,9 @@ export class ValleySpiritJournal {
  private diskText:string|null=null;
  private head:PublicWeatherFact;
  private readonly path:string;
- constructor(database:string,head:PublicWeatherFact,private readonly assertOwned:()=>void,private readonly permissions:ValleySpiritPermissionAuthority){
+ constructor(database:string,head:PublicWeatherFact,private readonly assertOwned:()=>void,private readonly permissions:ValleySpiritPermissionAuthority,options?:Readonly<{persistEmpty?:true}>){
   this.path=resolve(database)+'.valley-spirit.json';this.head=structuredClone(head);
-  try{if(!validPublicWeatherFact(head))throw Error('invalid_public_fact');assertOwned();const text=this.read(),authority=permissions.read();if(text===null){if(authority)throw Error('initialized_journal_missing');this.state={schemaVersion:1,worldId:head.worldId,permission:permissions.initialize(),entries:[]};}else{const parsed:unknown=JSON.parse(text);if(!authority||!validJournal(parsed,head)||parsed.permission.version!==authority.version||parsed.permission.publicWeather!==authority.publicWeather)throw Error('incompatible_journal');this.state=parsed;}this.diskText=text;}catch{this.isolated=true;}
+  try{if(!validPublicWeatherFact(head))throw Error('invalid_public_fact');assertOwned();const text=this.read(),authority=permissions.read();if(text===null){if(authority)throw Error('initialized_journal_missing');this.state={schemaVersion:1,worldId:head.worldId,permission:permissions.initialize(),entries:[]};}else{const parsed:unknown=JSON.parse(text);if(!authority||!validJournal(parsed,head)||parsed.permission.version!==authority.version||parsed.permission.publicWeather!==authority.publicWeather)throw Error('incompatible_journal');this.state=parsed;}this.diskText=text;if(options?.persistEmpty&&text===null&&!this.save(this.state))throw Error('empty_journal_unavailable');}catch{this.isolated=true;}
  }
  isolate():void {this.isolated=true;}
  private read():string|null{return readWeatherJournal(this.path);}
@@ -122,9 +122,9 @@ export class ValleySpiritJournal {
   }catch{this.isolated=true;return false;}finally{if(fd!==undefined)closeSync(fd);if(temporary)try{unlinkSync(temporary);}catch{/* a failed private temporary is never used as a journal */}}
  }
  /** Called only after authoritative world commit succeeds. No catch-up or guessed gaps. */
- observe(fact:PublicWeatherFact|null):void {
+ observe(fact:PublicWeatherFact|null,sample=true):void {
   try{const s=this.current();if(!s)return;if(!validPublicWeatherFact(fact)||fact.worldId!==this.head.worldId||fact.minute<this.head.minute||fact.worldRevision<this.head.worldRevision)throw Error('invalid_committed_public_fact');this.head=structuredClone(fact);
-   if(!s.permission.publicWeather)return;const id=publicWeatherEntryId(fact,s.permission.version);if(s.entries.some(e=>e.entryId===id))return;
+   if(!sample||!s.permission.publicWeather)return;const id=publicWeatherEntryId(fact,s.permission.version);if(s.entries.some(e=>e.entryId===id))return;
    const next=structuredClone(s);next.entries.push({entryId:id,sourceRef:`${s.worldId}/${id}`,permissionVersion:s.permission.version,fromMinute:fact.minute,toMinute:fact.minute,fact:structuredClone(fact),text:describe(fact)});this.save(next);
   }catch{this.isolated=true;}
  }

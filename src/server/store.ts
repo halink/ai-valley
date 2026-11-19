@@ -683,7 +683,7 @@ export class WorldStore {
    this.developerSpiritFixtureOwner!.assertOwned();
    this.db.exec('SAVEPOINT optional_native_weather_credit');
    try{
-    appendNativeWeatherCredit(this.db,previous,world,previousRevision);
+    appendNativeWeatherCredit(this.db,previous,world,previousRevision,this.developerSpiritFixtureOwner!.rulesWeatherHourCredit===true);
     this.db.exec('RELEASE optional_native_weather_credit');
    }catch{
     this.db.exec('ROLLBACK TO optional_native_weather_credit');

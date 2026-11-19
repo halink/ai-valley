@@ -1,3 +1,4 @@
+import {nativeWeatherHourTransition} from './valley-spirit-weather-credit.js';
 import {join} from 'node:path';
 import {acquireDeveloperMvpSpiritFixtureOwner,type DeveloperMvpSpiritFixtureOwner,type DeveloperMvpSpiritFixtureKey} from './valley-spirit-fixture-files.js';
 import {openPersistentGeographyCustody,type PersistentGeographyCustody} from './valley-spirit-geography-custody.js';
@@ -20,16 +21,18 @@ import {WorldStore} from './store.js';
 import {acquireRuntimeOwnership,type RuntimeOwnership} from './runtime-lock.js';
 import {assertGodotWebExport} from './godot-web.js';
 import type {World} from '../shared/types.js';
-export async function startPersistentRulesMvp(options:{database:string;port:number;webRoot?:string;autoStart?:boolean;tickMs?:number;privateSpiritShadow?:PersistentRulesShadowOptions;privateLifeFixture?:PersistentRulesLifeFixture;privateSpeechCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string}>}){
+export async function startPersistentRulesMvp(options:{database:string;port:number;webRoot?:string;autoStart?:boolean;tickMs?:number;privateSpiritShadow?:PersistentRulesShadowOptions;privateLifeFixture?:PersistentRulesLifeFixture;privateSpeechCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string;nativeWeatherCredit?:true}>}){
  if(typeof options.database!=='string'||!options.database.trim())throw Error('mvp_rules_database_required');
  if(!Number.isInteger(options.port)||options.port<0||options.port>65535)throw Error('godot_mvp_invalid_port');
  const tickMs=options.tickMs??500,shadowOptions=pinPersistentRulesShadowOptions(options.privateSpiritShadow);
  const speechPin=options.privateSpeechCustody===undefined?undefined:structuredClone(options.privateSpeechCustody);
  if(options.privateSpeechCustody!==undefined&&(!speechPin||!speechPin.fixture||typeof speechPin.worldId!=='string'||!/^godot-mvp-[A-Za-z0-9_-]{1,160}$/.test(speechPin.worldId)||
-    Object.keys(speechPin).length!==2||typeof speechPin.fixture.directory!=='string'||
+    Object.keys(speechPin).some(k=>!['fixture','worldId','nativeWeatherCredit'].includes(k))||
+    (Object.hasOwn(speechPin,'nativeWeatherCredit')&&speechPin.nativeWeatherCredit!==true)||typeof speechPin.fixture.directory!=='string'||
     options.database!==join(speechPin.fixture.directory,'fixture.sqlite')||
     options.privateLifeFixture!==undefined||options.privateSpiritShadow!==undefined||options.webRoot!==undefined))
   throw Error('mvp_rules_private_speech_scope');
+ const weatherCredit=speechPin?.nativeWeatherCredit===true;
  if(!Number.isFinite(tickMs)||tickMs<100)throw Error('mvp_rules_invalid_tick');
  if(options.webRoot!==undefined)assertGodotWebExport(options.webRoot);
  let owner:RuntimeOwnership|DeveloperMvpSpiritFixtureOwner|undefined,privateOwner:DeveloperMvpSpiritFixtureOwner|undefined,store:WorldStore|undefined,timer:ReturnType<typeof setInterval>|undefined;
@@ -46,6 +49,7 @@ export async function startPersistentRulesMvp(options:{database:string;port:numb
   if(speechPin){
    owner=privateOwner=acquireDeveloperMvpSpiritFixtureOwner(speechPin.fixture);
    if(privateOwner.rulesSpeechWorldId!==speechPin.worldId)throw Error('mvp_rules_private_speech_world');
+   if((privateOwner.rulesWeatherHourCredit===true)!==weatherCredit)throw Error('mvp_rules_private_weather_scope');
   }else owner=acquireRuntimeOwnership(options.database);
   owner.assertOwned();
   try{lstatSync(owner.database+'.self-hosted-session');throw Error('mvp_rules_unresolved_session');}catch(error){if(!(error&&typeof error==='object'&&'code' in error&&error.code==='ENOENT'))throw error;}
@@ -59,7 +63,7 @@ export async function startPersistentRulesMvp(options:{database:string;port:numb
   const snapshot=()=>({...session!.snapshot(),valleySpirit:valleySpirit?.view()??valleySpiritUnavailable()});
   server=createMvpServer({snapshot,get world(){return session?.world;}},{webRoot:options.webRoot,privateSpeechWeatherOnly:speechPin?true:undefined,valleySpiritLifeViewer:lifePin?{latest:id=>life?.latest(id)??null}:undefined,valleySpiritSource:ref=>valleySpirit?.resolveSource(ref)??null,valleySpiritArchive:query=>valleySpirit?.archive(query)??{status:'unavailable'},valleySpiritReaders:{almanac:id=>viewers?.almanac(id)??null,latestAlmanac:()=>viewers?.latestAlmanac()??{status:'unavailable'},topics:range=>viewers?.topics(range)??{status:'unavailable'}}});
   await new Promise<void>((resolve,reject)=>{server!.once('error',reject);server!.listen(options.port,'127.0.0.1',resolve);});
-  store=new WorldStore(owner.database,{allowMvpClimate:true,developerSpiritFixtureOwner:privateOwner});
+  store=new WorldStore(owner.database,{allowMvpClimate:true,developerSpiritFixtureOwner:privateOwner,nativeWeatherCredit:weatherCredit?true:undefined});
   const saved=store.load(),world=structuredClone(saved??createMvpWorld()),previous=saved?.revision??null;
   if(speechPin&&world.id!==speechPin.worldId)throw Error('mvp_rules_private_speech_world');
   assertMvpWorld(world);
@@ -67,16 +71,19 @@ export async function startPersistentRulesMvp(options:{database:string;port:numb
   const rainAdopted=adoptMvpRainProvenance(world);
   if(adopted||soilAdopted||agricultureAdopted||rainAdopted)world.revision++;
   if(!saved||upgraded||adopted||soilAdopted||agricultureAdopted||rainAdopted)store.commit(world,previous);
+  let lastCommittedMinute=world.minute;
   session=createMvpSession({world,persistent:true,captureAddressedSpeechCustody:speechPin?true:undefined,commit:(draft,revision,speech)=>{
    owner!.assertOwned();
    if(speechPin){
     if(draft.id!==speechPin.worldId)throw Error('mvp_rules_private_speech_world');
     store!.commitMvpWithAddressedSpeech(draft,revision,speech);
    }else store!.commit(draft,revision);
-   try{valleySpirit?.observe(publicWeatherProjection(draft));}catch{valleySpirit?.isolate();}
+   const sample=!weatherCredit||nativeWeatherHourTransition(lastCommittedMinute,draft.minute);
+   lastCommittedMinute=draft.minute;
+   try{valleySpirit?.observe(publicWeatherProjection(draft),sample);}catch{valleySpirit?.isolate();}
    shadow?.onCommitted(draft);}});
   const initialPublicFact=publicWeatherProjection(session.world);
-  if(initialPublicFact){try{spiritPermissions=new SqliteValleySpiritPermissions(owner.database,initialPublicFact.worldId,()=>owner!.assertOwned());valleySpirit=new ValleySpiritJournal(owner.database,initialPublicFact,()=>owner!.assertOwned(),spiritPermissions);valleySpirit.observe(initialPublicFact);}catch{valleySpirit?.isolate();}}
+  if(initialPublicFact){try{spiritPermissions=new SqliteValleySpiritPermissions(owner.database,initialPublicFact.worldId,()=>owner!.assertOwned());valleySpirit=new ValleySpiritJournal(owner.database,initialPublicFact,()=>owner!.assertOwned(),spiritPermissions,weatherCredit?{persistEmpty:true}:undefined);if(!weatherCredit)valleySpirit.observe(initialPublicFact);}catch{valleySpirit?.isolate();}}
   if(valleySpirit){
    if(shadowOptions)try{
     if(shadowOptions.durableObservation)geographyCustody=openPersistentGeographyCustody(owner.database,world.id,()=>owner!.assertOwned());

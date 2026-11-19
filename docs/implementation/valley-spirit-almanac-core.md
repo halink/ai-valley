@@ -196,3 +196,14 @@ matching same-transaction custody row. Missing proof, malformed custody, or
 a receipt-count/event-identity mismatch rolls back the world minute; quiet
 or non-addressed conversation remains unaffected. Optional custody policy
 outside this fixture is unchanged.
+
+A distinct zero-effect fixture manifest and explicit programmatic
+`nativeWeatherCredit: true` opt-in can add weather custody to the actual
+private persistent rules starter. Only a real native one-minute transition
+ending at the exact new hour is credited, using the same SQLite transaction
+as the world and addressed-speech custody. The objective JSON witness samples
+only that successful boundary; startup and other in-hour ticks advance no
+samples, and an empty witness can survive restart without backfill. Existing
+source grant epochs still govern collection and strict packet reading. Neither
+standard startup nor the speech-only fixture is affected; the fixture retains
+its objective-weather-only loopback, with no model or publication.
