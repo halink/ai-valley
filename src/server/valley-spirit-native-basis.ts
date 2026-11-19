@@ -13,8 +13,8 @@ import {verifiesNativeWeatherCredit} from './valley-spirit-weather-credit.js';
 import type {World} from '../shared/types.js';
 
 
-type NativePin={worldId:string;weatherEntryId:string;lifeSectionId:string};
-function checkedPin(options:NativePin){
+export type NativePin={worldId:string;weatherEntryId:string;lifeSectionId:string};
+export function checkedPin(options:NativePin){
  const pin=Object.freeze({...options});
  if(!/^godot-mvp-[A-Za-z0-9_-]{1,160}$/.test(pin.worldId)||!/^valley-almanac-[a-f0-9]{64}$/.test(pin.weatherEntryId)||!/^valley-life-section-[a-f0-9]{64}$/.test(pin.lifeSectionId))throw Error('native_yearbook_pin_invalid');
  return pin;
@@ -93,6 +93,55 @@ export function openPrivateNativeYearbookBasis(database:string,options:NativePin
  }catch(error){close();throw error;}
 }
 
+/** Internal borrowing seam; the host owns the transaction. All evidence is
+ * derived from the pinned DB and JSON witness, never caller source callbacks. */
+export function nativeYearbookCaptureOnConnection(sqlite:DatabaseSync,database:string,worldId:string,assertOwned:()=>void){
+  let head:ReturnType<typeof readWorldHead>=null;
+  let priorRevision=-1,priorTime=-1n,priorEpoch=0;
+  let priorEntries:PublicWeatherEntry[]=[];
+  const authority=valleySpiritLifeAuthorityOnConnection(sqlite,worldId,assertOwned,
+   ()=>head?{worldId:head.worldId,asOfUs:head.atUs}:null,
+   receipt=>receipt.kind==='conversation-completed'&&verifyValleySpiritSpeechCustody(sqlite,receipt));
+  const latestLife=valleySpiritLifeViewOnConnection(sqlite,worldId,assertOwned,authority);
+  const capture=(pin:Readonly<NativePin>):OfflineYearbookBasis|null=>{
+   const h=head=readWorldHead(sqlite,worldId);
+   const grant=readValleySpiritWeatherPermission(sqlite,worldId);
+   if(!h||!grant)return null;
+   if(h.worldRevision<priorRevision||BigInt(h.atUs)<priorTime||grant.version<priorEpoch)
+    throw Error('rewound_native_yearbook_snapshot');
+   priorRevision=h.worldRevision;priorTime=BigInt(h.atUs);priorEpoch=grant.version;
+   const life=latestLife(worldId);
+   const payload=readExistingPublicWeatherJournal(database,h,grant);
+   if(!payload)return null;
+   if(payload.entries.length<priorEntries.length||priorEntries.some((row,i)=>JSON.stringify(row)!==JSON.stringify(payload.entries[i])))
+    throw Error('rewound_native_yearbook_payload');
+   const candidates=new Map(payload.entries.filter(e=>e.permissionVersion===grant.version).map(e=>[e.sourceRef,e]));
+   const verified=new Map<string,PublicWeatherEntry|null>();
+   const rows=readValleySpiritAlmanacSnapshot(sqlite,worldId);
+   const weather=new ValleySpiritAlmanac({read:()=>rows,replace:()=>false},{
+    permission:()=>grant,resolve:ref=>{
+     if(verified.has(ref))return verified.get(ref)??null;
+     const entry=candidates.get(ref);
+     const result=entry&&verifiesNativeWeatherCredit(sqlite,ref,entry.fact)?entry:null;
+     verified.set(ref,result);return result;
+    }
+   }).get(pin.weatherEntryId);
+   if(!weather||life?.sectionId!==pin.lifeSectionId||life.lines.some(l=>l.kind!=='conversation-completed'))return null;
+   priorEntries=payload.entries;
+   const marks={headUs:h.atUs,headRevision:h.worldRevision};
+   return {worldId:worldId,...marks,weather:{...marks,entryId:weather.entryId,textVersion:weather.textVersion,
+    permissionVersion:weather.permissionVersion,facts:weather.facts.map(({sourceRef,minute,field,value})=>Object.freeze({sourceRef,minute,field,value}))},
+    life:{...marks,sectionId:life.sectionId,lines:life.lines.map(({sourceRef,atUs,grantVersion,receiptVersion})=>
+     Object.freeze({sourceRef,atUs,grantVersion,receiptVersion,kind:'conversation-completed'}))}};
+  };
+ return (options:NativePin)=>{
+  const pin=checkedPin(options);
+  if(pin.worldId!==worldId)throw Error('native_yearbook_world_changed');
+  assertOwned();
+  try{return capture(pin);}finally{head=null;}
+ };
+}
+
 /** Strict private inspection only. The JSON is an untrusted candidate payload,
  * never an authority. Every referenced sample must have exact SQLite custody
  * in the same snapshot as both current grants, world head and publication logs. */
@@ -102,46 +151,8 @@ export function openPrivateAtomicNativeYearbookBasis(database:string,options:Nat
  try{
   const sqlite=db=new DatabaseSync(owner.database,{readOnly:true});
   sqlite.exec('PRAGMA trusted_schema=OFF; PRAGMA query_only=ON');
-  let closed=false,invalid=false,head:ReturnType<typeof readWorldHead>=null;
-  let priorRevision=-1,priorTime=-1n,priorEpoch=0;
-  let priorEntries:PublicWeatherEntry[]=[];
-  const authority=valleySpiritLifeAuthorityOnConnection(sqlite,pin.worldId,owner.assertOwned,
-   ()=>head?{worldId:head.worldId,asOfUs:head.atUs}:null,
-   receipt=>receipt.kind==='conversation-completed'&&verifyValleySpiritSpeechCustody(sqlite,receipt));
-  const latestLife=valleySpiritLifeViewOnConnection(sqlite,pin.worldId,owner.assertOwned,authority);
-  const capture=():OfflineYearbookBasis|null=>{
-   const h=head=readWorldHead(sqlite,pin.worldId);
-   const grant=readValleySpiritWeatherPermission(sqlite,pin.worldId);
-   if(!h||!grant)return null;
-   if(h.worldRevision<priorRevision||BigInt(h.atUs)<priorTime||grant.version<priorEpoch)
-    throw Error('rewound_native_yearbook_snapshot');
-   priorRevision=h.worldRevision;priorTime=BigInt(h.atUs);priorEpoch=grant.version;
-   const payload=readExistingPublicWeatherJournal(owner.database,h,grant);
-   if(!payload)return null;
-   if(payload.entries.length<priorEntries.length||priorEntries.some((row,i)=>JSON.stringify(row)!==JSON.stringify(payload.entries[i])))
-    throw Error('rewound_native_yearbook_payload');
-   const candidates=new Map(payload.entries.filter(e=>e.permissionVersion===grant.version).map(e=>[e.sourceRef,e]));
-   const verified=new Map<string,PublicWeatherEntry|null>();
-   const rows=readValleySpiritAlmanacSnapshot(sqlite,pin.worldId);
-   const weather=new ValleySpiritAlmanac({read:()=>rows,replace:()=>false},{
-    permission:()=>grant,resolve:ref=>{
-     if(verified.has(ref))return verified.get(ref)??null;
-     const entry=candidates.get(ref);
-     const result=entry&&verifiesNativeWeatherCredit(sqlite,ref,entry.fact)?entry:null;
-     verified.set(ref,result);return result;
-    }
-   }).get(pin.weatherEntryId);
-   // Advance life histories whenever its current release can be checked, even
-   // if no matching weather edition survives current validation.
-   const life=latestLife(pin.worldId);
-   if(!weather||life?.sectionId!==pin.lifeSectionId||life.lines.some(l=>l.kind!=='conversation-completed'))return null;
-   priorEntries=payload.entries;
-   const marks={headUs:h.atUs,headRevision:h.worldRevision};
-   return {worldId:pin.worldId,...marks,weather:{...marks,entryId:weather.entryId,textVersion:weather.textVersion,
-    permissionVersion:weather.permissionVersion,facts:weather.facts.map(({sourceRef,minute,field,value})=>Object.freeze({sourceRef,minute,field,value}))},
-    life:{...marks,sectionId:life.sectionId,lines:life.lines.map(({sourceRef,atUs,grantVersion,receiptVersion})=>
-     Object.freeze({sourceRef,atUs,grantVersion,receiptVersion,kind:'conversation-completed'}))}};
-  };
+  let closed=false,invalid=false;
+  const capture=nativeYearbookCaptureOnConnection(sqlite,owner.database,pin.worldId,owner.assertOwned);
   return Object.freeze({
    read():Readonly<OfflineYearbookBasis>|null{
     if(closed||invalid)return null;
@@ -149,7 +160,7 @@ export function openPrivateAtomicNativeYearbookBasis(database:string,options:Nat
     try{
      owner.assertOwned();
      sqlite.exec('BEGIN');transaction=true;
-     const b=capture();
+     const b=capture(pin);
      owner.assertOwned();
      sqlite.exec('COMMIT');transaction=false;
      if(!b)return null;
@@ -159,7 +170,7 @@ export function openPrivateAtomicNativeYearbookBasis(database:string,options:Nat
      invalid=true;
      if(transaction)try{sqlite.exec('ROLLBACK');}catch{/* no further reads */}
      return null;
-    }finally{head=null;}
+    }
    },
    close(){
     if(closed)return;closed=true;

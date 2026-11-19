@@ -9,7 +9,7 @@ export interface OfflineYearbookBasis {
  life:{headUs:string;headRevision:number;sectionId:string;lines:readonly Life[]};
 }
 interface Fact {id:string;kind:'weather'|'conversation';text:string;}
-interface Draft {version:1;worldId:string;priorEditionId:string|null;sourceDigest:string;selectedIds:string[];lines:Fact[];}
+export interface Draft {version:1;worldId:string;priorEditionId:string|null;sourceDigest:string;selectedIds:string[];lines:Fact[];}
 interface Review {version:1;worldId:string;priorEditionId:string|null;renderedDigest:string;approvalReference:string;}
 const digest=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const hash=(v:unknown)=>typeof v==='string'&&/^[a-f0-9]{64}$/.test(v);
@@ -42,21 +42,28 @@ function normalize(b:OfflineYearbookBasis){
  }
  return {worldId:b.worldId,choices,sourceDigest:digest([b.worldId,b.weather.entryId,b.weather.textVersion,b.weather.permissionVersion,weather,b.life.sectionId,life])};
 }
+export function nativeYearbookChoiceMenu(basis:OfflineYearbookBasis|null){
+ return [...(basis&&normalize(basis)?.choices.values()||[])].map(({id,kind})=>({id,kind}));
+}
+/** Deterministically build the exact draft from existing typed, grounded facts. */
+export function buildNativeYearbookDraft(basis:OfflineYearbookBasis|null,ids:readonly string[],priorEditionId:string|null):Draft|null {
+  const n=basis&&normalize(basis);
+  if(!n||!Array.isArray(ids)||ids.length<2||ids.length>12||new Set(ids).size!==ids.length)return null;
+  const lines:Fact[]=[];
+  for(const id of ids){const f=n.choices.get(id);if(!f)return null;lines.push(f);}
+  if(!lines.some(f=>f.kind==='weather')||!lines.some(f=>f.kind==='conversation'))return null;
+  return {version:1,worldId:n.worldId,priorEditionId,sourceDigest:n.sourceDigest,selectedIds:[...ids],lines};
+}
+export function nativeYearbookDraftDigest(draft:Draft):string{return digest(draft);}
 /** NOT a publication or durable release. Fixture host supplies independent read
  * and review; there is no raw-source, network, or production adapter. */
 export class OfflineYearbookEditionEditor {
  private current:{editionId:string;draft:Draft;withdrawn:boolean}|null=null;
  private readonly usedSources=new Set<string>();
  constructor(private readonly readFixture:()=>OfflineYearbookBasis|null,private readonly verifyFixtureReview:(review:Readonly<Review>)=>boolean){}
- private basis(){const b=this.readFixture();return b&&normalize(b);}
- menu(){try{return [...(this.basis()?.choices.values()??[])].map(({id,kind})=>({id,kind}));}catch{return [];}}
+ menu(){try{return nativeYearbookChoiceMenu(this.readFixture());}catch{return [];}}
  private make(ids:readonly string[],priorEditionId:string|null):Draft|null{
-  const n=this.basis();
-  if(!n||!Array.isArray(ids)||ids.length<2||ids.length>12||new Set(ids).size!==ids.length)return null;
-  const lines:Fact[]=[];
-  for(const id of ids){const f=n.choices.get(id);if(!f)return null;lines.push(f);}
-  if(!lines.some(f=>f.kind==='weather')||!lines.some(f=>f.kind==='conversation'))return null;
-  return {version:1,worldId:n.worldId,priorEditionId,sourceDigest:n.sourceDigest,selectedIds:[...ids],lines};
+  return buildNativeYearbookDraft(this.readFixture(),ids,priorEditionId);
  }
  draft(ids:readonly string[]){
   try{

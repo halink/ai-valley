@@ -86,3 +86,22 @@ payload fails closed, without replacing authoritative SQLite evidence. An older
 fact remains eligible if it is exact and currently authorized; an older life
 edition does not replace the latest section. This neither changes the older
 non-atomic inspector nor adds any runtime, public, edition-write or review path.
+
+A separate sealed temporary fixture can pin a purpose-specific Ed25519 public
+key at creation and persist reviewed combined editions. The independent signer
+receives deterministic rendered terms bound to the fixture, world, pinned
+sources, ordered selections, exact source/rendered digests, and prior edition;
+the editor never receives a signing key. Its bounded private SQLite log stores
+only signed approvals, not duplicate prose. The exact draft is reconstructed
+from the native source snapshot before append and again on every read. Approval
+uses one BEGIN IMMEDIATE for the source checks and prior-edition compare-and-swap.
+An identical currently authorized retry is idempotent. Latest is selected before
+reauthorization; an unavailable or revoked source produces no older fallback.
+A temporarily absent/mismatching JSON witness is not a durable revocation;
+a later revalidated witness may restore availability under the same current
+authority. This is not a public edition, a user-save feature, or resistance to
+whole-database rollback by someone who controls fixture storage.
+Within an open reviewed-edition handle, all pins share one monotonic source
+reader, and the signed approval log must extend its exact previously observed
+prefix. A detected rewind isolates the handle; newly written log state is
+remembered only after COMMIT. The in-memory floors do not survive a reopen.

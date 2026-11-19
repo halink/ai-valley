@@ -12,6 +12,7 @@ const databaseName='fixture.sqlite';
 const shape='valley-spirit-private-developer-fixture/v1';
 const formalShape='valley-spirit-private-formal-fixture/v1';
 const formalShadowShape='valley-spirit-private-formal-fixture/v2';
+const reviewedShape='valley-spirit-private-yearbook-review-fixture/v1';
 const active=new WeakSet<DeveloperMvpSpiritFixtureOwner>();
 const attached=new WeakSet<DeveloperMvpSpiritFixtureOwner>();
 const digest=(token:string)=>createHash('sha256').update(token,'ascii').digest('hex');
@@ -27,8 +28,9 @@ function root():string {
  return realpathSync(tmpdir());
 }
 interface Manifest {
- readonly schema:typeof shape|typeof formalShape|typeof formalShadowShape;
+ readonly schema:typeof shape|typeof formalShape|typeof formalShadowShape|typeof reviewedShape;
  readonly approvalKeyPem?:string;
+ readonly yearbookReviewerKeyPem?:string;
  readonly shadowKeyPem?:string;
  readonly directoryIdentity:string;
  readonly databaseIdentity:string;
@@ -43,6 +45,7 @@ export interface DeveloperMvpSpiritFixtureKey {
 export interface DeveloperMvpSpiritFixtureOwner {
  readonly database:string;
  readonly formalApprovalKeyPem?:string;
+ readonly yearbookReviewerKeyPem?:string;
  readonly formalShadowKeyPem?:string;
  readonly seal:string;
  readonly capacity:MvpGroundFruitCapacity;
@@ -78,7 +81,11 @@ export function createDeveloperFormalShadowFixtureKey(
  if(!independentKeys(approvalKeyPem,shadowKeyPem)||capacity.worldLots<1||capacity.lotsPerTarget<1)return invalid();
  return createKey(capacity,approvalKeyPem,shadowKeyPem);
 }
-function createKey(capacity:MvpGroundFruitCapacity,approvalKeyPem?:string,shadowKeyPem?:string):DeveloperMvpSpiritFixtureKey {
+export function createDeveloperReviewedYearbookFixtureKey(capacity:MvpGroundFruitCapacity,reviewerKeyPem:string):DeveloperMvpSpiritFixtureKey {
+ if(!formalApprovalKey(reviewerKeyPem))return invalid();
+ return createKey(capacity,undefined,undefined,reviewerKeyPem);
+}
+function createKey(capacity:MvpGroundFruitCapacity,approvalKeyPem?:string,shadowKeyPem?:string,yearbookReviewerKeyPem?:string):DeveloperMvpSpiritFixtureKey {
  if(!validMvpSpiritFixtureCapacity(capacity))return invalid();
  const directory=mkdtempSync(join(root(),prefix));
  const initial=lstatSync(directory,{bigint:true});if(!privateDirectory(initial))return invalid();
@@ -89,7 +96,7 @@ function createKey(capacity:MvpGroundFruitCapacity,approvalKeyPem?:string,shadow
   const s=fstatSync(fd,{bigint:true});if(!privateFile(s)||s.size!==0n)return invalid();
   databaseIdentity=identity(s);fsyncSync(fd);
  }finally{closeSync(fd);}
- const manifest:Manifest={schema:shadowKeyPem?formalShadowShape:approvalKeyPem?formalShape:shape,directoryIdentity:identity(initial),databaseIdentity,tokenHash:digest(token),capacity:{...capacity},...(approvalKeyPem?{approvalKeyPem}:{}),...(shadowKeyPem?{shadowKeyPem}:{})};
+ const manifest:Manifest={schema:yearbookReviewerKeyPem?reviewedShape:shadowKeyPem?formalShadowShape:approvalKeyPem?formalShape:shape,directoryIdentity:identity(initial),databaseIdentity,tokenHash:digest(token),capacity:{...capacity},...(approvalKeyPem?{approvalKeyPem}:{}),...(shadowKeyPem?{shadowKeyPem}:{}),...(yearbookReviewerKeyPem?{yearbookReviewerKeyPem}:{})};
  const metadata=openSync(join(directory,manifestName),constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600);
  try{writeFileSync(metadata,JSON.stringify(manifest),'utf8');fsyncSync(metadata);}finally{closeSync(metadata);}
  const parent=openSync(directory,constants.O_RDONLY|constants.O_DIRECTORY|constants.O_NOFOLLOW);
@@ -117,6 +124,7 @@ function readManifest(path:string):{identity:string;value:Manifest} {
   try{v=JSON.parse(body.toString('utf8')) as Manifest;}catch{return invalid();}
   const base=['schema','directoryIdentity','databaseIdentity','tokenHash','capacity'];
   if(!(v?.schema===shape&&exact(v,base)||v?.schema===formalShape&&exact(v,[...base,'approvalKeyPem'])&&formalApprovalKey(v.approvalKeyPem)||
+   v?.schema===reviewedShape&&exact(v,[...base,'yearbookReviewerKeyPem'])&&formalApprovalKey(v.yearbookReviewerKeyPem)||
    v?.schema===formalShadowShape&&exact(v,[...base,'approvalKeyPem','shadowKeyPem'])&&
     independentKeys(v.approvalKeyPem!,v.shadowKeyPem))||!hex(v.tokenHash)||
    typeof v.directoryIdentity!=='string'||typeof v.databaseIdentity!=='string'||
@@ -147,6 +155,7 @@ export function acquireDeveloperMvpSpiritFixtureOwner(key:DeveloperMvpSpiritFixt
    database:handle.database,seal:createHmac('sha256',key.token).update(manifestSnapshot,'utf8').digest('hex'),
    capacity:Object.freeze({...manifest.capacity}),
    ...(manifest.approvalKeyPem?{formalApprovalKeyPem:manifest.approvalKeyPem}:{}),
+   ...(manifest.yearbookReviewerKeyPem?{yearbookReviewerKeyPem:manifest.yearbookReviewerKeyPem}:{}),
    ...(manifest.shadowKeyPem?{formalShadowKeyPem:manifest.shadowKeyPem}:{}),
    assertOwned(){
     if(!active.has(owner))return invalid();
