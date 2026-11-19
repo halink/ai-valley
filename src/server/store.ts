@@ -1,3 +1,4 @@
+import {probeMvpFallenFruitAdjacentEngineEdge} from './valley-spirit-mvp-fallen-fruit-approach.js';
 import {appendFormalDueIntent,formalDueCurrent,formalDueInputs,makeFormalDueCheckpoint,prepareFormalDueIntent,
  readFormalDueRows,writeFormalDueCheckpoint,type FormalDueCheckpoint,type FormalDueIntent} from './valley-spirit-formal-due.js';
 import {appendFormalShadowPermission,appendFormalShadowProposal,formalShadowApprovalBasis,formalShadowScope,initializeFormalShadowCustody,makeFormalShadowProposal,
@@ -684,6 +685,23 @@ export class WorldStore {
    this.db.exec('COMMIT');
    return change.result;
   }catch(error){this.db.exec('ROLLBACK');throw error;}
+ }
+ /** Developer-only detached probe, not a world tick or write. The engine
+  * cannot bypass other custody via this API: its complete draft is discarded. */
+ probeDeveloperMvpFallenFruitAdjacentEdge(worldId:string){
+  const owner=this.developerSpiritFixtureOwner;
+  const unavailable={status:'unavailable'} as const;
+  if(!owner||owner.formalApprovalKeyPem)return unavailable;
+  try{
+   owner.assertOwned();this.db.exec('BEGIN');
+   try{
+    const w=this.readWorld(false,false);
+    if(!w||w.id!==worldId){this.db.exec('COMMIT');return unavailable;}
+    assertDeveloperMvpEffectArchive(this.db,w);
+    const result=probeMvpFallenFruitAdjacentEngineEdge(w);
+    this.db.exec('COMMIT');return result;
+   }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }catch{return unavailable;}
  }
  /** No runtime route: the fixture operation is recalculated from a fresh
   * authoritative head under one SQLite lock, never by accepting a draft. */

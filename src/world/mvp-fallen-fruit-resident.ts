@@ -97,11 +97,11 @@ export function observeMvpFallenFruit(
  }catch{return [];}
 }
 
-function needsPermit(w:World,r:Resident):boolean {
+export function mvpFallenFruitOptionalActionPermitted(w:World,r:Resident):boolean {
  const thirst=mvpThirst(w,r);
  // Existing MVP priorities: don't displace hunger, water, rest, current plans
- // or temporary physiological protection. Take only on the current tile, so
- // no fruit-induced detour, schedule, reservoir or auto-eating exists.
+ // or temporary physiological protection. This guard alone authorizes
+ // neither movement nor pickup.
  return w.clock.paused===false&&r.plan===null&&r.activity===null&&!r.decisionProtection&&
    !w.health?.transports.some(t=>t.carrierId===r.id&&t.phase==='carrying')&&
    Number.isFinite(r.hunger)&&r.hunger>=0&&r.hunger<35&&
@@ -118,7 +118,7 @@ export function chooseMvpFallenFruitPickup(
  if(slot!=='idle-fallback')return null;
  try{
   const head=context(w,residentId);
-  if(!head||!needsPermit(w,head.resident))return null;
+  if(!head||!mvpFallenFruitOptionalActionPermitted(w,head.resident))return null;
   const {resident,items}=head;
   const lot=items.filter(candidate=>!settledEffectIds?.has(candidate.effectId)&&same(candidate.at,resident.at)).sort((a,b)=>stable(a.effectId,b.effectId))
    .find(candidate=>observes(w,resident,candidate));
