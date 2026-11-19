@@ -220,3 +220,12 @@ disconnected quota rehearsal and independent editorial review. No state,
 sidecar, or credit is copied between saves. This proves the sealed source-to-
 review chain under a single save, not a formal resident runtime or a real
 provider/public authorization.
+
+The existing programmatic private persistent-rules life fixture may explicitly
+opt into `includeConsumedMeals: true` for one exact approved latest section.
+The read opens one physical read-only SQLite snapshot for the matching
+runtime/head, life publication and per-receipt grants, and native conversation
+or actual meal custody. Cooking, allocation, or event prose cannot mint the
+meal receipt; only the existing native consumed-meal witness can corroborate
+it. This is read-side support only; there is no new publisher, grant writer,
+auto-collection, public display default or CLI switch.

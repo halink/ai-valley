@@ -117,6 +117,31 @@ function regular(path:string){
 const same=(a:ReturnType<typeof regular>,b:ReturnType<typeof regular>)=>a.dev===b.dev&&a.ino===b.ino;
 const rowSignature=(r:CustodyRow)=>JSON.stringify(expected.map(([name])=>r[name]));
 
+const supportedMealReceipt=(r:unknown,worldId:string):r is ValleySpiritLifeReceipt=>
+ isValleySpiritLifeReceipt(r)&&r.kind==='meal-consumed'&&r.worldId===worldId&&r.receiptVersion===1;
+function verifyReceipt(db:DatabaseSync,worldId:string,data:readonly CustodyRow[],receipt:Readonly<ValleySpiritLifeReceipt>):boolean{
+ if(!supportedMealReceipt(receipt,worldId))return false;
+ const row=data.find(r=>r.receipt_id===receipt.receiptId);
+ return !!row&&row.at_us===receipt.atUs&&persistedMeal(db,worldId,{revision:row.committed_revision,
+  eventId:row.event_id,actorId:row.actor_id,atUs:row.at_us},false);
+}
+/** Internal read-only borrower. The caller owns the file/SQL snapshot; the
+ * helper never opens a writer, issues a receipt or scans events for new food. */
+export function nativeMvpMealCustodyVerifierOnConnection(db:DatabaseSync,worldId:string){
+ if(!WORLD.test(worldId))throw Error('invalid_life_meal_world');
+ const seen=new Map(rows(db,worldId).map(row=>[row.event_id,rowSignature(row)]));
+ let isolated=false;
+ return (receipt:Readonly<ValleySpiritLifeReceipt>):boolean=>{
+  if(isolated||!supportedMealReceipt(receipt,worldId))return false;
+  try{
+   const data=rows(db,worldId),current=new Map(data.map(r=>[r.event_id,rowSignature(r)]));
+   if([...seen].some(([id,signature])=>current.get(id)!==signature))throw Error('rewound_life_meal_custody');
+   for(const [id,signature] of current)seen.set(id,signature);
+   return verifyReceipt(db,worldId,data,receipt);
+  }catch{isolated=true;return false;}
+ };
+}
+
 /** Optional private SQLite attachment. Requires the same live world owner.
  * No scanning past events to issue receipts: only witnessed commit hook can
  * mint UUID custody. Ledger loss after a committed world tick stays missing. */
@@ -169,11 +194,9 @@ export class SqliteValleySpiritMealCustody{
  }
  /** For real life authority's verifyCommitted/isCurrentReceipt ports only. */
  verifyCommitted(receipt:Readonly<ValleySpiritLifeReceipt>):boolean{
-  if(this.isolated||!isValleySpiritLifeReceipt(receipt)||receipt.kind!=='meal-consumed'||receipt.worldId!==this.worldId||receipt.receiptVersion!==1)return false;
+  if(this.isolated||!supportedMealReceipt(receipt,this.worldId))return false;
   try{
-   const row=this.read().find(r=>r.receipt_id===receipt.receiptId);
-   return !!row&&row.at_us===receipt.atUs&&persistedMeal(this.db,this.worldId,{revision:row.committed_revision,
-    eventId:row.event_id,actorId:row.actor_id,atUs:row.at_us},false);
+   return verifyReceipt(this.db,this.worldId,this.read(),receipt);
   }catch{this.isolated=true;return false;}
  }
  close(){this.db.close();}
