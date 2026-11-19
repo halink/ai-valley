@@ -73,31 +73,38 @@ function physicallyEligible(world:World,source:Resource,at:Vec):boolean {
   findPath(world,entrance,at,false,world.map.width*world.map.height,(_from,to)=>noRights(world,to))!==null;
 }
 
-/** Snapshot-only feasibility of exactly one declared source/target. The only
- * supported source scope has ordinary communal MVP gather rights. No fallback
- * site, maturity guess, reserve/debit, notice, or pickup is performed. */
-export function inspectMvpGroundFruitPlacement(
- world:World,state:MvpGroundFruitState,sourceId:string,at:Vec,capacity?:MvpGroundFruitCapacity,
-) {
- if(!inScope(world))return null;
- validateMvpGroundFruitState(world,state);
- if(!token(sourceId)||!checkedPoint(world,at)||!capacity||!exact(capacity,['worldLots','lotsPerTarget'])||
-  !natural(capacity.worldLots)||capacity.worldLots>MAX_SCHEMA_ITEMS||
-  !natural(capacity.lotsPerTarget)||capacity.lotsPerTarget>capacity.worldLots)return null;
+/** Geography and registered edible stock only. No ground-state or
+ * placement capability is implied by this read. */
+export function inspectMvpGroundFruitGeography(world:World,sourceId:string,at:Vec){
+ if(!inScope(world)||world.simulationOnly||!token(sourceId)||!checkedPoint(world,at))return null;
  const registered=world.mvpResources?.addedResourceIds.filter(id=>id===sourceId),sources=world.resources.filter(r=>r.id===sourceId);
  if(registered?.length!==1||sources.length!==1||!Object.hasOwn(world.mvpResources!.renewal,sourceId))return null;
  const source=sources[0];
  if(source.kind!=='bush'||source.foodItem!=='fruit'||!checkedPoint(world,source.at)||!noRights(world,source.at)||
   !walkable(world,source.at)||!natural(source.amount)||!natural(source.max)||source.amount>source.max||
   source.amount<1||!physicallyEligible(world,source,at))return null;
+ const resourceInstanceId=instanceId(source.id,source.at);
+ if(!token(resourceInstanceId))return null;
+ return {source:{resourceInstanceId,ownerId:'commons' as const,ripeAvailable:source.amount},targetId:targetId(at)};
+}
+
+/** Snapshot-only feasibility of exactly one declared source/target. */
+export function inspectMvpGroundFruitPlacement(
+ world:World,state:MvpGroundFruitState,sourceId:string,at:Vec,capacity?:MvpGroundFruitCapacity,
+) {
+ if(!inScope(world))return null;
+ validateMvpGroundFruitState(world,state);
+ if(!capacity||!exact(capacity,['worldLots','lotsPerTarget'])||
+  !natural(capacity.worldLots)||capacity.worldLots>MAX_SCHEMA_ITEMS||
+  !natural(capacity.lotsPerTarget)||capacity.lotsPerTarget>capacity.worldLots)return null;
+ const geography=inspectMvpGroundFruitGeography(world,sourceId,at);
+ if(!geography)return null;
  const localLots=state.items.filter(fruit=>same(fruit.at,at)).length;
  const freeCapacity=Math.min(capacity.worldLots-state.items.length,capacity.lotsPerTarget-localLots);
  if(freeCapacity<1)return null;
- const resourceInstanceId=instanceId(source.id,source.at);
- if(!token(resourceInstanceId))return null;
  return {
-  source:{resourceInstanceId,ownerId:'commons' as const,ripeAvailable:source.amount},
-  target:{id:targetId(at),freeCapacity,reachable:true as const,preservesOwnerId:'commons' as const,
+  source:geography.source,
+  target:{id:geography.targetId,freeCapacity,reachable:true as const,preservesOwnerId:'commons' as const,
    canHoldGroundFruit:true as const,supportsGroundFood:false as const,supportsDiscovery:false as const,supportsPickup:false as const},
  };
 }

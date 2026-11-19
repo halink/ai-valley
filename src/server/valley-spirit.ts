@@ -157,6 +157,22 @@ export class ValleySpiritJournal {
    range:{fromHour:cursor.fromHour,toHour:cursor.toHour},coverage:{fromHour:cursor.nextHour,toHour:pageEnd},slots,
    nextCursor:pageEnd<cursor.toHour?encodeCursor({...cursor,nextHour:pageEnd}):null};
  }
+ /** Find one already archived rain point under the current permission.
+  * This does not infer an episode or create a missing hourly record. */
+ currentObservedRainPacket(fromUs:bigint,untilUs:bigint):PublicWeatherNarrationInput|null{
+  if(fromUs<0n||untilUs<=fromUs||untilUs-fromUs>1_440_000_000n)return null;
+  const s=this.current();if(!s?.permission.publicWeather)return null;
+  let lo=0,hi=s.entries.length;
+  while(lo<hi){const mid=(lo+hi)>>>1;if(BigInt(s.entries[mid].fact.atUs)<untilUs)lo=mid+1;else hi=mid;}
+  for(let i=lo-1;i>=0&&i>=lo-26;i--){
+   const e=s.entries[i],at=BigInt(e.fact.atUs);
+   if(at<fromUs||e.permissionVersion<s.permission.version)break;
+   if(e.permissionVersion===s.permission.version&&e.fact.condition==='rain'&&e.fact.precipitationPermille>0)
+    return {mode:'public-weather-only',worldId:s.worldId,projectionVersion:1,permissionVersion:s.permission.version,
+     sourceRefs:[e.sourceRef],records:[structuredClone(e)],dispatch:'disabled'};
+  }
+  return null;
+ }
  /** Runtime reader adapters use the same checked journal and SQLite grant. */
  publicWeatherPermission(){const s=this.current();return s?{...s.permission}:null;}
  /** All source lookups and future narrative input exports share the current gate. */
