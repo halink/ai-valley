@@ -31,6 +31,9 @@ const heldTable='sealed_mvp_aged_held_v2';
 const heldSql='CREATE TABLE sealed_mvp_aged_held_v2(slot INTEGER PRIMARY KEY NOT NULL CHECK(slot=1),body TEXT NOT NULL)';
 const heldExpiryTable='sealed_mvp_aged_held_expiry_v2';
 const heldExpirySql='CREATE TABLE sealed_mvp_aged_held_expiry_v2(slot INTEGER PRIMARY KEY NOT NULL CHECK(slot=1),body TEXT NOT NULL)';
+const heldTickTable='sealed_mvp_aged_held_tick_v2';
+const heldTickSql='CREATE TABLE sealed_mvp_aged_held_tick_v2(sequence INTEGER PRIMARY KEY NOT NULL,body TEXT NOT NULL)';
+const maxHeldTicks=48; // Private replay bound, covers an ordinary 30-minute wait; not a shelf-life policy.
 const maxTicks=8; // Fixture replay bound; not an expiry policy or gameplay limit.
 const maxState=32*1024*1024;
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
@@ -52,7 +55,7 @@ const typedRows=(db:DatabaseSync,field:'mvpAgedFruitBirth'|'mvpAgedFruitExpiry'|
 /** The parked archive never follows TEMP shadow tables, and the dedicated
  * direct CAS may not execute unknown trigger code. */
 export function assertAgedBirthSqlAuthority(db:DatabaseSync):void {
- const names=['worlds','events','event_people','event_animals','mvp_spirit_developer_fixture',table,expiryTable,tickTable,heldTable,heldExpiryTable,'valley_spirit_sealed_source_credit',
+ const names=['worlds','events','event_people','event_animals','mvp_spirit_developer_fixture',table,expiryTable,tickTable,heldTable,heldExpiryTable,heldTickTable,'valley_spirit_sealed_source_credit',
   'sealed_aged_g1_review_epoch','valley_spirit_permissions'];
  const slots=names.map(()=>'?').join(',');
  if(db.prepare(`SELECT 1 FROM sqlite_temp_schema WHERE lower(name) IN (${slots}) OR lower(tbl_name) IN (${slots})`).get(...names,...names))fail();
@@ -66,7 +69,7 @@ export function rejectSealedAgedBirthOnGenericPath(db:DatabaseSync,scanSealedArc
  // Normal runtime can cheaply reject a present sidecar, and its world
  // decoder separately rejects inline markers. Only sealed save preflight
  // checks detached archived orphans (the owner holds an exclusive lock).
- if(hasTable(db)||expirySchema(db)||tickSchema(db)||heldSchema(db)||heldExpirySchema(db)||scanSealedArchive&&(typedRows(db,'mvpAgedFruitBirth').length||typedRows(db,'mvpAgedFruitExpiry').length||typedRows(db,'mvpAgedFruitPickup').length||typedRows(db,'mvpAgedHeldFruitExpiry').length))throw Error('sealed_aged_birth_requires_private_archive');
+ if(hasTable(db)||expirySchema(db)||tickSchema(db)||heldSchema(db)||heldExpirySchema(db)||heldTickSchema(db)||scanSealedArchive&&(typedRows(db,'mvpAgedFruitBirth').length||typedRows(db,'mvpAgedFruitExpiry').length||typedRows(db,'mvpAgedFruitPickup').length||typedRows(db,'mvpAgedHeldFruitExpiry').length))throw Error('sealed_aged_birth_requires_private_archive');
 }
 
 function reconstruct(
@@ -120,6 +123,7 @@ function rawHead(db:DatabaseSync){
  return {id:rows[0].id,revision:rows[0].revision,state:rows[0].state};
 }
 
+const heldTickSchema=(db:DatabaseSync)=>db.prepare('SELECT type,sql FROM sqlite_schema WHERE name=? COLLATE NOCASE').get(heldTickTable);
 const heldExpirySchema=(db:DatabaseSync)=>db.prepare('SELECT type,sql FROM sqlite_schema WHERE name=? COLLATE NOCASE').get(heldExpiryTable);
 const heldSchema=(db:DatabaseSync)=>db.prepare('SELECT type,sql FROM sqlite_schema WHERE name=? COLLATE NOCASE').get(heldTable);
 const tickSchema=(db:DatabaseSync)=>db.prepare('SELECT type,sql FROM sqlite_schema WHERE name=? COLLATE NOCASE').get(tickTable);
@@ -270,18 +274,22 @@ interface AgedHeldExpiry {
  readonly bornUs:string;readonly expiresUs:string;readonly beforeUs:string;readonly settledUs:string;
  readonly pickupEventId:string;readonly expiryEventId:string;readonly fromRevision:number;readonly revision:number;readonly heldDebit:1;
 }
-function nativeHeldExpiryDraft(head:World,prior:World,held:AgedHeldItem,sourceId:string){
- const beforeUs=head.mvpClimate!.lastUs,now=parseClimateUs(beforeUs),expiry=parseClimateUs(held.expiresUs);
- const owner=head.residents.find(r=>r.id===held.residentId),source=head.resources.find(r=>r.id===sourceId);
- if(now>=expiry||now+1_000_000n<expiry||!owner||owner.status!=='alive'||!(owner.health>0)||owner.residency==='outside'||owner.regionalLocation||!source)return null;
+function nativeHeldMinute(head:World,prior:World,held:AgedHeldItem){
+ const owner=head.residents.find(r=>r.id===held.residentId);
+ if(!owner||owner.status!=='alive'||!(owner.health>0)||owner.residency==='outside'||owner.regionalLocation||
+  parseClimateUs(head.mvpClimate!.lastUs)>=parseClimateUs(held.expiresUs))return null;
  const native=detachedNativeMinute(head,prior);
  if(!native)return null;
- const {draft,ordinary}=native,settledUs=draft.mvpClimate!.lastUs,current=draft.residents.find(r=>r.id===held.residentId);
- if(parseClimateUs(settledUs)<expiry||!current||current.status!=='alive'||!(current.health>0)||current.residency!==owner.residency||
-  current.regionalLocation||!equal(current.inventory,owner.inventory)||
-  !equal(draft.resources.find(r=>r.id===sourceId),source))return null;
+ const current=native.draft.residents.find(r=>r.id===held.residentId);
+ // Estate and cross-location ownership custody are not implemented.
+ if(!current||current.status!=='alive'||!(current.health>0)||current.residency!==owner.residency||current.regionalLocation)return null;
+ return {...native,owner,current};
+}
+function settleNativeHeldExpiry(head:World,draft:World,held:AgedHeldItem,ownerAt:Vec){
+ const beforeUs=head.mvpClimate!.lastUs,settledUs=draft.mvpClimate!.lastUs,expiry=parseClimateUs(held.expiresUs);
+ if(parseClimateUs(beforeUs)>=expiry||parseClimateUs(settledUs)<expiry)return null;
  const marker=head.mvpClimate!.spiritEffects;
- const event=emitLedgerEvent(draft,{kind:'system',actors:[],place:current.at,text:'一份已拾取的果实超过原保鲜期。'}) as
+ const event=emitLedgerEvent(draft,{kind:'system',actors:[],place:ownerAt,text:'一份已拾取的果实超过原保鲜期。'}) as
   WorldEvent&{mvpAgedHeldFruitExpiry:{version:2;effectId:string}};
  if(!Number.isSafeInteger(draft.revision)||draft.revision<=head.revision)return null;
  const fact:AgedHeldExpiry=Object.freeze({version:2,kind:'held-aged-fruit-expired',worldId:head.id,residentId:held.residentId,
@@ -290,10 +298,37 @@ function nativeHeldExpiryDraft(head:World,prior:World,held:AgedHeldItem,sourceId
   fromRevision:head.revision,revision:draft.revision,heldDebit:1});
  event.mvpAgedHeldFruitExpiry={version:2,effectId:held.effectId};
  Object.assign(draft.mvpClimate!,{spiritEffects:{...marker,held:null,heldExpiry:fact}});
- return {world:draft,events:[...ordinary,event],event,fact};
+ return {event,fact};
+}
+// Keep the older first-minute-only transition and its extra stock gates.
+function nativeHeldExpiryDraft(head:World,prior:World,held:AgedHeldItem,sourceId:string){
+ const now=parseClimateUs(head.mvpClimate!.lastUs),expiry=parseClimateUs(held.expiresUs),source=head.resources.find(r=>r.id===sourceId);
+ if(now>=expiry||now+1_000_000n<expiry||!source)return null;
+ const native=nativeHeldMinute(head,prior,held);
+ if(!native||!equal(native.current.inventory,native.owner.inventory)||
+  !equal(native.draft.resources.find(r=>r.id===sourceId),source))return null;
+ const terminal=settleNativeHeldExpiry(head,native.draft,held,native.current.at);
+ return terminal?{world:native.draft,events:[...native.ordinary,terminal.event],...terminal}:null;
+}
+function nativeHeldContinuationDraft(head:World,prior:World,held:AgedHeldItem,sequence:number){
+ if(sequence<1||sequence>maxHeldTicks)return null;
+ const native=nativeHeldMinute(head,prior,held);
+ if(!native)return null;
+ const {draft,ordinary,current}=native;
+ const beforeUs=head.mvpClimate!.lastUs,afterUs=draft.mvpClimate!.lastUs;
+ const due=parseClimateUs(afterUs)>=parseClimateUs(held.expiresUs);
+ const terminal=due?settleNativeHeldExpiry(head,draft,held,current.at):null;
+ if(due&&!terminal)return null;
+ if(!terminal)Object.assign(draft.mvpClimate!,{spiritEffects:structuredClone(head.mvpClimate!.spiritEffects)});
+ const events=terminal?[...ordinary,terminal.event]:ordinary;
+ const fact=Object.freeze({version:1,kind:'sealed-native-aged-held-minute',sequence,worldId:head.id,pickupEventId:held.pickupEventId,
+  effectId:held.effectId,holderId:held.residentId,bornUs:held.bornUs,expiresUs:held.expiresUs,beforeUs,afterUs,
+  fromRevision:head.revision,toRevision:draft.revision,beforeDigest:hash(JSON.stringify(head)),afterDigest:hash(JSON.stringify(draft)),
+  eventIds:Object.freeze(events.map(e=>e.id)),expiry:terminal?.fact??null});
+ return {world:draft,events,fact};
 }
 function exactExpiryArchiveSuffix(db:DatabaseSync,worldId:string,birthSeq:unknown,expected:readonly WorldEvent[]):boolean {
- if(typeof birthSeq!=='number'||!Number.isSafeInteger(birthSeq)||birthSeq<1||expected.length>256*(maxTicks+2))return false;
+ if(typeof birthSeq!=='number'||!Number.isSafeInteger(birthSeq)||birthSeq<1||expected.length>256*(maxTicks+maxHeldTicks+2))return false;
  const rows=db.prepare('SELECT rowid AS archiveSeq,id,world_id,at,body FROM events WHERE rowid>? ORDER BY rowid LIMIT ?')
   .all(birthSeq,expected.length+1);
  if(rows.length!==expected.length)return false;
@@ -316,9 +351,9 @@ function readVerifiedSealedAgedBirth(
  assertAgedBirthSqlAuthority(db);
  const schema=hasTable(db);
  const events=typedRows(db,'mvpAgedFruitBirth'),expiryEvents=typedRows(db,'mvpAgedFruitExpiry'),expiryHeader=expirySchema(db),tickHeader=tickSchema(db),heldHeader=heldSchema(db),pickupEvents=typedRows(db,'mvpAgedFruitPickup'),
-  heldExpiryHeader=heldExpirySchema(db),heldExpiryEvents=typedRows(db,'mvpAgedHeldFruitExpiry');
+  heldExpiryHeader=heldExpirySchema(db),heldTickHeader=heldTickSchema(db),heldExpiryEvents=typedRows(db,'mvpAgedHeldFruitExpiry');
  if(!schema){
-  if(events.length||expiryEvents.length||expiryHeader||tickHeader||heldHeader||pickupEvents.length||heldExpiryHeader||heldExpiryEvents.length)return fail();
+  if(events.length||expiryEvents.length||expiryHeader||tickHeader||heldHeader||pickupEvents.length||heldExpiryHeader||heldTickHeader||heldExpiryEvents.length)return fail();
   // A deleted table cannot turn a parked V2 head into an absent receipt.
   if(db.prepare('SELECT 1 FROM worlds LIMIT 1').get())decode(rawHead(db).state);
   return null;
@@ -338,8 +373,8 @@ function readVerifiedSealedAgedBirth(
  if(actual.id!==derived.event.id||actual.world_id!==derived.world.id||actual.at!==derived.event.at||actual.body!==JSON.stringify(derived.event))return fail();
  let world=derived.world,expiry:AgedFruitExpiry|null=null,tickCount=0;
  const discoveries=new Map<string,AgedFruitDiscovery>(),arrivals=new Map<string,AgedGroundArrival>();
- let held:AgedHeldItem|null=null,heldExpiry:AgedHeldExpiry|null=null;
- if(expiryHeader&&tickHeader||heldHeader&&!tickHeader||!heldHeader&&pickupEvents.length||heldExpiryHeader&&!heldHeader||!heldExpiryHeader&&heldExpiryEvents.length)return fail();
+ let held:AgedHeldItem|null=null,heldExpiry:AgedHeldExpiry|null=null,heldTickCount=0;
+ if(expiryHeader&&tickHeader||heldHeader&&!tickHeader||!heldHeader&&pickupEvents.length||heldExpiryHeader&&heldTickHeader||(heldExpiryHeader||heldTickHeader)&&!heldHeader||(!heldExpiryHeader&&!heldTickHeader)&&heldExpiryEvents.length)return fail();
  if(tickHeader){
   if(tickHeader.type!=='table'||tickHeader.sql!==tickSql||
    db.prepare("SELECT 1 FROM sqlite_schema WHERE tbl_name=? COLLATE NOCASE AND type IN ('trigger','index')").get(tickTable))return fail();
@@ -365,6 +400,20 @@ function readVerifiedSealedAgedBirth(
    const pickup=nativeHeldDraft(derived,world,prior,proof.residentId,discoveries,arrivals);
    if(!pickup||rows[0].body!==JSON.stringify(pickup.held)||pickupEvents[0].id!==pickup.event.id)return fail();
    world=pickup.world;held=pickup.held;replayEvents.push(...pickup.events);
+   if(heldTickHeader){
+    if(heldTickHeader.type!=='table'||heldTickHeader.sql!==heldTickSql||
+     db.prepare("SELECT 1 FROM sqlite_schema WHERE tbl_name=? COLLATE NOCASE AND type IN ('trigger','index')").get(heldTickTable))return fail();
+    const rows=db.prepare('SELECT sequence,CASE WHEN length(body)<=90000 THEN body ELSE NULL END AS body FROM sealed_mvp_aged_held_tick_v2 ORDER BY sequence LIMIT ?')
+     .all(maxHeldTicks+1);
+    if(rows.length<1||rows.length>maxHeldTicks)return fail();
+    for(const step of rows){
+     if(heldExpiry||step.sequence!==++heldTickCount)return fail();
+     const next=nativeHeldContinuationDraft(world,prior,held,heldTickCount);
+     if(!next||step.body!==JSON.stringify(next.fact))return fail();
+     world=next.world;heldExpiry=next.fact.expiry;replayEvents.push(...next.events);
+    }
+    if(heldExpiryEvents.length!==(heldExpiry?1:0)||heldExpiry&&heldExpiryEvents[0].id!==heldExpiry.expiryEventId)return fail();
+   }
    if(heldExpiryHeader){
     if(heldExpiryHeader.type!=='table'||heldExpiryHeader.sql!==heldExpirySql||heldExpiryEvents.length!==1||
      db.prepare("SELECT 1 FROM sqlite_schema WHERE tbl_name=? COLLATE NOCASE AND type IN ('trigger','index')").get(heldExpiryTable))return fail();
@@ -388,7 +437,7 @@ function readVerifiedSealedAgedBirth(
  }else if(expiryEvents.length||!exactExpiryArchiveSuffix(db,derived.world.id,actual.archiveSeq,[]))return fail();
  if(current.id!==world.id||current.revision!==world.revision||
   !equalBytes(current.state,gzipSync(JSON.stringify(world),{level:1})))return fail();
- return {world,prior,birth:derived,expiry,held,heldExpiry,tickCount,discoveries,arrivals,point:derived.event.place,receipt:derived.receipt,proofs:stored as unknown as AgedBirthProofs};
+ return {world,prior,birth:derived,expiry,held,heldExpiry,heldTickCount,tickCount,discoveries,arrivals,point:derived.event.place,receipt:derived.receipt,proofs:stored as unknown as AgedBirthProofs};
 }
 
 export function readSealedAgedBirthArchive(db:DatabaseSync,owner:DeveloperMvpSpiritFixtureOwner,decode:DecodePredecessor){
@@ -496,7 +545,7 @@ export function advanceSealedAgedHeldFruitExpiry(
  db:DatabaseSync,owner:DeveloperMvpSpiritFixtureOwner,decode:DecodePredecessor,worldId:string,expectedRevision:number,
 ){
  const prior=readVerifiedSealedAgedBirth(db,owner,decode);
- if(!prior?.held||prior.world.id!==worldId)return null;
+ if(!prior?.held||prior.world.id!==worldId||prior.heldTickCount)return null;
  if(prior.heldExpiry)return prior.heldExpiry.fromRevision===expectedRevision?
   {status:'held-expired' as const,replay:true,expiry:prior.heldExpiry}:null;
  if(prior.world.revision!==expectedRevision)return null;
@@ -512,6 +561,29 @@ export function advanceSealedAgedHeldFruitExpiry(
  const verified=readVerifiedSealedAgedBirth(db,owner,decode);
  if(!verified||!equal(verified.heldExpiry,next.fact))return fail();
  return {status:'held-expired' as const,replay:false,expiry:next.fact};
+}
+/** Explicit private continuation; the generic/ordinary state reader never
+ * sees the V2 dependency. The held item has no ordinary food representation. */
+export function advanceSealedAgedHeldFruitMinute(
+ db:DatabaseSync,owner:DeveloperMvpSpiritFixtureOwner,decode:DecodePredecessor,worldId:string,expectedRevision:number,
+){
+ const prior=readVerifiedSealedAgedBirth(db,owner,decode);
+ if(!prior?.held||prior.world.id!==worldId||prior.world.revision!==expectedRevision||prior.heldExpiry||
+  prior.heldTickCount>=maxHeldTicks)return null;
+ const next=nativeHeldContinuationDraft(prior.world,prior.prior,prior.held,prior.heldTickCount+1);
+ if(!next)return null;
+ const previous=rawHead(db),state=gzipSync(JSON.stringify(next.world),{level:1}),body=JSON.stringify(next.fact);
+ if(previous.id!==worldId||previous.revision!==expectedRevision||state.length>maxState||Buffer.byteLength(body)>90000)return fail();
+ if(!prior.heldTickCount)db.exec(heldTickSql);
+ db.prepare('INSERT INTO sealed_mvp_aged_held_tick_v2 VALUES (?,?)').run(next.fact.sequence,body);
+ appendNativeAgedEvents(db,worldId,next.events);
+ if(db.prepare('UPDATE worlds SET revision=?,state=? WHERE id=? AND revision=? AND state=?')
+  .run(next.world.revision,state,worldId,previous.revision,previous.state).changes!==1)return fail();
+ const exact=readVerifiedSealedAgedBirth(db,owner,decode);
+ if(!exact||exact.heldTickCount!==next.fact.sequence||!equal(exact.heldExpiry,next.fact.expiry))return fail();
+ // Actor custody remains available only through per-owner archival reads.
+ const {holderId:_private,expiry,...summary}=next.fact;
+ return Object.freeze({...summary,expired:expiry!==null});
 }
 export function sameAgedBirthProofs(a:AgedBirthProofs,b:AgedBirthProofs):boolean {
  function sameProof(left:unknown,right:unknown,canonical?:(v:unknown)=>Buffer|null):boolean {

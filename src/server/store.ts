@@ -1,4 +1,4 @@
-import {assertAgedBirthSqlAuthority,advanceSealedAgedFruitExpiry,advanceSealedAgedHeldFruitExpiry,advanceSealedAgedFruitMinute,pickUpSealedAgedFruit,readOwnedSealedAgedHeldFruit,readOwnedSealedAgedHeldFruitExpiry,readOwnedSealedAgedBirthReceipt,readOwnedSealedAgedFruitDiscovery,readOwnedSealedAgedFruitExpiry,readOwnedSealedAgedFruitSight,readSealedAgedBirthArchive,rejectSealedAgedBirthOnGenericPath,
+import {assertAgedBirthSqlAuthority,advanceSealedAgedFruitExpiry,advanceSealedAgedHeldFruitExpiry,advanceSealedAgedHeldFruitMinute,advanceSealedAgedFruitMinute,pickUpSealedAgedFruit,readOwnedSealedAgedHeldFruit,readOwnedSealedAgedHeldFruitExpiry,readOwnedSealedAgedBirthReceipt,readOwnedSealedAgedFruitDiscovery,readOwnedSealedAgedFruitExpiry,readOwnedSealedAgedFruitSight,readSealedAgedBirthArchive,rejectSealedAgedBirthOnGenericPath,
  sameAgedBirthProofs,writeSealedAgedBirth,type AgedBirthProofs} from './valley-spirit-aged-birth-archive.js';
 import {makeAgedBirthExecutionTerms,makeAgedBirthReviewTerms,verifiesAgedBirthExecution,verifiesAgedBirthReview} from './valley-spirit-aged-birth-review.js';
 import {agedG1ReviewTerms,agedG1RevokeTerms,advanceAgedG1ReviewEpoch,initializeAgedG1ReviewEpoch,
@@ -1050,6 +1050,17 @@ export class WorldStore {
    owner.assertOwned();this.assertDeveloperSpiritSeal();this.db.exec('BEGIN IMMEDIATE');
    try{
     const outcome=advanceSealedAgedHeldFruitExpiry(this.db,owner,decodeAgedBirthPredecessor,worldId,expectedRevision);
+    owner.assertOwned();this.db.exec('COMMIT');return outcome;
+   }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }catch{return null;}
+ }
+ stepDeveloperMvpAgedHeldFruitMinute(worldId:string,expectedRevision:number){
+  const owner=this.developerSpiritFixtureOwner;
+  if(!this.sealedAgedBirthExecution||!owner||this.nativeWeatherCredit||!Number.isSafeInteger(expectedRevision)||expectedRevision<1)return null;
+  try{
+   owner.assertOwned();this.assertDeveloperSpiritSeal();this.db.exec('BEGIN IMMEDIATE');
+   try{
+    const outcome=advanceSealedAgedHeldFruitMinute(this.db,owner,decodeAgedBirthPredecessor,worldId,expectedRevision);
     owner.assertOwned();this.db.exec('COMMIT');return outcome;
    }catch(error){this.db.exec('ROLLBACK');throw error;}
   }catch{return null;}
