@@ -202,9 +202,9 @@ function renderAlmanacTextV1(p:ValleySpiritAlmanacPacket,draft:GroundedDraft):Re
  return {rendererVersion:TEXT_RENDERER_VERSION,facts,atmosphere:{kind:'editorial-register-only',value:draft.atmosphere}};
 }
 function publicView(e:ValleySpiritAlmanacEntry) {
- if(e.phase!=='published'||!e.rendered)return null;
+ if(e.phase!=='published'||!e.rendered||!e.draft)return null;
  const p=e.packet,r=structuredClone(e.rendered);
- return {mode:'curated-verified-weather' as const,origin:{...e.origin},entryId:e.entryId,textVersion:e.textVersion,supersedes:e.supersedes,fromMinute:p.fromMinute,throughMinute:p.throughMinute,projectionVersion:p.projectionVersion,permissionVersion:p.permissionVersion,coverage:p.coverage,unselectedHourBuckets:[...p.unselectedHourBuckets],facts:r.facts,atmosphere:r.atmosphere};
+ return {mode:'curated-verified-weather' as const,origin:{...e.origin},entryId:e.entryId,textVersion:e.textVersion,supersedes:e.supersedes,fromMinute:p.fromMinute,throughMinute:p.throughMinute,projectionVersion:p.projectionVersion,permissionVersion:p.permissionVersion,coverage:p.coverage,unselectedHourBuckets:[...p.unselectedHourBuckets],rendering:{rendererVersion:r.rendererVersion,wording:e.draft.wording},facts:r.facts,atmosphere:r.atmosphere};
 }
 export class ValleySpiritAlmanac {
  constructor(private readonly store:ValleySpiritAlmanacStore,private readonly authority:ValleySpiritAlmanacAuthority){}

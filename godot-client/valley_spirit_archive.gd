@@ -106,6 +106,20 @@ static func presentation(value: Variant, context: Dictionary, requested: Diction
 	return "\n".join(lines)
 
 
+# Validate the server's sealed v1 text against structured fields, but do not
+# display arbitrary wire text: local wording uses the same two allowed orders.
+static func _matches_almanac_v1_text(text: Variant, minute: float, field_label: String, wording: String) -> bool:
+	if not text is String or text.length() > 96: return false
+	var prefix := "第 " if wording == "time-first" else field_label + "（第 "
+	var suffix := " 游戏分钟，" + field_label if wording == "time-first" else " 游戏分钟）"
+	if not text.begins_with(prefix) or not text.ends_with(suffix): return false
+	var raw_minute: String = text.substr(prefix.length(), text.length() - prefix.length() - suffix.length())
+	if raw_minute.is_empty() or raw_minute.length() > 32 or not raw_minute.is_valid_float(): return false
+	for ch in raw_minute:
+		if not ch in "0123456789eE+-.": return false
+	return float(raw_minute) == minute
+
+
 # Never use provider prose or display unpublished/foreign data.
 static func almanac_presentation(value: Variant, context: Dictionary) -> String:
 	if context.is_empty() or not value is Dictionary or not _eq_string(value.get("worldId"), context.worldId) or not _eq_number(value.get("permissionVersion"), context.permissionVersion):
@@ -114,7 +128,7 @@ static func almanac_presentation(value: Variant, context: Dictionary) -> String:
 		return "暂无已发布的年鉴。客观天气档案仍可读取，不代表模型生成。"
 	if not _eq_string(value.get("status"), "ready") or not _exact(value, ["status", "worldId", "permissionVersion", "entry"]): return ""
 	var entry: Variant = value.entry
-	if not _exact(entry, ["mode", "origin", "entryId", "textVersion", "supersedes", "fromMinute", "throughMinute", "projectionVersion", "permissionVersion", "coverage", "unselectedHourBuckets", "facts", "atmosphere"]): return ""
+	if not _exact(entry, ["mode", "origin", "entryId", "textVersion", "supersedes", "fromMinute", "throughMinute", "projectionVersion", "permissionVersion", "coverage", "unselectedHourBuckets", "rendering", "facts", "atmosphere"]): return ""
 	if not _eq_string(entry.mode, "curated-verified-weather") or not _eq_string(entry.coverage, "selected-actual-points-only") or not _eq_number(entry.projectionVersion, 1) or not _eq_number(entry.permissionVersion, context.permissionVersion): return ""
 	if not _number(entry.fromMinute, 0, context.atMinute) or not _number(entry.throughMinute, entry.fromMinute, context.atMinute) or not _integer(entry.textVersion, 1, 10000): return ""
 	if not entry.facts is Array or entry.facts.is_empty() or entry.facts.size() > 24: return ""
@@ -125,6 +139,15 @@ static func almanac_presentation(value: Variant, context: Dictionary) -> String:
 	elif _eq_string(entry.origin.kind, "unverified-admission"):
 		attribution = "选材来源未核验，不代表真实模型输出。"
 	if attribution.is_empty(): return ""
+	if not _exact(entry.rendering, ["rendererVersion", "wording"]) or not _eq_number(entry.rendering.rendererVersion, 1): return ""
+	var wording: Variant = entry.rendering.wording
+	if not _eq_string(wording, "time-first") and not _eq_string(wording, "field-first"): return ""
+	if not _exact(entry.atmosphere, ["kind", "value"]) or not _eq_string(entry.atmosphere.kind, "editorial-register-only"): return ""
+	var editorial := ""
+	if _eq_string(entry.atmosphere.value, "quiet"): editorial = "简静"
+	elif _eq_string(entry.atmosphere.value, "reflective"): editorial = "回顾"
+	elif _eq_string(entry.atmosphere.value, "plain"): editorial = "平实"
+	if editorial.is_empty(): return ""
 	var lines := PackedStringArray(["谷灵 · 最新已发布年鉴", attribution, "事实字段已核对；以下为获选时点，不代表整段天气。", "文字版本：%d" % int(entry.textVersion), ""])
 	var shown := {}
 	for fact in entry.facts:
@@ -138,12 +161,15 @@ static func almanac_presentation(value: Variant, context: Dictionary) -> String:
 		var line := ""
 		match fact.field:
 			"condition":
-				if fact.value is String and WEATHER.has(fact.value): line = "天气 %s" % WEATHER[fact.value]
+				if fact.value is String and WEATHER.has(fact.value): line = "天气：%s" % WEATHER[fact.value]
 			"temperatureDeciC":
-				if _integer(fact.value, -300, 450): line = "气温 %.1f℃" % (fact.value / 10.0)
+				if _integer(fact.value, -300, 450): line = "气温：%.1f℃" % (fact.value / 10.0)
 			"relativeHumidityPermille":
-				if _integer(fact.value, 0, 1000): line = "相对湿度 %.1f%%" % (fact.value / 10.0)
-		if line.is_empty(): return ""
-		lines.append("%s · %s" % [_time(float(fact.minute)), line])
+				if _integer(fact.value, 0, 1000): line = "相对湿度：%.1f%%" % (fact.value / 10.0)
+		if line.is_empty() or not _matches_almanac_v1_text(fact.text, float(fact.minute), line, wording): return ""
+		var local_time := _time(float(fact.minute))
+		lines.append("%s · %s" % [local_time, line] if wording == "time-first" else "%s（%s）" % [line, local_time])
 		lines.append("来源：" + expected_ref)
+	lines.append("")
+	lines.append("编辑语气（不是事实）：" + editorial)
 	return "\n".join(lines)
