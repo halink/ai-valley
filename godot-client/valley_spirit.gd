@@ -29,6 +29,18 @@ static func text(snapshot: Dictionary, connected: bool) -> String:
 	return "\n".join(lines)
 
 
+# Session observations have no persistent authority. Continuity only preserves
+# already applied text until the next frame of the same no-save world is ready.
+static func same_weather_session(applied: Dictionary, buffered: Dictionary) -> bool:
+	for snapshot in [applied, buffered]:
+		if snapshot.get("publicProjectionPending") == true or snapshot.get("valleySpirit") != null: return false
+		var view_world: Variant = snapshot.get("world")
+		if not view_world is Dictionary or _session_weather(snapshot.get("valleySpiritSessionWeather"), view_world).is_empty(): return false
+	var old: Dictionary = applied.world
+	var next: Dictionary = buffered.world
+	if old.id != next.id or old.revision > next.revision or old.minute > next.minute: return false
+	return old.revision != next.revision or old.minute == next.minute
+
 # This snapshot-local view never authorizes archive or life reads.
 static func _session_weather(value: Variant, world: Dictionary) -> String:
 	if not WeatherArchive._exact(value, ["schemaVersion", "worldId", "worldRevision", "atMinute", "readings"]): return ""

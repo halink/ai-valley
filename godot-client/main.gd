@@ -490,7 +490,10 @@ func _set_follow(enabled: bool) -> void:
 # Do not leave the prior public text visible while the scene buffers an
 # authority change. Clear both the rendered and the retained projections.
 func _quarantine_pending_spirit_projection(parsed: Dictionary) -> void:
-	if ValleySpiritArchive.same_authority(spirit_archive_context, ValleySpiritArchive.authority(parsed)): return
+	var next := ValleySpiritArchive.authority(parsed)
+	if ValleySpiritArchive.same_authority(spirit_archive_context, next): return
+	# Keep the already applied session text until the matching scene is applied.
+	if connected and spirit_archive_context.is_empty() and next.is_empty() and ValleySpirit.same_weather_session(valley_spirit_snapshot, parsed): return
 	valley_spirit_snapshot = {"publicProjectionPending": true}
 	_set_archive_authority({})
 	hud.show_spirit(ValleySpirit.text(valley_spirit_snapshot, connected))
