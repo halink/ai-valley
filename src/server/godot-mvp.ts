@@ -1,3 +1,4 @@
+import {parseWeatherArchiveQuery,type ValleySpiritJournal} from './valley-spirit.js';
 import {mvpMealObservation} from './mvp-meal-observation.js';
 import {seasonalPersonalWeather} from './mvp-seasonal-context.js';
 import {personallyFeelsRain,shelterRoomWithinIdleTime,MVP_IDLE_WAIT_MINUTES} from '../world/mvp-shelter.js';
@@ -332,11 +333,19 @@ export function createMvpSession(options:{world?:World;commit?:(world:World,prev
  };
  return {get world(){return world;},snapshot,advance};
 }
-export function createMvpServer(session:Pick<ReturnType<typeof createMvpSession>,'snapshot'>,options:{webRoot?:string;valleySpiritSource?:(sourceRef:string)=>unknown}={}):Server {
+export function createMvpServer(session:Pick<ReturnType<typeof createMvpSession>,'snapshot'>,options:{webRoot?:string;valleySpiritSource?:(sourceRef:string)=>unknown;valleySpiritArchive?:ValleySpiritJournal['archive']}={}):Server {
  return createServer((req,res)=>{
   res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');
   if(options.webRoot&&serveGodotWeb(req,res,options.webRoot))return;
   if(req.method!=='GET'){res.writeHead(405,{'Allow':'GET'});res.end('Read-only MVP');return;}
+  const archivePath='/ai-town/api/valley-spirit/archive';
+  if(req.url===archivePath||req.url?.startsWith(archivePath+'?')){
+   const unavailable={status:'unavailable'} as const;
+   const query=parseWeatherArchiveQuery(new URL(req.url,'http://localhost').searchParams);
+   const page=!options.valleySpiritArchive?unavailable:query?options.valleySpiritArchive(query):{status:'invalid'};
+   res.writeHead(page.status==='ready'?200:page.status==='invalid'?400:404,{'Content-Type':'application/json; charset=utf-8'});
+   res.end(JSON.stringify(page));return;
+  }
   if(req.url?.startsWith('/ai-town/api/valley-spirit/source?')){
    const params=new URL(req.url,'http://localhost').searchParams,ref=params.get('ref');
    const source=ref&&ref.length<=300&&[...params.keys()].length===1?options.valleySpiritSource?.(ref):null;

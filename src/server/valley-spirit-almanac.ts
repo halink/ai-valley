@@ -1,0 +1,245 @@
+import {createHash} from 'node:crypto';
+import type {PublicWeatherFact} from './valley-spirit.js';
+
+const VERSION = 1 as const;
+const MAX_SOURCES = 24;
+const MAX_CLAIMS = 24;
+const CONDITIONS = ['sun','cloud','rain','snow','mixed'] as const;
+const MOODS = ['quiet','reflective','plain'] as const;
+const FIELDS = ['condition','temperatureDeciC','relativeHumidityPermille'] as const;
+type Condition = typeof CONDITIONS[number];
+type Mood = typeof MOODS[number];
+type Field = typeof FIELDS[number];
+
+export interface ValleySpiritAlmanacWeatherSource {sourceRef:string;permissionVersion:number;fact:PublicWeatherFact;}
+export interface ValleySpiritAlmanacAuthority {
+ permission(): {version:number;publicWeather:boolean}|null;
+ resolve(sourceRef:string): ValleySpiritAlmanacWeatherSource|null;
+}
+export interface ValleySpiritAlmanacRange {
+ worldId:string; fromMinute:number; throughMinute:number; sourceRefs:readonly string[];
+}
+interface WeatherPoint {
+ sourceRef:string; minute:number; condition:Condition; temperatureDeciC:number; relativeHumidityPermille:number;
+}
+export interface ValleySpiritAlmanacPacket {
+ schemaVersion:1; projectionVersion:1; permissionVersion:number; worldId:string;
+ fromMinute:number; throughMinute:number; coverage:'selected-actual-points-only';
+ unselectedHourBuckets:number[]; points:WeatherPoint[];
+}
+interface Claim {sourceRef:string; field:Field; value:Condition|number;}
+interface GroundedDraft {claims:Claim[]; atmosphere:Mood;}
+type Phase = 'dispatch-intent'|'sent-unknown'|'discarded'|'grounded'|'published'|'retracted';
+type Failure = 'permission'|'invalid-draft'|'not-sent'|'source-correction';
+export interface ValleySpiritAlmanacEntry {
+ schemaVersion:1; entryId:string; textVersion:number; supersedes:string|null;
+ packet:ValleySpiritAlmanacPacket; phase:Phase; draft:GroundedDraft|null;
+ failure:Failure|null;
+}
+/** Compare-and-replace is synchronous/atomic and must durably commit before
+ * returning true. A foreign/unknown/corrupt store must throw and remain frozen. */
+export interface ValleySpiritAlmanacStore {
+ read(): readonly ValleySpiritAlmanacEntry[];
+ replace(previous:readonly ValleySpiritAlmanacEntry[],next:readonly ValleySpiritAlmanacEntry[]):boolean;
+}
+/** Only explicitly configured, account-shared admission may implement this.
+ * While obtaining an account slot, it must not dispatch or receive the packet.
+ * send is single-use by adapter contract; no automatic sends/retries.
+ * After any provider-preparation await, the adapter must call
+ * authorizeDelivery immediately before actual transport handoff. If false,
+ * it must not send and must settle the reservation as demonstrably unsent. */
+export interface ValleySpiritAlmanacAdmission {
+ reserve(request:{purpose:'valley-spirit-almanac'; requestId:string; packetBytes:number; promptVersion:1}):
+  Promise<{cancelUnsent:()=>void; send:(packet:Readonly<ValleySpiritAlmanacPacket>,authorizeDelivery:()=>boolean)=>Promise<unknown>}|null>;
+}
+const rec=(v:unknown):v is Record<string,unknown>=>!!v&&typeof v==='object'&&!Array.isArray(v);
+const exact=(v:unknown,keys:readonly string[])=>rec(v)&&Object.keys(v).length===keys.length&&keys.every(k=>Object.hasOwn(v,k));
+const integer=(v:unknown,low:number,high:number):v is number=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=low&&v<=high;
+const option=<T extends string>(values:readonly T[],v:unknown):v is T=>typeof v==='string'&&values.some(i=>i===v);
+const minute=(v:unknown):v is number=>typeof v==='number'&&Number.isFinite(v)&&v>=0&&v<=1e9;
+const world=(v:unknown):v is string=>typeof v==='string'&&/^godot-mvp-[a-zA-Z0-9_-]{1,188}$/.test(v);
+const sourceId=(w:string,v:unknown):v is string=>typeof v==='string'&&v.startsWith(w+'/')&&/^weather-[1-9][0-9]{0,15}-[0-9]{1,9}$/.test(v.slice(w.length+1));
+const byMinute=(a:WeatherPoint,b:WeatherPoint)=>a.minute-b.minute||(a.sourceRef<b.sourceRef?-1:a.sourceRef>b.sourceRef?1:0);
+const serial=(v:unknown)=>JSON.stringify(v);
+const phases=['dispatch-intent','sent-unknown','discarded','grounded','published','retracted'] as const;
+const failures=['permission','invalid-draft','not-sent','source-correction'] as const;
+function unselectedBuckets(from:number,through:number,points:readonly WeatherPoint[]):number[] {
+ const occupied=new Set(points.map(p=>Math.floor(p.minute/60)));
+ return Array.from({length:Math.floor(through/60)-Math.floor(from/60)+1},(_,i)=>Math.floor(from/60)+i).filter(h=>!occupied.has(h));
+}
+function validPacket(v:unknown):v is ValleySpiritAlmanacPacket {
+ if(!exact(v,['schemaVersion','projectionVersion','permissionVersion','worldId','fromMinute','throughMinute','coverage','unselectedHourBuckets','points']))return false;
+ const p=v as ValleySpiritAlmanacPacket;
+ if(p.schemaVersion!==1||p.projectionVersion!==1||p.coverage!=='selected-actual-points-only'||!world(p.worldId)||!integer(p.permissionVersion,1,Number.MAX_SAFE_INTEGER)||!minute(p.fromMinute)||!minute(p.throughMinute)||p.throughMinute<p.fromMinute||Math.floor(p.throughMinute/60)-Math.floor(p.fromMinute/60)>=MAX_SOURCES||!Array.isArray(p.points)||!p.points.length||p.points.length>MAX_SOURCES||!Array.isArray(p.unselectedHourBuckets))return false;
+ const seen=new Set<string>(),occupied=new Set<number>();
+ for(const [i,q] of p.points.entries()){
+  if(!exact(q,['sourceRef','minute','condition','temperatureDeciC','relativeHumidityPermille'])||!sourceId(p.worldId,q.sourceRef)||seen.has(q.sourceRef)||!minute(q.minute)||q.minute<p.fromMinute||q.minute>p.throughMinute||q.sourceRef!==`${p.worldId}/weather-${p.permissionVersion}-${Math.floor(q.minute/60)}`||occupied.has(Math.floor(q.minute/60))||!option(CONDITIONS,q.condition)||!integer(q.temperatureDeciC,-300,450)||!integer(q.relativeHumidityPermille,0,1000)||(i>0&&byMinute(p.points[i-1],q)>=0))return false;
+  seen.add(q.sourceRef);occupied.add(Math.floor(q.minute/60));
+ }
+ return serial(p.unselectedHourBuckets)===serial(unselectedBuckets(p.fromMinute,p.throughMinute,p.points));
+}
+/** Canonical read-only projection for the almanac editor and topic chooser.
+ * Empty hour buckets mean "not represented in this packet", not an archive claim. */
+export function createValleySpiritAlmanacPacket(range:ValleySpiritAlmanacRange,a:ValleySpiritAlmanacAuthority):ValleySpiritAlmanacPacket|null {
+ try{
+  const permission=a.permission();
+  if(!permission?.publicWeather||!world(range.worldId)||!minute(range.fromMinute)||!minute(range.throughMinute)||range.throughMinute<range.fromMinute||Math.floor(range.throughMinute/60)-Math.floor(range.fromMinute/60)>=MAX_SOURCES||!Array.isArray(range.sourceRefs)||!range.sourceRefs.length||range.sourceRefs.length>MAX_SOURCES||new Set(range.sourceRefs).size!==range.sourceRefs.length)return null;
+  const points:WeatherPoint[]=[];
+  for(const ref of range.sourceRefs){
+   if(!sourceId(range.worldId,ref))return null;
+   const source=a.resolve(ref);
+   if(!source||source.sourceRef!==ref||source.permissionVersion!==permission.version||source.fact.projectionVersion!==VERSION||source.fact.worldId!==range.worldId)return null;
+   const f=source.fact;
+   points.push({sourceRef:ref,minute:f.minute,condition:f.condition,temperatureDeciC:f.temperatureDeciC,relativeHumidityPermille:f.relativeHumidityPermille});
+  }
+  points.sort(byMinute);
+  const p:ValleySpiritAlmanacPacket={schemaVersion:VERSION,projectionVersion:VERSION,permissionVersion:permission.version,worldId:range.worldId,fromMinute:range.fromMinute,throughMinute:range.throughMinute,coverage:'selected-actual-points-only',unselectedHourBuckets:unselectedBuckets(range.fromMinute,range.throughMinute,points),points};
+  const check=a.permission();
+  return validPacket(p)&&check?.publicWeather&&check.version===permission.version?p:null;
+ }catch{return null;}
+}
+function canonicalPacket(p:ValleySpiritAlmanacPacket):ValleySpiritAlmanacPacket {
+ return {schemaVersion:VERSION,projectionVersion:VERSION,permissionVersion:p.permissionVersion,worldId:p.worldId,fromMinute:p.fromMinute,throughMinute:p.throughMinute,coverage:'selected-actual-points-only',unselectedHourBuckets:[...p.unselectedHourBuckets],points:p.points.map(q=>({sourceRef:q.sourceRef,minute:q.minute,condition:q.condition,temperatureDeciC:q.temperatureDeciC,relativeHumidityPermille:q.relativeHumidityPermille}))};
+}
+function permit(p:ValleySpiritAlmanacPacket,a:ValleySpiritAlmanacAuthority):boolean {
+ const current=createValleySpiritAlmanacPacket({...p,sourceRefs:p.points.map(q=>q.sourceRef)},a);
+ return !!current&&serial(current)===serial(canonicalPacket(p));
+}
+export function groundValleySpiritAlmanacDraft(packet:ValleySpiritAlmanacPacket,draft:unknown):GroundedDraft|null {
+ if(!validPacket(packet)||!exact(draft,['claims','atmosphere'])||!option(MOODS,(draft as Record<string,unknown>).atmosphere))return null;
+ const v=draft as GroundedDraft;
+ if(!Array.isArray(v.claims)||!v.claims.length||v.claims.length>MAX_CLAIMS)return null;
+ const byRef=new Map(packet.points.map(q=>[q.sourceRef,q])),seen=new Set<string>(),claims:Claim[]=[];
+ for(const c of v.claims){
+  if(!exact(c,['sourceRef','field','value'])||!option(FIELDS,c.field))return null;
+  if(typeof c.sourceRef!=='string')return null;
+  const point=byRef.get(c.sourceRef),key=c.sourceRef+'\0'+c.field;
+  if(!point||seen.has(key)||!Object.is(c.value,point[c.field]))return null;
+  seen.add(key);claims.push({sourceRef:c.sourceRef,field:c.field,value:c.value});
+ }
+ return {claims,atmosphere:v.atmosphere};
+}
+function identity(p:ValleySpiritAlmanacPacket,textVersion:number):string {
+ return 'valley-almanac-'+createHash('sha256').update(serial([p.worldId,p.fromMinute,p.throughMinute,textVersion])).digest('hex');
+}
+export function validateValleySpiritAlmanacEntries(value:unknown):value is ValleySpiritAlmanacEntry[] {
+ if(!Array.isArray(value))return false;
+ const seen=new Map<string,ValleySpiritAlmanacEntry>(),heads=new Map<string,ValleySpiritAlmanacEntry>();
+ for(const e of value as ValleySpiritAlmanacEntry[]){
+  if(!exact(e,['schemaVersion','entryId','textVersion','supersedes','packet','phase','draft','failure'])||e.schemaVersion!==1||!validPacket(e.packet)||!option(phases,e.phase)||!integer(e.textVersion,1,10000)||e.entryId!==identity(e.packet,e.textVersion)||seen.has(e.entryId))return false;
+  const k=identity(e.packet,0),before=heads.get(k);
+  if(e.textVersion===1?(e.supersedes!==null||!!before):(!before||e.supersedes!==before.entryId||before.textVersion+1!==e.textVersion||!['published','retracted'].includes(before.phase)))return false;
+  const needsDraft=e.phase==='grounded'||e.phase==='published';
+  if(needsDraft?!groundValleySpiritAlmanacDraft(e.packet,e.draft):e.draft!==null)return false;
+  if(e.phase==='retracted'?!option(['permission','source-correction'],e.failure):e.phase==='discarded'?!option(failures,e.failure):e.failure!==null)return false;
+  seen.set(e.entryId,e);heads.set(k,e);
+ }
+ return true;
+}
+function frozenPacket(p:ValleySpiritAlmanacPacket):Readonly<ValleySpiritAlmanacPacket> {
+ const copy=canonicalPacket(p);for(const point of copy.points)Object.freeze(point);Object.freeze(copy.points);Object.freeze(copy.unselectedHourBuckets);return Object.freeze(copy);
+}
+function publicView(e:ValleySpiritAlmanacEntry) {
+ const draft=groundValleySpiritAlmanacDraft(e.packet,e.draft);
+ if(!draft)return null;
+ const p=e.packet,byRef=new Map(p.points.map(q=>[q.sourceRef,q]));
+ const chinese:Record<Condition,string>={sun:'晴',cloud:'阴',rain:'雨',snow:'雪',mixed:'雨雪混合'};
+ const factText=draft.claims.map(c=>{
+  const at=byRef.get(c.sourceRef)!.minute;
+  const detail=c.field==='condition'?`天气：${chinese[c.value as Condition]}`:c.field==='temperatureDeciC'?`气温：${((c.value as number)/10).toFixed(1)}℃`:`相对湿度：${((c.value as number)/10).toFixed(1)}%`;
+  return {sourceRef:c.sourceRef,minute:at,field:c.field,value:c.value,text:`第 ${at} 游戏分钟，${detail}`};
+ });
+ return {mode:'model-curated-verified-weather' as const,entryId:e.entryId,textVersion:e.textVersion,supersedes:e.supersedes,fromMinute:p.fromMinute,throughMinute:p.throughMinute,projectionVersion:p.projectionVersion,permissionVersion:p.permissionVersion,coverage:p.coverage,unselectedHourBuckets:[...p.unselectedHourBuckets],facts:factText,atmosphere:{kind:'editorial-register-only' as const,value:draft.atmosphere}};
+}
+export class ValleySpiritAlmanac {
+ constructor(private readonly store:ValleySpiritAlmanacStore,private readonly authority:ValleySpiritAlmanacAuthority){}
+ private read():ValleySpiritAlmanacEntry[] {
+  const rows=structuredClone(this.store.read());
+  if(!validateValleySpiritAlmanacEntries(rows))throw Error('invalid_almanac_state');
+  return rows;
+ }
+ private change(old:ValleySpiritAlmanacEntry[],entry:ValleySpiritAlmanacEntry):boolean {
+  const i=old.findIndex(e=>e.entryId===entry.entryId);
+  const updated=[...old];if(i<0)updated.push(entry);else updated[i]=entry;
+  return validateValleySpiritAlmanacEntries(updated)&&this.store.replace(old,updated);
+ }
+ private transition(id:string,expect:Phase,next:Phase,draft:GroundedDraft|null=null,failure:Failure|null=null):boolean {
+  const rows=this.read();const current=rows.find(e=>e.entryId===id);
+  return !!current&&current.phase===expect&&this.change(rows,{...current,phase:next,draft,failure});
+ }
+ /** Current snapshots are rebuilt by ref before both debit/send and publishing.
+  * An absent admission means default-off; do not make a staged request. */
+ async generate(range:ValleySpiritAlmanacRange, admission?:ValleySpiritAlmanacAdmission, supersedes?:string):Promise<string|null> {
+  if(!admission)return null;
+  try{
+   const packet=createValleySpiritAlmanacPacket(range,this.authority);if(!packet)return null;
+   const rows=this.read(),latest=rows.filter(e=>identity(e.packet,0)===identity(packet,0)).at(-1);
+   const retry=latest?.phase==='discarded'&&latest.failure==='not-sent'&&latest.supersedes===(supersedes??null)&&serial(canonicalPacket(latest.packet))===serial(packet);
+   if(!retry&&(latest?(supersedes!==latest.entryId||!['published','retracted'].includes(latest.phase)):supersedes!==undefined))return null;
+   const textVersion=retry?latest.textVersion:(latest?.textVersion??0)+1,entryId=identity(packet,textVersion);
+   const entry:ValleySpiritAlmanacEntry={schemaVersion:VERSION,entryId,textVersion,supersedes:supersedes??null,packet,phase:'dispatch-intent',draft:null,failure:null};
+   if(!this.change(rows,entry))return null;
+   const reservation=await admission.reserve({purpose:'valley-spirit-almanac',requestId:entryId,packetBytes:Buffer.byteLength(serial(packet)),promptVersion:VERSION});
+   if(!reservation){this.transition(entryId,'dispatch-intent','discarded',null,'not-sent');return null;}
+   let started=false;
+   try{
+    if(!permit(packet,this.authority)){
+     this.transition(entryId,'dispatch-intent','discarded',null,'permission');
+     return null;
+    }
+    // From here on a restart must conservatively assume possible delivery.
+    if(!this.transition(entryId,'dispatch-intent','sent-unknown'))return null;
+    if(!permit(packet,this.authority)){
+     this.transition(entryId,'sent-unknown','discarded',null,'permission');
+     return null;
+    }
+    started=true;
+    const response=await reservation.send(frozenPacket(packet),()=>permit(packet,this.authority));
+    if(!permit(packet,this.authority)){
+     this.transition(entryId,'sent-unknown','discarded',null,'permission');
+     return null;
+    }
+    const grounded=groundValleySpiritAlmanacDraft(packet,response);
+    if(!grounded){this.transition(entryId,'sent-unknown','discarded',null,'invalid-draft');return null;}
+    return this.transition(entryId,'sent-unknown','grounded',grounded)?entryId:null;
+   }finally{if(!started)reservation.cancelUnsent();}
+  }catch{return null;} // durable intent or sent-unknown is never retried automatically
+ }
+ publish(entryId:string):boolean {
+  try{
+   const rows=this.read(),e=rows.find(e=>e.entryId===entryId);
+   if(!e||e.phase!=='grounded')return false;
+   if(!permit(e.packet,this.authority)){this.change(rows,{...e,phase:'discarded',draft:null,failure:'permission'});return false;}
+   return this.change(rows,{...e,phase:'published'});
+  }catch{return false;}
+ }
+ /** Retractions are visible in private provenance; revoked facts and links
+  * remain hidden even when the sweep could not write. */
+ retractChanged():number {
+  try{
+   const rows=this.read();
+   const permission=this.authority.permission();let affected=0;
+   const next:ValleySpiritAlmanacEntry[]=rows.map(e=>{
+    if((e.phase!=='published'&&e.phase!=='grounded')||permit(e.packet,this.authority))return e;
+    affected++;
+    const failure=permission?.publicWeather&&permission.version===e.packet.permissionVersion?'source-correction' as const:'permission' as const;
+    return {...e,phase:e.phase==='published'?'retracted':'discarded',draft:null,failure};
+   });
+   return affected&&validateValleySpiritAlmanacEntries(next)&&this.store.replace(rows,next)?affected:0;
+  }catch{return 0;}
+ }
+ get(entryId:string){
+  try {
+   const rows=this.read(),e=rows.find(r=>r.entryId===entryId);
+   if(!e||e.phase!=='published'||!permit(e.packet,this.authority)||rows.some(r=>identity(e.packet,0)===identity(r.packet,0)&&r.textVersion>e.textVersion&&(r.phase==='published'||r.phase==='retracted')))return null;
+   // A correction must not disclose a previously revoked entry's ID.
+   const publicEntry=e.supersedes&&rows.some(r=>r.entryId===e.supersedes&&r.phase==='published'&&permit(r.packet,this.authority))?e:{...e,supersedes:null};
+   return publicView(publicEntry);
+  }catch{return null;}
+ }
+ /** Explicit fallback must never masquerade as model narration. */
+ objective(range:ValleySpiritAlmanacRange) {
+  const packet=createValleySpiritAlmanacPacket(range,this.authority);
+  return packet?{mode:'objective-weather-points' as const,generatedBy:'fixed-factual-template' as const,modelNarration:'unavailable' as const,packet}:null;
+ }
+}

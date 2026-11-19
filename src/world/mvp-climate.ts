@@ -61,16 +61,55 @@ function dailyTemperature(us:bigint):number {
  const phase=(us+19n*60n*US)%DAY;
  return phase<DAY/2n?lerp(-40,40,phase,DAY/2n):lerp(40,-40,phase-DAY/2n,DAY/2n);
 }
-function precipitation(seed:number,us:bigint):{intensity:number;saturation:number} {
- const day=Number(us/DAY),within=us%DAY;
- if(hash(seed,day,4)%1000>=350)return {intensity:0,saturation:0};
+const PRECIPITATION_RAMP=20n*US, PURE_RAIN_DECI_C=20;
+function storm(seed:number,day:number) {
+ if(hash(seed,day,4)%1000>=350)return null;
  const start=BigInt(60+hash(seed,day,5)%1000)*US;
  const end=start+BigInt(90+hash(seed,day,6)%241)*US;
- if(within<start||within>=end)return {intensity:0,saturation:0};
- const ramp=20n*US,distance=within-start<end-within?within-start:end-within;
- const peak=400+hash(seed,day,7)%601;
- return {intensity:distance<ramp?lerp(0,peak,distance,ramp):peak,
-  saturation:distance<ramp?lerp(0,1000,distance,ramp):1000};
+ return {start,end,peak:400+hash(seed,day,7)%601};
+}
+function precipitation(seed:number,us:bigint):{intensity:number;saturation:number} {
+ const within=us%DAY,episode=storm(seed,Number(us/DAY));
+ if(!episode||within<episode.start||within>=episode.end)return {intensity:0,saturation:0};
+ const distance=within-episode.start<episode.end-within?within-episode.start:episode.end-within;
+ return {intensity:distance<PRECIPITATION_RAMP?lerp(0,episode.peak,distance,PRECIPITATION_RAMP):episode.peak,
+  saturation:distance<PRECIPITATION_RAMP?lerp(0,1000,distance,PRECIPITATION_RAMP):1000};
+}
+const temperatureNoise=(seed:number,us:bigint)=>slotValue(seed,us,1,-40,81);
+const temperature=(seed:number,us:bigint)=>seasonalTemperature(us)+dailyTemperature(us)+temperatureNoise(seed,us);
+
+/** Mathematical bounds, NOT world evidence. The authoritative writer invokes
+ * these only for intervals its live draft has actually traversed. */
+export function climatePrecipitationBoundsV1(seed:number,day:number):{start:bigint;end:bigint}|null {
+ const episode=storm(seed,day);if(!episode)return null;
+ const twicePeak=2n*BigInt(episode.peak),edge=(PRECIPITATION_RAMP+twicePeak-1n)/twicePeak;
+ const base=BigInt(day)*DAY;
+ return {start:base+episode.start+edge,end:base+episode.end-edge+1n};
+}
+
+/** Earliest pure-rain micro-minute inside a positive-precipitation interval.
+ * On each absolute hour each rounded thermal component is monotone (daily
+ * turns and seasonal knots align); their SUM need not be monotone. Visit every
+ * distinct component transition, not merely the signs at the endpoints. */
+export function climateFirstPureRainV1(seed:number,start:bigint,end:bigint):bigint|null {
+ const parts=[seasonalTemperature,dailyTemperature,(us:bigint)=>temperatureNoise(seed,us)];
+ for(let cell=start;cell<end;){
+  const boundary=(cell/SLOT+1n)*SLOT,tail=(boundary<end?boundary:end)-1n;
+  if(temperature(seed,cell)>=PURE_RAIN_DECI_C)return cell;
+  const cuts=new Set<bigint>();
+  for(const part of parts){
+   let at=cell;const final=part(tail);
+   while(at<tail){
+    const prior=part(at);if(prior===final)break;
+    let low=at+1n,high=tail;
+    while(low<high){const mid=(low+high)/2n;if(part(mid)===prior)low=mid+1n;else high=mid;}
+    cuts.add(low);at=low;
+   }
+  }
+  for(const cut of [...cuts].sort((a,b)=>a<b?-1:1))if(temperature(seed,cut)>=PURE_RAIN_DECI_C)return cut;
+  cell=tail+1n;
+ }
+ return null;
 }
 /** RH rounded to 0.1 percentage point from the same quantized T and Td.
  * BigInt ratio prevents large multiplication from losing integer precision. */
@@ -95,7 +134,7 @@ export function climateAt(seed:number,minute:number):MvpClimateSnapshot {return 
 export function climateAtUs(seed:number,atUs:string):MvpClimateSnapshot {
  if(!Number.isInteger(seed)||seed<0||seed>0xffffffff)throw new Error('mvp_climate_invalid_seed');
  const us=parseClimateUs(atUs);
- const temperatureDeciC=seasonalTemperature(us)+dailyTemperature(us)+slotValue(seed,us,1,-40,81);
+ const temperatureDeciC=temperature(seed,us);
  const rain=precipitation(seed,us),precipitationPermille=rain.intensity;
  const cloudPermille=Math.max(slotValue(seed,us,2,150,751),lerp(0,950,BigInt(rain.saturation),1000n));
  const windPermille=slotValue(seed,us,3,100,701);
@@ -103,7 +142,7 @@ export function climateAtUs(seed:number,atUs:string):MvpClimateSnapshot {
  const depression=lerp(dryDepression,0,BigInt(rain.saturation),1000n);
  const relativeHumidityPermille=climateRelativeHumidity(temperatureDeciC,temperatureDeciC-depression);
  const condition:MvpClimateSnapshot['condition']=precipitationPermille>0
-  ?temperatureDeciC<=0?'snow':temperatureDeciC>=20?'rain':'mixed'
+  ?temperatureDeciC<=0?'snow':temperatureDeciC>=PURE_RAIN_DECI_C?'rain':'mixed'
   :cloudPermille>=600?'cloud':'sun';
  return {schemaVersion:1,algorithmVersion:1,parameterFingerprint:MVP_CLIMATE_PARAMETER_FINGERPRINT,
   rhTableFingerprint:MVP_CLIMATE_RH_FINGERPRINT,previewOnly:true,atUs,temperatureDeciC,

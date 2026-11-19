@@ -14,13 +14,48 @@ export interface PublicWeatherFact {
  relativeHumidityPermille:number;cloudPermille:number;windPermille:number;
  daylightPermille:number;precipitationPermille:number;
 }
-interface Entry {entryId:string;sourceRef:string;permissionVersion:number;fromMinute:number;toMinute:number;fact:PublicWeatherFact;text:string;}
-interface Journal {schemaVersion:1;worldId:string;permission:{version:number;publicWeather:boolean};entries:Entry[];}
+export interface PublicWeatherEntry {entryId:string;sourceRef:string;permissionVersion:number;fromMinute:number;toMinute:number;fact:PublicWeatherFact;text:string;}
+interface Journal {schemaVersion:1;worldId:string;permission:{version:number;publicWeather:boolean};entries:PublicWeatherEntry[];}
+/** Archive bounds are zero-based absolute game-hour indices, end exclusive. */
+export type WeatherArchiveQuery={fromHour:number;toHour:number;limit:number}|{cursor:string};
+type WeatherArchivePage={schemaVersion:1;status:'ready';mode:'objective-weather-records';
+ worldId:string;permissionVersion:number;range:{fromHour:number;toHour:number};
+ coverage:{fromHour:number;toHour:number};slots:({hour:number;status:'observed';record:PublicWeatherEntry}|{hour:number;status:'missing'})[];
+ nextCursor:string|null;}|{status:'invalid'|'unavailable'};
+export interface PublicWeatherNarrationInput {
+ mode:'public-weather-only';worldId:string;projectionVersion:1;permissionVersion:number;
+ sourceRefs:readonly string[];records:readonly PublicWeatherEntry[];dispatch:'disabled';
+}
+const ARCHIVE_LIMIT=48, ARCHIVE_RANGE=28*24, ARCHIVE_DEFAULT=24, ARCHIVE_MAX_HOUR=Math.floor(1e9/60);
 const LIMIT=16*1024*1024;
 const keys=['projectionVersion','worldId','worldRevision','minute','atUs','condition','temperatureDeciC','relativeHumidityPermille','cloudPermille','windPermille','daylightPermille','precipitationPermille'];
 const record=(v:unknown):v is Record<string,unknown>=>!!v&&typeof v==='object'&&!Array.isArray(v);
 const exact=(v:unknown,k:string[])=>record(v)&&Object.keys(v).length===k.length&&k.every(key=>Object.hasOwn(v,key));
 const integer=(v:unknown):v is number=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=0;
+const archiveRange=(from:unknown,to:unknown,limit:unknown):boolean=>
+ integer(from)&&integer(to)&&integer(limit)&&to>from&&to<=ARCHIVE_MAX_HOUR&&to-from<=ARCHIVE_RANGE&&limit>0&&limit<=ARCHIVE_LIMIT;
+const hourArgument=(s:string|null)=>s!==null&&/^(0|[1-9][0-9]{0,7})$/.test(s)?Number(s):NaN;
+export function parseWeatherArchiveQuery(params:URLSearchParams):WeatherArchiveQuery|null {
+ const names=[...params.keys()];
+ if(names.length===1&&names[0]==='cursor')return {cursor:params.get('cursor')!};
+ if(names.length!==(params.has('limit')?3:2)||new Set(names).size!==names.length||names.some(k=>!['fromHour','toHour','limit'].includes(k)))return null;
+ const fromHour=hourArgument(params.get('fromHour')),toHour=hourArgument(params.get('toHour')),limit=params.has('limit')?hourArgument(params.get('limit')):ARCHIVE_DEFAULT;
+ return archiveRange(fromHour,toHour,limit)?{fromHour,toHour,limit}:null;
+}
+type ArchiveCursor={schemaVersion:1;worldId:string;permissionVersion:number;fromHour:number;toHour:number;nextHour:number;limit:number};
+const encodeCursor=(c:ArchiveCursor)=>Buffer.from(JSON.stringify(c)).toString('base64url');
+function decodeCursor(value:unknown):ArchiveCursor|null {
+ if(typeof value!=='string'||!/^[A-Za-z0-9_-]{1,2048}$/.test(value))return null;
+ try {
+  const decoded:unknown=JSON.parse(Buffer.from(value,'base64url').toString('utf8'));
+  if(!exact(decoded,['schemaVersion','worldId','permissionVersion','fromHour','toHour','nextHour','limit']))return null;
+  const c=decoded as ArchiveCursor;
+  if(c.schemaVersion!==1||typeof c.worldId!=='string'||!integer(c.permissionVersion)||c.permissionVersion===0||
+     !archiveRange(c.fromHour,c.toHour,c.limit)||!integer(c.nextHour)||c.nextHour<=c.fromHour||c.nextHour>=c.toHour||
+     (c.nextHour-c.fromHour)%c.limit!==0||encodeCursor(c)!==value)return null;
+  return c;
+ }catch{return null;}
+}
 function validFact(v:unknown):v is PublicWeatherFact {
  if(!exact(v,keys))return false;const f=v as PublicWeatherFact;
  if(f.projectionVersion!==1||typeof f.worldId!=='string'||!f.worldId.startsWith('godot-mvp-')||f.worldId.length>200||!integer(f.worldRevision)||!Number.isFinite(f.minute)||f.minute<0||f.minute>1e9||typeof f.atUs!=='string'||f.atUs!==minuteToClimateUs(f.minute)||!['sun','cloud','rain','snow','mixed'].includes(f.condition)||!Number.isInteger(f.temperatureDeciC)||f.temperatureDeciC< -300||f.temperatureDeciC>450)return false;
@@ -44,7 +79,7 @@ function validJournal(v:unknown,head:PublicWeatherFact):v is Journal {
  for(const e of j.entries){if(!exact(e,['entryId','sourceRef','permissionVersion','fromMinute','toMinute','fact','text'])||!validFact(e.fact)||e.fact.worldId!==head.worldId||e.fact.minute>head.minute||e.fact.worldRevision>head.worldRevision||e.fact.minute<minute||e.fact.worldRevision<revision||!integer(e.permissionVersion)||e.permissionVersion<1||e.permissionVersion<permission||e.permissionVersion>j.permission.version||e.entryId!==entryId(e.fact,e.permissionVersion)||ids.has(e.entryId)||e.sourceRef!==`${j.worldId}/${e.entryId}`||e.fromMinute!==e.fact.minute||e.toMinute!==e.fact.minute||e.text!==describe(e.fact))return false;ids.add(e.entryId);minute=e.fact.minute;revision=e.fact.worldRevision;permission=e.permissionVersion;}
  return true;
 }
-export const valleySpiritUnavailable=()=>({schemaVersion:1 as const,status:'unavailable' as const,mode:'objective-weather-records' as const,generatedBy:'fixed-factual-template' as const,modelNarration:'disabled-pending-shared-admission-and-request-recovery' as const,records:[] as Entry[]});
+export const valleySpiritUnavailable=()=>({schemaVersion:1 as const,status:'unavailable' as const,mode:'objective-weather-records' as const,generatedBy:'fixed-factual-template' as const,modelNarration:'disabled-pending-shared-admission-and-request-recovery' as const,records:[] as PublicWeatherEntry[]});
 /** Caller owns the existing world runtime lock for this complete lifetime.
  * Independent failures isolate this module, never roll back/stop the world.
  * The adjacent file is private persistence, not a public static/export route. */
@@ -88,10 +123,68 @@ export class ValleySpiritJournal {
   const next=structuredClone(s);next.permission={version:s.permission.version+1,publicWeather:allowed};try{this.permissions.advance(s.permission,next.permission);}catch{this.isolated=true;return false;}return this.save(next);
  }
  view(){const s=this.current();const base=valleySpiritUnavailable();if(!s)return {...base,status:'isolated' as const};return {...base,status:s.permission.publicWeather?'ready' as const:'revoked' as const,worldId:s.worldId,atMinute:this.head.minute,worldRevision:this.head.worldRevision,permissionVersion:s.permission.version,persistent:this.diskText!==null,records:s.permission.publicWeather?structuredClone(s.entries.filter(e=>e.permissionVersion===s.permission.version).slice(-6).reverse()):[]};}
+ /** Closed-hour slots cannot receive newer facts. This makes a cursor stable
+  * across world commits and journal restarts without making it a capability. */
+ archive(query:WeatherArchiveQuery):WeatherArchivePage {
+  const s=this.current();if(!s?.permission.publicWeather)return {status:'unavailable'};
+  let cursor:ArchiveCursor;
+  if(record(query)&&Object.hasOwn(query,'cursor')){
+   if(!exact(query,['cursor']))return {status:'invalid'};
+   const decoded=decodeCursor((query as {cursor:string}).cursor);
+   if(!decoded)return {status:'invalid'};
+   if(decoded.worldId!==s.worldId||decoded.permissionVersion!==s.permission.version)return {status:'unavailable'};
+   cursor=decoded;
+  }else{
+   if(!exact(query,['fromHour','toHour','limit']))return {status:'invalid'};
+   const first=query as Exclude<WeatherArchiveQuery,{cursor:string}>;
+   if(!archiveRange(first.fromHour,first.toHour,first.limit))return {status:'invalid'};
+   cursor={schemaVersion:1,worldId:s.worldId,permissionVersion:s.permission.version,...first,nextHour:first.fromHour};
+  }
+  if(cursor.toHour>Math.floor(this.head.minute/60))return {status:'invalid'};
+  const pageEnd=Math.min(cursor.toHour,cursor.nextHour+cursor.limit);
+  const records=new Map<number,PublicWeatherEntry>();
+  for(const e of s.entries){
+   const hour=Math.floor(e.fact.minute/60);
+   if(hour>=pageEnd)break;
+   if(hour>=cursor.nextHour&&e.permissionVersion===s.permission.version)records.set(hour,e);
+  }
+  const slots:Extract<WeatherArchivePage,{status:'ready'}>['slots']=[];
+  for(let hour=cursor.nextHour;hour<pageEnd;hour++){
+   const entry=records.get(hour);
+   slots.push(entry?{hour,status:'observed',record:structuredClone(entry)}:{hour,status:'missing'});
+  }
+  return {schemaVersion:1,status:'ready',mode:'objective-weather-records',worldId:s.worldId,permissionVersion:s.permission.version,
+   range:{fromHour:cursor.fromHour,toHour:cursor.toHour},coverage:{fromHour:cursor.nextHour,toHour:pageEnd},slots,
+   nextCursor:pageEnd<cursor.toHour?encodeCursor({...cursor,nextHour:pageEnd}):null};
+ }
  /** All source lookups and future narrative input exports share the current gate. */
  resolveSource(sourceRef:string){const s=this.current();if(!s?.permission.publicWeather)return null;const e=s.entries.find(e=>e.sourceRef===sourceRef&&e.permissionVersion===s.permission.version);return e?structuredClone(e):null;}
- publicNarrationInput(){const view=this.view();if(view.status!=='ready')return null;return {mode:'public-weather-only' as const,worldId:view.worldId,projectionVersion:1 as const,permissionVersion:view.permissionVersion,sourceRefs:view.records.map(e=>e.sourceRef),records:structuredClone(view.records),dispatch:'disabled' as const};}
+ private narrationEntries(s:Journal,refs:readonly string[]):PublicWeatherEntry[]|null {
+  if(!Array.isArray(refs)||refs.length>ARCHIVE_LIMIT||new Set(refs).size!==refs.length||
+    [...refs].some(ref=>typeof ref!=='string'||ref.length>300))return null;
+  const wanted=new Set(refs), entries=new Map<string,PublicWeatherEntry>();
+  for(const e of s.entries)if(e.permissionVersion===s.permission.version&&wanted.has(e.sourceRef))entries.set(e.sourceRef,e);
+  return entries.size===refs.length?refs.map(ref=>entries.get(ref)!):null;
+ }
+ /** Optional explicit refs select archived public evidence; no silent truncation
+  * or substitution. The returned copy cannot mutate journal state. */
+ publicNarrationInput(sourceRefs?:readonly string[]):PublicWeatherNarrationInput|null {
+  const s=this.current();if(!s?.permission.publicWeather)return null;
+  if(sourceRefs!==undefined&&(!Array.isArray(sourceRefs)||sourceRefs.length===0))return null;
+  const recent=sourceRefs??s.entries.filter(e=>e.permissionVersion===s.permission.version).slice(-6).reverse().map(e=>e.sourceRef);
+  const records=this.narrationEntries(s,recent);if(!records)return null;
+  return {mode:'public-weather-only',worldId:s.worldId,projectionVersion:1,permissionVersion:s.permission.version,
+   sourceRefs:[...recent],records:structuredClone(records),dispatch:'disabled'};
+ }
  /** Revalidation is mandatory before any future dispatch/publication. This does
   * not authorize an LLM call or provide an account/budget capability. */
- isCurrentPublicInput(input:ReturnType<ValleySpiritJournal['publicNarrationInput']>):boolean {const s=this.current();return !!s&&s.permission.publicWeather&&!!input&&exact(input,['mode','worldId','projectionVersion','permissionVersion','sourceRefs','records','dispatch'])&&input.mode==='public-weather-only'&&input.projectionVersion===1&&input.dispatch==='disabled'&&input.worldId===s.worldId&&input.permissionVersion===s.permission.version&&Array.isArray(input.sourceRefs)&&Array.isArray(input.records)&&input.sourceRefs.length===input.records.length&&new Set(input.sourceRefs).size===input.sourceRefs.length&&input.sourceRefs.every((ref,i)=>{const source=this.resolveSource(ref);return source!==null&&JSON.stringify(source)===JSON.stringify(input.records[i]);});}
+ isCurrentPublicInput(input:PublicWeatherNarrationInput|null):boolean {
+  const s=this.current();
+  if(!s?.permission.publicWeather||!input||!exact(input,['mode','worldId','projectionVersion','permissionVersion','sourceRefs','records','dispatch'])||
+    input.mode!=='public-weather-only'||input.projectionVersion!==1||input.dispatch!=='disabled'||input.worldId!==s.worldId||
+    input.permissionVersion!==s.permission.version||!Array.isArray(input.sourceRefs)||!Array.isArray(input.records))return false;
+  const sources=this.narrationEntries(s,input.sourceRefs);
+  try{return !!sources&&sources.length===input.records.length&&sources.every((source,i)=>JSON.stringify(source)===JSON.stringify(input.records[i]));}
+  catch{return false;}
+ }
 }

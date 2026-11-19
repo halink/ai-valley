@@ -23,4 +23,18 @@ export interface MvpClimateState {
  parameterFingerprint:string; rhTableFingerprint:string;
  adoptedMinute:number; adoptedUs:string; lastMinute:number; lastUs:string;
  current:MvpClimatePoint;
+ rainProvenance?:MvpRainProvenance;
+}
+
+/** A completed, fully observed precipitation episode containing pure rain. */
+export interface MvpRainEpisode {
+ rainEventId:string;
+ startedUs:string;
+ firstRainUs:string;
+ endedUs:string;
+}
+export interface MvpRainProvenance {
+ version:1;
+ adoptedUs:string;
+ recent:MvpRainEpisode[];
 }

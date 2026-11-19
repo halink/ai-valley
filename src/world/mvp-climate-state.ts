@@ -4,6 +4,7 @@ import type {MvpClimatePoint} from '../shared/mvp-climate.js';
 import {climateAt,minuteToClimateUs,parseClimateUs,MVP_CLIMATE_PARAMETER_FINGERPRINT} from './mvp-climate.js';
 import {MVP_CLIMATE_RH_FINGERPRINT} from './mvp-climate-rh.js';
 import {isSupportedMvpMap} from '../shared/mvp-hamlet.js';
+import {advanceMvpRainProvenance,validateMvpRainProvenance} from './mvp-rain-provenance.js';
 const owns=(v:object,k:string)=>Object.prototype.hasOwnProperty.call(v,k);
 function point(seed:number,minute:number,version:1|2|3=1):MvpClimatePoint {const {previewOnly,schemaVersion,...sample}=climateAt(seed,minute);return version===1?{...sample,schemaVersion:1,observationOnly:true}:version===2?{...sample,schemaVersion:2,soilWater:true}:{...sample,schemaVersion:3,agriculture:true};}
 function same(a:unknown,b:unknown):boolean {
@@ -22,9 +23,11 @@ export function validateMvpClimate(w:World):void {
  const s=w.mvpClimate;
  if(!s||typeof s!=='object'||Array.isArray(s)||!((s.schemaVersion===1&&s.capability==='observation-only')||(s.schemaVersion===2&&s.capability==='soil-water-v1')||(s.schemaVersion===3&&s.capability==='agriculture-v1'))||s.algorithmVersion!==1||s.seed!==w.seed||s.parameterFingerprint!==MVP_CLIMATE_PARAMETER_FINGERPRINT||s.rhTableFingerprint!==MVP_CLIMATE_RH_FINGERPRINT)throw Error('mvp_climate_unsupported_state');
  const keys=['schemaVersion','capability','seed','algorithmVersion','parameterFingerprint','rhTableFingerprint','adoptedMinute','adoptedUs','lastMinute','lastUs','current'];
+ if(owns(s,'rainProvenance'))keys.push('rainProvenance');
  if(Object.keys(s).length!==keys.length||keys.some(k=>!owns(s,k)))throw Error('mvp_climate_unknown_fields');
  if(minuteToClimateUs(s.adoptedMinute)!==s.adoptedUs||minuteToClimateUs(s.lastMinute)!==s.lastUs||s.lastMinute!==w.minute||s.adoptedMinute>s.lastMinute||parseClimateUs(s.adoptedUs)>parseClimateUs(s.lastUs))throw Error('mvp_climate_clock_mismatch');
  if(!same(s.current,point(w.seed,w.minute,s.schemaVersion)))throw Error('mvp_climate_sample_mismatch');
+ validateMvpRainProvenance(w.id,s);
  validateMvpSoil(w);
 }
 export function adoptMvpClimate(w:World):boolean {
@@ -43,7 +46,8 @@ export function advanceMvpClimate(w:World,previousMinute:number):void {
  const current=point(w.seed,w.minute,s.schemaVersion);
  if(parseClimateUs(current.atUs)<parseClimateUs(s.lastUs))throw Error('mvp_climate_clock_reversal');
  advanceMvpSoil(w,previousMinute);
- w.mvpClimate={...s,lastMinute:w.minute,lastUs:current.atUs,current};
+ const rain=s.rainProvenance?{rainProvenance:advanceMvpRainProvenance(w.id,w.seed,s.rainProvenance,s.lastUs,current.atUs)}:{};
+ w.mvpClimate={...s,lastMinute:w.minute,lastUs:current.atUs,current,...rain};
 }
 export function rejectMvpClimateForModels(w:unknown):void {
  if(w&&typeof w==='object'&&(owns(w,'mvpClimate')||owns(w,'mvpSoil')||owns(w,'mvpAgriculture')||owns(w,'mvpPreservation')))throw Error('mvp_climate_model_entry_unsupported');

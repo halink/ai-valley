@@ -1,6 +1,7 @@
 import {readSeasonalLedger,writeSeasonalLedger,type SeasonalLedger} from './seasonal-model-ledger.js';
 import {assertSeasonalKnowledgeAdvance} from '../world/mvp-seasonal-knowledge.js';
 import {rejectMvpClimateForModels} from '../world/mvp-climate-state.js';
+import {assertMvpRainProvenanceAdvance} from '../world/mvp-rain-provenance.js';
 import type {Biography,HistoryPage,HistoryQuery} from '../shared/history.js';
 import {normalizeHistory,historyKey,readHistoryCursor,makeHistoryCursor} from './history-query.js';
 import {DatabaseSync} from 'node:sqlite';
@@ -172,9 +173,11 @@ export class WorldStore {
   this.db.exec('BEGIN IMMEDIATE');
   try{
    const row=this.db.prepare('SELECT revision,state FROM worlds WHERE id=?').get(world.id) as {revision:number;state:string|Uint8Array}|undefined;
-   if(row){const stored=decodeSavedWorld(row.state);if(stored.schemaVersion===3&&world.schemaVersion!==3)throw Error('shelter_schema_downgrade');if(stored.mvpSeasonalModelVersion===1&&(!this.seasonalModel||world.mvpSeasonalModelVersion!==1))throw Error('seasonal_model_dependency_downgrade');assertSeasonalKnowledgeAdvance(stored as unknown as World,world);if(Object.prototype.hasOwnProperty.call(stored,'mvpPreservation')&&!world.mvpPreservation)throw Error('preservation_dependency_downgrade');if(Object.prototype.hasOwnProperty.call(stored,'mvpSoil')&&(!world.mvpSoil||(world.mvpClimate?.schemaVersion??0)<2))throw Error('soil_dependency_downgrade');if(Object.prototype.hasOwnProperty.call(stored,'mvpAgriculture')&&(!world.mvpAgriculture||world.mvpClimate?.schemaVersion!==3))throw Error('agriculture_dependency_downgrade');if(!this.allowMvpClimate)rejectMvpClimateForModels(stored);}
+   const stored=row?decodeSavedWorld(row.state):null;
+   if(stored){if(stored.schemaVersion===3&&world.schemaVersion!==3)throw Error('shelter_schema_downgrade');if(stored.mvpSeasonalModelVersion===1&&(!this.seasonalModel||world.mvpSeasonalModelVersion!==1))throw Error('seasonal_model_dependency_downgrade');assertSeasonalKnowledgeAdvance(stored as unknown as World,world);if(Object.prototype.hasOwnProperty.call(stored,'mvpPreservation')&&!world.mvpPreservation)throw Error('preservation_dependency_downgrade');if(Object.prototype.hasOwnProperty.call(stored,'mvpSoil')&&(!world.mvpSoil||(world.mvpClimate?.schemaVersion??0)<2))throw Error('soil_dependency_downgrade');if(Object.prototype.hasOwnProperty.call(stored,'mvpAgriculture')&&(!world.mvpAgriculture||world.mvpClimate?.schemaVersion!==3))throw Error('agriculture_dependency_downgrade');if(!this.allowMvpClimate)rejectMvpClimateForModels(stored);}
    if((row?.revision??null)!==previousRevision)throw new Error('stale_world_revision');
-   const prior=this.seasonalModel?readSeasonalLedger(this.db,row?decodeSavedWorld(row.state) as unknown as World:null,true):null;
+   if(this.allowMvpClimate)assertMvpRainProvenanceAdvance(stored as unknown as World|null,world);
+   const prior=this.seasonalModel?readSeasonalLedger(this.db,stored as unknown as World|null,true):null;
    if(!!(seasonalLedger??prior)!==(world.mvpSeasonalModelVersion===1))throw Error('seasonal_model_ledger_marker_mismatch');
    if(seasonalLedger){if(!this.seasonalModel)throw Error('seasonal_model_store_required');writeSeasonalLedger(this.db,seasonalLedger,prior,world);}
    else if(prior?.requests.at(-1)?.state==='intent')throw Error('seasonal_model_unresolved_request');

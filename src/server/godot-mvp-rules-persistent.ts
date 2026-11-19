@@ -7,6 +7,7 @@ import {lstatSync} from 'node:fs';
 import {createMvpSession,createMvpServer,createMvpWorld} from './godot-mvp.js';
 import {assertMvpWorld,upgradeMvpWorld} from './godot-mvp-persistent.js';
 import {adoptMvpClimate,validateMvpClimate,assertMvpClimateWorld} from '../world/mvp-climate-state.js';
+import {adoptMvpRainProvenance} from '../world/mvp-rain-provenance.js';
 import {preflightWorldSave} from './save-preflight.js';
 import {WorldStore} from './store.js';
 import {acquireRuntimeOwnership,type RuntimeOwnership} from './runtime-lock.js';
@@ -32,14 +33,15 @@ export async function startPersistentRulesMvp(options:{database:string;port:numb
   // Bind before any writable SQLite open or adoption.
   let session:ReturnType<typeof createMvpSession>|undefined;
   const snapshot=()=>({...session!.snapshot(),valleySpirit:valleySpirit?.view()??valleySpiritUnavailable()});
-  server=createMvpServer({snapshot},{webRoot:options.webRoot,valleySpiritSource:ref=>valleySpirit?.resolveSource(ref)??null});
+  server=createMvpServer({snapshot},{webRoot:options.webRoot,valleySpiritSource:ref=>valleySpirit?.resolveSource(ref)??null,valleySpiritArchive:query=>valleySpirit?.archive(query)??{status:'unavailable'}});
   await new Promise<void>((resolve,reject)=>{server!.once('error',reject);server!.listen(options.port,'127.0.0.1',resolve);});
   store=new WorldStore(owner.database,{allowMvpClimate:true});
   const saved=store.load(),world=structuredClone(saved??createMvpWorld()),previous=saved?.revision??null;
   assertMvpWorld(world);
   const upgraded=upgradeMvpWorld(world),adopted=adoptMvpClimate(world),soilAdopted=adoptMvpSoil(world),agricultureAdopted=adoptMvpAgriculture(world);
-  if(adopted||soilAdopted||agricultureAdopted)world.revision++;
-  if(!saved||upgraded||adopted||soilAdopted||agricultureAdopted)store.commit(world,previous);
+  const rainAdopted=adoptMvpRainProvenance(world);
+  if(adopted||soilAdopted||agricultureAdopted||rainAdopted)world.revision++;
+  if(!saved||upgraded||adopted||soilAdopted||agricultureAdopted||rainAdopted)store.commit(world,previous);
   session=createMvpSession({world,persistent:true,commit:(draft,revision)=>{owner!.assertOwned();store!.commit(draft,revision);try{valleySpirit?.observe(publicWeatherProjection(draft));}catch{valleySpirit?.isolate();}}});
   const initialPublicFact=publicWeatherProjection(session.world);
   if(initialPublicFact){try{spiritPermissions=new SqliteValleySpiritPermissions(owner.database,initialPublicFact.worldId,()=>owner!.assertOwned());valleySpirit=new ValleySpiritJournal(owner.database,initialPublicFact,()=>owner!.assertOwned(),spiritPermissions);valleySpirit.observe(initialPublicFact);}catch{valleySpirit?.isolate();}}
