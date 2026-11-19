@@ -30,9 +30,10 @@ export interface FormalDueCheckpoint {
  readonly evidenceDigest:string;readonly sourceBefore:number;readonly foodDefinition:string;readonly foodExpiresAt:number;
  readonly executionAuthorized:false;
 }
+export const formalDueScheduleId=(worldId:string,opportunityId:string)=>'formal-due:'+digest([worldId,opportunityId]);
 const makeIntent=(w:Pick<World,'id'|'revision'|'minute'>,row:ShadowRow,input:Inputs):FormalDueIntent=>{
  const p=row.proposal!;
- return {schema:'formal-due-intent/v1',id:'formal-due:'+digest([w.id,p.opportunityId]),worldId:w.id,proposalId:p.proposalId,
+ return {schema:'formal-due-intent/v1',id:formalDueScheduleId(w.id,p.opportunityId),worldId:w.id,proposalId:p.proposalId,
   opportunityId:p.opportunityId,permissionVersion:p.permissionVersion,shadowBasisDigest:formalShadowApprovalBasis(row)!,
   recordedMinute:w.minute,recordedRevision:w.revision,notBefore:input.notBefore,expiresAt:input.expiresAt,executionAuthorized:false};
 };
