@@ -1,3 +1,4 @@
+import {validateFormalRainProvenance} from '../world/formal-rain-provenance.js';
 import {validateMvpRooms} from '../world/mvp-rooms.js';
 import {readSeasonalLedger,type SeasonalLedger} from './seasonal-model-ledger.js';
 import {validateSeasonalKnowledge} from '../world/mvp-seasonal-knowledge.js';
@@ -100,6 +101,7 @@ export function assertWorldCompatibility(value:unknown,allowMvpSpiritEffectFixtu
  if(!owns(value,'ledgerVersion')&&(!Array.isArray(value.events)||!Array.isArray(value.processed)))
   fail('save_missing_inline_ledger');
  const world=value as unknown as World;
+ try{validateFormalRainProvenance(world);}catch{fail('save_invalid_formalRainProvenance');}
  if(hasMvpSpiritEffects(world.mvpClimate)||hasMvpSpiritEffectEvents(world.events)){
   if(!allowMvpSpiritEffectFixture)fail('save_mvpSpiritEffects_requires_isolated_fixture');
   try{validateMvpSpiritEffects(world);}catch{fail('save_invalid_mvpSpiritEffects');}

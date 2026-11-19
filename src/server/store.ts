@@ -1,3 +1,4 @@
+import {assertFormalRainProvenanceCommit,emptyFormalRainProvenance,forgetFormalRainStep} from '../world/formal-rain-provenance.js';
 import {appendValleySpiritFormalArrivalCustody,readValleySpiritFormalArrivalCustody,verifyValleySpiritFormalArrivalCustody,type ValleySpiritFormalArrivalReceipt} from './valley-spirit-formal-arrival-custody.js';
 import type {AddressedSpeechObservation} from '../world/addressed-speech.js';
 import {appendValleySpiritSpeechCustody,readValleySpiritSpeechCustody,verifyValleySpiritSpeechCustody} from './valley-spirit-speech-custody.js';
@@ -52,11 +53,13 @@ export class WorldStore {
  private readonly exactReceipt;
  private readonly receiptPrefix;
  private readonly allowMvpClimate:boolean;
+ private readonly allowFormalRainProvenance:boolean;
  private readonly seasonalModel:boolean;
  private readonly mvpSpiritEffectFixture?:MvpGroundFruitCapacity;
  private readonly developerSpiritFixtureOwner?:DeveloperMvpSpiritFixtureOwner;
- constructor(path:string,options:{dailySnapshots?:DailySnapshotConfig;allowMvpClimate?:boolean;seasonalModel?:true;mvpSpiritEffectFixture?:MvpGroundFruitCapacity;developerSpiritFixtureOwner?:DeveloperMvpSpiritFixtureOwner}={}){
+ constructor(path:string,options:{formalRainProvenance?:true;dailySnapshots?:DailySnapshotConfig;allowMvpClimate?:boolean;seasonalModel?:true;mvpSpiritEffectFixture?:MvpGroundFruitCapacity;developerSpiritFixtureOwner?:DeveloperMvpSpiritFixtureOwner}={}){
   this.allowMvpClimate=options.allowMvpClimate===true;
+  this.allowFormalRainProvenance=options.formalRainProvenance===true&&!this.allowMvpClimate&&!options.seasonalModel;
   this.seasonalModel=options.seasonalModel===true;
   const fixture=options.mvpSpiritEffectFixture;
   const owner=options.developerSpiritFixtureOwner;
@@ -74,7 +77,8 @@ export class WorldStore {
     !validMvpSpiritFixtureCapacity(fixture))throw Error('mvp_spirit_fixture_requires_disposable_memory');
    this.mvpSpiritEffectFixture=Object.freeze({...fixture});
   }
-  preflightWorldSave(path,{rejectClimate:!this.allowMvpClimate,allowSeasonalModel:this.seasonalModel,developerSpiritFixtureOwner:owner});
+  const savedHeader=preflightWorldSave(path,{rejectClimate:!this.allowMvpClimate,allowSeasonalModel:this.seasonalModel,developerSpiritFixtureOwner:owner});
+  if(savedHeader?.formalRainProvenance&&!this.allowFormalRainProvenance)throw Error('formal_rain_store_scope');
   owner?.assertOwned();
   const needsDeveloperSeal=!!owner&&lstatSync(path,{bigint:true}).size===0n;
   if(path!==':memory:'&&!owner)mkdirSync(dirname(path),{recursive:true,mode:0o700});
@@ -155,6 +159,7 @@ export class WorldStore {
   if (!row) return null;
   const saved=decodeSavedWorld(row.state,!!this.mvpSpiritEffectFixture) as unknown as World & {terrainKey?:string;resourceChanges:Array<[number,Resource]>;resourceCount:number;ledgerVersion?:1};
   if(!this.allowMvpClimate)rejectMvpClimateForModels(saved);
+  if(saved.formalRainProvenance&&!this.allowFormalRainProvenance)throw Error('formal_rain_store_scope');
   if(!this.seasonalModel&&saved.mvpSeasonalModelVersion!==undefined)throw Error('seasonal_model_store_required');
   if (!saved.terrainKey) return saved;
   const {terrainKey,resourceChanges,resourceCount,ledgerVersion,...world}=saved;
@@ -206,6 +211,22 @@ export class WorldStore {
   }
   return gzipSync(JSON.stringify({...state,ledgerVersion:1,terrainKey,resourceCount:persistedResources.length,resourceChanges}),{level:1});
  }
+ /** Explicit internal developer adoption; initial rain has no observed start. */
+ adoptFormalRainProvenance(worldId:string):boolean {
+  if(!this.allowFormalRainProvenance)return false;
+  const w=this.load();
+  if(!w||w.id!==worldId||w.mode!=='formal'||w.formalRainProvenance)return false;
+  const before=w.revision++;w.formalRainProvenance=emptyFormalRainProvenance(w);this.commit(w,before);return true;
+ }
+ readCommittedFormalRainEpisode(worldId:string,id:string){
+  if(!this.allowFormalRainProvenance)return null;
+  try{
+   const w=this.load();
+   if(!w||w.id!==worldId||w.mode!=='formal')return null;
+   const found=w.formalRainProvenance?.closed.find(e=>e.episodeId===id);
+   return found?structuredClone(found):null;
+  }catch{return null;}
+ }
  seasonalLedger(world:World){if(!this.seasonalModel)throw Error('seasonal_model_store_required');return readSeasonalLedger(this.db,world,true);}
  private assertWritable(world:World):void {
   this.developerSpiritFixtureOwner?.assertOwned();
@@ -213,6 +234,7 @@ export class WorldStore {
   if(this.developerSpiritFixtureOwner&&(world.mode!=='validation'||!world.id.startsWith('godot-mvp-')||!world.mvpClimate?.rainProvenance))
    throw Error('mvp_spirit_fixture_invalid_world');
   if(!this.allowMvpClimate)rejectMvpClimateForModels(world);
+  if(world.formalRainProvenance&&!this.allowFormalRainProvenance)throw Error('formal_rain_store_scope');
   if(!this.seasonalModel&&world.mvpSeasonalModelVersion!==undefined)throw Error('seasonal_model_store_required');
  }
  commit(world:World,previousRevision:number|null,appended?:AppendedHistory,seasonalLedger?:SeasonalLedger):void{
@@ -267,6 +289,7 @@ export class WorldStore {
     }
    }
    this.db.exec('COMMIT');
+   forgetFormalRainStep(world);
    if(world.mode==='formal'){this.terrainKeys.add(terrainRevision(world.map));this.separateLedgers.add(world.id);}
    return speech;
   }catch(error){this.db.exec('ROLLBACK');throw error;}
@@ -339,6 +362,7 @@ export class WorldStore {
   const stored=row?decodeSavedWorld(row.state,!!this.mvpSpiritEffectFixture):null;
   if(stored){if(stored.schemaVersion===3&&world.schemaVersion!==3)throw Error('shelter_schema_downgrade');if(stored.mvpSeasonalModelVersion===1&&(!this.seasonalModel||world.mvpSeasonalModelVersion!==1))throw Error('seasonal_model_dependency_downgrade');assertSeasonalKnowledgeAdvance(stored as unknown as World,world);if(Object.prototype.hasOwnProperty.call(stored,'mvpPreservation')&&!world.mvpPreservation)throw Error('preservation_dependency_downgrade');if(Object.prototype.hasOwnProperty.call(stored,'mvpSoil')&&(!world.mvpSoil||(world.mvpClimate?.schemaVersion??0)<2))throw Error('soil_dependency_downgrade');if(Object.prototype.hasOwnProperty.call(stored,'mvpAgriculture')&&(!world.mvpAgriculture||world.mvpClimate?.schemaVersion!==3))throw Error('agriculture_dependency_downgrade');if(!this.allowMvpClimate)rejectMvpClimateForModels(stored);}
   if((row?.revision??null)!==previousRevision)throw new Error('stale_world_revision');
+  assertFormalRainProvenanceCommit(stored as unknown as World|null,world,this.allowFormalRainProvenance);
   if(this.allowMvpClimate)assertMvpRainProvenanceAdvance(stored as unknown as World|null,world);
   if(this.mvpSpiritEffectFixture)assertMvpSpiritEffectsAdvance(stored as unknown as World|null,world,this.mvpSpiritEffectFixture);
   if(this.mvpSpiritEffectFixture)assertMvpFallenFruitFixtureTransition(stored as unknown as World|null,world,settlementOperation);

@@ -1,3 +1,4 @@
+import {beginFormalRainStep,observeFormalRainEdge} from './formal-rain-provenance.js';
 import {completeMvpShelter,personallyFeelsRain,validMvpShelter,MVP_IDLE_WAIT_MINUTES,shelterRoomWithinIdleTime,shelterPlanDeadline,SHELTER_WAIT,SHELTER_UNAVAILABLE} from './mvp-shelter.js';
 import {captureSeasonalKnowledge,validateSeasonalKnowledge,validSeasonalInspect,seasonalInspectRoute,completeSeasonalInspect} from './mvp-seasonal-knowledge.js';
 import {validPreservationAction,preservationTransferReason,preservationRoute,preservationReason,completePreservation,allocatePreservationExecution,advanceMvpPreservation,reconcileMvpPreservation} from './mvp-preservation.js';
@@ -686,6 +687,7 @@ export function stepWorld(world:World,minutes:number,options:{actionFailures?:St
  if(exact!==undefined&&(!Number.isFinite(exact)||exact<=world.minute||exact-world.minute!==minutes))throw new Error('invalid_exact_step_endpoint');
  if(world.mvpClimate){const end=exact??world.minute+minutes;minuteToClimateUs(end);if(end<=world.minute)throw Error('mvp_climate_clock_not_advancing');}
  validateSeasonalKnowledge(world);
+ const finishFormalRain=beginFormalRainStep(world);
  // A caller may use large isolated-test steps; real runtime never catches up downtime.
  ensureCensus(world);initializePhysiology(world);
  if(world.mode==='formal'){initializeSocialAppointments(world);initializePersonalFoodGifts(world);initializeAdultPresence(world);initializePregnancyPreparation(world);initializeEconomy(world);initializeCivic(world);initializeCommons(world);initializeWaterSupply(world);initializeProduction(world);initializeEmployment(world);initializeForeignTrade(world);initializeOutsideAid(world);initializeConstruction(world);initializeLandRights(world);initializeRegionSurveys(world);initializeEducation(world);initializeIndustry(world);initializeFerries(world);initializeRooms(world);initializeFood(world);initializeHealth(world);initializeLongCare(world);initializeEmergencyCare(world);initializeFunerary(world);initializeAgency(world);initializeAdoption(world);initializeFamilyRelocation(world);initializeDebt(world);initializeHousehold(world);initializeSocial(world);initializeCulture(world);}
@@ -748,12 +750,14 @@ export function stepWorld(world:World,minutes:number,options:{actionFailures?:St
   const day=Math.floor(world.minute/DAY);
   if(day!==previousDay){
    const previousWeather=world.weather;world.weather=((day*17+world.seed)%11)<3?'rain':'sun';
+   observeFormalRainEdge(world,previousWeather);
    for(const p of world.plots){if(!p.crop||p.crop.mvpCrop)continue;const def=world.definitions[p.crop.definition];if((def.data.seasons as string[]).includes(calendar(world.minute-1).season)&&(p.crop.wateredDay===previousDay||previousWeather==='rain'))p.crop.growth=Math.min(Number(def.data.growthDays),p.crop.growth+1);p.crop.lastGrowthDay=day;}
    if(!world.production)for(const res of world.resources)if(!world.mvpResources?.renewal[res.id]&&res.regrowthDays>0&&res.amount<res.max&&world.minute-res.lastHarvest>=res.regrowthDays*DAY){res.amount=Math.min(res.max,res.amount+1);res.lastHarvest=world.minute;}
   }
   reconcileMvpPreservation(world);
  }
  world.revision++;
+ finishFormalRain?.();
 }
 
 /** Optional observer-only receipts; simulation and saved state are unchanged. */
