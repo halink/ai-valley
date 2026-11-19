@@ -1,10 +1,11 @@
+import type {FormalShadowProposal} from './valley-spirit-formal-shadow-custody.js';
 import type {World} from '../shared/types.js';
 import {countValleySpiritFacts} from '../shared/valley-spirit-fairness.js';
 import {validateFormalGroundBerryFoodBirth,type FormalBerryFixtureEffect} from './valley-spirit-formal-berry-authority.js';
 
 /** Private projection of already-verified, same-save SQL archive rows. Never a
  * public API, a resident view, or authorization for a subsequent effect. */
-export function projectCommittedFormalBerryFairness(w:World,rows:readonly FormalBerryFixtureEffect[]){
+export function projectCommittedFormalBerryFairness(w:World,rows:readonly FormalBerryFixtureEffect[],proposals?:readonly FormalShadowProposal[]){
  const effects=rows.map(({receipt:r,committedRevision})=>({
   supplyReceiptId:r.draftId,sourceId:r.sourceId,target:{...r.target},rainEpisodeId:r.rain.episodeId,
   at:r.placedMinute,committedRevision,
@@ -24,7 +25,10 @@ export function projectCommittedFormalBerryFairness(w:World,rows:readonly Formal
  }
  return {
   status:'ready',audience:'internal-audit',schemaVersion:1,worldId:w.id,throughRevision:w.revision,throughMinute:w.minute,
-  proposalDirections:{status:'unavailable',code:'no-formal-proposal-custody'},
+  proposalDirections:proposals?{status:'ready',count:proposals.length,
+   byTarget:countValleySpiritFacts(proposals,p=>'ground:'+p.target.x+':'+p.target.y),
+   records:proposals.map(p=>({proposalId:p.proposalId,opportunityId:p.opportunityId,target:{...p.target},at:p.atMinute})),
+  }:{status:'unavailable',code:'no-readable-formal-proposal-custody'},
   actualEffects:{status:'ready',count:effects.length,records:effects,
    byTarget:countValleySpiritFacts(effects,e=>'ground:'+e.target.x+':'+e.target.y)},
   actualDiscoveries:{status:'partial',code:'independent-discovery-not-recorded',confirmedOnSettlement:{

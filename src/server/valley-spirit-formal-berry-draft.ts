@@ -12,7 +12,7 @@ const nat=(v:unknown):v is number=>typeof v==='number'&&Number.isSafeInteger(v)&
 const min=(v:unknown):v is number=>typeof v==='number'&&Number.isFinite(v)&&v>=0&&v<=1e9;
 const samePoint=(a:Vec,b:Vec)=>a.x===b.x&&a.y===b.y;
 const hash=(values:unknown[])=>createHash('sha256').update(JSON.stringify(values)).digest('hex');
-const id=(worldId:string,rainId:string,sourceId:string)=>'formal-berry:'+hash([worldId,rainId,sourceId]);
+export const formalBerryOpportunityId=(worldId:string,rainId:string,sourceId:string)=>'formal-berry:'+hash([worldId,rainId,sourceId]);
 
 interface Capacity {worldLots:number;lotsPerTarget:number}
 export interface FormalBerryDetachedReceipt {
@@ -70,7 +70,7 @@ export function validateFormalBerryDetachedLedger(w:World,ledger:FormalBerryDeta
     !exact(r.rain,['episodeId','startedMinute','closedMinute'])||!min(r.rain.startedMinute)||!min(r.rain.closedMinute)||
     r.rain.episodeId!==formalNativeRainEpisodeId(w.id,r.rain.startedMinute)||
     r.rain.startedMinute<=rain.adoptedMinute||r.rain.closedMinute<=r.rain.startedMinute||r.rain.closedMinute>r.placedMinute||
-    r.draftId!==id(w.id,r.rain.episodeId,r.sourceId)||seen.has(r.draftId))return false;
+    r.draftId!==formalBerryOpportunityId(w.id,r.rain.episodeId,r.sourceId)||seen.has(r.draftId))return false;
    const retained=rain.closed.find(e=>e.episodeId===r.rain.episodeId);
    if(retained?(retained.startedMinute!==r.rain.startedMinute||retained.closedMinute!==r.rain.closedMinute):
     (!rain.closed.length||r.rain.closedMinute>=rain.closed[0].startedMinute))return false;
@@ -95,7 +95,7 @@ export function draftFormalBerryGround(store:WorldStore,options?:FormalBerryDraf
    capacity:{...options.capacity},drafts:[]}:structuredClone(prior);
   if(!validateFormalBerryDetachedLedger(w,old)||old.capacity.worldLots!==options.capacity.worldLots||
    old.capacity.lotsPerTarget!==options.capacity.lotsPerTarget)return unavailable;
-  const key=id(w.id,episode.episodeId,site.sourceId);
+  const key=formalBerryOpportunityId(w.id,episode.episodeId,site.sourceId);
   if(old.drafts.some(d=>d.draftId===key))return {status:'already_drafted'} as const;
   if(old.drafts.length>=old.capacity.worldLots||old.drafts.filter(d=>samePoint(d.target,site.target)).length>=old.capacity.lotsPerTarget)
    return {status:'capacity'} as const;

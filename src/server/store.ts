@@ -1,3 +1,6 @@
+import {appendFormalShadowPermission,appendFormalShadowProposal,formalShadowScope,initializeFormalShadowCustody,makeFormalShadowProposal,
+ readFormalShadowRows,verifyFormalShadowPermission} from './valley-spirit-formal-shadow-custody.js';
+import {readFormalRainShadowBasis} from './valley-spirit-formal-eligibility.js';
 import {projectCommittedFormalBerryFairness} from './valley-spirit-formal-berry-fairness.js';
 import {completeDeveloperFormalBerryPickup} from './valley-spirit-formal-berry-pickup.js';
 import {DAY} from '../world/time.js';
@@ -113,6 +116,7 @@ export class WorldStore {
    this.db.exec('CREATE TABLE mvp_spirit_developer_fixture (version INTEGER NOT NULL CHECK(version=1), seal TEXT NOT NULL)');
    this.db.prepare('INSERT INTO mvp_spirit_developer_fixture VALUES (1,?)').run(owner!.seal);
    if(owner!.formalApprovalKeyPem)this.db.exec(FORMAL_BERRY_EFFECT_SCHEMA);
+   if(owner!.formalShadowKeyPem)initializeFormalShadowCustody(this.db);
    this.db.exec('COMMIT');
   }
   if(!this.db.prepare("SELECT value FROM archive_meta WHERE key='event_people_v1'").get()){
@@ -264,11 +268,85 @@ export class WorldStore {
    owner.assertOwned();this.db.exec('BEGIN');
    try{
     const world=this.readWorld(false,false);
-    const audit=world?.id===worldId?projectCommittedFormalBerryFairness(world,this.readFormalBerryArchive(world)):
+    let shadow:ReturnType<typeof readFormalShadowRows>|undefined;
+    if(world?.id===worldId&&owner.formalShadowKeyPem){
+     try{shadow=readFormalShadowRows(this.db,owner,world);}catch{/* isolate unreadable independent G1 storage */}
+    }
+    const audit=world?.id===worldId?projectCommittedFormalBerryFairness(world,this.readFormalBerryArchive(world),shadow?.flatMap(r=>r.proposal?[r.proposal]:[])):
      {status:'unavailable',code:'no-matching-formal-head'} as const;
     this.db.exec('COMMIT');return audit;
    }catch(error){this.db.exec('ROLLBACK');throw error;}
   }catch{return {status:'unavailable',code:'invalid-formal-custody'} as const;}
+ }
+ /** Separate reviewed closed-rain projection, not a G2 signing route. */
+ formalShadowPermissionScope():string|null{
+  const owner=this.developerSpiritFixtureOwner;
+  if(!owner?.formalShadowKeyPem)return null;
+  owner.assertOwned();this.assertDeveloperSpiritSeal();return formalShadowScope(owner);
+ }
+ recordDeveloperFormalShadowPermission(input:unknown){
+  const owner=this.developerSpiritFixtureOwner;
+  if(!owner?.formalShadowKeyPem)return {status:'disabled'} as const;
+  let grant:unknown;
+  try{grant=structuredClone(input);}catch{return {status:'denied'} as const;}
+  if(!verifyFormalShadowPermission(grant,owner))return {status:'denied'} as const;
+  owner.assertOwned();this.db.exec('BEGIN IMMEDIATE');
+  try{
+   const w=this.readWorld(false,false),t=grant.terms;
+   if(!w||w.id!==t.worldId||t.startsAt>w.minute||w.minute>=t.expiresAt||
+    (t.decision==='allow'&&!w.formalRainProvenance?.closed.some(e=>e.episodeId===t.episodeId))){
+    this.db.exec('COMMIT');return {status:'denied'} as const;
+   }
+   const rows=readFormalShadowRows(this.db,owner,w);
+   if(t.version!==rows.length+1){this.db.exec('COMMIT');return {status:'denied'} as const;}
+   appendFormalShadowPermission(this.db,grant);
+   this.db.exec('COMMIT');return {status:'recorded' as const,version:t.version};
+  }catch(error){this.db.exec('ROLLBACK');throw error;}
+ }
+ /** Number-only offline selection: always option 1 from the freshly
+  * validated, independently signed menu. Never requests an actual effect. */
+ stepDeveloperFormalShadowProposal(worldId:string){
+  const owner=this.developerSpiritFixtureOwner;
+  if(!owner?.formalShadowKeyPem)return {status:'disabled'} as const;
+  const no={status:'no_proposal'} as const;
+  owner.assertOwned();this.db.exec('BEGIN IMMEDIATE');
+  try{
+   const w=this.readWorld(false,false);
+   if(!w||w.id!==worldId){this.db.exec('COMMIT');return no;}
+   const rows=readFormalShadowRows(this.db,owner,w),head=rows.at(-1),terms=head?.permission.terms;
+   if(!terms||terms.decision!=='allow'||head.proposal||w.minute<terms.startsAt||w.minute>=terms.expiresAt){
+    this.db.exec('COMMIT');return no;
+   }
+   const prior=rows.filter(r=>r.proposal).at(-1)?.proposal;
+   if(prior&&w.minute<prior.atMinute+prior.cooldownGameMinutes){this.db.exec('COMMIT');return no;}
+   const basis=readFormalRainShadowBasis(this,{scope:'formal-rain-geography-shadow-only',enabled:true,
+    worldId,episodeId:terms.episodeId,maxAgeGameMinutes:terms.maxAgeGameMinutes,sites:terms.sites});
+   if(basis.status!=='geography_only'||basis.revision!==w.revision||basis.atMinute!==w.minute||
+    w.minute>=basis.head.episode.closedMinute+terms.maxAgeGameMinutes){this.db.exec('COMMIT');return no;}
+   const numbered=basis.offers.map(offer=>makeFormalShadowProposal(terms,w,offer,basis.head.episode))
+    .filter(p=>!rows.some(r=>r.proposal?.opportunityId===p.opportunityId));
+   const choice=1,proposal=numbered[choice-1];
+   if(!proposal){this.db.exec('COMMIT');return no;}
+   appendFormalShadowProposal(this.db,proposal);
+   this.db.exec('COMMIT');return {status:'proposed' as const,proposal};
+  }catch(error){this.db.exec('ROLLBACK');throw error;}
+ }
+ readDeveloperFormalShadowProposals(worldId:string){
+  const owner=this.developerSpiritFixtureOwner;
+  if(!owner?.formalShadowKeyPem)return {status:'disabled'} as const;
+  try{
+   owner.assertOwned();this.db.exec('BEGIN');
+   try{
+    const w=this.readWorld(false,false);
+    if(!w||w.id!==worldId){this.db.exec('COMMIT');return {status:'unavailable'} as const;}
+    const rows=readFormalShadowRows(this.db,owner,w),current=rows.at(-1)?.permission.terms;
+    const proposals=rows.flatMap(({proposal:p})=>p?[{proposal:p,
+     permissionCurrent:p.permissionVersion===current?.version&&current.decision==='allow'&&w.minute<p.expiresAt&&
+      !w.clock.paused&&w.weather==='sun'&&!w.formalRainProvenance?.open&&w.formalRainProvenance?.closed.at(-1)?.episodeId===p.episodeId,
+    }]:[]);
+    this.db.exec('COMMIT');return {status:'ready' as const,proposals};
+   }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }catch{return {status:'unavailable'} as const;}
  }
  /** Explicit private resident projection; reads only committed ground. */
  readDeveloperFormalBerryDiscovery(worldId:string,residentId:string){
