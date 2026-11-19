@@ -1,5 +1,6 @@
 extends Control
 
+const CJK_FONT = preload("res://art/fonts/ValleyCJK-Regular.otf")
 const NOTICE := "离线合成选择，不是真实大模型"
 const KEYS := ["springRoot", "fruit", "water", "wood", "meal", "preserve"]
 const NAMES := ["春秋芜菁", "鲜果", "水", "木", "餐食", "罐藏"]
@@ -13,6 +14,9 @@ var endpoint := ""
 var timer: Timer
 
 func _ready() -> void:
+	# This standalone page bypasses ObserverHud; Web has no system CJK fallback.
+	theme = Theme.new()
+	theme.default_font = CJK_FONT
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var backdrop := ColorRect.new()
 	backdrop.color = Color("f0e7d5")
