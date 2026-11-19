@@ -85,14 +85,21 @@ function readState(db:DatabaseSync,r:ValleySpiritFormalArrivalReceipt){
  if(row.schema_version!==1||typeof row.ops!=='string')throw Error('unknown_formal_arrival_release_state');
  return parse(JSON.parse(row.ops),r);
 }
-function custodyAtCurrentHead(db:DatabaseSync,r:ValleySpiritFormalArrivalReceipt):boolean{
- if(!verifyValleySpiritFormalArrivalCustody(db,r))return false;
+interface CommittedHead {readonly worldId:string;readonly worldRevision:number;readonly asOfUs:string;}
+export interface ValleySpiritFormalArrivalHostHead extends CommittedHead {readonly minimumGrantVersion:number;}
+export interface ValleySpiritFormalArrivalLoopbackPacket {
+ readonly marker:CommittedHead & {readonly schemaVersion:1;readonly sectionId:string;readonly grantVersion:number;
+  readonly generatedBy:'offline-fixed-factual-template'};
+ readonly line:{readonly kind:'arrived';readonly atUs:string;readonly text:string};
+}
+function custodyAtCurrentHead(db:DatabaseSync,r:ValleySpiritFormalArrivalReceipt):CommittedHead|null{
+ if(!verifyValleySpiritFormalArrivalCustody(db,r))return null;
  const row=db.prepare('SELECT id,revision,state FROM worlds WHERE id=?').get(r.worldId);
- if(!row)return false;
+ if(!row)return null;
  const head=decodeSavedWorld(row.state);
- if(head.id!==row.id||head.id!==r.worldId||head.mode!=='formal'||head.revision!==row.revision||typeof head.minute!=='number')return false;
+ if(head.id!==row.id||head.id!==r.worldId||head.mode!=='formal'||head.revision!==row.revision||!natural(head.revision)||typeof head.minute!=='number')return null;
  const us=minuteToClimateUs(head.minute);
- return clock(us)&&BigInt(r.atUs)<=BigInt(us);
+ return clock(us)&&BigInt(r.atUs)<=BigInt(us)?{worldId:r.worldId,worldRevision:head.revision,asOfUs:us}:null;
 }
 type State=ReturnType<typeof readState>;
 /** A release binds one actual formal receipt and a live, caller-owned
@@ -124,17 +131,18 @@ abstract class FormalArrivalAttachment {
    this.transaction(false,()=>true);
   }catch(e){this.db.close();throw e;}
  }
- protected transaction<T>(write:boolean,op:(state:State)=>T):T {
+ protected transaction<T>(write:boolean,op:(state:State,head:CommittedHead)=>T):T {
   if(this.isolated)throw Error('formal_arrival_release_isolated');
   this.options.assertOwned();
   if(!sameFile(this.file,regular(this.options.database)))throw Error('changed_formal_arrival_release_database');
   this.db.exec(write?'BEGIN IMMEDIATE':'BEGIN');
   try{
-   if(!custodyAtCurrentHead(this.db,this.receipt))throw Error('formal_arrival_custody_unavailable');
+   const head=custodyAtCurrentHead(this.db,this.receipt);
+   if(!head)throw Error('formal_arrival_custody_unavailable');
    const state=readState(this.db,this.receipt);
    if(!prefix(this.seen,state.log)||state.version<(this.options.minimumGrantVersion??0))throw Error('rewound_formal_arrival_release_state');
    this.seen=state.log;
-   const result=op(state);
+   const result=op(state,head);
    this.options.assertOwned();if(!sameFile(this.file,regular(this.options.database)))throw Error('changed_formal_arrival_release_database');
    this.db.exec('COMMIT');return result;
   }catch(e){try{this.db.exec('ROLLBACK');}catch{this.isolated=true;}throw e;}
@@ -200,13 +208,30 @@ export class ValleySpiritFormalArrivalViewer extends FormalArrivalAttachment {
  }
  current(worldId:string,expectedSectionId?:string):ValleySpiritFormalArrivalPublishedView|null{
   if(worldId!==this.receipt.worldId)return null;
-  try{return this.transaction(false,state=>{
+  try{return this.transaction(false,state=>this.present(state,expectedSectionId));}catch{return null;}
+ }
+ private present(state:State,expectedSectionId?:string):ValleySpiritFormalArrivalPublishedView|null{
    if(!state.allowed||!state.publication||expectedSectionId!==undefined&&state.publication.sectionId!==expectedSectionId)return null;
    const r=this.receipt,whole=BigInt(r.atUs)/1_000_000n,part=BigInt(r.atUs)%1_000_000n;
    const minute=part===0n?String(whole):String(whole)+'.'+String(part).padStart(6,'0').replace(/0+$/,'');
    return Object.freeze({schemaVersion:1,status:'ready',worldId:r.worldId,sectionId:state.publication.sectionId,
     sourceRef:sourceRef(r),grantVersion:state.version,receiptVersion:1,kind:'arrived',atUs:r.atUs,
     text:'游戏分钟 '+minute+'：记录到一次实际到场。',generatedBy:'offline-fixed-factual-template'});
+ }
+ /** Developer-only read. Compare the independent trusted host basis and the
+  * live grant while the same SQLite snapshot pins custody, time, and line. */
+ readForDeveloperLoopback(worldId:string,hostCurrent:()=>ValleySpiritFormalArrivalHostHead|null):ValleySpiritFormalArrivalLoopbackPacket|null{
+  if(worldId!==this.receipt.worldId)return null;
+  try{return this.transaction(false,(state,head)=>{
+   const expected=hostCurrent();
+   if(!expected||!exact(expected,['worldId','worldRevision','asOfUs','minimumGrantVersion'])||
+    expected.worldId!==head.worldId||expected.worldRevision!==head.worldRevision||expected.asOfUs!==head.asOfUs||
+    !natural(expected.minimumGrantVersion)||state.version<expected.minimumGrantVersion)return null;
+   const visible=this.present(state);
+   if(!visible)return null;
+   return Object.freeze({marker:Object.freeze({schemaVersion:1 as const,...head,sectionId:visible.sectionId,
+    grantVersion:visible.grantVersion,generatedBy:visible.generatedBy}),
+    line:Object.freeze({kind:visible.kind,atUs:visible.atUs,text:visible.text})});
   });}catch{return null;}
  }
  verify(value:Readonly<ValleySpiritFormalArrivalPublishedView>):boolean{
