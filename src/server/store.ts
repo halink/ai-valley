@@ -1,3 +1,4 @@
+import {buildSealedMvpAgedG1Basis} from './valley-spirit-aged-g1.js';
 import {makeSealedAgedPlacementTerms,sealedAgedPlacementAgeDigest,sealedAgedPlacementScope,verifiesSealedAgedPlacementEncoding} from './valley-spirit-aged-placement-terms.js';
 import {valleySpiritFruitFallOpportunityId} from '../shared/valley-spirit-effects.js';
 import {resolveMvpRainEpisode} from '../world/mvp-rain-provenance.js';
@@ -827,6 +828,23 @@ export class WorldStore {
     verifySealedMvpSourceAge(owner.sourceAge.keyPem,terms,proof)?{status:'verified-age-metadata' as const,terms}:null):null;
    this.db.exec('COMMIT');return result;
   }catch(error){this.db.exec('ROLLBACK');throw error;}
+ }
+ /** Separate, exact G1 advisory snapshot; it never verifies a caller
+  * supplied assessment digest or upgrades legacy signature-only terms. */
+ readDeveloperMvpAgedG1Basis(worldId:string,proposalId:string,ageProof:unknown){
+  const owner=this.developerSpiritFixtureOwner;
+  if(!owner?.sourceAge||!owner.agedPlacementKeyPem||owner.formalApprovalKeyPem)return null;
+  try{
+   const proof=structuredClone(ageProof);
+   owner.assertOwned();this.assertDeveloperSpiritSeal();this.db.exec('BEGIN');
+   try{
+    const w=this.readWorld(false,false);
+    if(!w||w.id!==worldId){this.db.exec('COMMIT');return null;}
+    assertDeveloperMvpEffectArchive(this.db,w);
+    const result=buildSealedMvpAgedG1Basis(this.db,owner,w,proposalId,proof);
+    this.db.exec('COMMIT');return result;
+   }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }catch{return null;}
  }
  /** Canonical custody handoff only. The assessment digest is caller-carried
   * and strictly unverified until an aged G1 authority is implemented. */
