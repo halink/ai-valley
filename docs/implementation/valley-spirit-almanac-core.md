@@ -115,3 +115,16 @@ or mismatching credit for any point rejects the entire packet. Only the
 canonical allowlisted packet leaves the reader, not the source rows or World.
 This is a read-only evidence pilot, not an account/purpose grant, a dry send,
 or a production/runtime activation.
+
+A disconnected developer fixture may separately pin an Ed25519 **weather-use**
+authority and a documentary synthetic account fingerprint. Signed grants and
+revocations bind the exact branded quota account/run, sealed world/fixture,
+canonical quota policy digest, weather-specific purpose, current public weather
+epoch, contiguous version, and at most 30 seconds of wall-clock validity.
+The verifier never accepts a caller-supplied active flag or uses a yearbook
+reviewer key. Transitions are recorded in one bounded private SQLite log, with a
+revocation slot reserved for every accepted grant; an open verifier isolates
+observed history rewind. Closing or rotating the public weather grant denies
+old use even if the purpose signature remains valid. No quota is booked, no
+outbound transport opens, and the record proves neither real account identity
+nor any production authorization.
