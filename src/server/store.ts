@@ -218,14 +218,18 @@ export class WorldStore {
   if(!w||w.id!==worldId||w.mode!=='formal'||w.formalRainProvenance)return false;
   const before=w.revision++;w.formalRainProvenance=emptyFormalRainProvenance(w);this.commit(w,before);return true;
  }
- readCommittedFormalRainEpisode(worldId:string,id:string){
+ /** Internal same-head read for formal shadow analysis; no external route. */
+ readCommittedFormalRainHead(worldId:string,id:string){
   if(!this.allowFormalRainProvenance)return null;
   try{
    const w=this.load();
    if(!w||w.id!==worldId||w.mode!=='formal')return null;
    const found=w.formalRainProvenance?.closed.find(e=>e.episodeId===id);
-   return found?structuredClone(found):null;
+   return found?{world:w,episode:structuredClone(found)}:null;
   }catch{return null;}
+ }
+ readCommittedFormalRainEpisode(worldId:string,id:string){
+  return this.readCommittedFormalRainHead(worldId,id)?.episode??null;
  }
  seasonalLedger(world:World){if(!this.seasonalModel)throw Error('seasonal_model_store_required');return readSeasonalLedger(this.db,world,true);}
  private assertWritable(world:World):void {
