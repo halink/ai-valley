@@ -1,3 +1,4 @@
+import {makeAgedBirthReviewTerms,verifiesAgedBirthReview} from './valley-spirit-aged-birth-review.js';
 import {agedG1ReviewTerms,agedG1RevokeTerms,advanceAgedG1ReviewEpoch,initializeAgedG1ReviewEpoch,
  readAgedG1ReviewEpoch,verifiesAgedG1Review} from './valley-spirit-aged-g1-review.js';
 import {buildSealedMvpAgedG1Basis} from './valley-spirit-aged-g1.js';
@@ -880,6 +881,33 @@ export class WorldStore {
     const terms=basis?agedG1ReviewTerms(basis,epoch):null;
     const result=!terms?null:signed===undefined?{status:'review-signing-input' as const,terms,executionAuthorized:false as const}:
      verifiesAgedG1Review(key,terms,signed)?{status:'review-verified' as const,terms,executionAuthorized:false as const}:null;
+    this.db.exec('COMMIT');this.agedG1ObservedEpoch=epoch;return result;
+   }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }catch{return null;}
+ }
+ /** Triple-key review of one exact sealed candidate, still non-executable.
+  * The genuine age, current permission, assessment and reviewer epoch are
+  * revalidated from the same read snapshot; no ground schema is adopted. */
+ readDeveloperMvpAgedBirthReview(worldId:string,proposalId:string,ageProof:unknown,g1Proof:unknown,request:unknown,review?:unknown){
+  const owner=this.developerSpiritFixtureOwner;
+  if(!owner?.agedG1ReviewerKeyPem||!owner.agedPlacementKeyPem||!owner.sourceAge||owner.formalApprovalKeyPem)return null;
+  try{
+   const input=structuredClone({ageProof,g1Proof,request,review});
+   owner.assertOwned();this.assertDeveloperSpiritSeal();this.db.exec('BEGIN');
+   try{
+    const w=this.readWorld(false,false);
+    if(!w||w.id!==worldId){this.db.exec('COMMIT');return null;}
+    assertDeveloperMvpEffectArchive(this.db,w);
+    const effects=w.mvpClimate?.spiritEffects,settlement=w.mvpClimate?.spiritFruitSettlement;
+    const basis=effects?.version===1&&effects.applied.length===0&&effects.ground.items.length===0&&
+     settlement&&settlement.discoveries.length===0&&settlement.pickups.length===0?
+      buildSealedMvpAgedG1Basis(this.db,owner,w,proposalId,input.ageProof):null;
+    const epoch=this.checkedAgedG1ReviewEpoch(owner.seal);
+    const terms=basis&&verifiesAgedG1Review(owner.agedG1ReviewerKeyPem,agedG1ReviewTerms(basis,epoch),input.g1Proof)?
+     makeAgedBirthReviewTerms(basis,epoch,input.g1Proof,input.request):null;
+    const result=!terms?null:input.review===undefined?{status:'birth-review-signing-input' as const,terms,executionAuthorized:false as const}:
+     verifiesAgedBirthReview(owner.agedPlacementKeyPem,terms,input.review)?
+      {status:'birth-review-verified' as const,terms,executionAuthorized:false as const}:null;
     this.db.exec('COMMIT');this.agedG1ObservedEpoch=epoch;return result;
    }catch(error){this.db.exec('ROLLBACK');throw error;}
   }catch{return null;}
