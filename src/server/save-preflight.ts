@@ -4,6 +4,7 @@ import {validateSeasonalKnowledge} from '../world/mvp-seasonal-knowledge.js';
 import {validateMvpPreservation} from '../world/mvp-preservation.js';
 import {validateMvpClimate} from '../world/mvp-climate-state.js';
 import {hasMvpSpiritEffects,hasMvpSpiritEffectEvents,validateMvpSpiritEffects} from '../world/mvp-spirit-effects.js';
+import {validMvpFallenFruitSettlementLedger} from '../world/mvp-fallen-fruit-settlement.js';
 import type {World} from '../shared/types.js';
 /** Read-before-write compatibility gate. No migration or model/runtime dependency.
  * The probe reads private copies so SQLite cannot create/change the source SHM.
@@ -15,6 +16,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {gunzipSync} from 'node:zlib';
 import {createHash} from 'node:crypto';
+import {isDeveloperMvpSpiritFixtureOwner,type DeveloperMvpSpiritFixtureOwner} from './valley-spirit-fixture-files.js';
 
 export class SaveCompatibilityError extends Error {
  constructor(readonly code:string){super(code);this.name='SaveCompatibilityError';}
@@ -24,7 +26,7 @@ const record=(v:unknown):v is Record<string,unknown>=>!!v&&typeof v==='object'&&
 const owns=(v:object,key:string)=>Object.prototype.hasOwnProperty.call(v,key);
 // Exact reserved upgrade names only. Unknown legacy extension names are not
 // guessed from prefixes/regex. These modules have no writable format yet.
-const unsupportedUpgradeFields=['worldUpgrade','mvpGroundFruit','mvpSpiritEffects'] as const;
+const unsupportedUpgradeFields=['worldUpgrade','mvpGroundFruit','mvpSpiritEffects','spiritFruitSettlement','mvpSpiritFruitSettlement'] as const;
 const MAX_STATE_BYTES=256*1024*1024;
 
 /** Validate only the compatibility envelope, not every game's domain rule. */
@@ -101,6 +103,9 @@ export function assertWorldCompatibility(value:unknown,allowMvpSpiritEffectFixtu
  if(hasMvpSpiritEffects(world.mvpClimate)||hasMvpSpiritEffectEvents(world.events)){
   if(!allowMvpSpiritEffectFixture)fail('save_mvpSpiritEffects_requires_isolated_fixture');
   try{validateMvpSpiritEffects(world);}catch{fail('save_invalid_mvpSpiritEffects');}
+  const climate=world.mvpClimate;
+  if(climate&&owns(climate,'spiritFruitSettlement')&&!validMvpFallenFruitSettlementLedger(world,climate.spiritFruitSettlement))
+   fail('save_invalid_mvpSpiritFruitSettlement');
  }
 }
 export function decodeSavedWorld(body:unknown,allowMvpSpiritEffectFixture=false):Record<string,unknown> {
@@ -117,13 +122,30 @@ function jsonBlob(body:unknown):unknown {
  try{return JSON.parse(gunzipSync(body,{maxOutputLength:MAX_STATE_BYTES}).toString());}
  catch{fail('save_invalid_landscape_encoding');}
 }
-function inspectDatabase(db:DatabaseSync,rejectClimate:boolean,validateWorld?: (world:Record<string,unknown>)=>void,allowSeasonalModel=false,inspectSeasonalModel?:(s:SeasonalLedger|null)=>void):Record<string,unknown>|null {
+function inspectDatabase(db:DatabaseSync,rejectClimate:boolean,validateWorld?: (world:Record<string,unknown>)=>void,allowSeasonalModel=false,inspectSeasonalModel?:(s:SeasonalLedger|null)=>void,fixtureSeal?:string):Record<string,unknown>|null {
+ const fixtureTable=db.prepare("SELECT name,type FROM sqlite_master WHERE lower(name)='mvp_spirit_developer_fixture'").get();
+ if(fixtureTable&&!fixtureSeal)fail('save_developer_fixture_requires_owner');
+ if(fixtureSeal){
+  if(fixtureTable?.name!=='mvp_spirit_developer_fixture'||fixtureTable.type!=='table')fail('save_unknown_developer_fixture');
+  const seals=db.prepare('SELECT * FROM mvp_spirit_developer_fixture LIMIT 2').all();
+  if(seals.length!==1||Object.keys(seals[0]).length!==2||seals[0].version!==1||seals[0].seal!==fixtureSeal)
+   fail('save_unknown_developer_fixture');
+ }
  const table=db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='worlds'").get();
  if(!table)fail('save_missing_worlds_table');
  let latest:Record<string,unknown>|null=null;
  for(const row of db.prepare('SELECT id,revision,length(CAST(state AS BLOB)) AS stateBytes, CASE WHEN length(CAST(state AS BLOB))<=? THEN state ELSE NULL END AS state FROM worlds ORDER BY rowid').iterate(MAX_STATE_BYTES)){
   if(typeof row.stateBytes!=='number'||row.stateBytes>MAX_STATE_BYTES)fail('save_state_too_large');
-  const world=decodeSavedWorld(row.state);
+  const world=decodeSavedWorld(row.state,fixtureSeal!==undefined);
+  if(fixtureSeal){
+   if(latest!==null||world.mode!=='validation'||world.mvpSeasonalModelVersion!==undefined||
+    typeof world.id!=='string'||!world.id.startsWith('godot-mvp-')||
+    !(world as unknown as World).mvpClimate?.rainProvenance)fail('save_unknown_developer_fixture');
+   const expected=(world as unknown as World).events.filter(event=>event.mvpFruitFall!==undefined);
+   const archived=db.prepare("SELECT id,at,body FROM events WHERE world_id=? AND json_type(body,'$.mvpFruitFall') IS NOT NULL ORDER BY rowid LIMIT 4097").all(world.id);
+   if(expected.length!==archived.length||expected.some((event,i)=>event.id!==archived[i].id||
+    event.at!==archived[i].at||JSON.stringify(event)!==archived[i].body))fail('save_invalid_developer_effect_archive');
+  }
   if(!allowSeasonalModel&&world.schemaVersion===2)fail('save_seasonal_model_requires_explicit_entry');
   if(rejectClimate&&owns(world,'mvpClimate'))fail('save_mvpClimate_requires_opt_in');
   validateWorld?.(world);
@@ -196,12 +218,16 @@ function unchanged(path:string,files:ReadonlyArray<SourceFile|null>,suffixes:rea
  * checkpoint. WAL is copied alongside the DB and SQLite reads its latest state.
  * This is not a substitute for caller-held ownership against concurrent writers.
  */
-export function preflightWorldSave(path:string,options:{requireWorld?:boolean;rejectClimate?:boolean;allowSeasonalModel?:boolean;inspectSeasonalModel?:(s:SeasonalLedger|null)=>void;inspectOptionalAlmanac?:(snapshot:DatabaseSync,world:Record<string,unknown>)=>void;validateWorld?:(world:Record<string,unknown>)=>void}={}):Record<string,unknown>|null {
+export function preflightWorldSave(path:string,options:{requireWorld?:boolean;rejectClimate?:boolean;allowSeasonalModel?:boolean;inspectSeasonalModel?:(s:SeasonalLedger|null)=>void;inspectOptionalAlmanac?:(snapshot:DatabaseSync,world:Record<string,unknown>)=>void;validateWorld?:(world:Record<string,unknown>)=>void;developerSpiritFixtureOwner?:DeveloperMvpSpiritFixtureOwner}={}):Record<string,unknown>|null {
+ const fixture=options.developerSpiritFixtureOwner;
+ if(fixture!==undefined&&(!isDeveloperMvpSpiritFixtureOwner(fixture)||fixture.database!==path||options.rejectClimate||options.allowSeasonalModel))
+  fail('save_developer_fixture_requires_owner');
  if(path===':memory:')return null;
  const suffixes=['','-wal','-journal'] as const;
  const files:Array<SourceFile|null>=[];
  let directory:string|undefined,db:DatabaseSync|undefined;
  try{
+  fixture?.assertOwned();
   for(const suffix of suffixes)files.push(sourceFile(path,suffix));
   unchanged(path,files,suffixes);
   const main=files[0];
@@ -215,10 +241,12 @@ export function preflightWorldSave(path:string,options:{requireWorld?:boolean;re
   unchanged(path,files,suffixes);
   // readOnly may create SHM on this PRIVATE copy, never on the user's save.
   db=new DatabaseSync(copy,{readOnly:true});
-  const result=inspectDatabase(db,options.rejectClimate===true,options.validateWorld,options.allowSeasonalModel===true,options.inspectSeasonalModel);
+  if(fixture)db.exec('PRAGMA trusted_schema=OFF; PRAGMA query_only=ON');
+  const result=inspectDatabase(db,options.rejectClimate===true,options.validateWorld,options.allowSeasonalModel===true,options.inspectSeasonalModel,fixture?.seal);
   if(!result&&options.requireWorld)fail('save_missing_world');
   if(result&&options.inspectOptionalAlmanac){db.exec('PRAGMA trusted_schema=OFF; PRAGMA query_only=ON');options.inspectOptionalAlmanac(db,result);}
   unchanged(path,files,suffixes);
+  fixture?.assertOwned();
   return result;
  }catch(error){if(error instanceof SaveCompatibilityError)throw error;throw new SaveCompatibilityError('save_preflight_failed');}
  finally{

@@ -28,6 +28,11 @@ export function validateMvpClimate(w:World):void {
   if(s.spiritEffects?.version!==1)throw Error('mvp_climate_unknown_spirit_effect_dependency');
   keys.push('spiritEffects');
  }
+ if(owns(s,'spiritFruitSettlement')){
+  if(s.spiritFruitSettlement?.schemaVersion!==1||!s.spiritEffects)
+   throw Error('mvp_climate_unknown_spirit_fruit_settlement_dependency');
+  keys.push('spiritFruitSettlement');
+ }
  if(Object.keys(s).length!==keys.length||keys.some(k=>!owns(s,k)))throw Error('mvp_climate_unknown_fields');
  if(minuteToClimateUs(s.adoptedMinute)!==s.adoptedUs||minuteToClimateUs(s.lastMinute)!==s.lastUs||s.lastMinute!==w.minute||s.adoptedMinute>s.lastMinute||parseClimateUs(s.adoptedUs)>parseClimateUs(s.lastUs))throw Error('mvp_climate_clock_mismatch');
  if(!same(s.current,point(w.seed,w.minute,s.schemaVersion)))throw Error('mvp_climate_sample_mismatch');

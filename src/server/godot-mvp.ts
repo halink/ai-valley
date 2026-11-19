@@ -1,3 +1,4 @@
+import {captureValleySpiritMvpMealStep,type ValleySpiritMvpMealWitness} from './valley-spirit-meal-custody.js';
 import {parseValleySpiritAlmanacId,parseValleySpiritTopicWindow,type ValleySpiritPublicReaders} from './valley-spirit-reader.js';
 import {parseWeatherArchiveQuery,type ValleySpiritJournal} from './valley-spirit.js';
 import {mvpMealObservation} from './mvp-meal-observation.js';
@@ -106,7 +107,7 @@ function mvpPlanDefinition(w:World,action:Action){return action.type==='mvpPrese
 function mvpCanStart(w:World,r:Resident,action:Action):boolean {
  return planStartError(w,{id:'mvp-exchange-preview',actorId:r.id,actorRevision:r.revision,createdAt:w.minute,definition:mvpPlanDefinition(w,action),intention:'本地规则：行动预检',actions:[action]})===null;
 }
-export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string} {
+export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string;idleFallback?:true} {
  // Each recipient chooses independently, using exact received terms and its
  // own supplies. No automatic acceptance, distant stock probe, or free food.
  const wantsFood=(r.inventory.berry??0)<1&&(r.inventory.water??0)>=2;
@@ -230,7 +231,7 @@ export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string
   if(shelterRoomWithinIdleTime(w,r))
    return {action:{type:'mvpShelter'},reason:'本人在户外察觉雨水，其他行动已处理，选择步行到共屋前室短候'};
  }
- return {action:{type:'wait',minutes:MVP_IDLE_WAIT_MINUTES},reason:'当前没有可执行的规则行动，短暂等待'};
+ return {action:{type:'wait',minutes:MVP_IDLE_WAIT_MINUTES},reason:'当前没有可执行的规则行动，短暂等待',idleFallback:true};
 }
 /** Rule-only farming preference. Engine permissions never enforce these quotas. */
 function chooseAgricultureRule(w:World,r:Resident):{action:Action;reason:string}|null {
@@ -250,7 +251,7 @@ function chooseAgricultureRule(w:World,r:Resident):{action:Action;reason:string}
  return null;
 }
 function calendarSeason(w:World){return ['spring','summer','autumn','winter'][Math.floor(w.minute/1440/28)%4];}
-export function createMvpSession(options:{world?:World;commit?:(world:World,previousRevision:number)=>void;persistent?:boolean}={}){
+export function createMvpSession(options:{world?:World;commit?:(world:World,previousRevision:number)=>void;persistent?:boolean;observeCommittedMeals?:(witnesses:readonly ValleySpiritMvpMealWitness[])=>void}={}){
  let world=structuredClone(options.world??createMvpWorld());
  if(options.world)inheritReceiptHistory(options.world,world);
  const initialRevision=world.revision;
@@ -296,7 +297,9 @@ export function createMvpSession(options:{world?:World;commit?:(world:World,prev
     const shelterWorkers=new Set(world.residents.filter(r=>r.activity?.action.type==='mvpShelter'||r.plan?.actions[0]?.type==='mvpShelter').map(r=>r.id));
     const activityPlans=new Map(world.residents.map(r=>[r.id,r.activity?.planId]));
     const actionFailures:import('../world/engine.js').StepActionFailure[]=[];
-    stepWorld(world,1,{actionFailures});
+    const stageMealWitnesses=options.persistent&&options.commit&&options.observeCommittedMeals
+     ?captureValleySpiritMvpMealStep(world,{actionFailures}):null;
+    if(!stageMealWitnesses)stepWorld(world,1,{actionFailures});
     for(const failed of world.residents.filter(r=>r.lastFailure)){
      const action=gathering.get(failed.id);
      const fresh=newGather.get(failed.id);
@@ -327,7 +330,12 @@ export function createMvpSession(options:{world?:World;commit?:(world:World,prev
     }
     validateMvpClimate(world);validateMvpPreservation(world);
     world.revision=Math.max(world.revision,current.revision+1);
+    // Capture only fresh typed evidence. Neither capture nor delivery can
+    // pause the world, and no draft acknowledgement is emitted on rollback.
+    let witnesses:readonly ValleySpiritMvpMealWitness[]=[];
+    if(stageMealWitnesses)try{witnesses=stageMealWitnesses();}catch{/* optional custody */}
     options.commit?.(world,current.revision);
+    if(witnesses.length)try{options.observeCommittedMeals?.(witnesses);}catch{/* committed world is independent */}
     }catch(error){world=current;serial=previousSerial;for(const key of Object.keys(decisions))delete decisions[key];Object.assign(decisions,previousDecisions);throw error;}
    }
   }catch(error){fault=error instanceof Error?error.message:String(error);world.clock.paused=true;world.clock.reason=fault;world.revision++;}

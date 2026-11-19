@@ -1,4 +1,4 @@
-import type {ValleySpiritAlmanac,ValleySpiritAlmanacAdmission,ValleySpiritAlmanacRange} from './valley-spirit-almanac.js';
+import {syntheticValleySpiritAlmanacAdmission,type ValleySpiritAlmanac,type ValleySpiritAlmanacAdmission,type ValleySpiritAlmanacRange} from './valley-spirit-almanac.js';
 
 const FEATURE='valley-spirit-almanac' as const;
 const MAX_HOUR=Math.floor(1e9/60);
@@ -115,7 +115,7 @@ export class ValleySpiritAlmanacScheduler {
      {status:'published',window,entryId:id,fallback}:{status:'blocked',window,fallback};
    }
    if(!this.almanac.objective(range))return {status:'no-evidence',window,fallback};
-   const id=await this.almanac.generate(range,{reserve:request=>this.settlement(request)});
+   const id=await this.almanac.generate(range,syntheticValleySpiritAlmanacAdmission(request=>this.settlement(request)));
    if(!id){
     const now=this.almanac.schedulingState(range);
     return {status:now.status==='unavailable'||now.status==='recorded'&&['dispatch-intent','sent-unknown'].includes(now.phase)?'blocked':'deferred',window,fallback};

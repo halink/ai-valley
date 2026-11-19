@@ -79,12 +79,14 @@ function sighting(w:World,r:Resident,lot:MvpGroundFruit):MvpFallenFruitSighting 
 /** Private view for exactly one resident from the committed fixture head.
  * No rain/ownership archive lookup gives a resident knowledge, and neither
  * another resident's view nor a future lot is discoverable here. */
-export function observeMvpFallenFruit(w:World,residentId:string):readonly MvpFallenFruitSighting[] {
+export function observeMvpFallenFruit(
+ w:World,residentId:string,settledEffectIds?:ReadonlySet<string>,
+):readonly MvpFallenFruitSighting[] {
  try{
   const head=context(w,residentId);
   if(!head)return [];
   const {resident,items}=head;
-  const nearby=items.filter(lot=>distance(resident.at,lot.at)<=SIGHT_AND_ROUTE_STEPS)
+  const nearby=items.filter(lot=>!settledEffectIds?.has(lot.effectId)&&distance(resident.at,lot.at)<=SIGHT_AND_ROUTE_STEPS)
    .sort((a,b)=>distance(resident.at,a.at)-distance(resident.at,b.at)||a.at.y-b.at.y||a.at.x-b.at.x||stable(a.effectId,b.effectId));
   const observed:MvpFallenFruitSighting[]=[];
   for(const lot of nearby)if(observes(w,resident,lot)){
@@ -111,14 +113,14 @@ function needsPermit(w:World,r:Resident):boolean {
  * arbitrary wait from barter/shelter/rest/commitments. A visible distant lot
  * yields no movement intent. Future rules must use a typed settlement path. */
 export function chooseMvpFallenFruitPickup(
- w:World,residentId:string,slot:MvpFallenFruitDecisionSlot,
+ w:World,residentId:string,slot:MvpFallenFruitDecisionSlot,settledEffectIds?:ReadonlySet<string>,
 ):MvpFallenFruitPickupIntent|null {
  if(slot!=='idle-fallback')return null;
  try{
   const head=context(w,residentId);
   if(!head||!needsPermit(w,head.resident))return null;
   const {resident,items}=head;
-  const lot=items.filter(candidate=>same(candidate.at,resident.at)).sort((a,b)=>stable(a.effectId,b.effectId))
+  const lot=items.filter(candidate=>!settledEffectIds?.has(candidate.effectId)&&same(candidate.at,resident.at)).sort((a,b)=>stable(a.effectId,b.effectId))
    .find(candidate=>observes(w,resident,candidate));
   if(!lot)return null;
   const proof=sighting(w,resident,lot);

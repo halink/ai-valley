@@ -3,11 +3,13 @@ import {assertSeasonalKnowledgeAdvance} from '../world/mvp-seasonal-knowledge.js
 import {rejectMvpClimateForModels} from '../world/mvp-climate-state.js';
 import {assertMvpRainProvenanceAdvance} from '../world/mvp-rain-provenance.js';
 import {assertMvpSpiritEffectsAdvance,validMvpSpiritFixtureCapacity} from '../world/mvp-spirit-effects.js';
+import {assertMvpFallenFruitFixtureTransition,planMvpFallenFruitFixtureStep,
+ type MvpFallenFruitFixtureOperation,type MvpFallenFruitFixtureResult} from './valley-spirit-resident-fruit-fixture.js';
 import type {MvpGroundFruitCapacity} from '../world/mvp-ground-fruit.js';
 import type {Biography,HistoryPage,HistoryQuery} from '../shared/history.js';
 import {normalizeHistory,historyKey,readHistoryCursor,makeHistoryCursor} from './history-query.js';
 import {DatabaseSync} from 'node:sqlite';
-import {mkdirSync} from 'node:fs';
+import {lstatSync,mkdirSync} from 'node:fs';
 import {dirname} from 'node:path';
 import {gzipSync,gunzipSync} from 'node:zlib';
 import {terrainRevision} from './landscape.js';
@@ -16,6 +18,7 @@ import {AtomicDailySnapshots} from './acceptance-daily-store.js';
 import type {DailySnapshotConfig} from './acceptance-daily-snapshots.js';
 import {attachReceiptHistory} from '../world/receipts.js';
 import {assertWorldCompatibility,decodeSavedWorld,preflightWorldSave} from './save-preflight.js';
+import {claimDeveloperMvpSpiritFixtureOwner,isDeveloperMvpSpiritFixtureOwner,type DeveloperMvpSpiritFixtureOwner} from './valley-spirit-fixture-files.js';
 export interface AppendedHistory {
  events: WorldEvent[];
  processed: string[];
@@ -46,20 +49,35 @@ export class WorldStore {
  private readonly allowMvpClimate:boolean;
  private readonly seasonalModel:boolean;
  private readonly mvpSpiritEffectFixture?:MvpGroundFruitCapacity;
- constructor(path:string,options:{dailySnapshots?:DailySnapshotConfig;allowMvpClimate?:boolean;seasonalModel?:true;mvpSpiritEffectFixture?:MvpGroundFruitCapacity}={}){
+ private readonly developerSpiritFixtureOwner?:DeveloperMvpSpiritFixtureOwner;
+ constructor(path:string,options:{dailySnapshots?:DailySnapshotConfig;allowMvpClimate?:boolean;seasonalModel?:true;mvpSpiritEffectFixture?:MvpGroundFruitCapacity;developerSpiritFixtureOwner?:DeveloperMvpSpiritFixtureOwner}={}){
   this.allowMvpClimate=options.allowMvpClimate===true;
   this.seasonalModel=options.seasonalModel===true;
   const fixture=options.mvpSpiritEffectFixture;
+  const owner=options.developerSpiritFixtureOwner;
+  if(owner!==undefined){
+   if(!isDeveloperMvpSpiritFixtureOwner(owner)||owner.database!==path||!this.allowMvpClimate||
+    fixture!==undefined||this.seasonalModel||options.dailySnapshots!==undefined)
+    throw Error('mvp_spirit_fixture_requires_private_disk_owner');
+   claimDeveloperMvpSpiritFixtureOwner(owner);
+   this.developerSpiritFixtureOwner=owner;
+   this.mvpSpiritEffectFixture=owner.capacity;
+  }
   if(fixture!==undefined){
    // Never permit this developer authority against a real or files-backed save.
    if(path!==':memory:'||!this.allowMvpClimate||this.seasonalModel||options.dailySnapshots!==undefined||
     !validMvpSpiritFixtureCapacity(fixture))throw Error('mvp_spirit_fixture_requires_disposable_memory');
    this.mvpSpiritEffectFixture=Object.freeze({...fixture});
   }
-  preflightWorldSave(path,{rejectClimate:!this.allowMvpClimate,allowSeasonalModel:this.seasonalModel});
-  if(path!==':memory:')mkdirSync(dirname(path),{recursive:true,mode:0o700});
+  preflightWorldSave(path,{rejectClimate:!this.allowMvpClimate,allowSeasonalModel:this.seasonalModel,developerSpiritFixtureOwner:owner});
+  owner?.assertOwned();
+  const needsDeveloperSeal=!!owner&&lstatSync(path,{bigint:true}).size===0n;
+  if(path!==':memory:'&&!owner)mkdirSync(dirname(path),{recursive:true,mode:0o700});
   this.db=new DatabaseSync(path);
-  this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;
+  try{
+  this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;');
+  if(needsDeveloperSeal)this.db.exec('BEGIN IMMEDIATE');
+  this.db.exec(`
    CREATE TABLE IF NOT EXISTS worlds (id TEXT PRIMARY KEY,revision INTEGER NOT NULL,state BLOB NOT NULL);
    CREATE TABLE IF NOT EXISTS terrain (hash TEXT PRIMARY KEY, body BLOB NOT NULL);
    CREATE TABLE IF NOT EXISTS resource_bases (world_id TEXT PRIMARY KEY, body BLOB NOT NULL);
@@ -74,6 +92,11 @@ export class WorldStore {
    CREATE TABLE IF NOT EXISTS event_animals (world_id TEXT NOT NULL,animal_id TEXT NOT NULL,event_id TEXT NOT NULL,event_seq INTEGER NOT NULL,PRIMARY KEY(event_id,animal_id),FOREIGN KEY(event_id) REFERENCES events(id));
    CREATE INDEX IF NOT EXISTS event_animal_sequence ON event_animals(world_id,animal_id,event_seq);
    CREATE TRIGGER IF NOT EXISTS immutable_event BEFORE UPDATE ON events WHEN NEW.body <> OLD.body BEGIN SELECT RAISE(ABORT, 'event_id_conflict'); END;`);
+  if(needsDeveloperSeal){
+   this.db.exec('CREATE TABLE mvp_spirit_developer_fixture (version INTEGER NOT NULL CHECK(version=1), seal TEXT NOT NULL)');
+   this.db.prepare('INSERT INTO mvp_spirit_developer_fixture VALUES (1,?)').run(owner!.seal);
+   this.db.exec('COMMIT');
+  }
   if(!this.db.prepare("SELECT value FROM archive_meta WHERE key='event_people_v1'").get()){
    this.db.exec('BEGIN IMMEDIATE');try{this.db.exec("INSERT OR IGNORE INTO event_people(world_id,person_id,event_id,event_seq) SELECT e.world_id,a.value,e.id,e.rowid FROM events e,json_each(e.body,'$.actors') a WHERE typeof(a.value)='text'");this.db.prepare('INSERT INTO archive_meta(key,value) VALUES(?,?)').run('event_people_v1','1');this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
@@ -81,9 +104,10 @@ export class WorldStore {
   if(!this.db.prepare("SELECT value FROM archive_meta WHERE key='event_animals_v1'").get()){
    this.db.exec('BEGIN IMMEDIATE');try{this.db.exec("INSERT OR IGNORE INTO event_animals(world_id,animal_id,event_id,event_seq) SELECT e.world_id,a.value,e.id,e.rowid FROM events e,json_each(e.body,'$.animalIds') a WHERE json_type(e.body,'$.animalIds')='array' AND a.type='text'");this.db.prepare('INSERT INTO archive_meta(key,value) VALUES(?,?)').run('event_animals_v1','1');this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
-  if(options.dailySnapshots){try{this.dailySnapshots=new AtomicDailySnapshots(this.db,options.dailySnapshots);}catch(error){this.db.close();throw error;}}
+  if(options.dailySnapshots)this.dailySnapshots=new AtomicDailySnapshots(this.db,options.dailySnapshots);
   this.exactReceipt=this.db.prepare('SELECT 1 FROM receipts WHERE world_id=? AND receipt=?');
   this.receiptPrefix=this.db.prepare('SELECT receipt FROM receipts WHERE world_id=? AND receipt>=? AND receipt<? ORDER BY rowid LIMIT 1');
+  }catch(error){this.db.close();throw error;}
  }
  private resourceBase(id:string): Resource[] | undefined {
   let base=this.resourceBases.get(id);
@@ -120,6 +144,8 @@ export class WorldStore {
   });
  }
  private readWorld(working:boolean,indexedReceipts:boolean):World|null {
+  this.developerSpiritFixtureOwner?.assertOwned();
+  this.assertDeveloperSpiritSeal();
   const row=this.db.prepare('SELECT state FROM worlds ORDER BY rowid DESC LIMIT 1').get() as {state:string|Uint8Array}|undefined;
   if (!row) return null;
   const saved=decodeSavedWorld(row.state,!!this.mvpSpiritEffectFixture) as unknown as World & {terrainKey?:string;resourceChanges:Array<[number,Resource]>;resourceCount:number;ledgerVersion?:1};
@@ -177,7 +203,10 @@ export class WorldStore {
  }
  seasonalLedger(world:World){if(!this.seasonalModel)throw Error('seasonal_model_store_required');return readSeasonalLedger(this.db,world,true);}
  private assertWritable(world:World):void {
+  this.developerSpiritFixtureOwner?.assertOwned();
   assertWorldCompatibility(world,!!this.mvpSpiritEffectFixture);
+  if(this.developerSpiritFixtureOwner&&(world.mode!=='validation'||!world.id.startsWith('godot-mvp-')||!world.mvpClimate?.rainProvenance))
+   throw Error('mvp_spirit_fixture_invalid_world');
   if(!this.allowMvpClimate)rejectMvpClimateForModels(world);
   if(!this.seasonalModel&&world.mvpSeasonalModelVersion!==undefined)throw Error('seasonal_model_store_required');
  }
@@ -198,6 +227,7 @@ export class WorldStore {
  ):T {
   const capacity=this.mvpSpiritEffectFixture;
   if(!capacity)throw Error('mvp_spirit_fixture_requires_disposable_memory');
+  this.developerSpiritFixtureOwner?.assertOwned();
   this.db.exec('BEGIN IMMEDIATE');
   try{
    const current=this.readWorld(false,false);
@@ -215,13 +245,39 @@ export class WorldStore {
    return change.result;
   }catch(error){this.db.exec('ROLLBACK');throw error;}
  }
- private writeCommit(world:World,previousRevision:number|null,appended?:AppendedHistory,seasonalLedger?:SeasonalLedger):void {
+ /** No runtime route: the fixture operation is recalculated from a fresh
+  * authoritative head under one SQLite lock, never by accepting a draft. */
+ runMvpFallenFruitSettlementFixture(worldId:string,operation:MvpFallenFruitFixtureOperation):MvpFallenFruitFixtureResult {
+  if(!this.hasMvpSpiritEffectFixture())throw Error('mvp_spirit_resident_fruit_requires_isolated_fixture');
+  this.developerSpiritFixtureOwner?.assertOwned();
+  const pinned=structuredClone(operation);
+  this.db.exec('BEGIN IMMEDIATE');
+  try{
+   const current=this.readWorld(false,false);
+   if(!current||current.id!==worldId)throw Error('mvp_spirit_resident_fruit_invalid_head');
+   const planned=planMvpFallenFruitFixtureStep(current,pinned);
+   if(planned.draft){
+    this.assertWritable(planned.draft);
+    this.writeCommit(planned.draft,current.revision,undefined,undefined,pinned);
+   }
+   this.db.exec('COMMIT');
+   return planned.result;
+  }catch(error){this.db.exec('ROLLBACK');throw error;}
+ }
+ private writeCommit(world:World,previousRevision:number|null,appended?:AppendedHistory,seasonalLedger?:SeasonalLedger,
+  settlementOperation?:MvpFallenFruitFixtureOperation):void {
+  this.assertDeveloperSpiritSeal();
+  if(this.developerSpiritFixtureOwner){
+   const ids=this.db.prepare('SELECT id FROM worlds ORDER BY rowid LIMIT 2').all();
+   if(ids.length>1||ids.length===1&&ids[0].id!==world.id)throw Error('mvp_spirit_fixture_world_changed');
+  }
   const row=this.db.prepare('SELECT revision,state FROM worlds WHERE id=?').get(world.id) as {revision:number;state:string|Uint8Array}|undefined;
   const stored=row?decodeSavedWorld(row.state,!!this.mvpSpiritEffectFixture):null;
   if(stored){if(stored.schemaVersion===3&&world.schemaVersion!==3)throw Error('shelter_schema_downgrade');if(stored.mvpSeasonalModelVersion===1&&(!this.seasonalModel||world.mvpSeasonalModelVersion!==1))throw Error('seasonal_model_dependency_downgrade');assertSeasonalKnowledgeAdvance(stored as unknown as World,world);if(Object.prototype.hasOwnProperty.call(stored,'mvpPreservation')&&!world.mvpPreservation)throw Error('preservation_dependency_downgrade');if(Object.prototype.hasOwnProperty.call(stored,'mvpSoil')&&(!world.mvpSoil||(world.mvpClimate?.schemaVersion??0)<2))throw Error('soil_dependency_downgrade');if(Object.prototype.hasOwnProperty.call(stored,'mvpAgriculture')&&(!world.mvpAgriculture||world.mvpClimate?.schemaVersion!==3))throw Error('agriculture_dependency_downgrade');if(!this.allowMvpClimate)rejectMvpClimateForModels(stored);}
   if((row?.revision??null)!==previousRevision)throw new Error('stale_world_revision');
   if(this.allowMvpClimate)assertMvpRainProvenanceAdvance(stored as unknown as World|null,world);
   if(this.mvpSpiritEffectFixture)assertMvpSpiritEffectsAdvance(stored as unknown as World|null,world,this.mvpSpiritEffectFixture);
+  if(this.mvpSpiritEffectFixture)assertMvpFallenFruitFixtureTransition(stored as unknown as World|null,world,settlementOperation);
   const prior=this.seasonalModel?readSeasonalLedger(this.db,stored as unknown as World|null,true):null;
   if(!!(seasonalLedger??prior)!==(world.mvpSeasonalModelVersion===1))throw Error('seasonal_model_ledger_marker_mismatch');
   if(seasonalLedger){if(!this.seasonalModel)throw Error('seasonal_model_store_required');writeSeasonalLedger(this.db,seasonalLedger,prior,world);}
@@ -239,6 +295,12 @@ export class WorldStore {
   }
   this.db.prepare('INSERT INTO worlds(id,revision,state) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision,state=excluded.state').run(world.id,world.revision,this.encode(world));
   this.dailySnapshots?.committed(world,previousRevision);
+ }
+ private assertDeveloperSpiritSeal():void {
+  if(!this.developerSpiritFixtureOwner)return;
+  const seals=this.db.prepare('SELECT * FROM mvp_spirit_developer_fixture LIMIT 2').all();
+  if(seals.length!==1||Object.keys(seals[0]).length!==2||seals[0].version!==1||
+   seals[0].seal!==this.developerSpiritFixtureOwner.seal)throw Error('mvp_spirit_fixture_seal_changed');
  }
  dailySnapshotReport(){
   if(!this.dailySnapshots)throw new Error('daily_snapshots_not_enabled');
@@ -270,5 +332,5 @@ export class WorldStore {
   const partners:Biography['partners']=[];for(const row of changes){const e=JSON.parse(row.body) as WorldEvent,other=e.actors.find(actor=>actor!==id);if(!other)continue;const current=[...partners].reverse().find(p=>p.personId===other&&p.endedAt===null&&!p.endReason);if(e.relationshipEnd){const end=e.relationshipEnd;if(current){current.kind=end.kind;current.marriedAt??=end.marriedAt;current.endedAt=end.endedAt;current.endReason=end.reason;current.sourceEvents.push(e.id);}else partners.push({personId:other,kind:end.kind,startedAt:end.startedAt,marriedAt:end.marriedAt,endedAt:end.endedAt,endReason:end.reason,sourceEvents:[e.id]});}else if(e.populationChange==='separate'){if(current){current.endedAt=e.at;current.sourceEvents.push(e.id);}else partners.push({personId:other,kind:'unspecified',startedAt:null,endedAt:e.at,sourceEvents:[e.id]});}else if(e.populationChange==='marriage'){if(current){current.kind='married';current.marriedAt=e.at;current.sourceEvents.push(e.id);}else partners.push({personId:other,kind:'married',marriedAt:e.at,startedAt:null,endedAt:null,sourceEvents:[e.id]});}else partners.push({personId:other,kind:'dating',startedAt:e.at,endedAt:null,sourceEvents:[e.id]});}
   return {recordCount:row.count,firstRecordAt:row.first,lastRecordAt:row.last,partners};
  }
- close(){this.db.close();}
+ close(){this.db.close();this.developerSpiritFixtureOwner?.release();}
 }

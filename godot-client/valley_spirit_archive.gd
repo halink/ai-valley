@@ -111,14 +111,21 @@ static func almanac_presentation(value: Variant, context: Dictionary) -> String:
 	if context.is_empty() or not value is Dictionary or not _eq_string(value.get("worldId"), context.worldId) or not _eq_number(value.get("permissionVersion"), context.permissionVersion):
 		return ""
 	if _eq_string(value.get("status"), "objective-only") and _exact(value, ["status", "worldId", "permissionVersion"]):
-		return "暂无已发布的模型年鉴。客观天气档案仍可读取，未使用规则文案冒充模型年鉴。"
+		return "暂无已发布的年鉴。客观天气档案仍可读取，不代表模型生成。"
 	if not _eq_string(value.get("status"), "ready") or not _exact(value, ["status", "worldId", "permissionVersion", "entry"]): return ""
 	var entry: Variant = value.entry
-	if not _exact(entry, ["mode", "entryId", "textVersion", "supersedes", "fromMinute", "throughMinute", "projectionVersion", "permissionVersion", "coverage", "unselectedHourBuckets", "facts", "atmosphere"]): return ""
-	if not _eq_string(entry.mode, "model-curated-verified-weather") or not _eq_string(entry.coverage, "selected-actual-points-only") or not _eq_number(entry.projectionVersion, 1) or not _eq_number(entry.permissionVersion, context.permissionVersion): return ""
+	if not _exact(entry, ["mode", "origin", "entryId", "textVersion", "supersedes", "fromMinute", "throughMinute", "projectionVersion", "permissionVersion", "coverage", "unselectedHourBuckets", "facts", "atmosphere"]): return ""
+	if not _eq_string(entry.mode, "curated-verified-weather") or not _eq_string(entry.coverage, "selected-actual-points-only") or not _eq_number(entry.projectionVersion, 1) or not _eq_number(entry.permissionVersion, context.permissionVersion): return ""
 	if not _number(entry.fromMinute, 0, context.atMinute) or not _number(entry.throughMinute, entry.fromMinute, context.atMinute) or not _integer(entry.textVersion, 1, 10000): return ""
 	if not entry.facts is Array or entry.facts.is_empty() or entry.facts.size() > 24: return ""
-	var lines := PackedStringArray(["谷灵 · 最新已发布年鉴", "模型选材，事实字段已核对。以下为获选时点，不代表整段天气。", "文字版本：%d" % int(entry.textVersion), ""])
+	if not _exact(entry.origin, ["schemaVersion", "kind"]) or not _eq_number(entry.origin.schemaVersion, 1): return ""
+	var attribution := ""
+	if _eq_string(entry.origin.kind, "offline-synthetic"):
+		attribution = "离线合成选材，不是真实模型输出。"
+	elif _eq_string(entry.origin.kind, "unverified-admission"):
+		attribution = "选材来源未核验，不代表真实模型输出。"
+	if attribution.is_empty(): return ""
+	var lines := PackedStringArray(["谷灵 · 最新已发布年鉴", attribution, "事实字段已核对；以下为获选时点，不代表整段天气。", "文字版本：%d" % int(entry.textVersion), ""])
 	var shown := {}
 	for fact in entry.facts:
 		if not _exact(fact, ["sourceRef", "minute", "field", "value", "text"]) or not _number(fact.minute, entry.fromMinute, entry.throughMinute) or not fact.field is String: return ""

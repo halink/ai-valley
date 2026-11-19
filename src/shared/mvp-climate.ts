@@ -25,6 +25,7 @@ export interface MvpClimateState {
  current:MvpClimatePoint;
  rainProvenance?:MvpRainProvenance;
  spiritEffects?:import('./valley-spirit-effects.js').MvpSpiritEffects;
+ spiritFruitSettlement?:import('./valley-spirit-fairness.js').MvpFallenFruitSettlementLedger;
 }
 
 /** A completed, fully observed precipitation episode containing pure rain. */

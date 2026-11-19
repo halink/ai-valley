@@ -194,6 +194,19 @@ export class ValleySpiritShadowQueue {
     return this.write(entry, this.state.entries.map(e => e === old ? entry : e));
   }
 
+  /** The trusted committed world's clock alone can expire an unapproved
+   * proposal even after its public sources no longer resolve. */
+  expire(proposalId:string,head:{worldId:string;nowMicroMinute:number},currentPolicy?:ValleySpiritFruitFallPolicy):QueueWrite {
+    if(!this.current())return blocked("queue_isolated");
+    const old=this.state.entries.find(e=>e.proposal.proposalId===proposalId);
+    if(!old)return blocked("not_found");
+    if(!isEnabledValleySpiritFruitFallPolicy(currentPolicy)||!isEqualRecord(old.policy,currentPolicy))return blocked("shadow_disabled");
+    if(head.worldId!==this.worldId||!natural(head.nowMicroMinute)||head.nowMicroMinute<old.proposal.validUntilMicroMinute)return blocked("invalid_request");
+    if(old.assessment.status!=="proposed")return {status:"unchanged",entry:structuredClone(old)};
+    const entry:ValleySpiritShadowEntry={...old,assessment:{status:"expired",checkedAtMicroMinute:head.nowMicroMinute}};
+    return this.write(entry,this.state.entries.map(e=>e===old?entry:e));
+  }
+
   private write(entry: ValleySpiritShadowEntry, entries: readonly ValleySpiritShadowEntry[]): QueueWrite {
     if (!validEntry(entry, this.worldId)) return blocked("invalid_request");
     const next = {...this.state, entries};

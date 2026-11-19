@@ -4,7 +4,7 @@ import type {ValleySpiritFruitFallReceipt} from '../shared/valley-spirit-effects
 import {emitLedgerEvent} from '../world/events.js';
 import {inspectMvpGroundFruitPlacement} from '../world/mvp-ground-fruit.js';
 import {resolveMvpRainEpisode} from '../world/mvp-rain-provenance.js';
-import {MVP_FRUIT_FALL_EVENT_TEXT} from '../world/mvp-spirit-effects.js';
+import {MVP_FRUIT_FALL_EVENT_TEXT,projectMvpSpiritActiveGround} from '../world/mvp-spirit-effects.js';
 import type {WorldStore} from './store.js';
 import {executeValleySpiritFruitFallFixture,recoverValleySpiritFruitFallReceipt,
  type ValleySpiritApprovedSchedule,type ValleySpiritFruitFallAuthority,type ValleySpiritFruitFallExecution,
@@ -99,7 +99,8 @@ export function runMvpFruitFallAttachmentFixture(
    if(current.clock.paused)return {result:{status:'rejected',reason:'schedule'}};
    const now=Number(current.mvpClimate!.lastUs),pinned=approved.pinnedOption;
    const rain=resolveMvpRainEpisode(current,pinned.rainEventId);
-   const placement=inspectMvpGroundFruitPlacement(current,state.ground,approved.sourceResourceId,approved.target,capacity);
+   const activeGround=projectMvpSpiritActiveGround(current);
+   const placement=activeGround&&inspectMvpGroundFruitPlacement(current,activeGround,approved.sourceResourceId,approved.target,capacity);
    const effectsAllowed=state.applied.length<approved.maxCommittedEffects;
    const evidence:ValleySpiritFruitFallEvidence={
     worldId:current.id,nowMicroMinute:now,

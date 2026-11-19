@@ -1,5 +1,7 @@
 import type {MvpClimateState,MvpRainEpisode} from '../shared/mvp-climate.js';
 import type {World,WorldEvent} from '../shared/types.js';
+import type {MvpGroundFruitState} from '../shared/mvp-ground-fruit.js';
+import {settledMvpFallenFruitEffectIds} from '../shared/valley-spirit-fairness.js';
 import {validValleySpiritFruitFallReceipt,type MvpSpiritEffects} from '../shared/valley-spirit-effects.js';
 import {minuteToClimateUs,parseClimateUs} from './mvp-climate.js';
 import {inspectMvpGroundFruitPlacement,validateMvpGroundFruitState,type MvpGroundFruitCapacity} from './mvp-ground-fruit.js';
@@ -91,6 +93,19 @@ export function validateMvpSpiritEffects(world:World):void {
  }
 }
 
+/** Occupancy only. Release a live slot for an exactly validated pickup
+ * while keeping every source debit/birth/effect receipt in durable history. */
+export function projectMvpSpiritActiveGround(world:World):MvpGroundFruitState|null {
+ try{
+  const climate=world.mvpClimate,state=climate?.spiritEffects;
+  if(!climate||!state||Object.hasOwn(world,'simulationOnly')||climate.lastUs!==minuteToClimateUs(world.minute))return null;
+  validateMvpSpiritEffects(world);
+  if(!own(climate,'spiritFruitSettlement'))return structuredClone(state.ground);
+  const picked=settledMvpFallenFruitEffectIds(world.id,world.revision,Number(climate.lastUs),state.applied,climate.spiritFruitSettlement);
+  return picked?{version:1,items:structuredClone(state.ground.items.filter(lot=>!picked.has(lot.effectId)))}:null;
+ }catch{return null;}
+}
+
 function comparableWorld(world:World){
  const {mvpClimate,resources,events,revision,...other}=world;
  if(!mvpClimate)return {other,climate:null};
@@ -125,7 +140,8 @@ export function assertMvpSpiritEffectsAdvance(
  const {receipt,rain,eventId,sourceBefore,sourceAfter}=after.applied.at(-1)!;
  const lot=after.ground.items.at(-1)!;
  const pinnedRain=resolveMvpRainEpisode(previous,receipt.rainEventId);
- const head=inspectMvpGroundFruitPlacement(previous,before.ground,lot.sourceResourceId,lot.at,capacity);
+ const activeGround=projectMvpSpiritActiveGround(previous);
+ const head=activeGround&&inspectMvpGroundFruitPlacement(previous,activeGround,lot.sourceResourceId,lot.at,capacity);
  if(lot.effectId!==receipt.effectId||minuteToClimateUs(previous.minute)!==lot.placedUs||
    !pinnedRain||!equal(pinnedRain,rain)||!head||head.source.resourceInstanceId!==lot.sourceResourceInstanceId||
    head.source.ripeAvailable!==sourceBefore||next.events.at(-1)?.id!==eventId)

@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import {validValleySpiritFruitFallReceipt,type ValleySpiritFruitFallReceipt} from './valley-spirit-effects.js';
+import {validValleySpiritFruitFallReceipt,type MvpSpiritAppliedEffect,type ValleySpiritFruitFallReceipt} from './valley-spirit-effects.js';
 
 const LIMIT = 4096; // wire/read bound, never a gameplay quota or retention policy
 const ID = /^[A-Za-z0-9][A-Za-z0-9:._-]{0,199}$/u;
@@ -60,6 +60,15 @@ export interface ValleySpiritFallenFruitPickupFact {
  readonly item:'fruit';
  readonly debitGroundFruit:1;
  readonly creditResidentFruit:1;
+}
+
+/** Versioned private fixture ledger. Original effect birth lots remain immutable;
+ * availability is recomputed by subtracting exactly these pickup receipts. */
+export interface MvpFallenFruitSettlementLedger {
+ readonly schemaVersion:1;
+ readonly worldId:string;
+ readonly discoveries:readonly ValleySpiritFallenFruitDiscoveryFact[];
+ readonly pickups:readonly ValleySpiritFallenFruitPickupFact[];
 }
 
 const PROPOSAL_KEYS=['schemaVersion','worldId','proposalId','opportunityId','targetId','proposedAtMicroMinute'] as const;
@@ -170,4 +179,40 @@ export function projectValleySpiritFairness(input:ValleySpiritFairnessInput):Val
    actualPickups:{count:pickups.size,byResident:counts(pickups.values(),p=>p.residentId)},
   };
  }catch{return unavailable;}
+}
+
+/** Shared lower-layer validation for active ground. Readers must separately
+ * verify the immutable effect births/events and pass the same committed head. */
+export function settledMvpFallenFruitEffectIds(
+ worldId:string,worldRevision:number,nowMicroMinute:number,applied:readonly MvpSpiritAppliedEffect[],ledger:unknown,
+):ReadonlySet<string>|null {
+ if(!natural(worldRevision)||!natural(nowMicroMinute)||!exact(ledger,['schemaVersion','worldId','discoveries','pickups'])||
+  ledger.schemaVersion!==1||ledger.worldId!==worldId||!Array.isArray(ledger.discoveries)||!Array.isArray(ledger.pickups)||
+  ledger.discoveries.length>LIMIT||ledger.pickups.length>LIMIT)return null;
+ const {discoveries,pickups}=ledger as unknown as MvpFallenFruitSettlementLedger;
+ const fairness=projectValleySpiritFairness({worldId,proposalDirections:[],actualEffects:applied.map(a=>a.receipt),
+  actualDiscoveries:discoveries,actualPickups:pickups});
+ // Unlike a diagnostic projection, authoritative history cannot store duplicate rows.
+ if(fairness.status!=='ready'||fairness.actualDiscoveries.count!==discoveries.length||fairness.actualPickups.count!==pickups.length||
+  discoveries.some(f=>f.worldRevision>worldRevision||f.discoveredAtMicroMinute>nowMicroMinute)||
+  pickups.some(f=>f.worldRevision>worldRevision||f.settledAtMicroMinute>nowMicroMinute))return null;
+ const committedRevision=new Map(applied.map(a=>[a.receipt.effectId,Number(a.eventId.slice(a.eventId.lastIndexOf(':')+1))]));
+ const usedRevision=new Set<number>(committedRevision.values());
+ let last=0;
+ for(const f of discoveries){
+  const predecessor=committedRevision.get(f.effectId);
+  if(predecessor===undefined||f.worldRevision<=predecessor||f.worldRevision<=last||usedRevision.has(f.worldRevision))return null;
+  last=f.worldRevision;usedRevision.add(last);
+ }
+ last=0;
+ for(const f of pickups){
+  if(f.worldRevision<=last||usedRevision.has(f.worldRevision))return null;
+  last=f.worldRevision;usedRevision.add(last);
+ }
+ const chronological=[
+  ...discoveries.map(f=>({revision:f.worldRevision,minute:f.discoveredAtMicroMinute})),
+  ...pickups.map(f=>({revision:f.worldRevision,minute:f.settledAtMicroMinute})),
+ ].sort((a,b)=>a.revision-b.revision);
+ if(chronological.some((f,i)=>i>0&&f.minute<chronological[i-1].minute))return null;
+ return new Set(pickups.map(p=>p.effectId));
 }
