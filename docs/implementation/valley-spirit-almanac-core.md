@@ -75,3 +75,14 @@ different first JSON sample in the same hour, or a missing post-commit JSON writ
 must never be treated as proof for a public archive record. Nothing here proves
 JSON publication, whole-DB anti-rollback, or a combined atomic yearbook; sharing a
 SQLite snapshot across the existing head, edition, and life readers is separate.
+
+A separate **private atomic read** can now pin a released weather entry and the
+latest addressed-speech section. It owns the existing runtime lock and opens one
+physically read-only SQLite connection. In one read transaction it checks the
+world head, current weather grant, released almanac data, all of that edition's
+weather source credits, latest life publication, current native life grants, and
+speech custody. JSON supplies only candidate weather payload; absent or mismatching
+payload fails closed, without replacing authoritative SQLite evidence. An older
+fact remains eligible if it is exact and currently authorized; an older life
+edition does not replace the latest section. This neither changes the older
+non-atomic inspector nor adds any runtime, public, edition-write or review path.

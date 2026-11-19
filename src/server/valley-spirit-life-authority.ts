@@ -104,41 +104,56 @@ function connect(database:string,worldId:string,assertOwned:()=>void){
   assertOwned();return {db,before,state};
  }catch(e){db.close();throw e;}
 }
-/** Physical read-only handle. Return null on unknown or if any referenced row
- * is private; the caller never sees whether a private receipt actually exists. */
-export class SqliteValleySpiritLifeReader implements ValleySpiritLifeAuthority{
- private readonly db:DatabaseSync;
- private readonly file:ReturnType<typeof safePath>;
- private isolated=false;
- private seen:Operation[];
- constructor(private readonly database:string,private readonly worldId:string,private readonly assertOwned:()=>void,
-   private readonly committedHead:()=>ValleySpiritLifeCommittedHead|null,
-   private readonly isCurrentReceipt:(receipt:Readonly<ValleySpiritLifeReceipt>,head:ValleySpiritLifeCommittedHead)=>boolean){
-  const {db,before,state}=connect(database,worldId,assertOwned);
-  this.db=db;this.file=before;this.seen=state.operations;
- }
- readCurrent(worldId:string,sourceRefs:readonly string[]):unknown{
-  if(this.isolated||worldId!==this.worldId||!Array.isArray(sourceRefs)||!sourceRefs.length||sourceRefs.length>MAX_REFS||
+/** Internal reader borrowing a caller-owned connection; never closes it. */
+export function valleySpiritLifeAuthorityOnConnection(db:DatabaseSync,expectedWorld:string,guard:()=>void,
+ committedHead:()=>ValleySpiritLifeCommittedHead|null,
+ isCurrentReceipt:(receipt:Readonly<ValleySpiritLifeReceipt>,head:ValleySpiritLifeCommittedHead)=>boolean):ValleySpiritLifeAuthority {
+ return lifeReaderWithPrefix(db,expectedWorld,guard,committedHead,isCurrentReceipt,[]);
+}
+function lifeReaderWithPrefix(db:DatabaseSync,expectedWorld:string,guard:()=>void,
+ committedHead:()=>ValleySpiritLifeCommittedHead|null,
+ isCurrentReceipt:(receipt:Readonly<ValleySpiritLifeReceipt>,head:ValleySpiritLifeCommittedHead)=>boolean,
+ initial:Operation[]):ValleySpiritLifeAuthority {
+ assertWorld(expectedWorld);
+ let seen=initial,isolated=false;
+ return {readCurrent(worldId:string,sourceRefs:readonly string[]):unknown{
+  if(isolated||worldId!==expectedWorld||!Array.isArray(sourceRefs)||!sourceRefs.length||sourceRefs.length>MAX_REFS||
     new Set(sourceRefs).size!==sourceRefs.length||sourceRefs.some(ref=>typeof ref!=='string'||!ref.startsWith(worldId+'/life-')||!hex.test(ref.slice(worldId.length+6))))return null;
   try{
-   this.assertOwned();
-   if(!sameFile(this.file,safePath(this.database)))throw Error('changed_life_authority_database');
-   const head=this.committedHead();
+   guard();
+   const head=committedHead();
    if(head?.worldId!==worldId||!time(head.asOfUs))return null;
-   const state=read(this.db,worldId);
-   if(!extendsHistory(this.seen,state.operations))throw Error('rewound_life_authority_history');
-   this.seen=state.operations;
+   const state=read(db,worldId);
+   if(!extendsHistory(seen,state.operations))throw Error('rewound_life_authority_history');
+   seen=state.operations;
    const rows=[];
    for(const sourceRef of sourceRefs){
     const row=state.sources.get(sourceRef);
-    if(!row?.allow||BigInt(row.receipt.atUs)>BigInt(head.asOfUs)||this.isCurrentReceipt(Object.freeze({...row.receipt}),head)!==true)return null;
+    if(!row?.allow||BigInt(row.receipt.atUs)>BigInt(head.asOfUs)||isCurrentReceipt(Object.freeze({...row.receipt}),head)!==true)return null;
     rows.push({receipt:{...row.receipt},grant:{audience:'valley-spirit-public',status:'granted',grantVersion:row.grantVersion,
      worldId,sourceRef,receiptVersion:row.receipt.receiptVersion,receiptDigest:row.digest}});
    }
-   this.assertOwned();
+   guard();
    return {schemaVersion:VERSION,worldId,asOfUs:head.asOfUs,rows};
-  }catch{this.isolated=true;return null;}
+  }catch{isolated=true;return null;}
+ }};
+}
+/** Physical read-only handle; absence and denied receipts are indistinguishable. */
+export class SqliteValleySpiritLifeReader implements ValleySpiritLifeAuthority{
+ private readonly db:DatabaseSync;
+ private readonly reader:ValleySpiritLifeAuthority;
+ constructor(database:string,worldId:string,assertOwned:()=>void,
+  committedHead:()=>ValleySpiritLifeCommittedHead|null,
+  isCurrentReceipt:(receipt:Readonly<ValleySpiritLifeReceipt>,head:ValleySpiritLifeCommittedHead)=>boolean){
+  const {db,before,state}=connect(database,worldId,assertOwned);
+  this.db=db;
+  // Keep the initially validated prefix, without resolving any receipt at open.
+  this.reader=lifeReaderWithPrefix(db,worldId,()=>{
+   assertOwned();
+   if(!sameFile(before,safePath(database)))throw Error('changed_life_authority_database');
+  },committedHead,isCurrentReceipt,state.operations);
  }
+ readCurrent(worldId:string,sourceRefs:readonly string[]):unknown{return this.reader.readCurrent(worldId,sourceRefs);}
  close(){this.db.close();}
 }
 

@@ -22,6 +22,10 @@ function validated(text:string|null,worldId:string):ValleySpiritAlmanacEntry[]{
  if(!validateValleySpiritAlmanacEntries(rows)||!rows.every(e=>e.packet.worldId===worldId))throw Error('invalid_almanac_state');
  return rows;
 }
+/** Internal query; caller owns connection and snapshot lifetime. */
+export function readValleySpiritAlmanacSnapshot(db:DatabaseSync,worldId:string):ValleySpiritAlmanacEntry[]{
+ return validated(tables(db,worldId),worldId);
+}
 /** Used on the authoritative save's private preflight copy, before writable
  * WorldStore opens. This inspector makes no migrations or repairs. */
 export function inspectValleySpiritAlmanac(db:DatabaseSync,worldId:string):void {
@@ -35,7 +39,7 @@ export class SqliteValleySpiritAlmanacReader {
   try{this.db.exec('PRAGMA trusted_schema=OFF; PRAGMA query_only=ON');inspectValleySpiritAlmanac(this.db,worldId);}catch(e){this.db.close();throw e;}
  }
  read():ValleySpiritAlmanacEntry[]{
-  this.assertOwned();return validated(tables(this.db,this.worldId),this.worldId);
+  this.assertOwned();return readValleySpiritAlmanacSnapshot(this.db,this.worldId);
  }
  close(){this.db.close();}
 }
@@ -57,7 +61,7 @@ export class SqliteValleySpiritAlmanacStore implements ValleySpiritAlmanacStore 
   try{this.db.exec('PRAGMA trusted_schema=OFF; PRAGMA synchronous=FULL');}catch(e){this.db.close();throw e;}
  }
  read():ValleySpiritAlmanacEntry[]{
-  this.assertOwned();return validated(tables(this.db,this.worldId),this.worldId);
+  this.assertOwned();return readValleySpiritAlmanacSnapshot(this.db,this.worldId);
  }
  replace(previous:readonly ValleySpiritAlmanacEntry[],next:readonly ValleySpiritAlmanacEntry[]):boolean {
   this.assertOwned();

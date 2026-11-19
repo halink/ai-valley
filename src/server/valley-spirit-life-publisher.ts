@@ -236,35 +236,41 @@ function currentLatest(state:Index,worldId:string,almanac:ValleySpiritLifeAlmana
  return substantiated?Object.freeze({status:'ready',generatedBy:'offline-synthetic-selection',worldId,
   range:Object.freeze({...newest.section.packet.range}),sectionId:substantiated.sectionId,lines:substantiated.lines}):null;
 }
-/** Reader owns a physically read-only SQLite connection; the HTTP seam accepts
- * only this explicitly provided fixture handle, not the writer or a draft. */
+/** Internal publication reader on the caller's SQLite snapshot. */
+export function valleySpiritLifeViewOnConnection(db:DatabaseSync,worldId:string,guard:()=>void,authority:ValleySpiritLifeAuthority){
+ return lifeViewWithPrefix(db,worldId,guard,authority,[]);
+}
+function lifeViewWithPrefix(db:DatabaseSync,expectedWorld:string,guard:()=>void,authority:ValleySpiritLifeAuthority,initial:readonly Op[]){
+ if(!WORLD.test(expectedWorld))throw Error('invalid_life_publication_world');
+ const almanac=new ValleySpiritLifeAlmanac(authority,'grounded-public-life-dev');
+ let isolated=false,seen=initial;
+ return (worldId:string):ValleySpiritPublishedLifeView|null=>{
+  if(isolated||worldId!==expectedWorld)return null;
+  try{
+   guard();
+   const next=read(db,worldId);
+   if(!prefix(seen,next.ops))throw Error('rewound_life_publication_database');
+   seen=next.ops;
+   const latest=currentLatest(next,worldId,almanac);
+   guard();return latest;
+  }catch{isolated=true;return null;}
+ };
+}
+/** Reader owns a physically read-only SQLite connection; HTTP only accepts this existing handle. */
 export class ValleySpiritLifeViewer {
  private readonly db:DatabaseSync;
- private readonly file:ReturnType<typeof regular>;
- private readonly almanac:ValleySpiritLifeAlmanac;
- private seen:readonly Op[];
- private isolated=false;
- constructor(private readonly options:Options){
+ private readonly readLatest:(worldId:string)=>ValleySpiritPublishedLifeView|null;
+ constructor(options:Options){
   if(options.mode!==MODE||!WORLD.test(options.worldId))throw Error('life_publication_disabled');
-  options.assertOwned();this.file=regular(options.database);this.almanac=new ValleySpiritLifeAlmanac(options.authority,'grounded-public-life-dev');
+  options.assertOwned();const file=regular(options.database);
   this.db=new DatabaseSync(options.database,{readOnly:true});
   try{
    this.db.exec('PRAGMA trusted_schema=OFF; PRAGMA query_only=ON');
-   if(!same(this.file,regular(options.database)))throw Error('changed_life_publication_database');
-   this.seen=read(this.db,options.worldId).ops;
+   const guard=()=>{options.assertOwned();if(!same(file,regular(options.database)))throw Error('changed_life_publication_database');};
+   guard();
+   this.readLatest=lifeViewWithPrefix(this.db,options.worldId,guard,options.authority,read(this.db,options.worldId).ops);
   }catch(e){this.db.close();throw e;}
  }
- latest(worldId:string):ValleySpiritPublishedLifeView|null {
-  if(this.isolated||worldId!==this.options.worldId)return null;
-  try{
-   this.options.assertOwned();
-   if(!same(this.file,regular(this.options.database)))throw Error('changed_life_publication_database');
-   const next=read(this.db,worldId);
-   if(!prefix(this.seen,next.ops))throw Error('rewound_life_publication_database');
-   this.seen=next.ops;
-   const latest=currentLatest(next,worldId,this.almanac);
-   this.options.assertOwned();return latest;
-  }catch{this.isolated=true;return null;}
- }
+ latest(worldId:string):ValleySpiritPublishedLifeView|null{return this.readLatest(worldId);}
  close(){this.db.close();}
 }
