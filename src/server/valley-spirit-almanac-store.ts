@@ -2,7 +2,7 @@ import {appendOrdinaryWeatherWithdrawal,readOrdinaryWeatherWithdrawals,ordinaryW
 import {DatabaseSync} from 'node:sqlite';
 import {lstatSync} from 'node:fs';
 import {ALMANAC_ENTRY_SCHEMA,REVIEWED_OFFLINE_ORIGIN,validateValleySpiritAlmanacEntries,type ValleySpiritAlmanacEntry,type ValleySpiritAlmanacStore} from './valley-spirit-almanac.js';
-import {appendOrdinaryWeatherReceipt,ordinaryReviewSaveScope,ordinaryReviewDigest,readExactOrdinaryWeatherReceipt,readOrdinaryWeatherReceipts,
+import {ORDINARY_OFFLINE_CORRECTION_SCHEMA,appendOrdinaryWeatherReceipt,ordinaryReviewSaveScope,ordinaryReviewDigest,readExactOrdinaryWeatherReceipt,readOrdinaryWeatherReceipts,
  type OrdinaryWeatherReviewReceipt} from './valley-spirit-ordinary-weather-receipt.js';
 import {readValleySpiritWeatherPermission} from './valley-spirit-permissions.js';
 import type {PublicWeatherEntry} from './valley-spirit.js';
@@ -47,7 +47,32 @@ function readState(db:DatabaseSync,worldId:string,scope?:string){
  const revision=db.prepare('SELECT revision FROM main.worlds WHERE id=?').get(worldId)?.revision;
  const withdrawals=readOrdinaryWeatherWithdrawals(db,hasWithdrawal,revision,publications);
  if(hasWithdrawal&&ordinaryReviewDigest(withdrawals)!==anchor)throw Error('invalid_almanac_withdrawal_anchor');
- return {rows,publications,withdrawals,revision};
+ const state={rows,publications,withdrawals,revision};
+ for(const e of reviewed(rows)){
+  if(e.textVersion!==2)continue;
+  const t=publications.get(e.entryId)!.terms;
+  const parent=correctionPredecessor(state,e.supersedes!,t.reviewerFingerprint);
+  if(t.schema!==ORDINARY_OFFLINE_CORRECTION_SCHEMA||!parent||t.headRevision<parent.minimumRevision||
+   t.predecessorDigest!==parent.predecessorDigest||t.predecessorReceiptDigest!==parent.predecessorReceiptDigest||
+   t.predecessorWithdrawalDigest!==parent.predecessorWithdrawalDigest)
+   throw Error('invalid_ordinary_weather_correction_custody');
+ }
+ return state;
+}
+function correctionPredecessor(state:Pick<ReturnType<typeof readState>,'rows'|'publications'|'withdrawals'>,entryId:string,reviewerFingerprint:string){
+ const prior=state.rows.find(e=>e.entryId===entryId);
+ const receipt=state.publications.get(entryId);
+ const withdrawal=state.withdrawals.find(w=>w.terms.entryId===entryId);
+ if(!prior||prior.textVersion!==1||!receipt||receipt.terms.reviewerFingerprint!==reviewerFingerprint||
+  withdrawal?.terms.reason!=='source-correction')return null;
+ return {prior,minimumRevision:withdrawal.terms.headRevision,predecessorDigest:ordinaryReviewDigest(prior),
+  predecessorReceiptDigest:ordinaryReviewDigest(receipt),predecessorWithdrawalDigest:ordinaryReviewDigest(withdrawal)};
+}
+export function readOrdinaryWeatherCorrectionBasis(db:DatabaseSync,worldId:string,scope:string,entryId:string,reviewerFingerprint:string){
+ const state=readState(db,worldId,scope);
+ const parent=correctionPredecessor(state,entryId,reviewerFingerprint);
+ if(!parent||state.rows.some(e=>e.supersedes===entryId))return null;
+ return {...parent,before:state.rows};
 }
 function visible(state:ReturnType<typeof readState>){
  const withdrawn=new Set(state.withdrawals.map(r=>r.terms.entryId));
@@ -105,6 +130,11 @@ export class SqliteValleySpiritAlmanacReader {
  read():ValleySpiritAlmanacEntry[]{
   return this.publicationState?structuredClone(visible(this.publicationState)):
    this.snapshot(()=>readValleySpiritAlmanacSnapshot(this.db,this.worldId,this.scope));
+ }
+ /** For the owned presentation adapter only: keep history for chain validation,
+  * but visibility still requires matchesReviewedSources in this same snapshot. */
+ readHistoryForPresentation():ValleySpiritAlmanacEntry[]{
+  return this.publicationState?structuredClone(this.publicationState.rows):this.read();
  }
  matchesReviewedSources(entry:ValleySpiritAlmanacEntry,records:readonly PublicWeatherEntry[]):boolean {
   const matches=(state:ReturnType<typeof readState>)=>

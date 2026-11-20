@@ -27,7 +27,7 @@ export interface ValleySpiritPublicReaders {
   {status:'invalid'|'unavailable'};
 }
 /** Intentionally has no transport, generation, store/write or scheduling seam. */
-export function createValleySpiritPublicReaders(journal:JournalReader,reader?:Pick<SqliteValleySpiritAlmanacReader,'read'>&Partial<Pick<SqliteValleySpiritAlmanacReader,'matchesReviewedSources'|'withPublicationSnapshot'>>):ValleySpiritPublicReaders {
+export function createValleySpiritPublicReaders(journal:JournalReader,reader?:Pick<SqliteValleySpiritAlmanacReader,'read'>&Partial<Pick<SqliteValleySpiritAlmanacReader,'matchesReviewedSources'|'withPublicationSnapshot'|'readHistoryForPresentation'>>):ValleySpiritPublicReaders {
  const authority:ValleySpiritAlmanacAuthority={
   permission:()=>journal.publicWeatherPermission(),
   resolve:ref=>journal.resolveSource(ref),
@@ -38,7 +38,7 @@ export function createValleySpiritPublicReaders(journal:JournalReader,reader?:Pi
     reader?.matchesReviewedSources?.(entry,current.records)===true;
   },
  };
- const almanac=reader?new ValleySpiritAlmanac({read:()=>reader.read(),replace:()=>false},authority):null;
+ const almanac=reader?new ValleySpiritAlmanac({read:()=>reader.readHistoryForPresentation?.()??reader.read(),replace:()=>false},authority):null;
  const topics=new ValleySpiritAlmanacTopics(authority);
  const publication=<T>(read:()=>T):T|null=>{
   try{return reader?.withPublicationSnapshot?reader.withPublicationSnapshot(read):read();}catch{return null;}

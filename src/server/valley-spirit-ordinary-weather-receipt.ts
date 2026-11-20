@@ -4,6 +4,8 @@ import type {DatabaseSync} from 'node:sqlite';
 import type {ValleySpiritAlmanacEntry} from './valley-spirit-almanac.js';
 export const ORDINARY_OFFLINE_REVIEW_SCHEMA='ordinary-offline-weather-review/v1' as const;
 const SCHEMA=ORDINARY_OFFLINE_REVIEW_SCHEMA;
+export const ORDINARY_OFFLINE_CORRECTION_SCHEMA='ordinary-offline-weather-correction/v1' as const;
+const CORRECTION_SCHEMA=ORDINARY_OFFLINE_CORRECTION_SCHEMA;
 export const ORDINARY_REVIEW_WORLD=/^godot-mvp-[A-Za-z0-9_-]{1,160}$/;
 const ENTRY=/^valley-almanac-[a-f0-9]{64}$/;
 const HEX=/^[a-f0-9]{64}$/;
@@ -13,15 +15,21 @@ const exact=(v:unknown,keys:readonly string[]):v is Record<string,unknown>=>!!v&
  Object.keys(v).length===keys.length&&keys.every(k=>Object.hasOwn(v,k));
 const int=(v:unknown,n:number):v is number=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=n;
 
-export interface OrdinaryOfflineWeatherReview {
- schema:typeof SCHEMA;worldId:string;saveScope:string;reviewerFingerprint:string;
+interface OrdinaryOfflineWeatherTerms {
+ worldId:string;saveScope:string;reviewerFingerprint:string;
  headRevision:number;permissionVersion:number;priorAlmanacDigest:string;
  entryId:string;editionDigest:string;selectedSourcesDigest:string;
 }
+export interface OrdinaryOfflineWeatherReview extends OrdinaryOfflineWeatherTerms {schema:typeof SCHEMA}
+export interface OrdinaryOfflineWeatherCorrection extends OrdinaryOfflineWeatherTerms {
+ schema:typeof CORRECTION_SCHEMA;
+ supersedes:string; predecessorDigest:string; predecessorReceiptDigest:string; predecessorWithdrawalDigest:string;
+}
+const baseline=['worldId','saveScope','reviewerFingerprint','headRevision','permissionVersion','priorAlmanacDigest','entryId','editionDigest','selectedSourcesDigest'] as const;
 /** The reviewer signs the exact supported edition and authority version, not
  * a generic release request. Private key stays outside the service. */
 export function encodeOrdinaryOfflineWeatherReview(t:unknown):Buffer|null {
- if(!exact(t,['schema','worldId','saveScope','reviewerFingerprint','headRevision','permissionVersion','priorAlmanacDigest','entryId','editionDigest','selectedSourcesDigest'])||
+ if(!exact(t,['schema',...baseline])||
    t.schema!==SCHEMA||typeof t.worldId!=='string'||!ORDINARY_REVIEW_WORLD.test(t.worldId)||typeof t.entryId!=='string'||!ENTRY.test(t.entryId)||
    !int(t.headRevision,0)||!int(t.permissionVersion,1)||
    [t.saveScope,t.reviewerFingerprint,t.priorAlmanacDigest,t.editionDigest,t.selectedSourcesDigest].some(v=>typeof v!=='string'||!HEX.test(v)))return null;
@@ -29,14 +37,24 @@ export function encodeOrdinaryOfflineWeatherReview(t:unknown):Buffer|null {
   t.priorAlmanacDigest,t.entryId,t.editionDigest,t.selectedSourcesDigest]),'utf8');
 }
 
+export function encodeOrdinaryOfflineWeatherCorrection(t:unknown):Buffer|null {
+ if(!exact(t,['schema',...baseline,'supersedes','predecessorDigest','predecessorReceiptDigest','predecessorWithdrawalDigest'])||
+  t.schema!==CORRECTION_SCHEMA||typeof t.supersedes!=='string'||!ENTRY.test(t.supersedes)||t.supersedes===t.entryId||
+  [t.predecessorDigest,t.predecessorReceiptDigest,t.predecessorWithdrawalDigest].some(v=>typeof v!=='string'||!HEX.test(v)))return null;
+ const inherited=Object.fromEntries(baseline.map(k=>[k,t[k]]));
+ const bytes=encodeOrdinaryOfflineWeatherReview({schema:SCHEMA,...inherited});
+ return bytes?Buffer.from(JSON.stringify([CORRECTION_SCHEMA,'first-replacement/v2',bytes.toString('base64url'),
+  t.supersedes,t.predecessorDigest,t.predecessorReceiptDigest,t.predecessorWithdrawalDigest]),'utf8'):null;
+}
+
 const TABLE='valley_spirit_ordinary_weather_review';
 const DDL='CREATE TABLE valley_spirit_ordinary_weather_review(entry_id TEXT PRIMARY KEY NOT NULL,world_id TEXT NOT NULL,receipt_json TEXT NOT NULL)';
-// The ordinary first-edition developer lane needs only a bounded release
+// The ordinary editorial developer lane needs only a bounded release
 // history. Every public read checks all signatures once; never let that
 // synchronous operation grow to thousands of verifier calls.
 const MAX_ROWS=256, MAX_BYTES=4096;
 export interface OrdinaryWeatherReviewReceipt {
- terms:OrdinaryOfflineWeatherReview;
+ terms:OrdinaryOfflineWeatherReview|OrdinaryOfflineWeatherCorrection;
  reviewerDer:string;
  signature:string;
 }
@@ -57,7 +75,9 @@ export function verifiedOrdinaryWeatherReceipt(value:unknown,entry:ValleySpiritA
  try{
   if(!exact(value,['terms','reviewerDer','signature'])||typeof value.reviewerDer!=='string'||!(/^[A-Za-z0-9_-]{59}$/.test(value.reviewerDer))||
    typeof value.signature!=='string'||!ORDINARY_REVIEW_SIGNATURE.test(value.signature))return null;
-  const bytes=encodeOrdinaryOfflineWeatherReview(value.terms),t=value.terms as OrdinaryOfflineWeatherReview;
+  const t=value.terms as OrdinaryWeatherReviewReceipt['terms'], corrected=entry.textVersion===2;
+  const bytes=corrected?encodeOrdinaryOfflineWeatherCorrection(t):entry.textVersion===1?encodeOrdinaryOfflineWeatherReview(t):null;
+  if(corrected&&(t.schema!==CORRECTION_SCHEMA||t.supersedes!==entry.supersedes))return null;
   if(!bytes||t.worldId!==entry.packet.worldId||t.entryId!==entry.entryId||t.permissionVersion!==entry.packet.permissionVersion||
    t.editionDigest!==ordinaryReviewDigest(entry)||!int(worldRevision,t.headRevision)||(scope!==undefined&&t.saveScope!==scope))return null;
   const publicDer=Buffer.from(value.reviewerDer,'base64url'),signature=Buffer.from(value.signature,'base64url');

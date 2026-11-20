@@ -178,7 +178,9 @@ export function validateValleySpiritAlmanacEntries(value:unknown):value is Valle
  for(const e of value as ValleySpiritAlmanacEntry[]){
   if(!exact(e,['schemaVersion','entryId','textVersion','supersedes','packet','phase','draft','failure','rendered','origin'])||e.schemaVersion!==ALMANAC_ENTRY_SCHEMA||!validPacket(e.packet)||!option(phases,e.phase)||!integer(e.textVersion,1,10000)||!validOrigin(e.origin)||e.entryId!==identity(e.packet,e.textVersion,e.origin)||seen.has(e.entryId))return false;
   const k=rangeKey(e.packet),before=heads.get(k);
-  if(e.origin.kind===REVIEWED_OFFLINE_ORIGIN&&(e.phase!=='published'||e.textVersion!==1||e.supersedes!==null)||before?.origin.kind===REVIEWED_OFFLINE_ORIGIN)return false;
+  if(e.origin.kind===REVIEWED_OFFLINE_ORIGIN){
+   if(e.phase!=='published'||e.textVersion>2||e.textVersion===2&&before?.origin.kind!==REVIEWED_OFFLINE_ORIGIN)return false;
+  }else if(before?.origin.kind===REVIEWED_OFFLINE_ORIGIN)return false;
   if(e.textVersion===1?(e.supersedes!==null||!!before):(!before||e.supersedes!==before.entryId||before.textVersion+1!==e.textVersion||!['published','retracted'].includes(before.phase)))return false;
   const needsDraft=e.phase==='grounded'||e.phase==='published';
   const grounded=needsDraft?groundValleySpiritAlmanacDraft(e.packet,e.draft):null;
@@ -220,16 +222,16 @@ function publicView(e:ValleySpiritAlmanacEntry) {
  const p=e.packet,r=structuredClone(e.rendered);
  return {mode:'curated-verified-weather' as const,origin:{schemaVersion:e.origin.schemaVersion,kind:e.origin.kind===REVIEWED_OFFLINE_ORIGIN?'offline-synthetic' as const:e.origin.kind},entryId:e.entryId,textVersion:e.textVersion,supersedes:e.supersedes,fromMinute:p.fromMinute,throughMinute:p.throughMinute,projectionVersion:p.projectionVersion,permissionVersion:p.permissionVersion,coverage:p.coverage,unselectedHourBuckets:[...p.unselectedHourBuckets],rendering:{rendererVersion:r.rendererVersion,wording:e.draft.wording},facts:r.facts,atmosphere:r.atmosphere};
 }
-/** Pure first-edition builder for the independently reviewed offline
- * release path. It performs no transport, admission, write or grant. */
-export function composeOfflineWeatherEdition(range:ValleySpiritAlmanacRange,authority:ValleySpiritAlmanacAuthority){
+/** Pure builder for independently reviewed offline weather. An explicit
+ * predecessor only builds a candidate for signing; no authority or write. */
+export function composeOfflineWeatherEdition(range:ValleySpiritAlmanacRange,authority:ValleySpiritAlmanacAuthority,supersedes:string|null=null){
  const packet=createValleySpiritAlmanacPacket(range,authority);
  if(!packet)return null;
  const draft=groundValleySpiritAlmanacDraft(packet,{claims:packet.points.map(p=>({sourceRef:p.sourceRef,field:'condition',value:p.condition})),
   atmosphere:'plain',wording:'time-first'});
  if(!draft)return null;
  const origin:ValleySpiritAlmanacOrigin={schemaVersion:ORIGIN_SCHEMA,kind:REVIEWED_OFFLINE_ORIGIN};
- const entry:ValleySpiritAlmanacEntry={schemaVersion:ALMANAC_ENTRY_SCHEMA,entryId:identity(packet,1,origin),textVersion:1,supersedes:null,
+ const entry:ValleySpiritAlmanacEntry={schemaVersion:ALMANAC_ENTRY_SCHEMA,entryId:identity(packet,supersedes?2:1,origin),textVersion:supersedes?2:1,supersedes,
   packet,phase:'published',draft,failure:null,rendered:renderAlmanacTextV1(packet,draft),origin};
  return {entry,view:publicView(entry)!};
 }
