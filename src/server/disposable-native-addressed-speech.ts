@@ -95,6 +95,16 @@ export function appendDisposableNativeSpeech(db:DatabaseSync,authority:Disposabl
  db.prepare(`INSERT INTO main.${TABLE} VALUES (?,?,?)`).run(head.revision,body,authenticateDisposableRulesPayload(authority,DOMAIN,body));
  if(JSON.stringify(read(db,authority,head,true))!==JSON.stringify(receipts))throw Error('disposable_native_speech_readback');
 }
+/** Borrow the caller's stopped owning SQLite snapshot, never a passed event or
+ * fabricated receipt. Editorial use requires the same speech-purpose brand. */
+export function readDisposableNativeSpeechOnConnection(db:DatabaseSync,authority:DisposableRulesSaveAuthority,purpose:DisposableSpeechPurpose){
+ if(!ownsDisposableSpeechPurpose(purpose,authority)||db.isTransaction===false)throw Error('disposable_native_speech_purpose');
+ const worldId=readDisposableRulesSaveMarker(db,authority),world=readNativeValidationWeatherHead(db,worldId);
+ if(!world)return null;
+ const head=Object.freeze({worldId,revision:world.worldRevision,atUs:world.atUs});
+ const receipts=read(db,authority,head);
+ return receipts.length?Object.freeze({head,receipts}):null;
+}
 export function openDisposableNativeSpeechReader(database:string,authority:DisposableRulesSaveAuthority,purpose:DisposableSpeechPurpose,current:()=>World){
  if(!ownsDisposableSpeechPurpose(purpose,authority))throw Error('disposable_native_speech_purpose');
  assertDisposableRulesSavePath(authority,database);

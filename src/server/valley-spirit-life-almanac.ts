@@ -68,11 +68,22 @@ function exactGameMinute(value:string):string{
  const whole=BigInt(value)/1_000_000n,part=BigInt(value)%1_000_000n;
  return part===0n?String(whole):String(whole)+'.'+String(part).padStart(6,'0').replace(/0+$/,'');
 }
+function renderLifeLine(f:{kind:ValleySpiritLifeFact['kind'];atUs:string},wording:Wording):string{
+ const fact=labels[f.kind],time='游戏分钟 '+exactGameMinute(f.atUs);
+ return wording==='time-first'?time+'：'+fact+'。':fact+'（'+time+'）。';
+}
+/** Existing objective renderer for the independently governed private one-line
+ * conversation edition. No identity, original utterance or source ID. */
+export function renderObjectiveDeliveredConversation(atUs:string){
+ if(!clock(atUs))return null;
+ const kind='conversation-completed' as const;
+ return Object.freeze({atUs,kind,text:renderLifeLine({atUs,kind},'time-first')});
+}
 function canonicalSection(packet:ValleySpiritLifeAlmanacPacket,choice:Selection):ValleySpiritLifeAlmanacSection{
  const lines=choice.indices.map(n=>{
-  const f=packet.source.facts[n-1],fact=labels[f.kind],time='游戏分钟 '+exactGameMinute(f.atUs);
+  const f=packet.source.facts[n-1];
   return Object.freeze({sourceRef:f.sourceRef,grantVersion:f.grantVersion,receiptVersion:f.receiptVersion,
-   atUs:f.atUs,kind:f.kind,text:choice.wording==='time-first'?time+'：'+fact+'。':fact+'（'+time+'）。'});
+   atUs:f.atUs,kind:f.kind,text:renderLifeLine(f,choice.wording)});
  });
  const sectionId='valley-life-section-'+createHash('sha256').update(JSON.stringify([SCHEMA,RENDERER,packet,choice,lines])).digest('hex');
  return Object.freeze({schemaVersion:SCHEMA,rendererVersion:RENDERER,sectionId,packet,selection:Object.freeze(choice),lines:Object.freeze(lines)});

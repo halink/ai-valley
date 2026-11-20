@@ -1,3 +1,4 @@
+import {openDisposableSpeechEditorial,pinDisposableSpeechEditorialReviewer,type DisposableSpeechEditorialWatermark} from './disposable-native-speech-release.js';
 import {bindDisposableSpeechPurpose,disposableSpeechHead,openDisposableNativeSpeechReader,stageDisposableSpeechScenario,type DisposableSpeechCase,type DisposableSpeechHead} from './disposable-native-addressed-speech.js';
 import {minuteToClimateUs} from '../world/mvp-climate.js';
 import {pinDisposableNativeAgedTransfer} from './disposable-native-aged-transfer.js';
@@ -98,11 +99,24 @@ export function createDisposableNativeRulesSave(){
 }
 /** Dedicated private proof profile. No world/draft, server, path, arbitrary
  * action, or share/publication handle escapes the fresh owning save closure. */
-export function createDisposableNativeSpeechSave(scenario:DisposableSpeechCase){
+export function createDisposableNativeSpeechSave(scenario:DisposableSpeechCase,commissionedReviewerPublicKeyPem?:string){
  if(scenario!=='recipient-perceives'&&scenario!=='recipient-cannot-perceive')throw Error('disposable_native_speech_scenario');
+ const reviewer=commissionedReviewerPublicKeyPem===undefined?undefined:pinDisposableSpeechEditorialReviewer(commissionedReviewerPublicKeyPem);
  const storage=createFreshDisposableRulesStorage();
+ const watermark:DisposableSpeechEditorialWatermark={seen:[],isolated:false};
  let open=false;
  return Object.freeze({
+  openEditorial(){
+   if(!reviewer||open)throw Error('disposable_speech_editorial_closed_scope_required');
+   storage.assertOwned();open=true;
+   let owner:RuntimeOwnership|undefined;
+   try{
+    owner=acquireRuntimeOwnership(storage.database,{existingOnly:true});
+    const storeOwner=storage.bind(owner),purpose=bindDisposableSpeechPurpose(owner.database,storeOwner);
+    const editor=openDisposableSpeechEditorial(owner.database,storeOwner,purpose,reviewer,watermark);
+    return Object.freeze({...editor,close(){if(!owner)return;try{editor.close();}finally{owner.release();owner=undefined;open=false;}}});
+   }catch(e){try{owner?.release();}finally{open=false;}throw e;}
+  },
   async open(){
    if(open)throw Error('disposable_native_rules_already_open');
    storage.assertOwned();open=true;
