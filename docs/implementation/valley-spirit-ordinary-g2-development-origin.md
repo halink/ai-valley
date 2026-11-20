@@ -58,12 +58,33 @@ No scalar inventory, nutrition, movement intent, public event or public
 view is credited. The original private host can read a held fact only by
 the exact resident key. The ordinary controls stay paused after
 pickup. The original no-port host has a separate manual held minute that
-runs the native engine without an eating or other V3 effect capability.
+runs the native engine with only one original holder’s restricted outdoor eating capability.
 It preserves the inherited timestamp, keeps the first pickup receipt
 as history and, at the first elapsed expiry boundary, debits the one
 held unit and advances the head and receipt/latch atomically. Closed or
 reopened terminal scopes cannot advance or replay. If the holder leaves
 the supported in-world living custody or the native minute requires an
 unsupported event settlement, the entire minute refuses unchanged.
-No V3 eating or hall path is implemented by this slice. Opportunity replay and generic advance remain
+No V3 hall route or table capability is implemented. Opportunity replay and generic advance remain
 blocked. Weather withdrawal after actual placement does not erase custody.
+
+
+### Native outdoor eating in the original held scope
+
+A hungry holder may choose the actual ordinary outdoor self-care action
+only when the native chooser gives it priority. Existing table preference
+and higher-priority needs/actions still apply; the V3 hold never grants a
+hall seat, room route, or substitute outdoor choice. No host input chooses
+the resident, food amount, action, or minute boundaries.
+
+The first through fourth real native minutes retain the exact one resident,
+outdoor place, plan, original age, work count, and committed head. Interim
+minutes do not relieve hunger or change scalar inventory. Only the fifth
+minute on the same plan commits the actual native nutrition, one held debit,
+and the normal generic eating event and event index with the new archive
+seal. A finish at the original expiry is not eligible; the held expiry
+path remains authoritative. The original owner may reopen mid-work and
+retrieve evidence by the one resident key. Without that V3 original archive
+and key, persisted work is unsupported and does not grant save access.
+There is no public detail, model, automatic scheduler, or alternative
+route on failure.

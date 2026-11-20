@@ -1,3 +1,4 @@
+import {stagedOrdinaryDevelopmentV3WorkActor,type prepareOrdinaryDevelopmentV3Minute} from './ordinary-g2-development-v3.js';
 import {ownsOrdinaryDevelopmentV3Pin,readOrdinaryDevelopmentV3,type OrdinaryDevelopmentV3Pin} from './ordinary-g2-development-v3.js';
 import {assertOrdinaryG2DevelopmentPath,inspectOrdinaryG2DevelopmentOrigin,isOrdinaryG2DevelopmentOriginScratch,type OrdinaryG2DevelopmentOrigin} from './ordinary-g2-development-origin.js';
 import {assertDisposableNativeAgedTransferStorage,exactDisposableEating,isDisposableNativeAgedTransferPin,readDisposableNativeAgedTransfer,readExactDisposableActiveEating,type Eating,type DisposableNativeAgedTransferPin} from './disposable-native-aged-transfer.js';
@@ -44,7 +45,12 @@ export function assertWorldCompatibility(value:unknown,allowMvpSpiritEffectFixtu
 export function assertStagedDisposableEatingCompatibility(value:World,work: Eating):void{
  assertWorldCompatibilityInternal(value,false,work);
 }
-function assertWorldCompatibilityInternal(value:unknown,allowMvpSpiritEffectFixture:boolean,privateEating?:Eating):asserts value is Record<string,unknown>{
+export function assertStagedOriginalOutdoorCompatibility(db:DatabaseSync,step:NonNullable<ReturnType<typeof prepareOrdinaryDevelopmentV3Minute>>){
+ const actor=stagedOrdinaryDevelopmentV3WorkActor(db,step);
+ if(!actor)fail('save_ordinary_g2_development_v3');
+ assertWorldCompatibilityInternal(step.draft,false,undefined,actor);
+}
+function assertWorldCompatibilityInternal(value:unknown,allowMvpSpiritEffectFixture:boolean,privateEating?:Eating,originalOutdoorActor?:string):asserts value is Record<string,unknown>{
  if(!record(value))fail('save_invalid_world');
  if(Array.isArray(value.events)&&value.events.some(e=>record(e)&&(owns(e,'mvpAgedFruitBirth')||owns(e,'mvpAgedFruitExpiry')||owns(e,'mvpAgedFruitPickup')||owns(e,'mvpAgedHeldFruitExpiry')||owns(e,'mvpAgedHeldFruitEaten'))))fail('save_sealed_aged_birth_requires_private_archive');
  // Reject presence, not a recognized version/truthy value. No upgrade escape.
@@ -73,7 +79,7 @@ function assertWorldCompatibilityInternal(value:unknown,allowMvpSpiritEffectFixt
   const activity=record(r.activity)?r.activity:null;
   if(plan.some(a=>record(a)&&(a.type==='mvpAgedFruitPickup'||a.type==='mvpAgedFruitEat'))||
    activity&&(owns(activity,'mvpAgedEatWorkStartedAt')&&(!privateEating?.table||privateEating.residentId!==r.id)||record(activity.action)&&(activity.action.type==='mvpAgedFruitPickup'||
-    activity.action.type==='mvpAgedFruitEat'&&privateEating?.residentId!==r.id)))
+    activity.action.type==='mvpAgedFruitEat'&&privateEating?.residentId!==r.id&&originalOutdoorActor!==r.id)))
    fail('save_sealed_aged_pickup_requires_private_archive');
   const pending=plan.some(a=>record(a)&&a.type==='mvpShelter');
   const shelter=activity&&record(activity.action)&&activity.action.type==='mvpShelter';
@@ -141,6 +147,17 @@ function parseSavedWorld(body:unknown):unknown {
 export function decodeSavedWorld(body:unknown,allowMvpSpiritEffectFixture=false):Record<string,unknown>{
  const value=parseSavedWorld(body);assertWorldCompatibility(value,allowMvpSpiritEffectFixture);return value;
 }
+export function decodeExactOrdinaryDevelopmentV3World(body:unknown,db:DatabaseSync,origin:OrdinaryG2DevelopmentOrigin,pin:OrdinaryDevelopmentV3Pin):Record<string,unknown>{
+ const value=parseSavedWorld(body);
+ if(!record(value))fail('save_invalid_world');
+ try{assertWorldCompatibility(value);return value;}
+ catch(error){
+  if(!(error instanceof SaveCompatibilityError)||error.code!=='save_sealed_aged_pickup_requires_private_archive')throw error;
+  const sealed=readOrdinaryDevelopmentV3(db,origin,pin,value as unknown as World);
+  if(!sealed?.lifecycle?.work||!sealed.lifecycle.held)throw error;
+  assertWorldCompatibilityInternal(value,false,undefined,sealed.lifecycle.held.holderId);return value;
+ }
+}
 export function decodeExactDisposableSavedWorld(body:unknown,db:DatabaseSync,owner:DisposableRulesSaveAuthority,pin:DisposableNativeAgedTransferPin):Record<string,unknown>{
  const value=parseSavedWorld(body);
  if(!record(value))fail('save_invalid_world');
@@ -193,6 +210,7 @@ function inspectDatabase(db:DatabaseSync,rejectClimate:boolean,validateWorld?: (
   if(typeof row.stateBytes!=='number'||row.stateBytes>MAX_STATE_BYTES)fail('save_state_too_large');
   const world=privateDisposableSave&&privateDisposableAgedTransfer?
    decodeExactDisposableSavedWorld(row.state,db,privateDisposableSave,privateDisposableAgedTransfer):
+   g2World&&ordinaryG2DevelopmentOrigin&&ordinaryG2V3?decodeExactOrdinaryDevelopmentV3World(row.state,db,ordinaryG2DevelopmentOrigin,ordinaryG2V3):
    decodeSavedWorld(row.state,fixtureSeal!==undefined&&!formalOwner&&!formalWeatherOwner);
   if(g2World&&(latest!==null||world.id!==g2World||world.mode!=='validation'||owns(world,'simulationOnly')||owns(world,'mvpSeasonalModelVersion')||
    owns(world.mvpClimate as object??{},'spiritEffects')||owns(world.mvpClimate as object??{},'spiritFruitSettlement')))
