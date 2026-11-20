@@ -69,7 +69,7 @@ function quotaEnrolled(db:DatabaseSync):string|null{
  if(rows.length!==1||rows[0].slot!==1||rows[0].version!==1||typeof rows[0].attachment!=='string'||!/^[0-9a-f]{64}$/.test(rows[0].attachment))throw Error('model_account_quota_marker_invalid');
  return rows[0].attachment;
 }
-type OwnerState={registryDirectory:string;scope:string;directory:{dev:number;ino:number};registryIdentity:string;assert:()=>void;marker:()=>string|null;enroll:(binding:string)=>void;claim:(request:string,register:boolean)=>boolean;hasRecovery:(request:string)=>boolean;quota?:QuotaChild;};
+type OwnerState={registryDirectory:string;scope:string;directory:{dev:number;ino:number};registryIdentity:string;assert:()=>void;marker:()=>string|null;enroll:(binding:string)=>void;claim:(request:string,register:boolean)=>boolean;hasRecovery:(request:string)=>boolean;seasonalWorld:(binding?:string)=>string|null;quota?:QuotaChild;};
 const quotaHandles=new WeakSet<object>();
 const owners=new WeakMap<ProductionModelAccountOwnership,OwnerState>();
 
@@ -129,6 +129,24 @@ export function attachProductionAccountQuotaRehearsal(ownership:ProductionModelA
    current();
    return Object.freeze({binding,registryIdentity:state.registryIdentity,runId:ownership.runId,completedAt,inputTokens,outputTokens});
   },
+  seasonalResidentBinding(){
+   current();const enrolled=ledger.offlineFixtureBinding();
+   if(state.marker()!==enrolled)throw Error('model_account_quota_file_binding_mismatch');
+   return createHash('sha256').update(JSON.stringify(['canonical-seasonal-resident/v1',state.registryIdentity,enrolled,
+    state.scope,ownership.runId])).digest('hex');
+  },
+  seasonalResidentWorld(binding?:string){
+   current();return state.seasonalWorld(binding);
+  },
+  seasonalResidentStates(requests:readonly string[]){
+   current();
+   if(!Array.isArray(requests)||requests.length>1000)throw Error('seasonal_model_canonical_request_limit');
+   const claimed=requests.map(request=>[request,scoped(request)] as const).filter(([,key])=>state.claim(key,false));
+   const rows=ledger.requestStates(claimed.map(([,key])=>key));
+   return new Map(claimed.flatMap(([request,key])=>{
+    const row=rows.get(key);return row?.purpose==='resident'?[[request,row] as const]:[];
+   }));
+  },
   summary(at:number){current();return ledger.summary(at);},
   matchesPolicy(policy:SharedModelAccountPolicy){current();return ledger.matchesPolicy(policy);},
   /** Confirms only this local quota handle is pending free. The existing
@@ -177,6 +195,9 @@ export function acquireProductionModelAccountOwnership(options:AccountOwnershipO
     marker:()=>enrolled,
     claim(request,register){assertOwned();return quotaClaim(r.db,request,options.runId,register);},
     hasRecovery(request){assertOwned();return checkedRecoveryTable(r.db)&&!!r.db.prepare('SELECT 1 FROM account_quota_recovery WHERE request=?').get(request);},
+    seasonalWorld(binding){
+     assertOwned();return seasonalResidentWorld(r.db,options.runId,binding);
+    },
     enroll(binding){
      assertOwned();
      if(quotaEnrolled(r.db)!==enrolled)throw Error('model_account_quota_marker_changed');
@@ -288,6 +309,27 @@ export function verifyHistoricalOfflineAlmanacCompletion(options:Readonly<Accoun
    options.binding,key,options.completedAt,options.inputTokens,options.outputTokens);
   stable();db.exec('COMMIT');return ledger;
  }finally{try{db?.close();}finally{lock.release();}}
+}
+
+const SEASONAL_WORLD_SQL='CREATE TABLE account_seasonal_resident_world (run TEXT PRIMARY KEY, binding TEXT NOT NULL, FOREIGN KEY(run) REFERENCES account_runs(run))';
+function seasonalResidentWorld(db:DatabaseSync,run:string,binding?:string):string|null{
+ const table=db.prepare("SELECT type,sql FROM sqlite_schema WHERE name='account_seasonal_resident_world'").get();
+ if(table&&(table.type!=='table'||table.sql!==SEASONAL_WORLD_SQL||
+    db.prepare("SELECT 1 FROM sqlite_schema WHERE tbl_name='account_seasonal_resident_world' AND (type='trigger' OR (type='index' AND sql IS NOT NULL))").get()))
+  throw Error('seasonal_model_canonical_binding_schema');
+ const rows=table?db.prepare('SELECT binding FROM account_seasonal_resident_world WHERE run=? LIMIT 2').all(run):[];
+ const existing=rows[0]?.binding;
+ if(rows.length>1||existing!==undefined&&(typeof existing!=='string'||!/^[0-9a-f]{64}$/.test(existing)))throw Error('seasonal_model_canonical_binding_row');
+ if(binding===undefined)return (existing as string|undefined)??null;
+ if(existing!==undefined||!/^[0-9a-f]{64}$/.test(binding))throw Error('seasonal_model_canonical_world_already_bound');
+ if(table&&Number(db.prepare('SELECT count(*) AS n FROM account_seasonal_resident_world').get()?.n)>=4096)
+  throw Error('seasonal_model_canonical_binding_capacity');
+ db.exec('BEGIN IMMEDIATE');
+ try{
+  if(!table)db.exec(SEASONAL_WORLD_SQL);
+  if(db.prepare('INSERT INTO account_seasonal_resident_world VALUES (?,?)').run(run,binding).changes!==1)throw Error('seasonal_model_canonical_binding_write');
+  db.exec('COMMIT');return binding;
+ }catch(error){db.exec('ROLLBACK');throw error;}
 }
 
 const QUOTA_RECOVERY_SQL='CREATE TABLE account_quota_recovery (request TEXT PRIMARY KEY, evidence TEXT NOT NULL, completed_at INTEGER NOT NULL, input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, recorded INTEGER NOT NULL)';

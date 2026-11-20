@@ -9,7 +9,7 @@ import {ProductionSiliconFlowHttpCandidate,type ProductionHttpTransport} from '.
 import {PRODUCTION_MODEL_CANDIDATE as P} from './production-model-policy.js';
 import {parseModelCompletion,prepareModelDecision,type ModelResult} from './decisions.js';
 import {persistedWorldFingerprint as fingerprint} from './acceptance-offline-protocol.js';
-import {offlineProductionRuntimeOwners as owners} from './production-model-runtime-ownership.js';
+import {offlineProductionRuntimeOwners as owners,canonicalSeasonalQuotaClaimed,formalResidentQuotaClaimed,rememberFormalResidentQuota} from './production-model-runtime-ownership.js';
 import {createHash} from 'node:crypto';
 import {ownsProductionAccountQuotaRehearsal,type ProductionModelAccountOwnership,type ProductionAccountQuotaRehearsal} from './production-model-account-ownership.js';
 import type {SharedModelAccountPolicy} from './shared-model-account.js';
@@ -21,7 +21,6 @@ interface OfflineResidentCanonicalQuota {
  mode:'explicit-disconnected-resident-quota';ownership:ProductionModelAccountOwnership;
  quota:ProductionAccountQuotaRehearsal;policy:SharedModelAccountPolicy;
 }
-const taken=new WeakSet<ProductionAccountQuotaRehearsal>();
 const boundResidentJournals=new WeakSet<ProductionModelJournal>();
 interface FormalSyntheticWeatherBinding {
  readonly store:WorldStore;readonly ownership:ProductionModelAccountOwnership;readonly quota:ProductionAccountQuotaRehearsal;
@@ -44,18 +43,19 @@ export function createProductionModelOfflineRuntime(input:RuntimeOptions&{shared
  if(!attachment||Object.keys(attachment).length!==4||attachment.mode!=='explicit-disconnected-resident-quota')
   throw Error('production_runtime_shared_quota_scope');
  const {ownership,quota}=attachment;
- if(!ownsProductionAccountQuotaRehearsal(ownership,quota)||taken.has(quota)||boundResidentJournals.has(options.journal)||!(options.store instanceof WorldStore)||
+ if(!ownsProductionAccountQuotaRehearsal(ownership,quota)||formalResidentQuotaClaimed(quota)||canonicalSeasonalQuotaClaimed(quota)||boundResidentJournals.has(options.journal)||!(options.store instanceof WorldStore)||
     quota.accountScope!==ownership.accountScope||quota.runId!==options.journal.contract.runId)
   throw Error('production_runtime_shared_quota_scope');
  const policy=structuredClone(attachment.policy),at=Date.now();
  ownership.assertOwned();
  if(!quota.matchesPolicy(policy)||policy.accountId!==ownership.accountScope)throw Error('production_runtime_shared_quota_policy');
+ if(quota.seasonalResidentWorld()!==null)throw Error('production_runtime_shared_quota_scope');
  const summary=quota.summary(at);
  if(summary.held||summary.unknown||summary.waitingResidents)throw Error('production_runtime_shared_quota_unresolved');
  // The host owns an actual disconnected account handle, not a production
  // account attestation. The runtime itself validates exact journal/world head.
  const result=createRuntimeBridge(options,undefined,{quota,ownership,policy});
- taken.add(quota);boundResidentJournals.add(options.journal);
+ rememberFormalResidentQuota(quota);boundResidentJournals.add(options.journal);
  return result;
 }
 /** Trusted integration only. Does not fetch evidence or authenticate records.

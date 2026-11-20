@@ -1,5 +1,8 @@
 import {claimSeasonalAlmanacFixture,openSeasonalAlmanacFixture,type SeasonalAlmanacFixture} from './seasonal-almanac-runtime.js';
-import {OfflineResidentAccountAdmission,type ResidentAccountRound} from './shared-resident-admission.js';
+import {createHash} from 'node:crypto';
+import {lstatSync} from 'node:fs';
+import {claimSeasonalResidentQuota} from './production-model-runtime-ownership.js';
+import {OfflineResidentAccountAdmission,type CanonicalSeasonalQuota,type ResidentAccountRound} from './shared-resident-admission.js';
 import {createServer} from 'node:http';
 import {acquireRuntimeOwnership} from './runtime-lock.js';
 import {preflightWorldSave} from './save-preflight.js';
@@ -56,22 +59,40 @@ function validateSyntheticReply(reply:ModelReply){
 const ready=(w:World,r:Resident)=>r.status==='alive'&&r.residency!=='outside'&&r.canDecide&&r.canExpress&&!r.plan&&!r.activity&&r.decisionDue<=w.minute;
 /** Separate bounded seasonal mode. Caller explicitly pumps the server; the
  * normal rules runner and all pre-existing model entry points stay unchanged. */
-export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal';database:string;port?:number;transport?:MemoryTransport;sharedAccount?:OfflineResidentAccountAdmission;almanacFixture?:SeasonalAlmanacFixture}){
+export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal';database:string;port?:number;transport?:MemoryTransport;sharedAccount?:OfflineResidentAccountAdmission;almanacFixture?:SeasonalAlmanacFixture;canonicalResidentQuota?:Readonly<CanonicalSeasonalQuota>}){
  if(options.mode!=='offline-seasonal')throw Error('seasonal_model_explicit_mode_required');
  if(options.port!==undefined&&(!Number.isInteger(options.port)||options.port<0||options.port>65535))throw Error('seasonal_model_port');
  const transport=options.transport===undefined?undefined:transports.get(options.transport);
  if(options.transport!==undefined&&(!transport||transport.claimed))throw Error('seasonal_model_transport_untrusted');
- const shared=options.sharedAccount;
- if(shared!==undefined&&(!(shared instanceof OfflineResidentAccountAdmission)||!transport))throw Error('seasonal_model_shared_fixture_required');
- const binding=shared?.fixtureBinding();
- if(options.almanacFixture!==undefined&&!shared)throw Error('seasonal_almanac_requires_bound_resident_account');
- const claimedAlmanac=options.almanacFixture&&shared?claimSeasonalAlmanacFixture(options.almanacFixture,shared):undefined;
+ const legacy=options.sharedAccount;
+ if(legacy!==undefined&&(!(legacy instanceof OfflineResidentAccountAdmission)||!transport))throw Error('seasonal_model_shared_fixture_required');
+ if(options.canonicalResidentQuota!==undefined&&(legacy||!transport||options.almanacFixture!==undefined))
+  throw Error('seasonal_model_canonical_residents_only');
+ const canonical=options.canonicalResidentQuota===undefined?undefined:
+  OfflineResidentAccountAdmission.claimCanonical(options.canonicalResidentQuota,wall);
+ const shared=canonical?.admission??legacy;
+ let binding=legacy?.fixtureBinding();
+ if(options.almanacFixture!==undefined&&!legacy)throw Error('seasonal_almanac_requires_bound_resident_account');
+ const claimedAlmanac=options.almanacFixture&&legacy?claimSeasonalAlmanacFixture(options.almanacFixture,legacy):undefined;
  // One-shot capability claim, even if startup later fails. No await or
  // listener bind may allow a second world to claim the same synthetic slot.
  if(transport)transport.claimed=true;
- const owner=acquireRuntimeOwnership(options.database);
+ const releaseQuota=canonical?claimSeasonalResidentQuota(canonical.quota):undefined;
+ const owner=(()=>{
+  try{
+   const pinned=canonical?.quota.seasonalResidentWorld();
+   return acquireRuntimeOwnership(options.database,pinned?{existingOnly:true}:undefined);
+  }catch(error){releaseQuota?.();throw error;}
+ })();
  let store:WorldStore|undefined,server:ReturnType<typeof createServer>|undefined,closed=false;
  let almanac:ReturnType<typeof openSeasonalAlmanacFixture>|undefined;
+ const worldBinding=()=>{
+  owner.assertOwned();
+  const f=lstatSync(owner.database,{bigint:true});
+  if(!f.isFile()||f.isSymbolicLink()||f.nlink!==1n)throw Error('seasonal_model_canonical_world_file');
+  return createHash('sha256').update(JSON.stringify(['seasonal-runtime-world/v1',canonical!.binding,
+   canonical!.worldId,String(f.dev),String(f.ino)])).digest('hex');
+ };
  try{
   owner.assertOwned();
   let inspected:SeasonalLedger|null=null;
@@ -79,20 +100,51 @@ export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal'
   // Cross-store binding is checked on the private preflight copy before
   // either the existing world or any resident/account state is changed.
   const previous=inspected as SeasonalLedger|null;
+  if(canonical){
+   if(saved&&(saved.id!==canonical.worldId||previous?.schemaVersion!==2))throw Error('seasonal_model_canonical_world');
+   const pinned=canonical.quota.seasonalResidentWorld();
+   if(saved){
+    binding=worldBinding();
+    if(binding!==pinned)throw Error('seasonal_model_canonical_world_file');
+   }else{
+    if(pinned!==null)throw Error('seasonal_model_canonical_world_already_bound');
+    canonical.assertFresh();
+   }
+  }
   if(shared&&saved&&!previous)throw Error('seasonal_model_shared_fixture_fresh_save_required');
   if(transport&&(previous?.schemaVersion===2?binding!==previous.sharedAccountBinding:!!shared&&!!previous))throw Error('seasonal_model_shared_account_mismatch');
+  if(canonical&&previous?.requests.at(-1)?.state!=='intent'){
+   const s=canonical.quota.summary(wall());
+   if(s.held||s.unknown)throw Error('seasonal_model_canonical_recovery_unresolved');
+  }
   if(shared&&previous&&!shared.verifyWorldRecovery(previous.requests.map(r=>({round:{worldId:previous.worldId,residentId:r.actorId,roundId:r.id},worldTerminal:r.state!=='intent'}))))throw Error('seasonal_model_shared_recovery_unresolved');
   let w:World;
   if(saved){
    if(transport){store=new WorldStore(owner.database,{allowMvpClimate:true,seasonalModel:true});w=store.load()!;}
    else w=saved as unknown as World;
    modelWorld(w);
-  }else w=createMvpSession({world:createMvpWorld()}).world;
+  }else{
+   // Generate a legitimate native seed; pin only its new exact world ID.
+   const initial=createMvpWorld();
+   if(canonical)initial.id=canonical.worldId;
+   w=createMvpSession({world:initial}).world;
+   if(canonical){
+    store=new WorldStore(owner.database,{allowMvpClimate:true,seasonalModel:true});
+    binding=worldBinding();
+    canonical.quota.seasonalResidentWorld(binding);
+    w.schemaVersion=2;w.mvpSeasonalModelVersion=1;
+    w.clock={...w.clock,paused:true,reason:'等待已绑定的离线合成决定'};
+    // Native world and zero-request binding enter one world transaction. If
+    // it fails, the earlier account binding stays spent; never rebind.
+    store.commit(w,null,undefined,{schemaVersion:2,worldId:w.id,sharedAccountBinding:binding,
+     nextSequence:1,lastWall:wall(),charges:[],requests:[]});
+   }
+  }
   let ledger:SeasonalLedger|null=store?.seasonalLedger(w)??inspected;
   let fault:string|null=null,budgetWaiting=false,dispatch:Promise<ModelReply>|null=null,controller:AbortController|null=null;
   const read=()=>({mode:'offline-seasonal' as const,driver:'synthetic-model-decisions' as const,
    liveModel:'blocked' as const,realModelCalls:0,account:policy.account,slots:policy.slots,
-   ...(ledger?.schemaVersion===2?{sharedAdmission:'durable-offline' as const}:{}),
+   ...(ledger?.schemaVersion===2?{sharedAdmission:canonical?'canonical-offline-residents' as const:'durable-offline' as const}:{}),
    paused:closed||!transport||!!fault||budgetWaiting||ledger?.requests.at(-1)?.state==='intent',
    status:closed?'closed':fault??(ledger?.requests.at(-1)?.state==='intent'?(dispatch?'awaiting-synthetic-response':'sent-unknown'):(budgetWaiting?'synthetic-budget-wait':transport?'ready':'no-synthetic-provider')),
    minute:w.minute,phases:w.residents.map(mvpPhase),
@@ -113,7 +165,12 @@ export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal'
    w=draft;if(next)ledger=next;
    almanac?.observe(draft);
   };
+  const assertCanonicalWorld=()=>{
+   if(canonical&&(canonical.quota.seasonalResidentWorld()!==binding||worldBinding()!==binding))
+    throw Error('seasonal_model_canonical_world_binding_changed');
+  };
   const synchronizePriority=()=>{
+   assertCanonicalWorld();
    if(shared)shared.setWorldWaiting(w.id,ledger?.requests.at(-1)?.state==='intent'||w.residents.some(r=>ready(w,r)));
   };
   if(shared&&binding&&!ledger){
@@ -135,6 +192,11 @@ export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal'
     const now=wall();
     // Conservative during any synchronous world write and failures. Lower
     // optional priority pressure only after persisted world state says so.
+    assertCanonicalWorld();
+    if(canonical){
+     const s=canonical.quota.summary(now);
+     if(s.held||s.unknown)throw Error('seasonal_model_canonical_recovery_unresolved');
+    }
     shared?.setWorldWaiting(w.id,true);
     if(ledger&&now<ledger.lastWall)throw Error('seasonal_model_wall_clock_reversal');
     const actor=w.residents.filter(r=>ready(w,r)).sort((a,b)=>a.decisionDue-b.decisionDue||a.id.localeCompare(b.id))[0];
@@ -170,7 +232,7 @@ export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal'
      shared.queue(round);
      const admitted=await shared.attempt({
       round,estimate:{inputTokens:charge.input,outputTokens:charge.output},
-      authorize:()=>{owner.assertOwned();return !closed;},
+      authorize:()=>{owner.assertOwned();assertCanonicalWorld();return !closed;},
       beforeHandoff:saveIntent,
       simulate:async()=>{
        const result=await invoke();
@@ -215,7 +277,31 @@ export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal'
    return read();
   };
   let closing:Promise<void>|undefined;
-  const close=()=>closing??=(async()=>{closed=true;controller?.abort();try{almanac?.close();}catch{/* isolate optional state */}try{if(server){server.closeAllConnections();await new Promise<void>(resolve=>server!.close(()=>resolve()));}store?.close();}finally{owner.release();}})();
+  const close=()=>closing??=(async()=>{
+   const dispatchWasLive=!!dispatch;
+   closed=true;controller?.abort();try{almanac?.close();}catch{/* isolate optional state */}
+   try{
+    if(server){server.closeAllConnections();await new Promise<void>(resolve=>server!.close(()=>resolve()));}
+    let clearCanonicalDemand=false;
+    if(canonical&&store&&!dispatchWasLive&&!fault&&ledger?.requests.at(-1)?.state!=='intent'){
+     try{
+      assertCanonicalWorld();
+      const head=store.load(),liveLedger=head&&store.seasonalLedger(head);
+      const s=canonical.quota.summary(wall());
+      clearCanonicalDemand=!!head&&head.id===w.id&&head.revision===w.revision&&head.minute===w.minute&&
+       JSON.stringify(liveLedger)===JSON.stringify(ledger)&&!s.held&&!s.unknown;
+     }catch{/* Closed runtime cannot establish clean release; retain demand. */}
+    }
+    store?.close();
+    if(clearCanonicalDemand&&canonical){
+     try{
+      assertCanonicalWorld();
+      const s=canonical.quota.summary(wall());
+      if(!s.held&&!s.unknown)canonical.admission.setWorldWaiting(w.id,false);
+     }catch{/* Never replace ambiguous state with clean release. */}
+    }
+   }finally{try{owner.release();}finally{releaseQuota?.();}}
+  })();
   return {status:read,pump,close,server,
    async pumpAlmanac(){
     if(closed||!almanac)return {status:'disabled' as const};
@@ -226,5 +312,5 @@ export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal'
    latestAlmanac:()=>closed?null:almanac?.latest()??null,
    setAlmanacPublicWeatherAllowed:(allowed:boolean)=>!closed&&(almanac?.setPublicWeatherAllowed(allowed)??false),
   };
- }catch(error){try{almanac?.close();}catch{/* optional state */}try{if(server?.listening){server.closeAllConnections();await new Promise<void>(resolve=>server!.close(()=>resolve()));}store?.close();}finally{owner.release();}throw error;}
+ }catch(error){try{almanac?.close();}catch{/* optional state */}try{if(server?.listening){server.closeAllConnections();await new Promise<void>(resolve=>server!.close(()=>resolve()));}store?.close();}finally{try{owner.release();}finally{releaseQuota?.();}}throw error;}
 }
