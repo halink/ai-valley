@@ -73,7 +73,7 @@ type SeasonalWeatherAnchor=Readonly<{sourceDigest:string;stateDigest:string;vers
 type SeasonalWeatherAdvance=Readonly<{previous:SeasonalWeatherAnchor|null;next:SeasonalWeatherAnchor}>;
 type SeasonalDraftAnchor=Readonly<{sequence:number;digest:string}>;
 type SeasonalDraftAdvance=Readonly<{previous:SeasonalDraftAnchor|null;next:SeasonalDraftAnchor}>;
-type OwnerState={registryDirectory:string;scope:string;directory:{dev:number;ino:number};registryIdentity:string;assert:()=>void;marker:()=>string|null;enroll:(binding:string)=>void;claim:(request:string,register:boolean)=>boolean;hasRecovery:(request:string)=>boolean;seasonalWorld:(binding?:string)=>string|null;seasonalWeather:(binding:string,advance?:SeasonalWeatherAdvance,slot?:'topic-second')=>SeasonalWeatherAnchor|null;seasonalDraft:(binding:string,request:string,advance?:SeasonalDraftAdvance)=>SeasonalDraftAnchor|null;quota?:QuotaChild;};
+type OwnerState={registryDirectory:string;scope:string;directory:{dev:number;ino:number};registryIdentity:string;assert:()=>void;marker:()=>string|null;enroll:(binding:string)=>void;claim:(request:string,register:boolean)=>boolean;hasRecovery:(request:string)=>boolean;seasonalWorld:(binding?:string)=>string|null;seasonalWeather:(binding:string,advance?:SeasonalWeatherAdvance,slot?:'topic-second'|'public-source')=>SeasonalWeatherAnchor|null;seasonalDraft:(binding:string,request:string,advance?:SeasonalDraftAdvance)=>SeasonalDraftAnchor|null;quota?:QuotaChild;};
 const quotaHandles=new WeakSet<object>();
 const owners=new WeakMap<ProductionModelAccountOwnership,OwnerState>();
 
@@ -147,6 +147,9 @@ export function attachProductionAccountQuotaRehearsal(ownership:ProductionModelA
   },
   seasonalPrivateWeatherTopicSecondAnchor(binding:string,advance?:SeasonalWeatherAdvance){
    current();return state.seasonalWeather(binding,advance,'topic-second');
+  },
+  seasonalPublicWeatherSourceAnchor(binding:string,advance?:SeasonalWeatherAdvance){
+   current();return state.seasonalWeather(binding,advance,'public-source');
   },
   seasonalPrivateWeatherDraftRequest(request:string){
    current();
@@ -393,9 +396,10 @@ function seasonalDraftAnchor(db:DatabaseSync,run:string,binding:string,request:s
   db.exec('COMMIT');return next;
  }catch(error){db.exec('ROLLBACK');throw error;}
 }
-function seasonalWeatherAnchor(db:DatabaseSync,run:string,binding:string,advance?:SeasonalWeatherAdvance,slot?:'topic-second'):SeasonalWeatherAnchor|null{
- const name=slot==='topic-second'?'account_seasonal_private_weather_topic_second':'account_seasonal_private_weather';
- const ddl=slot==='topic-second'?SEASONAL_WEATHER_SQL.replace('account_seasonal_private_weather',name):SEASONAL_WEATHER_SQL;
+function seasonalWeatherAnchor(db:DatabaseSync,run:string,binding:string,advance?:SeasonalWeatherAdvance,slot?:'topic-second'|'public-source'):SeasonalWeatherAnchor|null{
+ const name=slot==='topic-second'?'account_seasonal_private_weather_topic_second':
+  slot==='public-source'?'account_seasonal_public_weather_source':'account_seasonal_private_weather';
+ const ddl=SEASONAL_WEATHER_SQL.replace('account_seasonal_private_weather',name);
  const hex=(v:unknown)=>typeof v==='string'&&/^[0-9a-f]{64}$/.test(v);
  const integer=(n:unknown):n is number=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=0;
  const valid=(a:SeasonalWeatherAnchor)=>hex(a.sourceDigest)&&hex(a.stateDigest)&&integer(a.version)&&a.version<=32&&integer(a.wallFloor);
