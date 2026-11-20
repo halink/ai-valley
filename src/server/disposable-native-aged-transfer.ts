@@ -1,6 +1,6 @@
 import {MVP_HALL} from '../shared/mvp-hamlet.js';
 import {roomLayout,roomPath} from '../shared/rooms.js';
-import {lawfulAgedGroundApproach,type AgedGroundApproachPlan,type AgedGroundApproachWitness} from '../world/mvp-native-aged-ground-approach.js';
+import {agedGroundApproachPath,chooseLawfulAgedGroundPath,equalAgedGroundPath,type AgedGroundApproachPlan,type AgedGroundApproachWitness} from '../world/mvp-native-aged-ground-approach.js';
 import {physiology} from '../world/physiology.js';
 import type {NativeAgedEatCompletion,NativeAgedEatSelection} from '../world/mvp-aged-fruit-native-eat.js';
 import {goods} from '../shared/items.js';
@@ -11,7 +11,7 @@ import type {GroundDiscoveryHead,NativeOrdinaryAgedDiscovery,CommittedNativeOrdi
 import {createHash,createPublicKey,verify} from 'node:crypto';
 import {gzipSync} from 'node:zlib';
 import type {DatabaseSync} from 'node:sqlite';
-import type {World} from '../shared/types.js';
+import type {Vec,World} from '../shared/types.js';
 import {parseClimateUs,minuteToClimateUs} from '../world/mvp-climate.js';
 import type {MvpFruitFlowBatch} from '../world/mvp-resources.js';
 import {validateMvpGroundFruitState} from '../world/mvp-ground-fruit.js';
@@ -104,27 +104,42 @@ type Entry=Omit<NonNullable<ReturnType<typeof makeDisposableNativeAgedBirth>>['e
  readonly approach?:Approach;
  readonly lastApproach?:ApproachResult;
 };
-type Approach=Readonly<{plan:AgedGroundApproachPlan;enteredAtUs?:string}>;
+// Persist the legacy one-edge shape unchanged; two-edge routes add the exact
+// ordered commit minute of each real edge (two edges may share a minute).
+type Approach=Readonly<{plan:AgedGroundApproachPlan;enteredAtUs?:string;stepTimesUs?:readonly string[]}>;
 type ApproachResult=Readonly<{approach:Approach;revision:number;finishedAtUs:string}&(
  {result:'completed'|'interrupted'}|{result:'superseded-by-pickup';pickupResidentId:string;pickupPlanId:string}
 )>;
-function exactMove(w:World,p:AgedGroundApproachPlan){
+const approachTimes=(a:Approach):readonly string[]=>a.stepTimesUs??(a.enteredAtUs?[a.enteredAtUs]:[]);
+function exactMove(w:World,approach:Approach){
+ const p=approach.plan;
  const r=w.residents.find(r=>r.id===p.residentId),a=r?.activity;
  if(!r||!a||!r.plan||r.plan.id!==p.planId||a.planId!==p.planId||r.plan.createdAt!==p.startedFromMinute||
   r.plan.actorId!==r.id||r.plan.actions.length!==0||a.action.type!=='move'||!same(a.action.to,p.to)||
   !same(a.target,p.to)||a.room||r.inside!==null||a.startedAt!==p.startedFromMinute+1||
   !Number.isFinite(a.travelProgress??0)||(a.travelProgress??0)<0||(a.travelProgress??0)>=1)return null;
- if(same(r.at,p.from)&&a.path.length===1&&same(a.path[0],p.to))return 'in-flight' as const;
- if(same(r.at,p.to)&&a.path.length===0&&(a.travelProgress??0)===0)return 'entered' as const;
- return null;
+ const path=agedGroundApproachPath(p),completed=approachTimes(approach).length;
+ if(!same(r.at,completed?path[completed-1]:p.from)||!equalAgedGroundPath(a.path,path.slice(completed)))return null;
+ if(completed<path.length)return 'in-flight' as const;
+ return (a.travelProgress??0)===0?'entered' as const:null;
 }
 function validateApproach(e:Entry,w:World,a:Approach){
  const p=a.plan,first=e.discoveries?.find(d=>d.residentId===p.residentId&&d.discoveryId===p.discoveryId);
- return !!first&&p.effectId===e.receipt.effectId&&p.expiresUs===e.lot.expiresUs&&same(p.to,e.lot.fruit.at)&&vec(p.from)&&
-  Math.abs(p.from.x-p.to.x)+Math.abs(p.from.y-p.to.y)===1&&Number.isSafeInteger(p.startedFromMinute)&&
-  p.startedFromMinute>=0&&w.minute>=p.startedFromMinute+1&&parseClimateUs(first.atUs)<=BigInt(p.startedFromMinute)*1_000_000n&&
-  p.planId.startsWith('mvp-rule-'+w.id+'-')&&w.processed.includes('plan:'+p.planId)&&
-  (!a.enteredAtUs||parseClimateUs(a.enteredAtUs)>=BigInt(p.startedFromMinute+1)*1_000_000n&&parseClimateUs(a.enteredAtUs)<parseClimateUs(p.expiresUs));
+ if(!first||p.effectId!==e.receipt.effectId||p.expiresUs!==e.lot.expiresUs||!same(p.to,e.lot.fruit.at)||!vec(p.from)||
+  !Number.isSafeInteger(p.startedFromMinute)||p.startedFromMinute<0||w.minute<p.startedFromMinute+1||
+  parseClimateUs(first.atUs)>BigInt(p.startedFromMinute)*1_000_000n||
+  !p.planId.startsWith('mvp-rule-'+w.id+'-')||!w.processed.includes('plan:'+p.planId))return false;
+ const at=(p:Vec)=>vec(p)&&p.x>=0&&p.y>=0&&p.x<w.map.width&&p.y<w.map.height;
+ const steps=agedGroundApproachPath(p),times=approachTimes(a);
+ if(p.path===undefined?a.stepTimesUs!==undefined:!Array.isArray(p.path)||p.path.length!==2||!Array.isArray(a.stepTimesUs))return false;
+ const latest=times.at(-1);
+ return at(p.from)&&steps.every((q,i)=>{
+  const from=i?steps[i-1]:p.from;
+  return at(q)&&Math.abs(from.x-q.x)+Math.abs(from.y-q.y)===1&&!same(q,p.from);
+ })&&same(steps.at(-1)!,p.to)&&times.length<=steps.length&&
+  a.enteredAtUs===(times.length===steps.length?latest:undefined)&&times.every((t,i)=>typeof t==='string'&&
+   parseClimateUs(t)>=BigInt(p.startedFromMinute+1)*1_000_000n&&parseClimateUs(t)<parseClimateUs(p.expiresUs)&&
+   parseClimateUs(t)<=parseClimateUs(minuteToClimateUs(w.minute))&&(!i||parseClimateUs(t)>=parseClimateUs(times[i-1])));
 }
 export function projectCurrentDisposableGroundApproach(e:Entry){
  return structuredClone(e.approach?.plan??null);
@@ -138,14 +153,18 @@ function stageApproach(e:Entry,before:World,after:World,witness:AgedGroundApproa
  if(e.pickup||e.expiry||old&&!sameJson(old.plan,p))throw Error('disposable_native_ground_approach_scope');
  const a=before.residents.find(r=>r.id===p.residentId),b=after.residents.find(r=>r.id===p.residentId);
  if(!a||!b||!old&&(p.startedFromMinute!==before.minute||e.lastApproach||!same(a.at,p.from)||a.activity||a.plan||
-   !lawfulAgedGroundApproach(before,a,p.to))||old&&!exactMove(before,p))throw Error('disposable_native_ground_approach_start');
- if(!validateApproach(e,after,{plan:p}))throw Error('disposable_native_ground_approach_evidence');
- const edge=witness.edge;
- if(edge&&(old?.enteredAtUs||witness.stopped||!same(edge.from,p.from)||!same(edge.to,p.to)||!same(b.at,p.to)||
-  parseClimateUs(atUs)>=parseClimateUs(p.expiresUs)))throw Error('disposable_native_ground_approach_edge');
- if(!edge&&!same(a.at,b.at))throw Error('disposable_native_ground_approach_unverified_motion');
- const approach={plan:p,...(old?.enteredAtUs||edge?{enteredAtUs:old?.enteredAtUs??atUs}:{})};
- const phase=exactMove(after,p), superseded=witness.supersededBy;
+   !equalAgedGroundPath(chooseLawfulAgedGroundPath(before,a,p.to)??[],agedGroundApproachPath(p)))||old&&!exactMove(before,old))throw Error('disposable_native_ground_approach_start');
+ const path=agedGroundApproachPath(p),times=[...(old?approachTimes(old):[])];
+ let pos=a.at;
+ for(const edge of witness.edges){
+  if(!path[times.length]||!same(edge.from,pos)||!same(edge.to,path[times.length])||
+   parseClimateUs(atUs)>=parseClimateUs(p.expiresUs))throw Error('disposable_native_ground_approach_edge');
+  pos=edge.to;times.push(atUs);
+ }
+ if(!same(pos,b.at))throw Error('disposable_native_ground_approach_unverified_motion');
+ const approach={plan:p,...(p.path?{stepTimesUs:times}:{}),...(times.length===path.length?{enteredAtUs:times.at(-1)!}:{})};
+ if(!validateApproach(e,after,approach))throw Error('disposable_native_ground_approach_evidence');
+ const phase=exactMove(after,approach), superseded=witness.supersededBy;
  if(superseded){
   if(!old||!pickup||witness.stopped||phase||b.activity||b.plan||
    pickup.settledUs!==atUs||pickup.effectId!==p.effectId||pickup.residentId===p.residentId||
@@ -287,7 +306,7 @@ export function readDisposableNativeAgedTransfer(db:DatabaseSync,owner:Disposabl
    committedRevision<r.observedRevision||committedRevision>w.revision||parseClimateUs(r.atUs)>parseClimateUs(minuteToClimateUs(w.minute)))))
   throw Error('disposable_native_aged_discovery_archive');
  if(e.approach&&(e.pickup||e.expiry||e.lastApproach||!validateApproach(e,w,e.approach)||
-   !exactMove(w,e.approach.plan)||(exactMove(w,e.approach.plan)==='entered')!==!!e.approach.enteredAtUs)||
+   !exactMove(w,e.approach)||(exactMove(w,e.approach)==='entered')!==!!e.approach.enteredAtUs)||
   e.lastApproach&&(!validateApproach(e,w,e.lastApproach.approach)||!Number.isSafeInteger(e.lastApproach.revision)||e.lastApproach.revision>w.revision||
    !['completed','interrupted','superseded-by-pickup'].includes(e.lastApproach.result)||
    e.lastApproach.result==='superseded-by-pickup'&&(!e.pickup||e.approach||e.expiry||
@@ -297,6 +316,7 @@ export function readDisposableNativeAgedTransfer(db:DatabaseSync,owner:Disposabl
     e.lastApproach.approach.enteredAtUs!==undefined&&parseClimateUs(e.lastApproach.approach.enteredAtUs)>parseClimateUs(e.pickup.settledUs))||
    parseClimateUs(e.lastApproach.finishedAtUs)<BigInt(e.lastApproach.approach.plan.startedFromMinute+1)*1_000_000n||
    parseClimateUs(e.lastApproach.finishedAtUs)>parseClimateUs(minuteToClimateUs(w.minute))||
+   approachTimes(e.lastApproach.approach).some(t=>parseClimateUs(t)>parseClimateUs(e.lastApproach!.finishedAtUs))||
    e.lastApproach.result==='completed'&&(!e.lastApproach.approach.enteredAtUs||
     parseClimateUs(e.lastApproach.finishedAtUs)<=parseClimateUs(e.lastApproach.approach.enteredAtUs)||
     parseClimateUs(e.lastApproach.finishedAtUs)>=parseClimateUs(e.lot.expiresUs))))

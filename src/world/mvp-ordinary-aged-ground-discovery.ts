@@ -1,4 +1,4 @@
-import {lawfulAgedGroundApproach,type AgedGroundApproach,type AgedGroundApproachPlan} from './mvp-native-aged-ground-approach.js';
+import {chooseLawfulAgedGroundPath,type AgedGroundApproach,type AgedGroundApproachPlan} from './mvp-native-aged-ground-approach.js';
 import type {NativeAgedPickupSelection} from './mvp-aged-fruit-native-pickup.js';
 import {canPerceiveMvpCommonFruitPoint,mvpFallenFruitOptionalActionPermitted} from './mvp-fallen-fruit-resident.js';
 import {same} from './navigation.js';
@@ -132,9 +132,11 @@ export function prepareOrdinaryNativeGroundApproach(w:World,port:OrdinaryAgedGro
  if(!selected||selected.approachAlreadyUsed)return intents;
  const {r,options}=selected;
  for(const {actor,fact:f} of options.values()){
-  if(!same(actor.at,r.fruit.at)&&lawfulAgedGroundApproach(w,actor,r.fruit.at))
+  const path=chooseLawfulAgedGroundPath(w,actor,r.fruit.at);
+  if(path)
    intents.set(actor.id,Object.freeze({residentId:actor.id,effectId:f.effectId,discoveryId:f.discoveryId,
-    from:{...actor.at},to:{...r.fruit.at},expiresUs:r.expiresUs}));
+    from:{...actor.at},to:{...r.fruit.at},expiresUs:r.expiresUs,
+    ...(path.length===2?{path:[{...path[0]},{...path[1]}] as const}:{})}));
  }
  return intents;
 }

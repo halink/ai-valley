@@ -1,4 +1,4 @@
-import {noteAgedGroundApproachEdge,noteDeclinedAgedGroundRacePickup,stopAgedGroundApproach,supersedeAgedGroundApproachAfterPickup} from './mvp-native-aged-ground-approach.js';
+import {noteAgedGroundApproachEdge,noteAgedGroundApproachHazardStop,noteDeclinedAgedGroundRacePickup,stopAgedGroundApproach,stopAgedGroundApproachOnEdge,supersedeAgedGroundApproachAfterPickup} from './mvp-native-aged-ground-approach.js';
 import {AGED_DINING_INVALID,AGED_EAT_INVALID,canRunMvpNativeAgedEat,completeMvpNativeAgedEat,workMvpNativeAgedEat,noteDisposableAgedDiningSeatDecline} from './mvp-aged-fruit-native-eat.js';
 import {canRunMvpNativeAgedPickup,completeMvpNativeAgedPickup} from './mvp-aged-fruit-native-pickup.js';
 import {noteMvpNativeMovePhase,noteMvpNativeObservationPhase} from './mvp-native-observation-phase.js';
@@ -639,6 +639,9 @@ function processActivity(world:World,r:Resident,minutes:number,actionFailures?:S
   const canStep=activity.action.type==='health'&&activity.action.operation==='rescue'&&activity.action.evacuationDangerId?(from:Vec,to:Vec)=>distance(from,to)===1&&frontierRetreatStepAllowed(world,r)(from,to):activity.action.type==='frontierHazard'&&(activity.action.operation==='retreat'||activity.action.operation==='shelter')?frontierRetreatStepAllowed(world,r):(from:Vec,to:Vec)=>walkable(world,to,from);
   while(available>1e-9&&activity.path.length){const next=activity.path[0];
    if(activity.action.type==='health'){syncMedicalTransport(world);if(r.activity!==activity)return;const error=healthReason(world,r,activity.action);if(error){failure(world,r,error);syncMedicalTransport(world);return;}}
+   if(activity.action.type==='move'&&stopAgedGroundApproachOnEdge(world,r,next,activity.planId)){
+    failure(world,r,'原本可选的短程移动已不适宜');return;
+   }
    if(!canStep(r.at,next)){failure(world,r,'原路线出现阻挡，需要重新决定');return;}
    endDecisionProtection(world,r,'decision');
    const duration=world.map.tiles[next.y*world.map.width+next.x]==='road'?.75:1,needed=(1-progress)*duration;
@@ -754,7 +757,7 @@ export function stepWorld(world:World,minutes:number,options:{actionFailures?:St
   advanceVisitorJourneyNeeds(world,!!options.decisionChoices);
   const beforeHazards=new Map(world.residents.map(r=>[r.id,r.health]));
   if(world.frontierHazards)advanceFrontierHazards(world,dt,(r,reason)=>{
-   if(r.plan||r.activity)failure(world,r,reason);
+   if(r.plan||r.activity){noteAgedGroundApproachHazardStop(world,r);failure(world,r,reason);}
    else{r.lastFailure=reason;r.decisionDue=Math.min(r.decisionDue,world.minute);r.revision++;}
   });
   for(const r of world.residents)recordProtectionLoss(r,'hazard',(beforeHazards.get(r.id)??r.health)-r.health);
