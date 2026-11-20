@@ -1,5 +1,5 @@
 import {verifyDueExecutionPlacement,verifyOrdinaryDueExecution,readOrdinaryDevelopmentDueRecord,consumeOrdinaryDevelopmentDue} from './ordinary-g2-development-due.js';
-import type {MvpFruitFlowBatch} from '../world/mvp-resources.js';
+import {deriveNativeAgedFruitSourceMinute,verifyNativeAgedFruitSourceFlow,type NativeAgedFruitSourceFlow} from './ordinary-native-aged-fruit-conservation.js';
 import {diningWorkClaim,readNativeAgedEatingState,type Eating} from './disposable-native-aged-transfer.js';
 import {agedGroundApproachPath,chooseLawfulAgedGroundPath,equalAgedGroundPath,type AgedGroundApproachPlan,type AgedGroundApproachWitness} from '../world/mvp-native-aged-ground-approach.js';
 import {same} from '../world/navigation.js';
@@ -131,7 +131,7 @@ type Eaten=Readonly<{heldDebit:1;witness:NativeAgedEatCompletion}>;
 type Route=Readonly<{plan:AgedGroundApproachPlan;edgesUs:readonly string[];result:'active'|'completed'|'interrupted'|'superseded';
  closedUs?:string;competitorPlanId?:string}>;
 type HallDecline=Readonly<{schema:'v3-native-hall-declined';holderId:string;planId:string;atUs:string;reason:NativeAgedDiningDeclineReason}>;
-type SourceFlow=Readonly<{observedMinutes:number;grossNaturalRenewal:number;grossOrdinaryGather:number;closingQuantity:number}>;
+type SourceFlow=NativeAgedFruitSourceFlow;
 type Lifecycle=Readonly<{schema:'ordinary-g2-development-continuation/v3';sequence:number;atUs:string;
  revision:number;digest:string;placement:Ground;discoveries:readonly CommittedNativeOrdinaryAgedDiscovery[];expiry:Expiry|null;held?:Held;heldExpiry?:HeldExpiry;work?:Work;hallWork?:Eating;hallDecline?:HallDecline;eaten?:Eaten;route?:Route;sourceFlow?:SourceFlow|null}>;
 const archiveKeys=['schema','approval','sourceBefore','sourceAfter','afterRevision','afterDigest','groundDigest'];
@@ -322,39 +322,14 @@ function eligibleLifecycleEvents(w:World,draft:World){
   hash(draft.events.slice(0,w.events.length))===hash(w.events)&&
   !draft.events.slice(w.events.length).some(e=>e.kind==='conversation'||e.speechText!==undefined||e.mvpMeal||e.socialAppointmentArrival||e.mvpFruitFall);
 }
-const sourcePoint=(row:{sourceAt:{x:number;y:number}}|undefined,g:Ground)=>!!row&&row.sourceAt.x===g.sourceAt.x&&row.sourceAt.y===g.sourceAt.y;
-function verifiedSourceFlow(w:World,g:Ground,a:Archive,l:Pick<Lifecycle,'sequence'|'sourceFlow'>|null):SourceFlow|null{
- const resource=w.resources.filter(r=>r.id===g.sourceId);
- const x=l?l.sourceFlow:{observedMinutes:0,grossNaturalRenewal:0,grossOrdinaryGather:0,closingQuantity:a.sourceAfter};
- if(!x||!exact(x,['observedMinutes','grossNaturalRenewal','grossOrdinaryGather','closingQuantity'])||
-  !Object.values(x).every(int)||x.observedMinutes!==(l?.sequence??0)||
-  BigInt(a.sourceAfter)+BigInt(x.grossNaturalRenewal)-BigInt(x.grossOrdinaryGather)!==BigInt(x.closingQuantity)||
-  resource.length!==1||resource[0].kind!=='bush'||resource[0].foodItem!=='fruit'||
-  !sourcePoint({sourceAt:resource[0].at},g)||resource[0].amount!==x.closingQuantity)return null;
- return x;
-}
-function advanceSourceFlow(w:World,draft:World,g:Ground,a:Archive,l:Lifecycle|null,flow:MvpFruitFlowBatch|null):SourceFlow|null{
- const old=verifiedSourceFlow(w,g,a,l);
- if(!old||!flow||flow.worldId!==w.id||draft.id!==w.id||flow.fromRevision!==w.revision||flow.toRevision!==draft.revision||
-  flow.fromUs!==minuteToClimateUs(w.minute)||flow.toUs!==minuteToClimateUs(draft.minute))return null;
- const open=flow.opening.find(r=>r.sourceId===g.sourceId),close=flow.closing.find(r=>r.sourceId===g.sourceId);
- if(!open||!close||!sourcePoint(open,g)||!sourcePoint(close,g)||open.amount!==old.closingQuantity)return null;
- let grossNaturalRenewal=old.grossNaturalRenewal,grossOrdinaryGather=old.grossOrdinaryGather;
- for(const op of flow.operations){
-  if(op.kind==='gather'&&op.sourceId===g.sourceId)grossOrdinaryGather+=op.quantity;
-  if(op.kind==='renewal'&&op.witness.sourceId===g.sourceId)grossNaturalRenewal+=op.witness.naturallyRenewed;
- }
- const sequence=(l?.sequence??0)+1;
- const sourceFlow={observedMinutes:sequence,grossNaturalRenewal,grossOrdinaryGather,closingQuantity:close.amount};
- return verifiedSourceFlow(draft,g,a,{sequence,sourceFlow});
-}
+const nativeSourceBasis=(g:Ground,a:Archive)=>({sourceId:g.sourceId,sourceAt:g.sourceAt,placementClosingQuantity:a.sourceAfter});
 /** Only project an original transaction-verified archive through its owning reader. */
 export function projectOrdinaryDevelopmentV3Fairness(w:World,owned:NonNullable<ReturnType<typeof readOrdinaryDevelopmentV3>>){
  const proof=verifiedArchiveReads.get(owned);
  if(!proof||proof.revision!==w.revision||proof.world!==hash(w)||proof.content!==hash(owned))return null;
  const l=owned.lifecycle,g=l?.placement??owned.ground;
  if(!g)return null;
- const flow=verifiedSourceFlow(w,g,owned.receipt,l);
+ const flow=verifyNativeAgedFruitSourceFlow(w,nativeSourceBasis(g,owned.receipt),l);
  return {status:'ready',coverage:'one-signed-development-opportunity',throughRevision:w.revision,throughUs:minuteToClimateUs(w.minute),
   proposalDirections:{linkedApprovedCandidate:1,total:'unavailable'},actualEffects:{groundPlacement:1},
   actualDiscoveries:{personal:(l?.discoveries??[]).length},actualPickups:{settled:l?.held?1:0},
@@ -429,7 +404,7 @@ export function prepareOrdinaryDevelopmentV3Minute(db:DatabaseSync,w:World,owned
     hash(holder.inventory)!==hash(opening.inventory))return null;
    hallDecline={schema:'v3-native-hall-declined',holderId:held.holderId,planId:l.hallWork.planId,atUs:after,reason:declining.reason};
   }
-  const prepared={draft:next.draft,placement:l.placement,sequence:l.sequence+1,discoveries:l.discoveries,expiry:null,held,heldExpiry,work,hallWork,hallDecline,eaten,route:l.route,sourceFlow:advanceSourceFlow(w,next.draft,l.placement,owned.receipt,l,next.fruitFlow)};
+  const prepared={draft:next.draft,placement:l.placement,sequence:l.sequence+1,discoveries:l.discoveries,expiry:null,held,heldExpiry,work,hallWork,hallDecline,eaten,route:l.route,sourceFlow:deriveNativeAgedFruitSourceMinute(w,next.draft,nativeSourceBasis(l.placement,owned.receipt),l,next.fruitFlow)};
   preparedMinutes.set(prepared,{db,priorSeal:owned.seal,content:hash(prepared)});
   return prepared;
  }
@@ -475,7 +450,7 @@ export function prepareOrdinaryDevelopmentV3Minute(db:DatabaseSync,w:World,owned
   discoveries.push({...seen,committedRevision:draft.revision});prior.add(seen.residentId);
  }
  if(discoveries.length>64)return null;
- const prepared={draft,placement:g,sequence:(l?.sequence??0)+1,discoveries,expiry:expiry.expired[0]??null,...(held?{held}:{}),heldExpiry:undefined,work:undefined,hallWork:undefined,hallDecline:undefined,eaten:undefined,route,sourceFlow:advanceSourceFlow(w,draft,g,owned.receipt,l,next.fruitFlow)};
+ const prepared={draft,placement:g,sequence:(l?.sequence??0)+1,discoveries,expiry:expiry.expired[0]??null,...(held?{held}:{}),heldExpiry:undefined,work:undefined,hallWork:undefined,hallDecline:undefined,eaten:undefined,route,sourceFlow:deriveNativeAgedFruitSourceMinute(w,draft,nativeSourceBasis(g,owned.receipt),l,next.fruitFlow)};
  preparedMinutes.set(prepared,{db,priorSeal:owned.seal,content:hash(prepared)});
  return prepared;
 }

@@ -185,3 +185,14 @@ reset, and no old approval or partial/copy can grant another debit.
 The resulting original-only ground lot uses the established private V3
 discovery, pickup and expiry paths. This is not a player save admission,
 production enablement, automatic scheduling, model dispatch or public reveal.
+
+### Reusable native source conservation (no execution seam)
+
+The source-balance calculation is a pure function of two actual world
+heads, the authenticated placement baseline provided by the owning archive,
+and a captured native minute. The original V3 store still owns all
+authentication, database reads, one-minute preparation, and writes.
+This function tracks same-minute natural renewal and ordinary gathering
+separately, rejects missing or discontinuous evidence, and cannot infer
+unobserved gross activity from net stock. It does not admit, authorize,
+produce, settle, or expose an effect for any ordinary or production save.
