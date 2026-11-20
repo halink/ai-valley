@@ -98,3 +98,9 @@ SQLite 同一世界事务的私有表保存请求身份、actor/revision、时�
 在同一原档、明确无端口的 canonical Seasonal 环境，可在 `publicWeatherSource`、`publicWeatherResponse` 外另外启用 `localWeatherEditorial: {mode:'explicit-local-offline-weather-edition', reviewerPublicKeyPem}`。编审公钥必须与来源审核、准确回包审核及已配置私用审核不同。只有确实获得当前来源许可、已闭实测小时、共享账户已把同一准确回包结算完毕时才有发布预览。复用一条天气断言的现有校验和已有第一版渲染；如选中温度或湿度，不改写为默认天气状况。它没有公开网页、写接口或模型供应商。
 
 `previewLocalWeatherEditorial('publish'|'revoke')` 生成独立签署条款，其中绑定当前原档完整存档头、原始证据、各项精确摘要和前一段已签历史。`encodeLocalWeatherEditorialTerms` 只为该用途编码；`recordLocalWeatherEditorial` 同事务复查。每份档仅有一份本机离线刊，可独立撤回一次；本档 SQL 记录和同账号独立注册锚都必须吻合。一侧丢失或损坏不重造、不恢复已经撤回的刊，不承诺抵抗协调篡改或完整外部回滚。每次 `latestLocalWeatherEdition` 仅读取已签且仍能复核来源、配额和精确渲染内容的刊；来源过期／撤权立刻隐藏，仍可签撤回留痕。版本明确为本机 `offline-synthetic`，默认关闭，无玩家、HTTP、真实模型或新预算。
+
+### 仅断网验证天气 HTTP 形状
+
+在同一原档、独立批准的真实闭合整点和现有居民优先配额下，`publicWeatherResponse.transport` 可显式使用 `createSeasonalHeldWeatherMemory()` 的一次性内存能力。该模式对匿名天气点和固定系统提示编码为指定模型的最小 JSON 补全请求；独立天气回包签名同时绑定匿名内层和实际外层字节。不会发起 HTTP，模块也不读取凭证。输入只有游戏时刻、天气类型、温度和湿度，不含原档、原始引用、居民、账号或调用者任意文字。
+
+仅接受指定模型名、有限非流式单条回复和边界内可对账的用量字段。用量格式不明、超额、模型名不符或失联时，已交接的请求保持未知，不自动重试；用量可确认而内容不是合法单事实时，扣除实际模拟报告的用量但不得进入可读草稿。送出、回读及可见性继续遵守同档来源有效性、原独立签章和居民优先。与原合成原样回包模式共用同一审批机会和持久索引，模式更换不能重发。新模式各返回明确 `liveAuthorized: false`，仅程序内原所有者读取结果、不可签发或发布、不开放端口。它只验证生产形状，不声称供应商兼容、真实账单或真实外发权限。对接真实服务还需已验证的真实账号／未决对账、受监督交接和独立明确的部署批准；普通居民准入保持不变。
