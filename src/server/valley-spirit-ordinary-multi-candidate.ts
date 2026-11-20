@@ -50,15 +50,18 @@ export function buildOrdinaryMultiCandidatePreview(w:World,p:OrdinaryMultiCandid
    if(until<=BigInt(atUs)||BigInt(lot.lot.bornUs)>BigInt(atUs))return [];
    return [{opportunityId:valleySpiritFruitFallOpportunityId(w.id,rain.rainEventId,geo.source.resourceInstanceId),
     lotId:lot.lot.id,sourceId:site.sourceId,sourceInstanceId:geo.source.resourceInstanceId,ownerId:geo.source.ownerId,
-    targetId:geo.targetId,eligibleUntilUs:until.toString()}];
+    targetId:geo.targetId,eligibleUntilUs:until.toString(),stockBand:geo.source.ripeAvailable===1?'one' as const:'several' as const,
+    remainingBand:until-BigInt(atUs)<=5_000_000n?'short' as const:until-BigInt(atUs)<=30_000_000n?'medium' as const:'long' as const}];
   });
   if(rows.length<2||new Set(rows.map(r=>r.opportunityId)).size!==rows.length||!journal.isCurrentPublicInput(archived))return null;
-  const offers=Object.freeze(rows.map((r,i)=>Object.freeze({number:i+1,...r})));
+  const offers=Object.freeze(rows.map(({stockBand:_stock,remainingBand:_remaining,...r},i)=>Object.freeze({number:i+1,...r})));
+  const selectionTraits=Object.freeze(rows.map((r,i)=>Object.freeze({number:i+1,kind:'ripe-fruit-after-rain' as const,
+   stockBand:r.stockBand,remainingBand:r.remainingBand})));
   const snapshot=hash([p,w.id,w.revision,atUs,rain,archived,offers,lots]);
   const numbered=Object.freeze({schema:'ordinary-native-candidate-numbered-preview/v1' as const,
    options:Object.freeze(offers.map(o=>Object.freeze({number:o.number,kind:'ripe-fruit-after-rain' as const})))});
   return Object.freeze({status:'candidate-menu-preview-only' as const,snapshot,headRevision:w.revision,
-   permissionVersion:archived.permissionVersion,offers,numbered,selectionAuthorized:false as const,executionAuthorized:false as const,
+   permissionVersion:archived.permissionVersion,offers,numbered,selectionTraits,selectionAuthorized:false as const,executionAuthorized:false as const,
    groundCapability:false as const});
  }catch{return null;}
 }
