@@ -1,10 +1,11 @@
+import {buildOrdinaryMultiCandidatePreview,type CandidateJournal,type OrdinaryMultiCandidatePin} from './valley-spirit-ordinary-multi-candidate.js';
 import {openOrdinaryNativeShelterLease,type OrdinaryNativeShelterOptions} from './ordinary-native-shelter-custody.js';
 import {openOrdinaryNativeSpeechLease,type OrdinaryNativeSpeechOptions} from './ordinary-native-speech-custody.js';
 import {appendDisposableNativeSpeech,ownsDisposableSpeechPurpose,type DisposableSpeechPurpose} from './disposable-native-addressed-speech.js';
 import type {GroundDiscoveryHead} from '../world/mvp-ordinary-aged-ground-discovery.js';
 import {advanceDisposableNativeAgedSourceFlow,advanceDisposableNativeAgedTransfer,assertDisposableNativeAgedTransferStorage,isDisposableNativeAgedTransferPin,hasDisposableNativeAgedTransfer,makeDisposableNativeAgedBirth,prepareDisposableNativeAgedTransfer,projectDisposableHeldForNativeEating,projectCurrentDisposableGroundApproach,type Eating,projectDisposableNativeAgedTransfer,projectDisposableNativeAgedFairness,projectActiveDisposableGroundForObservation,projectActiveDisposableGroundForPickup,projectDisposableGroundResidentDiscovery,readDisposableNativeAgedTransfer,writeDisposableNativeAgedTransfer,type DisposableNativeAgedTransferPin} from './disposable-native-aged-transfer.js';
 import {assertDisposableRulesSavePath,guardDisposableRulesSaveCommit,readDisposableRulesSaveMarker,type DisposableRulesSaveAuthority} from './disposable-native-rules-save.js';
-import {advanceOrdinaryNativeEmptyGround,pinOrdinaryAgedGround,readOwnedEmptyGround,type OrdinaryAgedGroundPin} from './valley-spirit-ordinary-aged-ground.js';
+import {assertOrdinaryAgedGroundStartup,advanceOrdinaryNativeEmptyGround,pinOrdinaryAgedGround,readOwnedEmptyGround,type OrdinaryAgedGroundPin} from './valley-spirit-ordinary-aged-ground.js';
 import {runtimeOwnershipAnchor,type RuntimeOwnership} from './runtime-lock.js';
 import {readValleySpiritWeatherPermission} from './valley-spirit-permissions.js';
 import {inspectRulesAgedFruitBasis,unavailableAgedRulesPreflight} from './valley-spirit-rules-aged-preflight.js';
@@ -1318,6 +1319,28 @@ export class WorldStore {
  }
  hasDisposableAgedTransfer(){
   return !!this.#privateDisposableSave&&hasDisposableNativeAgedTransfer(this.db);
+ }
+ readCurrentOrdinaryMultiCandidate(head:Readonly<{id:string;revision:number;minute:number}>,pin:OrdinaryMultiCandidatePin,journal:CandidateJournal){
+  if(!this.nativeMultiFruit||this.nativeMultiFruit.worldId!==head.id||pin.worldId!==head.id)return null;
+  try{
+   this.db.exec('BEGIN');
+   try{
+    const w=this.readWorld(false,false);
+    if(!w||w.id!==head.id||w.revision!==head.revision||w.minute!==head.minute)return null;
+    assertOrdinaryAgedGroundStartup(this.db,w as unknown as Record<string,unknown>,true);
+    const grant=readValleySpiritWeatherPermission(this.db,w.id);
+    if(!grant?.publicWeather)return null;
+    const first=this.nativeMultiFruit.inspect(this.db,w);
+    if(!first)return null;
+    const m=buildOrdinaryMultiCandidatePreview(w,pin,first,journal);
+    if(!m||m.permissionVersion!==grant.version)return null;
+    const second=this.nativeMultiFruit.inspect(this.db,w);
+    const after=second&&buildOrdinaryMultiCandidatePreview(w,pin,second,journal);
+    assertOrdinaryAgedGroundStartup(this.db,w as unknown as Record<string,unknown>,true);
+    const finalGrant=readValleySpiritWeatherPermission(this.db,w.id);
+    return after&&after.snapshot===m.snapshot&&finalGrant?.publicWeather&&finalGrant.version===grant.version?m:null;
+   }finally{this.db.exec('ROLLBACK');}
+  }catch{return null;}
  }
  readCurrentOrdinaryNativeMultiFruit(head:Readonly<{id:string;revision:number;minute:number}>){
   if(!this.nativeMultiFruit||this.nativeMultiFruit.worldId!==head.id)return null;
