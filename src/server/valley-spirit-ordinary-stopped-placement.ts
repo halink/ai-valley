@@ -1,10 +1,11 @@
+import {assertStoppedEventArchive,assertStoppedEventAuthority,prepareStoppedGroundReplayMinute,recoverStoppedGroundContinuation,stoppedContinuationSql,stoppedContinuationTable,stoppedGroundBody,type StoppedGroundReplay} from './valley-spirit-ordinary-stopped-continuation.js';
 import {createHash,createHmac,createPublicKey,randomBytes,verify} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
 import {constants,fstatSync,lstatSync,mkdtempSync,openSync,closeSync,readFileSync,writeFileSync,realpathSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {basename,dirname,join} from 'node:path';
 import {gzipSync} from 'node:zlib';
-import type {World} from '../shared/types.js';
+import type {World,WorldEvent} from '../shared/types.js';
 import {parseClimateUs} from '../world/mvp-climate.js';
 import {resolveMvpRainEpisode} from '../world/mvp-rain-provenance.js';
 import {validateMvpGroundFruitState} from '../world/mvp-ground-fruit.js';
@@ -166,7 +167,7 @@ function transfer(w:World,b:Basis){
  after.resources.find(r=>r.id===s.id)!.amount--;
  if(!Number.isSafeInteger(++after.revision))return bad();
  const groundState=JSON.stringify({version:2,worldId:w.id,effectId,items:[ground]});
- return {after,groundState,receipt:Object.freeze({effectId,sourceDebit:1 as const,groundCredit:1 as const,
+ return {after,groundState,ground,receipt:Object.freeze({effectId,sourceDebit:1 as const,groundCredit:1 as const,
   bornUs:ground.bornUs,expiresUs:ground.expiresUs,revision:after.revision,productionEnabled:false as const})};
 }
 const rawGround=(db:DatabaseSync)=>db.prepare('SELECT body,digest FROM main.valley_spirit_ordinary_aged_ground WHERE slot=1').get();
@@ -186,9 +187,9 @@ function recover(db:DatabaseSync,key:StoppedPlacementKey,p:ReturnType<typeof pin
   prior.id!==b.terms.worldId||prior.revision!==b.terms.revision||prior.mvpClimate?.lastUs!==b.terms.atUs||
   prior.id!==p.options.queue.worldId||b.basis.sourceResourceInstanceId!==b.ground.sourceResourceInstanceId||
   b.terms.targetId!=='ground:'+p.options.ground.target.x+':'+p.options.ground.target.y)return bad();
- const {after,groundState,receipt}=transfer(prior,v.b),raw=rawGround(db);
- if(!gzipSync(JSON.stringify(after),{level:1}).equals(live.bytes)||raw?.body!==groundState||raw.digest!==hash(groundState))return bad();
- return {receipt,b:v.b,g2:v.g2};
+ const {after,ground,receipt}=transfer(prior,v.b),raw=rawGround(db);
+ const replay=recoverStoppedGroundContinuation(db,after,ground,hash(row.body),live.bytes,raw);
+ return {receipt,b:v.b,g2:v.g2,replay};
 }
 /** Single write followed by immutable private recovery only. Ordinary runtime
  * refuses the archive; there is no route, scheduler, or new resident action. */
@@ -205,9 +206,9 @@ export function stoppedOrdinaryPlacement(key:StoppedPlacementKey,request:Readonl
      if(request.g1===undefined&&request.g2===undefined)return {status:'recovered' as const,replay:true,receipt:r.receipt};
      return exact(request.g1,['terms','signature'])&&request.g1.signature===r.b.g1.signature&&
       ordinaryAgedG1ReviewSigningBytes(request.g1.terms)?.equals(ordinaryAgedG1ReviewSigningBytes(r.b.g1.terms)!)&&
-      signedKey(r.b.terms,request.g2,p)?{status:'placed' as const,replay:true,receipt:r.receipt}:null;
+      signedKey(r.b.terms,request.g2,p)?{status:r.replay.sequence?'historical-placement' as const:'placed' as const,replay:true,receipt:r.receipt}:null;
     }
-    if(request.g1===undefined)return null;
+    if(db.prepare('SELECT 1 FROM sqlite_schema WHERE name=? COLLATE NOCASE').get(stoppedContinuationTable)||request.g1===undefined)return null;
     const b=currentBasis(db,owner,p,live.w,request.g1,live.bytes);
     if(!b)return null;
     if(request.g2===undefined)return {status:'g2-signing-input' as const,terms:b.terms,executionAuthorized:false as const};
@@ -224,6 +225,74 @@ export function stoppedOrdinaryPlacement(key:StoppedPlacementKey,request:Readonl
     db.prepare(`INSERT INTO main.${table} VALUES(1,?,?,?)`).run(body,live.bytes,mac(key.token,body,live.bytes));
     if(JSON.stringify(recover(db,key,p,head(db)).receipt)!==JSON.stringify(next.receipt))return bad();
     assert();db.exec('COMMIT');return {status:'placed' as const,replay:false,receipt:next.receipt};
+   }finally{if(db.isTransaction)db.exec('ROLLBACK');db.close();}
+  }finally{owner.release();}
+ }catch{return null;}
+}
+
+function append(db:DatabaseSync,w:World,events:readonly WorldEvent[]){
+ for(const e of events){
+  const body=JSON.stringify(e);
+  if(Buffer.byteLength(body)>131072)bad();
+  const seq=db.prepare('INSERT INTO main.events (id,world_id,at,body) VALUES (?,?,?,?)').run(e.id,w.id,e.at,body).lastInsertRowid;
+  for(const id of new Set(e.actors))db.prepare('INSERT INTO main.event_people VALUES (?,?,?,?)').run(w.id,id,e.id,seq);
+  for(const id of new Set(e.animalIds??[]))db.prepare('INSERT INTO main.event_animals VALUES (?,?,?,?)').run(w.id,id,e.id,seq);
+ }
+}
+/** Owning placement path must verify the original dual signed archive first;
+ * no generic caller or detached world can reach this function's committing path. */
+function stageStoppedGroundMinute(db:DatabaseSync,current:StoppedGroundReplay,old:Uint8Array,failAfterWorld:boolean){
+ const draft=prepareStoppedGroundReplayMinute(current);
+ if(!draft||!current.lot)return null;
+ assertStoppedEventAuthority(db);assertStoppedEventArchive(db,current.world);
+ const state=gzipSync(JSON.stringify(draft.finish.world),{level:1}),ground=stoppedGroundBody(draft.finish,current.lot.fruit.effectId),prior=stoppedGroundBody(current,current.lot.fruit.effectId);
+ if(state.length>32*1024*1024||db.prepare('UPDATE main.worlds SET revision=?,state=? WHERE id=? AND revision=? AND state=?')
+  .run(draft.finish.world.revision,state,current.world.id,current.world.revision,old).changes!==1)bad();
+ if(failAfterWorld)bad();
+ if(db.prepare('UPDATE main.valley_spirit_ordinary_aged_ground SET body=?,digest=? WHERE slot=1 AND body=? AND digest=?')
+  .run(ground,hash(ground),prior,hash(prior)).changes!==1)bad();
+ if(!current.sequence)db.exec(stoppedContinuationSql);
+ db.prepare(`INSERT INTO main.${stoppedContinuationTable} VALUES (?,?)`).run(draft.finish.sequence,draft.body);
+ append(db,draft.finish.world,draft.events);
+ return draft.finish;
+}
+
+/** One explicit native minute on the exact joined head. Calling this routine
+ * does not grant discovery to observers or change the original fruit age. */
+export function advanceStoppedOrdinaryGround(key:StoppedPlacementKey,expectedRevision:number,fault?:'after-world-cas'){
+ if(!integer(expectedRevision)||fault!==undefined&&fault!=='after-world-cas')return null;
+ try{
+  const {owner,assert,p}=owned(key);
+  try{
+   const db=new DatabaseSync(owner.database);
+   try{
+    db.exec('PRAGMA trusted_schema=OFF; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; BEGIN IMMEDIATE');
+    if(!authority(db))return null;
+    const live=head(db);
+    if(live.w.revision!==expectedRevision)return null;
+    const before=recover(db,key,p,live);
+    const draft=stageStoppedGroundMinute(db,before.replay,live.bytes,fault==='after-world-cas');
+    if(!draft)return null;
+    const checked=recover(db,key,p,head(db)).replay;
+    if(checked.sequence!==draft.sequence||checked.world.revision!==draft.world.revision)return bad();
+    assert();db.exec('COMMIT');
+    return Object.freeze({status:checked.expiry?'expired' as const:'advanced' as const,sequence:checked.sequence,
+     revision:checked.world.revision,atUs:checked.world.mvpClimate!.lastUs,expiry:checked.expiry,productionEnabled:false as const});
+   }finally{if(db.isTransaction)db.exec('ROLLBACK');db.close();}
+  }finally{owner.release();}
+ }catch{return null;}
+}
+export function readStoppedOrdinaryGroundDiscovery(key:StoppedPlacementKey,residentId:string){
+ if(typeof residentId!=='string'||!residentId||residentId.length>200)return null;
+ try{
+  const {owner,assert,p}=owned(key);
+  try{
+   const db=new DatabaseSync(owner.database,{readOnly:true});
+   try{
+    db.exec('PRAGMA trusted_schema=OFF; BEGIN');
+    if(!authority(db))return null;
+    const discovered=recover(db,key,p,head(db)).replay.discoveries.get(residentId);
+    assert();return discovered??null;
    }finally{if(db.isTransaction)db.exec('ROLLBACK');db.close();}
   }finally{owner.release();}
  }catch{return null;}

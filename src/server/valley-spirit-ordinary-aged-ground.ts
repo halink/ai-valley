@@ -55,7 +55,7 @@ function readInstalled(db:DatabaseSync):InstalledEmpty|null{
 /** Before ANY persistent startup. No schema writes. An unknown/nonempty
  * future lane must not quietly run as today's empty ordinary installation. */
 export function assertOrdinaryAgedGroundStartup(db:DatabaseSync,world:Record<string,unknown>|null, ordinary:boolean){
- if(db.prepare("SELECT 1 FROM sqlite_schema WHERE name='valley_spirit_ordinary_aged_transfer' COLLATE NOCASE").get())
+ if(db.prepare("SELECT 1 FROM sqlite_schema WHERE lower(name) IN ('valley_spirit_ordinary_aged_transfer','valley_spirit_ordinary_aged_continuation')").get())
   throw Error('ordinary_aged_ground_stopped_lane');
  const state=readInstalled(db);
  if(!state)return;

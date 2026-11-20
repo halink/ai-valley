@@ -1,3 +1,4 @@
+import {captureOrdinaryAgedGroundDiscovery,type OrdinaryAgedGroundDiscoveryRead} from '../world/mvp-ordinary-aged-ground-discovery.js';
 import {AGED_DINING_INVALID,AGED_EAT_INVALID,captureMvpNativeAgedEat,selectMvpNativeAgedEat,type NativeAgedEatSelection} from '../world/mvp-aged-fruit-native-eat.js';
 import {captureMvpNativeAgedPickup,selectMvpNativeAgedPickup,type NativeAgedPickupSelection} from '../world/mvp-aged-fruit-native-pickup.js';
 import {nativeWeatherHourTransition} from './valley-spirit-weather-credit.js';
@@ -409,6 +410,21 @@ export function prepareSealedMvpEcologyMinute(current:World,captureMeals=false,p
    JSON.stringify(draft.mvpClimate?.spiritEffects)!==JSON.stringify(current.mvpClimate?.spiritEffects)||
    JSON.stringify(draft.mvpClimate?.spiritFruitSettlement)!==JSON.stringify(current.mvpClimate?.spiritFruitSettlement))return null;
   return {draft,fruitFlow:result.fruitFlow,renewal:result.renewal,mealWitnesses:result.witnesses,speech:result.speech,observed,completion:scoped.completion,eaten:eating?.completion??null,movement:arrivals};
+ }catch{return null;}
+}
+
+/** One normal chooser/engine minute for the stopped ordinary archive only.
+ * The provided read port is built from the verified owning snapshot. */
+export function prepareStoppedOrdinaryAgedGroundMinute(current:World,ownedGround:OrdinaryAgedGroundDiscoveryRead){
+ if(current.mode!=='validation'||current.clock.paused||!current.mvpClimate?.rainProvenance||
+  Object.hasOwn(current.mvpClimate,'spiritEffects')||Object.hasOwn(current.mvpClimate,'spiritFruitSettlement'))return null;
+ const draft=structuredClone(current);
+ inheritReceiptHistory(current,draft);enableCompletedMovement(draft);
+ try{
+  const {result,observed}=captureOrdinaryAgedGroundDiscovery(draft,ownedGround,()=>
+   advanceMvpRuleMinuteDraft(draft,current,0,{},{meals:true,fruitFlow:false,fruitRenewal:false,addressedSpeech:true}));
+  if(draft.minute!==current.minute+1||result.speech?.receipts.length||result.witnesses.length)return null;
+  return {draft,observed};
  }catch{return null;}
 }
 
