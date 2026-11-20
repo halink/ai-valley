@@ -1,3 +1,4 @@
+import {assertOrdinaryAgedGroundStartup} from './valley-spirit-ordinary-aged-ground.js';
 import {rejectSealedAgedBirthOnGenericPath} from './valley-spirit-aged-birth-archive.js';
 import {assertFormalBerryMirrorHeader} from './valley-spirit-formal-berry-authority.js';
 import {validateFormalRainProvenance} from '../world/formal-rain-provenance.js';
@@ -197,6 +198,8 @@ function inspectDatabase(db:DatabaseSync,rejectClimate:boolean,validateWorld?: (
  if(!!seasonal!==(latest?.mvpSeasonalModelVersion===1))fail('save_seasonal_model_ledger_missing');
  if(allowSeasonalModel)inspectSeasonalModel?.(seasonal);
  if(formalOwner&&!latest)assertFormalBerryMirrorHeader(db,formalOwner);
+ try{assertOrdinaryAgedGroundStartup(db,latest,!fixtureSeal&&!allowSeasonalModel&&!rejectClimate);}
+ catch{fail('save_ordinary_aged_ground_unsupported');}
  return latest;
 }
 interface SourceFile {suffix:string;fd:number;stat:BigIntStats}

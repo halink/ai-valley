@@ -67,6 +67,10 @@ export interface RuntimeOwnership{
  assertOwned():void;
  release():void;
 }
+const runtimeOwnerAnchors=new WeakMap<RuntimeOwnership,Readonly<{database:string;assertOwned:()=>void}>>();
+export function runtimeOwnershipAnchor(value:RuntimeOwnership){
+ return runtimeOwnerAnchors.get(value)??null;
+}
 export function acquireRuntimeOwnership(input:string,options?:Readonly<{existingOnly:true}>):RuntimeOwnership{
  if(process.platform!=='linux'||!constants.O_NOFOLLOW||!constants.O_DIRECTORY)
   throw new RuntimeLockError('runtime_lock_requires_linux_local_filesystem');
@@ -118,13 +122,14 @@ export function acquireRuntimeOwnership(input:string,options?:Readonly<{existing
   };
   assertOwned();
   const handle=db,rawFd=lockFd,dirFd=directory,ownerKey=key;
-  return {database,lockPath:target+'.runtime-lock',assertOwned,release(){
+  const owner={database,lockPath:target+'.runtime-lock',assertOwned,release(){
    if(released)return;
    // Keep the owner registered and descriptors open if SQLite close fails.
    // A caller must not continue with uncertain ownership release.
    handle.close();released=true;held.delete(ownerKey);
    closeSync(rawFd);closeSync(dirFd);
   }};
+  runtimeOwnerAnchors.set(owner,Object.freeze({database,assertOwned}));return owner;
  }catch(error){
   // No unlink, rename, repair, or kill: a rejected contender cannot hurt an owner.
   try{db?.close();}finally{
