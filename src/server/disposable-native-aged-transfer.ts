@@ -87,7 +87,7 @@ export function makeDisposableNativeAgedBirth(pin:DisposableNativeAgedTransferPi
 type PickupFact=Readonly<DisposableNativePickupWitness&{revision:number;groundDebit:1;heldCredit:1}>;
 type HeldExpiry=Readonly<{atUs:string;revision:number;heldDebit:1}>;
 type Entry=Omit<NonNullable<ReturnType<typeof makeDisposableNativeAgedBirth>>['entry'],'version'>&{
- readonly version:1|2|3|4;
+ readonly version:1|2|3|4|5;
  readonly discoveries?:readonly CommittedNativeOrdinaryAgedDiscovery[];
  readonly pickup?:PickupFact;
  readonly heldExpiry?:HeldExpiry;
@@ -97,7 +97,9 @@ type Entry=Omit<NonNullable<ReturnType<typeof makeDisposableNativeAgedBirth>>['e
  readonly lastApproach?:ApproachResult;
 };
 type Approach=Readonly<{plan:AgedGroundApproachPlan;enteredAtUs?:string}>;
-type ApproachResult=Readonly<{approach:Approach;revision:number;finishedAtUs:string;result:'completed'|'interrupted'}>;
+type ApproachResult=Readonly<{approach:Approach;revision:number;finishedAtUs:string}&(
+ {result:'completed'|'interrupted'}|{result:'superseded-by-pickup';pickupResidentId:string;pickupPlanId:string}
+)>;
 function exactMove(w:World,p:AgedGroundApproachPlan){
  const r=w.residents.find(r=>r.id===p.residentId),a=r?.activity;
  if(!r||!a||!r.plan||r.plan.id!==p.planId||a.planId!==p.planId||r.plan.createdAt!==p.startedFromMinute||
@@ -119,7 +121,7 @@ function validateApproach(e:Entry,w:World,a:Approach){
 export function projectCurrentDisposableGroundApproach(e:Entry){
  return structuredClone(e.approach?.plan??null);
 }
-function stageApproach(e:Entry,before:World,after:World,witness:AgedGroundApproachWitness|undefined,atUs:string){
+function stageApproach(e:Entry,before:World,after:World,witness:AgedGroundApproachWitness|undefined,atUs:string,pickup?:DisposableNativePickupWitness){
  const old=e.approach,p=witness?.plan;
  if(!p){
   if(old)throw Error('disposable_native_ground_approach_missing_witness');
@@ -135,8 +137,19 @@ function stageApproach(e:Entry,before:World,after:World,witness:AgedGroundApproa
   parseClimateUs(atUs)>=parseClimateUs(p.expiresUs)))throw Error('disposable_native_ground_approach_edge');
  if(!edge&&!same(a.at,b.at))throw Error('disposable_native_ground_approach_unverified_motion');
  const approach={plan:p,...(old?.enteredAtUs||edge?{enteredAtUs:old?.enteredAtUs??atUs}:{})};
- const phase=exactMove(after,p);
+ const phase=exactMove(after,p), superseded=witness.supersededBy;
+ if(superseded){
+  if(!old||!pickup||witness.stopped||phase||b.activity||b.plan||
+   pickup.settledUs!==atUs||pickup.effectId!==p.effectId||pickup.residentId===p.residentId||
+   pickup.residentId!==superseded.residentId||pickup.planId!==superseded.planId||
+   parseClimateUs(atUs)>=parseClimateUs(p.expiresUs))
+   throw Error('disposable_native_ground_approach_pickup_order');
+  return {approach:undefined,lastApproach:{approach,revision:after.revision,finishedAtUs:atUs,
+   result:'superseded-by-pickup' as const,pickupResidentId:pickup.residentId,pickupPlanId:pickup.planId}};
+ }
  if(phase){
+  if(pickup)throw Error('disposable_native_ground_approach_unretired');
+
   if(witness.stopped||parseClimateUs(atUs)>=parseClimateUs(p.expiresUs)||(phase==='entered')!==!!approach.enteredAtUs)
    throw Error('disposable_native_ground_approach_phase');
   return {approach,lastApproach:e.lastApproach};
@@ -217,8 +230,8 @@ export function readDisposableNativeAgedTransfer(db:DatabaseSync,owner:Disposabl
  if(persisted?.revision!==w.revision||!(persisted.state instanceof Uint8Array)||hash(persisted.state)!==e.head)
   throw Error('disposable_native_aged_transfer_durable_head');
  const g1=prepareOrdinaryAgedG1ReviewEncoding(pin.review,e.p.basis,e.p.ground,e.p.g1);
- if((e.approach||e.lastApproach?e.version!==4:e.pickup?e.version!==2&&e.version!==3:e.version!==1)||
-  (e.eating||e.eaten)&&e.version!==3&&e.version!==4||e.head!==digestWorld(w)||w.id!==e.p.terms.worldId||w.revision<e.receipt.placementRevision||
+ if((e.lastApproach?.result==='superseded-by-pickup'?e.version!==5:e.approach||e.lastApproach?e.version!==4:e.pickup?e.version!==2&&e.version!==3:e.version!==1)||
+  (e.eating||e.eaten)&&e.version!==3&&e.version!==4&&e.version!==5||e.head!==digestWorld(w)||w.id!==e.p.terms.worldId||w.revision<e.receipt.placementRevision||
   g1.status!=='encoding-only'||e.p.terms.g1Digest!==hash(JSON.stringify(e.p.g1))||e.p.terms.effectKeyId!==pin.keyId||
   !g2Valid(e.p.terms,e.g2,pin)||e.expiry===null&&!e.pickup&&parseClimateUs(minuteToClimateUs(w.minute))>=parseClimateUs(e.lot.expiresUs)||
   e.expiry!==null&&(e.expiry.atUs!==e.lot.expiresUs||e.expiry.revision>w.revision))throw Error('disposable_native_aged_transfer_head');
@@ -230,7 +243,12 @@ export function readDisposableNativeAgedTransfer(db:DatabaseSync,owner:Disposabl
  if(e.approach&&(e.pickup||e.expiry||e.lastApproach||!validateApproach(e,w,e.approach)||
    !exactMove(w,e.approach.plan)||(exactMove(w,e.approach.plan)==='entered')!==!!e.approach.enteredAtUs)||
   e.lastApproach&&(!validateApproach(e,w,e.lastApproach.approach)||!Number.isSafeInteger(e.lastApproach.revision)||e.lastApproach.revision>w.revision||
-   !['completed','interrupted'].includes(e.lastApproach.result)||
+   !['completed','interrupted','superseded-by-pickup'].includes(e.lastApproach.result)||
+   e.lastApproach.result==='superseded-by-pickup'&&(!e.pickup||e.approach||e.expiry||
+    e.lastApproach.pickupResidentId!==e.pickup.residentId||e.lastApproach.pickupPlanId!==e.pickup.planId||
+    e.lastApproach.approach.plan.residentId===e.pickup.residentId||e.lastApproach.revision!==e.pickup.revision||
+    e.lastApproach.finishedAtUs!==e.pickup.settledUs||
+    e.lastApproach.approach.enteredAtUs!==undefined&&parseClimateUs(e.lastApproach.approach.enteredAtUs)>parseClimateUs(e.pickup.settledUs))||
    parseClimateUs(e.lastApproach.finishedAtUs)<BigInt(e.lastApproach.approach.plan.startedFromMinute+1)*1_000_000n||
    parseClimateUs(e.lastApproach.finishedAtUs)>parseClimateUs(minuteToClimateUs(w.minute))||
    e.lastApproach.result==='completed'&&(!e.lastApproach.approach.enteredAtUs||
@@ -311,7 +329,7 @@ export function advanceDisposableNativeAgedTransfer(e:Entry,before:World,after:W
     !event||event.kind!=='action'||event.at!==after.minute||event.actors.length!==1||event.actors[0]!==holder||!event.observerOnly||
     before.events.some(x=>x.id===event.id))throw Error('disposable_native_aged_eat_completion');
    const {eating:_old,...rest}=e;
-   return {...rest,version:e.lastApproach?4 as const:3 as const,head:digestWorld(after),eaten:{...completed,eventId:event.id,eventDigest:hash(JSON.stringify(event)),
+   return {...rest,version:e.lastApproach?e.version:3 as const,head:digestWorld(after),eaten:{...completed,eventId:event.id,eventDigest:hash(JSON.stringify(event)),
     revision:after.revision,heldDebit:1 as const}};
   }
   if(work&&(!e.eating?work.worked!==1:work.planId!==e.eating.planId||work.startedAt!==e.eating.startedAt||work.worked!==e.eating.worked+1))
@@ -320,10 +338,10 @@ export function advanceDisposableNativeAgedTransfer(e:Entry,before:World,after:W
   return {...rest,version:work&&!e.lastApproach?3 as const:e.version,...(work?{eating:work}:{}),head:digestWorld(after)};
  }
  if(scope||completed||!exactDisposableEating(after))throw Error('disposable_native_aged_eat_without_held');
- const routed=stageApproach(e,before,after,route,atUs);
+ const routed=stageApproach(e,before,after,route,atUs,pickup);
  const {approach:_oldRoute,lastApproach:_oldResult,...rest}=e;
  const routeState={...rest,...(routed.approach?{approach:routed.approach}:{}),...(routed.lastApproach?{lastApproach:routed.lastApproach}:{}),
-  version:routed.approach||routed.lastApproach?4 as const:e.version};
+  version:routed.lastApproach?.result==='superseded-by-pickup'?5 as const:routed.approach||routed.lastApproach?4 as const:e.version};
  const shift=e.expiry?null:advanceAgedGroundExpiry(before,after,[e.lot]);
  if(!e.expiry&&!shift)throw Error('disposable_native_aged_transfer_expiry');
  const expiry=shift?.expired[0];
@@ -331,14 +349,14 @@ export function advanceDisposableNativeAgedTransfer(e:Entry,before:World,after:W
  if(pickup){
   const first=e.discoveries?.find(d=>d.residentId===pickup.residentId&&d.discoveryId===pickup.discoveryId);
   const from=livingHolder(before,pickup.residentId),to=livingHolder(after,pickup.residentId);
-  if(e.expiry||expiry||route?.plan||e.approach||!first||first.committedRevision>before.revision||pickup.effectId!==e.receipt.effectId||
+  if(e.expiry||expiry||routeState.approach||route?.plan&&!e.approach||!first||first.committedRevision>before.revision||pickup.effectId!==e.receipt.effectId||
    pickup.settledUs!==atUs||pickup.startedAt!==after.minute||!from||!to||from.activity||from.plan||to.activity||to.plan||
    !same(from.at,e.lot.fruit.at)||!same(to.at,e.lot.fruit.at)||to.inside!==null||
    !after.processed.includes('plan:'+pickup.planId)||JSON.stringify(from.inventory)!==JSON.stringify(to.inventory))
    throw Error('disposable_native_aged_pickup_phase');
   // No new ground discoveries are made durable on the pickup settlement minute:
   // per-resident observations do not provide ordering against that removal.
-  return {...routeState,version:routeState.lastApproach?4 as const:2 as const,head:digestWorld(after),pickup:{...pickup,revision:after.revision,groundDebit:1 as const,heldCredit:1 as const}};
+  return {...routeState,version:routeState.lastApproach?routeState.version:2 as const,head:digestWorld(after),pickup:{...pickup,revision:after.revision,groundDebit:1 as const,heldCredit:1 as const}};
  }
  if(observed.length&&(e.expiry||expiry||observed.length>MAX_DISCOVERIES||observed.some(d=>!validDiscovery(e,d)||
   d.fromRevision!==before.revision||d.observedRevision>after.revision||d.atUs!==atUs)))

@@ -1,4 +1,4 @@
-import {noteAgedGroundApproachEdge,stopAgedGroundApproach} from './mvp-native-aged-ground-approach.js';
+import {noteAgedGroundApproachEdge,noteDeclinedAgedGroundRacePickup,stopAgedGroundApproach,supersedeAgedGroundApproachAfterPickup} from './mvp-native-aged-ground-approach.js';
 import {AGED_DINING_INVALID,AGED_EAT_INVALID,canRunMvpNativeAgedEat,completeMvpNativeAgedEat,workMvpNativeAgedEat} from './mvp-aged-fruit-native-eat.js';
 import {canRunMvpNativeAgedPickup,completeMvpNativeAgedPickup} from './mvp-aged-fruit-native-pickup.js';
 import {noteMvpNativeMovePhase,noteMvpNativeObservationPhase} from './mvp-native-observation-phase.js';
@@ -415,7 +415,14 @@ export function buildAllowed(world:World,r:Resident,a:Extract<Action,{type:'buil
 function completeAtomic(world:World,r:Resident,a:Action,definition:string,elapsed=0):string|null {
  const preservationTransfer=preservationTransferReason(world,a);if(preservationTransfer)return preservationTransfer;
  if(a.type==='mvpAgedFruitEat')return completeMvpNativeAgedEat(world,r,a,elapsed);
- if(a.type==='mvpAgedFruitPickup')return completeMvpNativeAgedPickup(world,r,a,elapsed);
+ if(a.type==='mvpAgedFruitPickup'){
+  const problem=completeMvpNativeAgedPickup(world,r,a,elapsed);
+  if(!problem){
+   const superseded=supersedeAgedGroundApproachAfterPickup(world,r,a.effectId,r.activity!.planId);
+   if(superseded)failure(world,superseded,'原本可选的短程移动已无目标');
+  }else if(r.activity)noteDeclinedAgedGroundRacePickup(world,r,a.effectId,r.activity.planId);
+  return problem;
+ }
  if(a.type==='frontierHazard')return completeFrontierHazard(world,r,a);
  if(a.type==='design')return completeDesign(world,r,a);
  if(a.type==='lastWish')return completeLastWish(world,r,a);

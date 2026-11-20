@@ -1,4 +1,4 @@
-import {captureAgedGroundApproach,hasAgedGroundApproachCapture,selectAgedGroundApproach,stoppedCurrentAgedGroundApproach,type AgedGroundApproachWitness} from '../world/mvp-native-aged-ground-approach.js';
+import {captureAgedGroundApproach,hasAgedGroundApproachCapture,isDeclinedAgedGroundRacePickup,selectAgedGroundApproach,stoppedCurrentAgedGroundApproach,type AgedGroundApproachWitness} from '../world/mvp-native-aged-ground-approach.js';
 import {captureOrdinaryAgedGroundDiscovery,prepareOrdinaryNativePickupIntents,prepareOrdinaryNativeGroundApproach,type OrdinaryAgedGroundNativePickupRead,type OrdinaryAgedGroundDiscoveryRead,type NativeOrdinaryAgedDiscovery} from '../world/mvp-ordinary-aged-ground-discovery.js';
 import {AGED_DINING_INVALID,AGED_EAT_INVALID,type NativeAgedEatCompletion,captureMvpNativeAgedEat,selectMvpNativeAgedEat,type NativeAgedEatSelection} from '../world/mvp-aged-fruit-native-eat.js';
 import {captureMvpNativeAgedPickup,selectMvpNativeAgedPickup,type NativeAgedPickupSelection} from '../world/mvp-aged-fruit-native-pickup.js';
@@ -330,7 +330,8 @@ function advanceMvpRuleMinuteDraft(world:World,current:World,serial:number,decis
   speech=captureAddressedSpeech(world,advanceObservedEngine);
  else advanceObservedEngine();
  for(const failed of world.residents.filter(r=>r.lastFailure)){
-  if(approachPlans&&stoppedCurrentAgedGroundApproach(world,failed,approachPlans.get(failed.id)))continue;
+  if(approachPlans&&(stoppedCurrentAgedGroundApproach(world,failed,approachPlans.get(failed.id))||
+   isDeclinedAgedGroundRacePickup(world,failed,approachPlans.get(failed.id))))continue;
   const action=gathering.get(failed.id);
   const fresh=newGather.get(failed.id);
   // A live start rejected only after a same-tick stock change is not a
@@ -538,7 +539,7 @@ export function createMvpSession(options:{observeSessionWeather?:true;world?:Wor
     const owned=options.persistent&&options.commit?options.privateAgedGroundDiscovery:undefined;
     const head={worldId:current.id,revision:current.revision,atUs:minuteToClimateUs(current.minute)};
     const priorApproach=owned?.readExactCurrentApproach?.(head)??null;
-    const intents=owned&&!priorApproach?prepareOrdinaryNativePickupIntents(current,owned):undefined;
+    const intents=owned?prepareOrdinaryNativePickupIntents(current,owned):undefined;
     const approachIntents=owned&&!priorApproach&&!intents?.size?prepareOrdinaryNativeGroundApproach(current,owned):new Map();
     const advanceObserved=()=>owned?captureOrdinaryAgedGroundDiscovery(world,owned,advanceNative):{result:advanceNative(),observed:undefined};
     const wrapped=()=>priorApproach||approachIntents.size?captureAgedGroundApproach(world,approachIntents,priorApproach,advanceObserved):
