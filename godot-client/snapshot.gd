@@ -182,7 +182,9 @@ static func action_detail(person: Dictionary) -> String:
 		target_text = "(%s, %s)" % [target.x, target.y]
 	return activity_label(person) + " · 目标位置 " + target_text + " · 剩余工作时间 " + number_label(activity.get("remaining")) + " 世界分钟（不含路程）"
 
-# Plain observer description of the actual action, not inferred intent.
+static func _same_point(a: Variant, b: Variant) -> bool:
+	return valid_position(a) and valid_position(b) and a.x == b.x and a.y == b.y
+
 static func resident_weather_label(sample: Dictionary, person: Dictionary, minute: Variant) -> String:
 	if not (minute is int or minute is float) or not is_finite(minute) or minute < 0:
 		return "本人现场天气观察不可用"
@@ -200,7 +202,8 @@ static func resident_weather_label(sample: Dictionary, person: Dictionary, minut
 		return "本人现场天气观察不可用"
 	return "本人户外所感（游戏分钟 %s）：%s · %s · %s" % [number_label(minute), weather[seen.condition], temperatures[seen.temperature], humidity[seen.humidity]]
 
-static func life_action(person: Dictionary, world: Dictionary) -> String:
+# Plain observer description of the actual action, not inferred intent.
+static func life_action(person: Dictionary, world: Dictionary, room_layouts: Dictionary = {}) -> String:
 	var activity = person.get("activity")
 	if not activity is Dictionary: return activity_label(person)
 	var action: Dictionary = activity.get("action", {})
@@ -208,8 +211,17 @@ static func life_action(person: Dictionary, world: Dictionary) -> String:
 	if kind == "mvpShelter":
 		var entered: Variant = activity.get("mvpShelterEnteredAt")
 		var now: Variant = world.get("minute")
+		if not activity.has("mvpShelterEnteredAt") and person.get("inside") == null:
+			return "前往共屋 · 本人在户外察觉降雨"
 		var actual: bool = (entered is int or entered is float) and is_finite(entered) and entered >= 0 and (now is int or now is float) and is_finite(now) and now >= entered
-		return "已入共屋前室 · 短候" if actual and person.get("inside") == "mvp-home" and valid_position(person.get("roomAt")) else "前往共屋 · 本人在户外察觉降雨"
+		if actual and person.get("inside") == "mvp-home" and person.get("status") == "alive":
+			var room: Dictionary = room_layouts.get("mvp-home", {})
+			var entry: Variant = room.get("entry")
+			if _same_point(person.get("roomAt"), entry):
+				for building in world.get("buildings", []):
+					if building.get("id") == "mvp-home" and building.get("kind") == "lodge" and building.get("ownerId") == "commons" and _same_point(person.get("at"), building.get("door")):
+						return "已入共屋前室 · 短候"
+		return "避雨安排进行中"
 	var verb: String = {"eat":"吃饭", "sleep":"休息", "mvpDrink":"喝水", "talk":"交谈", "plant":"播种", "water":"浇菜", "harvest":"收菜", "cook":"做饭", "mvpCollectSeed":"领种", "mvpSaveSeed":"留种", "wait":"停留"}.get(kind, action_name(kind, str(action.get("operation", ""))))
 	if kind == "gather":
 		verb = "采集"

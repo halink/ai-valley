@@ -655,7 +655,7 @@ func _update_resident_card() -> void:
 	var person := _resident(selected_resident)
 	if person.is_empty(): return
 	var location := _location(person) if connected else "位置已过期"
-	var action := Snapshot.life_action(person, world) if connected else "等待新的世界快照"
+	var action := Snapshot.life_action(person, world, valley.room_layouts) if connected else "等待新的世界快照"
 	if action == "暂无进行中行为 · 决策状态未知": action = "暂无进行中的行动"
 	var details := ""
 	if connected:
