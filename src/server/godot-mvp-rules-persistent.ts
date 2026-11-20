@@ -199,6 +199,7 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
   const startSession=(head:World)=>createMvpSession({world:head,persistent:true,
    privateReadHeldAgedEat:disposableAgedTransfer?head=>store!.readDisposableHeldForNativeEating(head):undefined,
    privateAgedGroundDiscovery:disposableAgedTransfer?{
+    readExactCurrentApproach:head=>store!.readDisposableCurrentGroundApproach(head),
     readExactActiveLot:head=>store!.readDisposableActiveGroundForNativeObservation(head),
     readExactPickupEvidence:head=>store!.readDisposableNativeGroundPickupEvidence(head),
    }:undefined,captureAddressedSpeechCustody:speechPin?true:undefined,captureSameSaveNativeWeather:privateOwner?.rulesWeatherAccountScope?true:undefined,captureAtomicNativeMeals:mealPin?true:undefined,captureAtomicNativeFruitRenewal:nativeRenewal?true:undefined,captureNativeEmptyGroundMinute:nativeEmpty?true:undefined,captureAtomicNativeFruitLot:nativeRenewal?.lotShelfLifeGameMinutes?true:undefined,commit:(draft,revision,speech,meals)=>{

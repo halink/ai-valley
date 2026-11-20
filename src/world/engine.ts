@@ -1,3 +1,4 @@
+import {noteAgedGroundApproachEdge,stopAgedGroundApproach} from './mvp-native-aged-ground-approach.js';
 import {AGED_DINING_INVALID,AGED_EAT_INVALID,canRunMvpNativeAgedEat,completeMvpNativeAgedEat,workMvpNativeAgedEat} from './mvp-aged-fruit-native-eat.js';
 import {canRunMvpNativeAgedPickup,completeMvpNativeAgedPickup} from './mvp-aged-fruit-native-pickup.js';
 import {noteMvpNativeMovePhase,noteMvpNativeObservationPhase} from './mvp-native-observation-phase.js';
@@ -562,6 +563,7 @@ function processActivity(world:World,r:Resident,minutes:number,actionFailures?:S
  }
  if(!r.activity)begin(world,r,minutes,actionFailures);
  const activity=r.activity;if(!activity)return;
+ if(stopAgedGroundApproach(world,r,minutes)){failure(world,r,'原本可选的短程移动已不适宜');return;}
  if(selfCareTransportBlocked(world,r,activity.action)){failure(world,r,'须先实际结束原同行或护送，不能执行另行本人自理');return;}
  if(travellingFamily(world,r.id)&&activity.action.type!=='wait'&&!isWaterSupportWithdrawal(activity.action)&&!isPregnancyWithdrawal(activity.action)&&!(activity.action.type==='familyRelocation'&&(activity.action.operation==='withdraw'||activity.action.operation==='decline'))){failure(world,r,'家庭同行期间须先实际停止同行，不能执行另行移动或工作');return;}
  if(world.mode==='formal'&&activity.action.type==='build'){failure(world,r,'旧的一次性建造已停用，请重新决定分阶段工程');return;}
@@ -634,7 +636,10 @@ function processActivity(world:World,r:Resident,minutes:number,actionFailures?:S
    if(available+1e-9<needed){progress+=available/duration;available=0;break;}
    const completedFrom={...r.at};
    available-=needed;progress=0;r.at=activity.path.shift()!;r.inside=null;recordCompletedMovement(world,r.id,completedFrom,r.at);noteGroundTransportStep(world,r);
-   if(activity.action.type==='move')noteMvpNativeMovePhase(world,r,completedFrom,activity.planId,activity.action.to);
+   if(activity.action.type==='move'){
+    noteMvpNativeMovePhase(world,r,completedFrom,activity.planId,activity.action.to);
+    noteAgedGroundApproachEdge(world,r,completedFrom,r.at,activity.planId);
+   }
    if(activity.cargo?.pickedUp){const body=world.residents.find(v=>v.id===activity.cargo!.bodyId);if(body){body.at={...r.at};body.inside=null;}}
    observe(world,r);
   }

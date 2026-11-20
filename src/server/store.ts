@@ -1,5 +1,5 @@
 import type {GroundDiscoveryHead} from '../world/mvp-ordinary-aged-ground-discovery.js';
-import {advanceDisposableNativeAgedTransfer,hasDisposableNativeAgedTransfer,makeDisposableNativeAgedBirth,prepareDisposableNativeAgedTransfer,projectDisposableHeldForNativeEating,type Eating,projectDisposableNativeAgedTransfer,projectActiveDisposableGroundForObservation,projectActiveDisposableGroundForPickup,projectDisposableGroundResidentDiscovery,readDisposableNativeAgedTransfer,writeDisposableNativeAgedTransfer,type DisposableNativeAgedTransferPin} from './disposable-native-aged-transfer.js';
+import {advanceDisposableNativeAgedTransfer,hasDisposableNativeAgedTransfer,makeDisposableNativeAgedBirth,prepareDisposableNativeAgedTransfer,projectDisposableHeldForNativeEating,projectCurrentDisposableGroundApproach,type Eating,projectDisposableNativeAgedTransfer,projectActiveDisposableGroundForObservation,projectActiveDisposableGroundForPickup,projectDisposableGroundResidentDiscovery,readDisposableNativeAgedTransfer,writeDisposableNativeAgedTransfer,type DisposableNativeAgedTransferPin} from './disposable-native-aged-transfer.js';
 import {assertDisposableRulesSavePath,guardDisposableRulesSaveCommit,readDisposableRulesSaveMarker,type DisposableRulesSaveAuthority} from './disposable-native-rules-save.js';
 import {advanceOrdinaryNativeEmptyGround,pinOrdinaryAgedGround,readOwnedEmptyGround,type OrdinaryAgedGroundPin} from './valley-spirit-ordinary-aged-ground.js';
 import {runtimeOwnershipAnchor,type RuntimeOwnership} from './runtime-lock.js';
@@ -856,7 +856,7 @@ export class WorldStore {
     if(!entry)throw Error('disposable_native_aged_transfer_missing');
     // A revoked weather provenance grant stops external readback; it
     // cannot make an already committed physical lot invisible to residents.
-    lifecycle=advanceDisposableNativeAgedTransfer(entry,before,world,native.groundObserved,native.groundPickup,native.agedEatingScope,native.agedEaten);
+    lifecycle=advanceDisposableNativeAgedTransfer(entry,before,world,native.groundObserved,native.groundPickup,native.agedEatingScope,native.agedEaten,native.agedApproach);
    }
    if(this.#disposableAgedTransfer)this.assertWritable(world,lifecycle?.eating);
    speech=this.writeDraftWithCustody(world,previousRevision,appended,seasonalLedger,proof,
@@ -1166,6 +1166,9 @@ export class WorldStore {
  }
  readDisposableActiveGroundForNativeObservation(head:GroundDiscoveryHead){
   return this.withCurrentDisposableGround(head,false,e=>projectActiveDisposableGroundForObservation(e,head));
+ }
+ readDisposableCurrentGroundApproach(head:GroundDiscoveryHead){
+  return this.withCurrentDisposableGround(head,false,projectCurrentDisposableGroundApproach);
  }
  readDisposableNativeGroundPickupEvidence(head:GroundDiscoveryHead){
   return this.withCurrentDisposableGround(head,false,e=>projectActiveDisposableGroundForPickup(e,head));

@@ -1,3 +1,4 @@
+import {lawfulAgedGroundApproach,type AgedGroundApproach,type AgedGroundApproachPlan} from './mvp-native-aged-ground-approach.js';
 import type {NativeAgedPickupSelection} from './mvp-aged-fruit-native-pickup.js';
 import {canPerceiveMvpCommonFruitPoint,mvpFallenFruitOptionalActionPermitted} from './mvp-fallen-fruit-resident.js';
 import {same} from './navigation.js';
@@ -82,37 +83,58 @@ export interface CommittedNativeOrdinaryAgedDiscovery extends NativeOrdinaryAged
  readonly committedRevision:number;
 }
 export interface OrdinaryAgedGroundNativePickupRead extends OrdinaryAgedGroundDiscoveryRead {
+ readonly readExactCurrentApproach?:(head:Readonly<GroundDiscoveryHead>)=>AgedGroundApproachPlan|null;
  readonly readExactPickupEvidence:(head:Readonly<GroundDiscoveryHead>)=>Readonly<{
   lot:NonNullable<ReturnType<OrdinaryAgedGroundDiscoveryRead['readExactActiveLot']>>;
   discoveries:readonly CommittedNativeOrdinaryAgedDiscovery[];
+  approachAlreadyUsed?:boolean;
  }>|null;
 }
 /** No chosen resident is passed in. This only prepares eligible actors who
  * really reached the lot; the engine's ordinary idle fallback arbitrates. */
-export function prepareOrdinaryNativePickupIntents(w:World,port:OrdinaryAgedGroundNativePickupRead){
- const intents=new Map<string,NativeAgedPickupSelection>();
+function exactOrdinaryGroundCandidates(w:World,port:OrdinaryAgedGroundNativePickupRead){
+ const options=new Map<string,{actor:World['residents'][number];fact:CommittedNativeOrdinaryAgedDiscovery}>();
  try{
-  let facts:readonly CommittedNativeOrdinaryAgedDiscovery[]|undefined;
+  let facts:readonly CommittedNativeOrdinaryAgedDiscovery[]|undefined,approachAlreadyUsed=false;
   const selected=readOrdinaryAgedGroundObservationHead(w,{readExactActiveLot(h){
-   const input=port.readExactPickupEvidence(h);facts=input?.discoveries;return input?.lot??null;
+   const input=port.readExactPickupEvidence(h);facts=input?.discoveries;approachAlreadyUsed=input?.approachAlreadyUsed??false;return input?.lot??null;
   }});
-  if(!selected||!facts||facts.length>64)return intents;
+  if(!selected||!facts||facts.length>64)return null;
   const {h,r,before}=selected;
   const byActor=new Map<string,CommittedNativeOrdinaryAgedDiscovery>();
   for(const f of facts){
    if(byActor.has(f.residentId)||f.schema!=='native-ordinary-aged-ground-observation/v1'||f.worldId!==h.worldId||
     f.effectId!==r.fruit.effectId||f.receiptDigest!==r.receiptDigest||f.discoveryId!==mvpFallenFruitDiscoveryId(h.worldId,f.residentId,f.effectId)||
     !same(f.target,r.fruit.at)||!Number.isSafeInteger(f.committedRevision)||f.committedRevision>h.revision||f.committedRevision<=f.fromRevision||
-    parseClimateUs(f.atUs)>before||parseClimateUs(f.atUs)<=parseClimateUs(r.fruit.placedUs))return intents;
+    parseClimateUs(f.atUs)>before||parseClimateUs(f.atUs)<=parseClimateUs(r.fruit.placedUs))return null;
    byActor.set(f.residentId,f);
   }
   for(const actor of w.residents){
-   const f=byActor.get(actor.id);
-   if(!f||actor.activity||actor.plan||!same(actor.at,r.fruit.at)||!mvpFallenFruitOptionalActionPermitted(w,actor)||
-    !canPerceiveMvpCommonFruitPoint(w,actor.id,r.fruit.at))continue;
+   const fact=byActor.get(actor.id);
+   if(fact&&mvpFallenFruitOptionalActionPermitted(w,actor))options.set(actor.id,{actor,fact});
+  }
+  return {h,r,options,approachAlreadyUsed};
+ }catch{return null;}
+}
+export function prepareOrdinaryNativePickupIntents(w:World,port:OrdinaryAgedGroundNativePickupRead){
+ const intents=new Map<string,NativeAgedPickupSelection>(),selected=exactOrdinaryGroundCandidates(w,port);
+ if(!selected)return intents;
+ const {h,r,options}=selected;
+ for(const {actor,fact:f} of options.values()){
+  if(same(actor.at,r.fruit.at)&&canPerceiveMvpCommonFruitPoint(w,actor.id,r.fruit.at))
    intents.set(actor.id,Object.freeze({residentId:actor.id,residentRevision:actor.revision,effectId:f.effectId,discoveryId:f.discoveryId,
     point:r.fruit.at,fromUs:h.atUs,expiresUs:r.expiresUs}));
-  }
-  return intents;
- }catch{return new Map<string,NativeAgedPickupSelection>();}
+ }
+ return intents;
+}
+export function prepareOrdinaryNativeGroundApproach(w:World,port:OrdinaryAgedGroundNativePickupRead){
+ const intents=new Map<string,AgedGroundApproach>(),selected=exactOrdinaryGroundCandidates(w,port);
+ if(!selected||selected.approachAlreadyUsed)return intents;
+ const {r,options}=selected;
+ for(const {actor,fact:f} of options.values()){
+  if(!same(actor.at,r.fruit.at)&&lawfulAgedGroundApproach(w,actor,r.fruit.at))
+   intents.set(actor.id,Object.freeze({residentId:actor.id,effectId:f.effectId,discoveryId:f.discoveryId,
+    from:{...actor.at},to:{...r.fruit.at},expiresUs:r.expiresUs}));
+ }
+ return intents;
 }
