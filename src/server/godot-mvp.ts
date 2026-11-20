@@ -462,6 +462,7 @@ export function followsPostCommitMvpFruitFlow(previous:MvpFruitFlowBatch,next:Mv
 export type DisposableNativePickupWitness=Readonly<{
  residentId:string;effectId:string;discoveryId:string;planId:string;settledUs:string;startedAt:number;
 }>;
+const nativeAddressedSpeechMinutes=new WeakMap<World,Readonly<{before:string;after:string;proof:AddressedSpeechObservation}>>();
 const atomicNativeMealMinutes=new WeakMap<World,Readonly<{before:string;after:string}>>();
 const atomicNativeRenewalMinutes=new WeakMap<World,Readonly<{before:string;after:string;renewal:readonly MvpFruitRenewalWitness[];flow:MvpFruitFlowBatch|null;groundObserved?:readonly NativeOrdinaryAgedDiscovery[];groundPickup?:DisposableNativePickupWitness;agedEaten?:NativeAgedEatCompletion;agedEatingScope?:NativeAgedEatSelection;agedApproach?:AgedGroundApproachWitness}>>();
 export function readAtomicNativeRulesRenewal(previous:World,draft:World){
@@ -484,6 +485,10 @@ function sealNativeWeatherMinute(previous:World,draft:World){
 export function isSameSaveNativeWeatherMinute(previous:World,draft:World):boolean{
  const observed=sameSaveNativeWeatherMinutes.get(draft);
  return !!observed&&observed.before===sameSaveWorldFingerprint(previous)&&observed.after===sameSaveWorldFingerprint(draft);
+}
+export function isAtomicNativeAddressedSpeechMinute(previous:World,draft:World,proof:AddressedSpeechObservation):boolean{
+ const x=nativeAddressedSpeechMinutes.get(draft);
+ return !!x&&x.proof===proof&&x.before===sameSaveWorldFingerprint(previous)&&x.after===sameSaveWorldFingerprint(draft);
 }
 export function isAtomicNativeMealMinute(previous:World,draft:World):boolean{
  const observed=atomicNativeMealMinutes.get(draft);
@@ -562,6 +567,8 @@ export function createMvpSession(options:{observeSessionWeather?:true;world?:Wor
     serial=minute.serial;
     const {speech,witnesses,renewal,fruitFlow}=minute;
     if(options.persistent&&options.commit&&options.captureSameSaveNativeWeather)sealNativeWeatherMinute(current,world);
+    if(options.persistent&&options.commit&&options.captureAddressedSpeechCustody&&speech?.receipts.length&&world.minute===current.minute+1)
+     nativeAddressedSpeechMinutes.set(world,Object.freeze({before:sameSaveWorldFingerprint(current),after:sameSaveWorldFingerprint(world),proof:speech}));
     const atomic=options.persistent&&options.commit&&options.captureAtomicNativeMeals;
     if(atomic&&witnesses.length&&world.minute===current.minute+1)
      atomicNativeMealMinutes.set(world,Object.freeze({before:sameSaveWorldFingerprint(current),after:sameSaveWorldFingerprint(world)}));
@@ -574,6 +581,7 @@ export function createMvpSession(options:{observeSessionWeather?:true;world?:Wor
     }finally{
      if(options.captureSameSaveNativeWeather)sameSaveNativeWeatherMinutes.delete(draft);
      if(options.captureAtomicNativeMeals)atomicNativeMealMinutes.delete(draft);
+     if(options.captureAddressedSpeechCustody)nativeAddressedSpeechMinutes.delete(draft);
      if(options.captureAtomicNativeFruitRenewal||options.captureAtomicNativeFruitLot||options.captureNativeEmptyGroundMinute)atomicNativeRenewalMinutes.delete(draft);
     }
     try{observeCommittedWeather();}catch{sessionWeather=undefined;}

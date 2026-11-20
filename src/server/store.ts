@@ -1,3 +1,4 @@
+import {openOrdinaryNativeSpeechLease,type OrdinaryNativeSpeechOptions} from './ordinary-native-speech-custody.js';
 import {appendDisposableNativeSpeech,ownsDisposableSpeechPurpose,type DisposableSpeechPurpose} from './disposable-native-addressed-speech.js';
 import type {GroundDiscoveryHead} from '../world/mvp-ordinary-aged-ground-discovery.js';
 import {advanceDisposableNativeAgedSourceFlow,advanceDisposableNativeAgedTransfer,assertDisposableNativeAgedTransferStorage,isDisposableNativeAgedTransferPin,hasDisposableNativeAgedTransfer,makeDisposableNativeAgedBirth,prepareDisposableNativeAgedTransfer,projectDisposableHeldForNativeEating,projectCurrentDisposableGroundApproach,type Eating,projectDisposableNativeAgedTransfer,projectDisposableNativeAgedFairness,projectActiveDisposableGroundForObservation,projectActiveDisposableGroundForPickup,projectDisposableGroundResidentDiscovery,readDisposableNativeAgedTransfer,writeDisposableNativeAgedTransfer,type DisposableNativeAgedTransferPin} from './disposable-native-aged-transfer.js';
@@ -27,7 +28,7 @@ import {ValleySpiritShadowQueue} from './valley-spirit-shadow-queue.js';
 import {minuteToClimateUs} from '../world/mvp-climate.js';
 import {makeSealedMvpSourceAgeTerms,verifySealedMvpSourceAge} from './valley-spirit-mvp-source-age.js';
 import {readCurrentSealedMvpSourceCommitment,readCurrentSealedMvpSourceCredit,writeSealedMvpSourceCredit} from './valley-spirit-mvp-source-credit.js';
-import {isAtomicNativeMealMinute,readAtomicNativeRulesRenewal,isSameSaveNativeWeatherMinute,prepareSealedMvpAdjacentMinute,prepareSealedMvpEcologyMinute,prepareSealedMvpFruitCreditMinute} from './godot-mvp.js';
+import {isAtomicNativeAddressedSpeechMinute,isAtomicNativeMealMinute,readAtomicNativeRulesRenewal,isSameSaveNativeWeatherMinute,prepareSealedMvpAdjacentMinute,prepareSealedMvpEcologyMinute,prepareSealedMvpFruitCreditMinute} from './godot-mvp.js';
 import {appendNativeWeatherCredit,nativeWeatherHourTransition} from './valley-spirit-weather-credit.js';
 import {probeMvpFallenFruitAdjacentEngineEdge} from './valley-spirit-mvp-fallen-fruit-approach.js';
 import {appendFormalDueIntent,formalDueCurrent,formalDueInputs,makeFormalDueCheckpoint,prepareFormalDueIntent,
@@ -131,6 +132,7 @@ export class WorldStore {
  private readonly receiptPrefix;
  private readonly allowMvpClimate:boolean;
  private readonly nativeWeatherCredit:boolean;
+ readonly #ordinaryNativeSpeech?:ReturnType<typeof openOrdinaryNativeSpeechLease>;
  readonly #ordinaryNativeMeal?:ReturnType<typeof openOrdinaryNativeMealLease>;
  readonly #disposableAgedTransfer?:DisposableNativeAgedTransferPin;
  readonly #privateDisposableSave?:DisposableRulesSaveAuthority;
@@ -148,7 +150,7 @@ export class WorldStore {
  private agedG1EpochIsolated=false;
  private armedFormalDue:FormalDueIntent|undefined;
  private armedFormalShadow:FormalShadowArm|undefined;
- constructor(path:string,options:{formalRainProvenance?:true;formalAppointmentChoiceCustody?:true;formalAddressedSpeechCustody?:true;dailySnapshots?:DailySnapshotConfig;allowMvpClimate?:boolean;seasonalModel?:true;mvpSpiritEffectFixture?:MvpGroundFruitCapacity;developerSpiritFixtureOwner?:DeveloperMvpSpiritFixtureOwner;nativeWeatherCredit?:true;nativeRulesFruitRenewal?:RulesNativeFruitRenewalPin;nativeEmptyGround?:Readonly<{owner:RuntimeOwnership;pin:OrdinaryAgedGroundPin}>;sealedAgedBirthExecution?:true;privateDisposableSave?:DisposableRulesSaveAuthority;disposableAgedTransfer?:DisposableNativeAgedTransferPin;ordinaryNativeMeal?:Readonly<{owner:RuntimeOwnership;pin:OrdinaryNativeMealOptions}>}={}){
+ constructor(path:string,options:{formalRainProvenance?:true;formalAppointmentChoiceCustody?:true;formalAddressedSpeechCustody?:true;dailySnapshots?:DailySnapshotConfig;allowMvpClimate?:boolean;seasonalModel?:true;mvpSpiritEffectFixture?:MvpGroundFruitCapacity;developerSpiritFixtureOwner?:DeveloperMvpSpiritFixtureOwner;nativeWeatherCredit?:true;nativeRulesFruitRenewal?:RulesNativeFruitRenewalPin;nativeEmptyGround?:Readonly<{owner:RuntimeOwnership;pin:OrdinaryAgedGroundPin}>;sealedAgedBirthExecution?:true;privateDisposableSave?:DisposableRulesSaveAuthority;disposableAgedTransfer?:DisposableNativeAgedTransferPin;ordinaryNativeMeal?:Readonly<{owner:RuntimeOwnership;pin:OrdinaryNativeMealOptions}>;ordinaryNativeSpeech?:Readonly<{owner:RuntimeOwnership;pin:OrdinaryNativeSpeechOptions}>}={}){
   this.allowMvpClimate=options.allowMvpClimate===true;
   this.allowFormalRainProvenance=options.formalRainProvenance===true&&!this.allowMvpClimate&&!options.seasonalModel;
   this.seasonalModel=options.seasonalModel===true;
@@ -217,6 +219,14 @@ export class WorldStore {
    validateWorld:(this.formalAppointmentChoiceCustody||this.formalAddressedSpeechCustody)?w=>{
     if(w.mode!=='formal')throw Error(this.formalAppointmentChoiceCustody?'formal_appointment_choice_custody_scope':'formal_addressed_speech_scope');
    }:undefined});
+  if(options.ordinaryNativeSpeech){
+   const {owner:runtimeOwner,pin}=options.ordinaryNativeSpeech;
+   if(owner||fixture||this.#privateDisposableSave||this.seasonalModel||!this.allowMvpClimate||this.nativeEmptyGround||
+    this.nativeRulesFruitRenewal||this.nativeWeatherCredit||options.dailySnapshots||options.ordinaryNativeMeal||
+    savedHeader?.id!==pin.worldId||savedHeader.mode!=='validation')
+    throw Error('ordinary_native_speech_store_scope');
+   this.#ordinaryNativeSpeech=openOrdinaryNativeSpeechLease(runtimeOwner,path,pin);
+  }
   if(options.ordinaryNativeMeal){
    const {owner:runtimeOwner,pin}=options.ordinaryNativeMeal;
    if(owner||fixture||this.#privateDisposableSave||this.seasonalModel||!this.allowMvpClimate||this.nativeEmptyGround||
@@ -823,6 +833,14 @@ export class WorldStore {
   if(!this.#ordinaryNativeMeal||this.#ordinaryNativeMeal.worldId!==world.id)throw Error('ordinary_native_meal_store_scope');
   this.commitTransaction(world,previousRevision,undefined,undefined,undefined,witnesses);
  }
+ readOrdinaryNativeSpeechAtHead(world:World,eventId:string){
+  if(!this.#ordinaryNativeSpeech)return null;
+  try{
+   this.db.exec('BEGIN');
+   try{return this.#ordinaryNativeSpeech.readAtHead(this.db,world,eventId);}
+   finally{this.db.exec('ROLLBACK');}
+  }catch{return null;}
+ }
  readOrdinaryNativeMealAtHead(world:World,eventId:string){
   if(!this.#ordinaryNativeMeal)return null;
   try{
@@ -1010,7 +1028,18 @@ export class WorldStore {
       expected.some(r=>!addressedIds.has(r.eventId)))throw Error('mvp_rules_private_speech_proof_missing');
   }
   let speech:readonly ValleySpiritLifeReceipt[]=[];
-  if(Array.isArray(proof?.receipts)&&proof.receipts.length){
+  if(this.#ordinaryNativeSpeech&&previous&&proof?.receipts.length){
+   this.db.exec('SAVEPOINT optional_ordinary_native_speech');
+   try{
+    if(!isAtomicNativeAddressedSpeechMinute(previous,world,proof))throw Error('ordinary_native_speech_missing_commit_proof');
+    this.#ordinaryNativeSpeech.append(this.db,previous,world,proof);
+    this.db.exec('RELEASE optional_ordinary_native_speech');
+   }catch{
+    this.db.exec('ROLLBACK TO optional_ordinary_native_speech');
+    this.db.exec('RELEASE optional_ordinary_native_speech');
+    this.#ordinaryNativeSpeech.isolate();
+   }
+  }else if(!this.#ordinaryNativeSpeech&&Array.isArray(proof?.receipts)&&proof.receipts.length){
    this.db.exec('SAVEPOINT optional_speech_custody');
    try{
     speech=appendValleySpiritSpeechCustody(this.db,world,previousRevision,proof);
