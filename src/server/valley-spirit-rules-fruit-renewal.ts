@@ -1,3 +1,6 @@
+import {verifyOrdinaryDevelopmentV3,type OrdinaryDevelopmentV3Pin} from './ordinary-g2-development-v3.js';
+import type {OrdinaryG2DevelopmentOrigin} from './ordinary-g2-development-origin.js';
+import {ownsSelectedPositiveRehearsal,type openSelectedOrdinaryRehearsal} from './valley-spirit-ordinary-selected-rehearsal.js';
 import {readAtomicNativeRulesRenewal} from './godot-mvp.js';
 import {lstatSync} from 'node:fs';
 import {runtimeOwnershipAnchor,type RuntimeOwnership} from './runtime-lock.js';
@@ -190,16 +193,20 @@ function readLot(db:DatabaseSync,p:RulesNativeFruitRenewalPin,w:World,name=table
 
 /** Exact same-clock removal of the native tracked cohort at an already
  * independently authorized transfer. A transfer is never a natural credit. */
-export function consumeRulesNativeFruitLot(db:DatabaseSync,p:RulesNativeFruitRenewalPin,before:World,after:World,lotId:string){
- const s=source(before,p),next=source(after,p),old=stored(db),head=digestHead(db,after);
+function consumeLot(db:DatabaseSync,p:RulesNativeFruitRenewalPin,before:World,after:World,lotId:string,name=table){
+ const s=source(before,p),next=source(after,p),old=stored(db,name),head=digestHead(db,after);
  if(!db.isTransaction||!s||!next||!head||!p.lotShelfLifeGameMinutes||old.schemaVersion!==2||old.lot?.id!==lotId||
   old.worldDigest!==hash(gzipSync(JSON.stringify(before),{level:1}))||old.revision!==before.revision||
   old.atUs!==minuteToClimateUs(before.minute)||old.balance!==s.amount||old.shelfLife!==p.lotShelfLifeGameMinutes||
   after.id!==before.id||after.revision!==before.revision+1||after.minute!==before.minute||next.amount!==s.amount-1)
   throw Error('disposable_native_aged_transfer_lot_cas');
  const entry={...old,revision:after.revision,balance:next.amount,worldDigest:head,lot:null,renewal:null};
- put(db,true,entry);
- if(JSON.stringify(stored(db))!==JSON.stringify(entry))throw Error('disposable_native_aged_transfer_lot_cas');
+ put(db,true,entry,name);
+ if(JSON.stringify(stored(db,name))!==JSON.stringify(entry))throw Error('disposable_native_aged_transfer_lot_cas');
+}
+
+export function consumeRulesNativeFruitLot(db:DatabaseSync,p:RulesNativeFruitRenewalPin,before:World,after:World,lotId:string){
+ consumeLot(db,p,before,after,lotId);
 }
 
 export function advanceRulesNativeFruitLot(db:DatabaseSync,p:RulesNativeFruitRenewalPin,prior:World,w:World,flow:MvpFruitFlowBatch){
@@ -288,6 +295,19 @@ export function openRulesNativeMultiFruitLease(owner:RuntimeOwnership,path:strin
     return Object.freeze({status:'ordinary-native-multiple-source-coverage' as const,worldId:w.id,revision:w.revision,
      atUs:minuteToClimateUs(w.minute),lots:Object.freeze(lots),selectionAuthorized:false as const,executionAuthorized:false as const});
    }catch{isolated=true;return null;}
+  },
+  consumeDevelopmentV3(db:DatabaseSync,before:World,after:World,origin:OrdinaryG2DevelopmentOrigin,
+   reviewer:OrdinaryDevelopmentV3Pin,proof:NonNullable<ReturnType<ReturnType<typeof openSelectedOrdinaryRehearsal>['currentPositive']>>,
+   input:unknown){
+   const a=ownsSelectedPositiveRehearsal(proof)&&verifyOrdinaryDevelopmentV3(input,origin,reviewer);
+   if(!a||a.terms.reviewDigest!==proof.reviewDigest||a.terms.snapshot!==proof.snapshot||a.terms.headDigest!==proof.headDigest||
+    a.terms.worldId!==before.id||a.terms.revision!==before.revision||a.terms.sourceId!==proof.evidence.offer.sourceId||
+    a.terms.lotId!==proof.evidence.lot.lot.id)throw Error('ordinary_multi_fruit_v3_consumption_consent');
+   const i=pin.sites.findIndex(site=>site.sourceId===a.terms.sourceId);
+   if(isolated||i<0||!db.isTransaction||!manifest(db)||!available(db,SLOT_NAMES[i]))
+    throw Error('ordinary_multi_fruit_v3_consumption_scope');
+   consumeLot(db,nativePin(pin.sites[i]),before,after,a.terms.lotId,SLOT_NAMES[i]);
+   guard();
   },
   isolate(){isolated=true;},
  });

@@ -29,6 +29,8 @@ export function encodeSelectedOrdinaryRehearsal(t:unknown){
 }
 
 type Proof=NonNullable<ReturnType<ReturnType<typeof openOrdinaryCandidateSelection>['reviewProof']>>;
+const positiveProofs=new WeakSet<object>();
+export function ownsSelectedPositiveRehearsal(v:unknown){return !!v&&typeof v==='object'&&positiveProofs.has(v);}
 type Evidence=NonNullable<ReturnType<WorldStore['readExactSelectedOrdinaryRehearsal']>>;
 export function openSelectedOrdinaryRehearsal(owner:RuntimeOwnership,pin:Pinned,selection:()=>Proof|null,current:(snapshot:string,n:number)=>Evidence|null){
  const o=runtimeOwnershipAnchor(owner);
@@ -36,6 +38,7 @@ export function openSelectedOrdinaryRehearsal(owner:RuntimeOwnership,pin:Pinned,
  const f=lstatSync(o.database,{bigint:true});
  if(!f.isFile()||f.nlink!==1n)throw Error('ordinary_selected_review_original_save');
  const scope=digest([MODE,String(f.dev),String(f.ino),pin.fingerprint]);
+ let positive:Readonly<{reviewDigest:string;headDigest:string;snapshot:string;number:number;evidence:Evidence}>|null=null;
  const get=()=>{
   try{
    o.assertOwned();
@@ -54,6 +57,10 @@ export function openSelectedOrdinaryRehearsal(owner:RuntimeOwnership,pin:Pinned,
  };
  return Object.freeze({
   preview:()=>get()?.terms??null,
+  currentPositive(){
+   const x=get();
+   return positive&&x?.terms.headDigest===positive.headDigest&&x.terms.snapshot===positive.snapshot?positive:null;
+  },
   run(input:unknown){
    try{
     const s=get(),a=structuredClone(input);
@@ -66,6 +73,11 @@ export function openSelectedOrdinaryRehearsal(owner:RuntimeOwnership,pin:Pinned,
      sourceResourceInstanceId:e.offer.sourceInstanceId,targetId:e.offer.targetId,rainEventId:e.rain.rainEventId,
      atUs:e.lot.atUs,reviewUntilUs:e.offer.eligibleUntilUs,lot:{...e.lot.lot,ownerId:e.offer.ownerId}});
     if(digest(get()?.terms)!==digest(s.terms))return null;
+    if(result.status==='validated_detached'){
+     positive=Object.freeze({reviewDigest:digest([s.terms,a.signature]),headDigest:s.terms.headDigest,
+      snapshot:s.terms.snapshot,number:e.offer.number,evidence:e});
+     positiveProofs.add(positive);
+    }
     return Object.freeze({...result,selectedNumber:e.offer.number,selectionOperative:false as const,groundCapability:false as const,
      ordinaryPlacementAuthorized:false as const,executionAuthorized:false as const});
    }catch{return null;}

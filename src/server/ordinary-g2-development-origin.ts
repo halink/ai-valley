@@ -13,7 +13,7 @@ const RESERVED=[TABLE,'valley_spirit_ordinary_g2_dev_ground_v3','valley_spirit_o
 const DDL="CREATE TABLE valley_spirit_ordinary_g2_dev_origin (version INTEGER NOT NULL CHECK(version=1), purpose TEXT NOT NULL CHECK(purpose='ordinary-g2-v3-development-origin/v1'), world_id TEXT NOT NULL, seal TEXT NOT NULL)";
 const worldPattern=/^godot-mvp-[A-Za-z0-9_-]{1,160}$/;
 export type OrdinaryG2DevelopmentOrigin=Readonly<{readonly ordinaryG2DevelopmentOrigin:unique symbol}>;
-type Lease=Readonly<{database:string;assertOriginal:()=>void;sealFor:(world:string)=>Buffer}>;
+type Lease=Readonly<{database:string;assertOriginal:()=>void;sealFor:(world:string)=>Buffer;auth:(domain:string,body:string)=>string}>;
 const leases=new WeakMap<OrdinaryG2DevelopmentOrigin,Lease>();
 const storageOwners=new WeakSet<object>();
 export function ownsOrdinaryG2DevelopmentStorage(storage:unknown){return !!storage&&typeof storage==='object'&&storageOwners.has(storage);}
@@ -58,7 +58,8 @@ export function createFreshOrdinaryG2DevelopmentOriginStorage(){
    assertOwned();
    const token=Object.freeze({}) as OrdinaryG2DevelopmentOrigin;
    leases.set(token,{database,assertOriginal:assertOwned,sealFor:world=>
-    createHmac('sha256',key).update(JSON.stringify([PURPOSE,dirId,fileId,world])).digest()});
+    createHmac('sha256',key).update(JSON.stringify([PURPOSE,dirId,fileId,world])).digest(),
+    auth:(domain,body)=>createHmac('sha256',key).update(JSON.stringify([PURPOSE,dirId,fileId,domain,body])).digest('hex')});
    return token;
   },
  });
@@ -76,11 +77,17 @@ export function assertOrdinaryG2DevelopmentPath(origin:OrdinaryG2DevelopmentOrig
 /** Checks reserved table names in the actual main schema before migrations.
  * A nonempty schema version belongs to a future explicit writer, never this
  * origin-only stage. The preflight snapshot connection is intentionally a copy. */
-export function inspectOrdinaryG2DevelopmentOrigin(db:DatabaseSync,origin?:OrdinaryG2DevelopmentOrigin){
+export function inspectOrdinaryG2DevelopmentOrigin(db:DatabaseSync,origin?:OrdinaryG2DevelopmentOrigin,permitV3=false){
  const names=db.prepare("SELECT name,type,sql FROM main.sqlite_schema WHERE lower(name) IN (?,?,?)").all(...RESERVED);
- if(!origin){if(names.length)throw Error('ordinary_g2_development_requires_owner');return null;}
+ const metadata=db.prepare("SELECT type FROM main.sqlite_schema WHERE name='archive_meta' COLLATE NOCASE").get();
+ const retainedLatch=metadata?.type==='table'&&db.prepare('PRAGMA main.table_info(archive_meta)').all().some(c=>c.name==='key')&&
+  !!db.prepare("SELECT 1 FROM main.archive_meta WHERE key='ordinary_g2_development_v3_placed' LIMIT 1").get();
+ if(!origin){if(names.length||retainedLatch)throw Error('ordinary_g2_development_requires_owner');return null;}
  const lease=requireOrigin(origin);
- if(names.length!==1||names[0].name!==TABLE||names[0].type!=='table'||names[0].sql!==DDL||
+ const marker=names.find(n=>n.name===TABLE);
+ if(!permitV3&&retainedLatch)
+  throw Error('ordinary_g2_development_v3_requires_pin');
+ if((names.length!==1&&!(permitV3&&names.length===3))||marker?.type!=='table'||marker.sql!==DDL||
   db.prepare("SELECT 1 FROM main.sqlite_schema WHERE lower(tbl_name)=? AND type IN ('trigger','index')").get(TABLE)||
   db.prepare("SELECT 1 FROM sqlite_temp_schema WHERE lower(name) IN (?,?,?,'worlds') OR lower(tbl_name) IN (?,?,?,'worlds')")
    .get(...RESERVED,...RESERVED))throw Error('ordinary_g2_development_marker');
@@ -102,4 +109,8 @@ export function guardOrdinaryG2DevelopmentOriginCommit(db:DatabaseSync,origin:Or
   db.prepare('INSERT INTO main.'+TABLE+' VALUES (1,?,?,?)').run(PURPOSE,id,lease.sealFor(id).toString('hex'));
  }
  if(inspectOrdinaryG2DevelopmentOrigin(db,origin)!==id)throw Error('ordinary_g2_development_world');
+}
+
+export function authenticateOrdinaryG2DevelopmentV3(origin:OrdinaryG2DevelopmentOrigin,domain:string,body:string){
+ return requireOrigin(origin).auth(domain,body);
 }
