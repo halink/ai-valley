@@ -1,4 +1,5 @@
 import {createHash} from 'node:crypto';
+import type {nativeSeasonalWeatherPairMenu} from './valley-spirit-topics.js';
 
 const PROFILE='seasonal-weather-claims/v1';
 const reference='point-1';
@@ -40,6 +41,24 @@ export function validSeasonalWeatherWireDraft(point:SeasonalWirePoint,v:unknown)
 export type SeasonalWeatherMemoryTransport=Readonly<{kind:'seasonal-weather-claims-memory'}>;
 type Entry={bytes:string;reply:(v:unknown)=>void;disconnect:()=>void};
 const transports=new WeakMap<SeasonalWeatherMemoryTransport,{claimed:boolean;invoke:(bytes:string,signal:AbortSignal)=>Promise<unknown>}>();
+const TOPIC_PROFILE='seasonal-weather-topic-choice/v1';
+type PairMenu=NonNullable<ReturnType<typeof nativeSeasonalWeatherPairMenu>>;
+/** Correlation token commits to the exact anonymous menu content, not to
+ * a world, account, real source ref, user, or equipment identity. */
+export function seasonalWeatherTopicChoiceRequest(menu:PairMenu){
+ const menuToken=createHash('sha256').update(JSON.stringify([TOPIC_PROFILE,menu]),'utf8').digest('hex');
+ const bytes=JSON.stringify({schema:TOPIC_PROFILE,menuToken,menu});
+ return Object.freeze({menuToken,bytes,digest:createHash('sha256').update(bytes,'utf8').digest('hex')});
+}
+export function groundSeasonalWeatherTopicChoice(menu:PairMenu,menuToken:string,bytes:unknown){
+ if(typeof bytes!=='string'||bytes.length>SEASONAL_WEATHER_WIRE_REPLY_BYTES||Buffer.byteLength(bytes)>SEASONAL_WEATHER_WIRE_REPLY_BYTES)return null;
+ try{
+  const v:unknown=JSON.parse(bytes);
+  if(!object(v)||v.schema!==TOPIC_PROFILE||v.menuToken!==menuToken||!Number.isSafeInteger(v.option)||
+   !menu.options.some(o=>o.number===v.option))return null;
+  return bytes===JSON.stringify({schema:TOPIC_PROFILE,menuToken,option:v.option})?Object.freeze({number:v.option as number}):null;
+ }catch{return null;}
+}
 /** Fixture driver can only observe immutable request bytes and supply a string
  * result or disconnection. No configured URL, sender, resolver or network I/O. */
 export function createSeasonalWeatherMemoryTransport(){
