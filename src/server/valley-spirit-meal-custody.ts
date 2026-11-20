@@ -1,4 +1,6 @@
-import {randomUUID} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
+import {gzipSync} from 'node:zlib';
+import {runtimeOwnershipAnchor,type RuntimeOwnership} from './runtime-lock.js';
 import {lstatSync} from 'node:fs';
 import {DatabaseSync} from 'node:sqlite';
 import {readMvpMealFact} from '../shared/mvp-meals.js';
@@ -97,14 +99,14 @@ export function inspectValleySpiritMealCustody(db:DatabaseSync,worldId:string):v
  rows(db,worldId);
 }
 function persistedMeal(db:DatabaseSync,worldId:string,r:{revision:number;eventId:string;actorId:string;atUs:string},exactHead:boolean):boolean{
- const head=db.prepare('SELECT revision FROM worlds WHERE id=?').get(worldId)?.revision;
+ const head=db.prepare('SELECT revision FROM main.worlds WHERE id=?').get(worldId)?.revision;
  if(!positive(head)||(exactHead?head!==r.revision:head<r.revision))return false;
  // SQLite selects only typed columns; no event prose or raw event object enters custody.
  const e=db.prepare(`SELECT at, json_extract(body,'$.id') AS body_id, json_extract(body,'$.at') AS body_at,
    json_extract(body,'$.kind') AS kind, json_extract(body,'$.mvpMeal') AS meal,
    json_type(body,'$.actors') AS actors, json_array_length(body,'$.actors') AS actor_count,
    json_extract(body,'$.actors[0]') AS actor, json_extract(body,'$.observerOnly') AS observer_only,
-   json_type(body,'$.agriculture') AS agriculture FROM events WHERE id=? AND world_id=?`).get(r.eventId,worldId);
+   json_type(body,'$.agriculture') AS agriculture FROM main.events WHERE id=? AND world_id=?`).get(r.eventId,worldId);
  return !!e&&e.body_id===r.eventId&&minute(e.at)&&e.body_at===e.at&&minuteToClimateUs(e.at)===r.atUs&&e.kind==='action'&&
   e.actors==='array'&&e.actor_count===1&&e.actor===r.actorId&&(e.observer_only===null||e.observer_only===0)&&
   e.agriculture===null&&typeof e.meal==='string'&&readMvpMealFact(JSON.parse(e.meal))?.kind==='ate';
@@ -254,4 +256,116 @@ export function readNativeMvpMealV2Receipt(db:DatabaseSync,worldId:string,eventI
   return r&&persistedMeal(db,worldId,{revision:r.committed_revision,eventId:r.event_id,actorId:r.actor_id,atUs:r.at_us},false)?
    asReceipt(r):null;
  }catch{return null;}
+}
+
+const ORDINARY='valley_spirit_ordinary_native_meal_receipts';
+const ORDINARY_DDL=`CREATE TABLE ${ORDINARY}(event_id TEXT PRIMARY KEY NOT NULL,world_id TEXT NOT NULL,schema_version INTEGER NOT NULL,plan_id TEXT NOT NULL,actor_id TEXT NOT NULL,at_us TEXT NOT NULL,committed_revision INTEGER NOT NULL,receipt_id TEXT UNIQUE NOT NULL,event_digest TEXT NOT NULL)`;
+const ordinaryScope='ordinary-native-meal-custody/v1';
+const ARCHIVE_META_DDL='CREATE TABLE archive_meta (key TEXT PRIMARY KEY,value TEXT NOT NULL)';
+export type OrdinaryNativeMealOptions=Readonly<{scope:typeof ordinaryScope;worldId:string}>;
+export function pinOrdinaryNativeMealOptions(input:unknown):OrdinaryNativeMealOptions|null{
+ if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).length!==2||
+    !Object.hasOwn(input,'scope')||!Object.hasOwn(input,'worldId'))return null;
+ const raw=input as OrdinaryNativeMealOptions;
+ return raw.scope===ordinaryScope&&typeof raw.worldId==='string'&&WORLD.test(raw.worldId)?
+  Object.freeze({scope:ordinaryScope,worldId:raw.worldId}):null;
+}
+const digest=(s:string)=>createHash('sha256').update(s).digest('hex');
+export function openOrdinaryNativeMealLease(owner:RuntimeOwnership,path:string,input:OrdinaryNativeMealOptions){
+ const opts=pinOrdinaryNativeMealOptions(input),anchor=runtimeOwnershipAnchor(owner);
+ if(!opts||!anchor||anchor.database!==path)throw Error('ordinary_native_meal_owner');
+ anchor.assertOwned();
+ const {worldId}=opts,file=regular(path);
+ const binding=digest(JSON.stringify([ordinaryScope,worldId,String(file.dev),String(file.ino)]));
+ const seen=new Map<string,string>();
+ let isolated=false;
+ const assertOwned=()=>{
+  anchor.assertOwned();
+  if(!same(file,regular(path)))throw Error('ordinary_native_meal_file_changed');
+ };
+ function assertCarrier(db:DatabaseSync){
+  const shape=db.prepare("SELECT name,type,sql FROM main.sqlite_schema WHERE lower(name)='archive_meta' LIMIT 2").all();
+  if(shape.length!==1||shape[0].name!=='archive_meta'||shape[0].type!=='table'||shape[0].sql!==ARCHIVE_META_DDL||
+   db.prepare("SELECT 1 FROM main.sqlite_schema WHERE lower(tbl_name)='archive_meta' AND type='trigger'").get()||
+   db.prepare("SELECT 1 FROM temp.sqlite_schema WHERE lower(name) IN ('archive_meta','worlds','events','event_people','event_animals',?) OR type='trigger' AND lower(tbl_name) IN ('archive_meta',?)").get(ORDINARY,ORDINARY))
+   throw Error('ordinary_native_meal_carrier');
+ }
+ function exactHead(db:DatabaseSync,w:World){
+  const head=db.prepare('SELECT revision,state FROM main.worlds WHERE id=?').get(w.id);
+  return head?.revision===w.revision&&head.state instanceof Uint8Array&&gzipSync(JSON.stringify(w),{level:1}).equals(head.state);
+ }
+ function read(db:DatabaseSync){
+  assertOwned();
+  assertCarrier(db);
+  const table=db.prepare('SELECT name,type,sql FROM main.sqlite_schema WHERE lower(name)=? LIMIT 2').all(ORDINARY);
+  const mark=db.prepare('SELECT value FROM main.archive_meta WHERE key=?').get(ordinaryScope)?.value;
+  if(!table.length&&mark===undefined&&!seen.size)return null;
+  if(table.length!==1||table[0].name!==ORDINARY||table[0].type!=='table'||table[0].sql!==ORDINARY_DDL||mark!==binding||
+   db.prepare("SELECT 1 FROM main.sqlite_schema WHERE lower(tbl_name)=? AND (type='trigger' OR (type='index' AND sql IS NOT NULL))").get(ORDINARY))
+   throw Error('ordinary_native_meal_storage');
+  const rows=db.prepare(`SELECT * FROM main.${ORDINARY} LIMIT ?`).all(LIMIT+1) as unknown as (CustodyRow&{event_digest:string})[];
+  if(!rows.length||rows.length>LIMIT)throw Error('ordinary_native_meal_capacity');
+  for(const r of rows)if(r.world_id!==worldId||r.schema_version!==1||!ID.test(r.event_id)||!ID.test(r.plan_id)||!ID.test(r.actor_id)||
+   !positive(r.committed_revision)||!supportedMealReceipt(asReceipt(r),worldId)||!/^[a-f0-9]{64}$/.test(r.event_digest))
+   throw Error('ordinary_native_meal_storage');
+  const current=new Map(rows.map(r=>[r.event_id,JSON.stringify(r)]));
+  if([...seen].some(([id,row])=>current.get(id)!==row))throw Error('ordinary_native_meal_observed_rollback');
+  return {rows,current};
+ }
+ function exactEventDigest(db:DatabaseSync,r:{worldId:string;revision:number;eventId:string;actorId:string;atUs:string},exactHead:boolean){
+  if(!persistedMeal(db,r.worldId,r,exactHead))return null;
+  const event=db.prepare('SELECT rowid AS seq,body FROM main.events WHERE id=? AND world_id=?').get(r.eventId,r.worldId);
+  const actors=db.prepare('SELECT world_id,person_id,event_seq FROM main.event_people WHERE event_id=? LIMIT 2').all(r.eventId);
+  if(typeof event?.body!=='string'||actors.length!==1||actors[0].world_id!==r.worldId||
+   actors[0].person_id!==r.actorId||actors[0].event_seq!==event.seq||
+   db.prepare('SELECT 1 FROM main.event_animals WHERE event_id=? LIMIT 1').get(r.eventId))return null;
+  return digest(event.body);
+ }
+ return Object.freeze({
+  worldId,
+  isolate(){isolated=true;},
+  /** The outer WorldStore savepoint keeps evidence atomic with its world.
+   * Never advance the observed rewind floor before that commit succeeds. */
+  append(db:DatabaseSync,w:World,witnesses:readonly ValleySpiritMvpMealWitness[]){
+   if(isolated||!witnesses.length)return;
+   if(!db.isTransaction||w.id!==worldId||w.mode!=='validation'||Object.hasOwn(w,'simulationOnly'))
+    throw Error('ordinary_native_meal_append_scope');
+   if(!exactHead(db,w))throw Error('ordinary_native_meal_changed_head');
+   const old=read(db);
+   if((old?.rows.length??0)+witnesses.length>LIMIT)throw Error('ordinary_native_meal_capacity');
+   const staged=witnesses.map(r=>{
+    if(known.get(r)!==w||r.worldId!==w.id||r.revision!==w.revision||r.atUs!==minuteToClimateUs(w.minute))
+     throw Error('ordinary_native_meal_unverified');
+    const eventDigest=exactEventDigest(db,r,true);if(!eventDigest)throw Error('ordinary_native_meal_unverified');
+    return {r,eventDigest,id:randomUUID()};
+   });
+   if(!old){
+    db.exec(ORDINARY_DDL);
+    db.prepare('INSERT INTO main.archive_meta(key,value) VALUES(?,?)').run(ordinaryScope,binding);
+   }
+   const insert=db.prepare(`INSERT INTO main.${ORDINARY} VALUES(?,?,1,?,?,?,?,?,?)`);
+   for(const {r,eventDigest,id} of staged)
+    if(insert.run(r.eventId,w.id,r.exactPlanId,r.actorId,r.atUs,r.revision,id,eventDigest).changes!==1)
+     throw Error('ordinary_native_meal_insert');
+   const confirmed=read(db);
+   if(!exactHead(db,w)||staged.some(({r,eventDigest,id})=>
+    exactEventDigest(db,r,true)!==eventDigest||!confirmed?.rows.some(v=>v.receipt_id===id&&v.event_id===r.eventId&&
+     v.event_digest===eventDigest&&v.plan_id===r.exactPlanId&&v.actor_id===r.actorId&&v.at_us===r.atUs&&v.committed_revision===r.revision)))
+    throw Error('ordinary_native_meal_readback');
+   assertOwned();
+  },
+  readAtHead(db:DatabaseSync,w:World,eventId:string){
+   if(isolated||!db.isTransaction||w.id!==worldId||w.mode!=='validation'||typeof eventId!=='string'||!ID.test(eventId))return null;
+   try{
+    if(!exactHead(db,w))return null;
+    const current=read(db),row=current?.rows.find(r=>r.event_id===eventId);
+    if(current)for(const [key,value] of current.current)seen.set(key,value);
+    if(!row||BigInt(row.at_us)>BigInt(minuteToClimateUs(w.minute)))return null;
+    if(exactEventDigest(db,{worldId:w.id,revision:row.committed_revision,eventId,actorId:row.actor_id,atUs:row.at_us},false)!==row.event_digest)
+     throw Error('ordinary_native_meal_archive_changed');
+    assertOwned();
+    return Object.freeze({status:'committed-private-meal' as const,receipt:Object.freeze(asReceipt(row)),disclosureAuthorized:false as const});
+   }catch{isolated=true;return null;}
+  },
+ });
 }

@@ -11,7 +11,7 @@ import {advanceRulesNativeFruitLot,appendRulesNativeFruitRenewal,consumeRulesNat
 import {appendFormalAddressedSpeech,readFormalAddressedSpeech} from './valley-spirit-formal-speech-custody.js';
 import {appendFormalAppointmentChoices,readFormalAppointmentChoice} from './valley-spirit-formal-choice-custody.js';
 import {nativeFormalAppointmentChoice} from '../world/social-appointments.js';
-import {appendNativeMvpMealCustodyV2,readNativeMvpMealV2Receipt,type ValleySpiritMvpMealWitness} from './valley-spirit-meal-custody.js';
+import {appendNativeMvpMealCustodyV2,openOrdinaryNativeMealLease,readNativeMvpMealV2Receipt,type OrdinaryNativeMealOptions,type ValleySpiritMvpMealWitness} from './valley-spirit-meal-custody.js';
 import {readMvpMealFact} from '../shared/mvp-meals.js';
 import {assertAgedBirthSqlAuthority,advanceSealedAgedFruitExpiry,advanceSealedAgedHeldFruitExpiry,advanceSealedAgedHeldFruitMinute,advanceSealedAgedFruitMinute,pickUpSealedAgedFruit,readOwnedSealedAgedHeldFruit,readOwnedSealedAgedHeldFruitExpiry,readOwnedSealedAgedHeldFruitEaten,readOwnedSealedMvpAgedFruitFairness,readOwnedSealedMvpAgedStockFlow,readOwnedSealedAgedBirthReceipt,readOwnedSealedAgedFruitDiscovery,readOwnedSealedAgedFruitExpiry,readOwnedSealedAgedFruitSight,readSealedAgedBirthArchive,rejectSealedAgedBirthOnGenericPath,
  sameAgedBirthProofs,writeSealedAgedBirth,type AgedBirthProofs} from './valley-spirit-aged-birth-archive.js';
@@ -131,6 +131,7 @@ export class WorldStore {
  private readonly receiptPrefix;
  private readonly allowMvpClimate:boolean;
  private readonly nativeWeatherCredit:boolean;
+ readonly #ordinaryNativeMeal?:ReturnType<typeof openOrdinaryNativeMealLease>;
  readonly #disposableAgedTransfer?:DisposableNativeAgedTransferPin;
  readonly #privateDisposableSave?:DisposableRulesSaveAuthority;
  private readonly nativeEmptyGround?:Readonly<{owner:RuntimeOwnership;pin:OrdinaryAgedGroundPin}>;
@@ -147,7 +148,7 @@ export class WorldStore {
  private agedG1EpochIsolated=false;
  private armedFormalDue:FormalDueIntent|undefined;
  private armedFormalShadow:FormalShadowArm|undefined;
- constructor(path:string,options:{formalRainProvenance?:true;formalAppointmentChoiceCustody?:true;formalAddressedSpeechCustody?:true;dailySnapshots?:DailySnapshotConfig;allowMvpClimate?:boolean;seasonalModel?:true;mvpSpiritEffectFixture?:MvpGroundFruitCapacity;developerSpiritFixtureOwner?:DeveloperMvpSpiritFixtureOwner;nativeWeatherCredit?:true;nativeRulesFruitRenewal?:RulesNativeFruitRenewalPin;nativeEmptyGround?:Readonly<{owner:RuntimeOwnership;pin:OrdinaryAgedGroundPin}>;sealedAgedBirthExecution?:true;privateDisposableSave?:DisposableRulesSaveAuthority;disposableAgedTransfer?:DisposableNativeAgedTransferPin}={}){
+ constructor(path:string,options:{formalRainProvenance?:true;formalAppointmentChoiceCustody?:true;formalAddressedSpeechCustody?:true;dailySnapshots?:DailySnapshotConfig;allowMvpClimate?:boolean;seasonalModel?:true;mvpSpiritEffectFixture?:MvpGroundFruitCapacity;developerSpiritFixtureOwner?:DeveloperMvpSpiritFixtureOwner;nativeWeatherCredit?:true;nativeRulesFruitRenewal?:RulesNativeFruitRenewalPin;nativeEmptyGround?:Readonly<{owner:RuntimeOwnership;pin:OrdinaryAgedGroundPin}>;sealedAgedBirthExecution?:true;privateDisposableSave?:DisposableRulesSaveAuthority;disposableAgedTransfer?:DisposableNativeAgedTransferPin;ordinaryNativeMeal?:Readonly<{owner:RuntimeOwnership;pin:OrdinaryNativeMealOptions}>}={}){
   this.allowMvpClimate=options.allowMvpClimate===true;
   this.allowFormalRainProvenance=options.formalRainProvenance===true&&!this.allowMvpClimate&&!options.seasonalModel;
   this.seasonalModel=options.seasonalModel===true;
@@ -216,6 +217,13 @@ export class WorldStore {
    validateWorld:(this.formalAppointmentChoiceCustody||this.formalAddressedSpeechCustody)?w=>{
     if(w.mode!=='formal')throw Error(this.formalAppointmentChoiceCustody?'formal_appointment_choice_custody_scope':'formal_addressed_speech_scope');
    }:undefined});
+  if(options.ordinaryNativeMeal){
+   const {owner:runtimeOwner,pin}=options.ordinaryNativeMeal;
+   if(owner||fixture||this.#privateDisposableSave||this.seasonalModel||!this.allowMvpClimate||this.nativeEmptyGround||
+    this.nativeRulesFruitRenewal||this.nativeWeatherCredit||options.dailySnapshots||savedHeader?.id!==pin.worldId||savedHeader.mode!=='validation')
+    throw Error('ordinary_native_meal_store_scope');
+   this.#ordinaryNativeMeal=openOrdinaryNativeMealLease(runtimeOwner,path,pin);
+  }
   if(savedHeader&&this.nativeRulesFruitRenewal&&(savedHeader.mode!=='validation'||savedHeader.id!==this.nativeRulesFruitRenewal.worldId||
      (savedHeader.mvpClimate as World['mvpClimate'])?.spiritEffects||(savedHeader.mvpClimate as World['mvpClimate'])?.spiritFruitSettlement))
    throw Error('rules_native_renewal_world_scope');
@@ -811,6 +819,18 @@ export class WorldStore {
    throw Error('mvp_private_meal_store_required');
   this.commitTransaction(world,previousRevision,undefined,undefined,undefined,witnesses);
  }
+ commitOrdinaryNativeMeals(world:World,previousRevision:number,witnesses:readonly ValleySpiritMvpMealWitness[]){
+  if(!this.#ordinaryNativeMeal||this.#ordinaryNativeMeal.worldId!==world.id)throw Error('ordinary_native_meal_store_scope');
+  this.commitTransaction(world,previousRevision,undefined,undefined,undefined,witnesses);
+ }
+ readOrdinaryNativeMealAtHead(world:World,eventId:string){
+  if(!this.#ordinaryNativeMeal)return null;
+  try{
+   this.db.exec('BEGIN');
+   try{return this.#ordinaryNativeMeal.readAtHead(this.db,world,eventId);}
+   finally{this.db.exec('ROLLBACK');}
+  }catch{return null;}
+ }
  readCommittedMvpAddressedSpeech(worldId:string,eventId:string):ValleySpiritLifeReceipt|null{
   if(this.developerSpiritFixtureOwner)rejectSealedAgedBirthOnGenericPath(this.db);
   return this.allowMvpClimate&&!this.seasonalModel?readValleySpiritSpeechCustody(this.db,worldId,eventId):null;
@@ -927,6 +947,22 @@ export class WorldStore {
    advanceOrdinaryNativeEmptyGround(this.db,owner,pin,previous,world,!!readAtomicNativeRulesRenewal(previous,world));
   }
 
+  if(this.#ordinaryNativeMeal&&mealWitnesses){
+   this.db.exec('SAVEPOINT optional_ordinary_native_meal');
+   try{
+    const before=new Set(previous?.events.map(e=>e.id)??[]);
+    const expected=new Set(world.events.filter(e=>!before.has(e.id)&&readMvpMealFact(e.mvpMeal)?.kind==='ate').map(e=>e.id));
+    if(mealWitnesses.length!==expected.size||new Set(mealWitnesses.map(r=>r.eventId)).size!==mealWitnesses.length||
+     mealWitnesses.some(r=>!expected.has(r.eventId))||expected.size&&(!previous||!isAtomicNativeMealMinute(previous,world)))
+     throw Error('ordinary_native_meal_missing_proof');
+    this.#ordinaryNativeMeal.append(this.db,world,mealWitnesses);
+    this.db.exec('RELEASE optional_ordinary_native_meal');
+   }catch{
+    this.db.exec('ROLLBACK TO optional_ordinary_native_meal');
+    this.db.exec('RELEASE optional_ordinary_native_meal');
+    this.#ordinaryNativeMeal.isolate();
+   }
+  }
   if(this.developerSpiritFixtureOwner?.rulesMealWorldId){
    const prior=new Set(previous?.events.map(e=>e.id)??[]), expected=new Set(world.events.filter(e=>
     !prior.has(e.id)&&readMvpMealFact(e.mvpMeal)?.kind==='ate').map(e=>e.id));
