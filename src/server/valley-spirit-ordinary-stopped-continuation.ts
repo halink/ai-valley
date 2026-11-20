@@ -4,27 +4,30 @@ import type {DatabaseSync} from 'node:sqlite';
 import type {World} from '../shared/types.js';
 import type {NativeOrdinaryAgedDiscovery} from '../world/mvp-ordinary-aged-ground-discovery.js';
 import {prepareOrdinaryAgedGroundPickup} from './valley-spirit-ordinary-aged-pickup.js';
-import {prepareStoppedOrdinaryAgedGroundMinute} from './godot-mvp.js';
+import {parseClimateUs} from '../world/mvp-climate.js';
+import {prepareSealedMvpEcologyMinute,prepareStoppedOrdinaryAgedGroundMinute} from './godot-mvp.js';
 import {advanceAgedGroundExpiry,type AgedGroundLot} from './valley-spirit-ordinary-aged-ground.js';
 
 export const stoppedContinuationTable='valley_spirit_ordinary_aged_continuation';
 export const stoppedContinuationSql='CREATE TABLE valley_spirit_ordinary_aged_continuation(sequence INTEGER PRIMARY KEY NOT NULL,body TEXT NOT NULL)';
-const maxSteps=8,maxEvents=4096,maxStepBytes=65536;
+const maxSteps=8,maxHeldSteps=48,maxEvents=4096,maxStepBytes=65536;
 const hash=(v:string|Uint8Array)=>createHash('sha256').update(v).digest('hex');
 const bytes=(w:World)=>gzipSync(JSON.stringify(w),{level:1});
 const same=(a:unknown,b:unknown)=>JSON.stringify(a)===JSON.stringify(b);
 function invalid():never{throw Error('ordinary_stopped_continuation_invalid');}
-const pickupSchema='ordinary-stopped-native-pickup/v1';
+const pickupSchema='ordinary-stopped-native-pickup/v1',heldSchema='ordinary-stopped-native-held-minute/v1';
 type Pickup=NonNullable<ReturnType<typeof prepareOrdinaryAgedGroundPickup>>['completion'];
 export interface StoppedOrdinaryHeldFruit {
  readonly schema:'ordinary-stopped-held-fruit/v1';readonly holderId:string;readonly lot:AgedGroundLot;
  readonly pickup:Pickup;readonly groundDebit:1;readonly heldCredit:1;
 }
+type Eat=NonNullable<NonNullable<ReturnType<typeof prepareSealedMvpEcologyMinute>>['eaten']>;
+type HeldDisposition=Readonly<{effectId:string;bornUs:string;expiresUs:string;heldDebit:1}&({kind:'expired';settledUs:string}|{kind:'eaten';witness:Eat})>;
 type Expiry=NonNullable<ReturnType<typeof advanceAgedGroundExpiry>>['expired'][number];
 export interface StoppedGroundReplay{
  readonly world:World;readonly lot:AgedGroundLot|null;readonly receiptDigest:string;readonly sequence:number;
  readonly discoveries:ReadonlyMap<string,NativeOrdinaryAgedDiscovery>;readonly expiry:Expiry|null;
- readonly held?:StoppedOrdinaryHeldFruit;
+ readonly held?:StoppedOrdinaryHeldFruit;readonly heldSteps?:number;readonly heldDisposition?:HeldDisposition;
 }
 function nativeEvents(prior:World,draft:World){
  if(draft.events.length>maxEvents||!same(draft.events.slice(0,prior.events.length),prior.events))return null;
@@ -75,6 +78,36 @@ export function prepareStoppedGroundReplayMinute(current:StoppedGroundReplay,pic
  if(Buffer.byteLength(body)>maxStepBytes)return null;
  return {finish,body,events};
 }
+/** Continue only the actual original resident's native plans. The carried
+ * lot stays out of ordinary scalar food; eating settles the scoped witness. */
+export function prepareStoppedHeldReplayMinute(current:StoppedGroundReplay){
+ const held=current.held,prior=current.world,heldSteps=current.heldSteps??0;
+ if(!held||current.lot||current.expiry||current.heldDisposition||heldSteps>=maxHeldSteps||!prior.mvpClimate)return null;
+ const owner=prior.residents.find(r=>r.id===held.holderId);
+ if(!owner||owner.status!=='alive'||owner.health<=0||owner.residency==='outside'||owner.regionalLocation)return null;
+ const before=parseClimateUs(prior.mvpClimate.lastUs),expires=parseClimateUs(held.lot.expiresUs);
+ if(before>=expires)return null;
+ const next=prepareSealedMvpEcologyMinute(prior,true,undefined,undefined,
+  {residentId:held.holderId,effectId:held.lot.fruit.effectId,expiresUs:held.lot.expiresUs,table:true});
+ if(!next||next.mealWitnesses.length||next.speech?.receipts.length||!next.draft.mvpClimate)return null;
+ const {draft,eaten}=next,atUs=draft.mvpClimate!.lastUs,now=parseClimateUs(atUs);
+ const person=draft.residents.find(r=>r.id===held.holderId),events=nativeEvents(prior,draft);
+ if(!events||now!==before+1_000_000n||!person||person.status!=='alive'||person.health<=0||person.residency!==owner.residency||person.regionalLocation)return null;
+ let heldDisposition:HeldDisposition|undefined;
+ const age={effectId:held.lot.fruit.effectId,bornUs:held.lot.bornUs,expiresUs:held.lot.expiresUs,heldDebit:1 as const};
+ if(eaten){
+  if(now>=expires||eaten.residentId!==held.holderId||eaten.settledUs!==atUs||eaten.workMinutes!==5||
+   parseClimateUs(eaten.settledUs)-parseClimateUs(eaten.startedUs)!==4_000_000n||
+   !draft.processed.includes('plan:'+eaten.planId)||person.activity||person.plan||!same(person.inventory,owner.inventory))return null;
+  heldDisposition=Object.freeze({kind:'eaten',witness:eaten,...age});
+ }else if(now>=expires)heldDisposition=Object.freeze({kind:'expired',settledUs:atUs,...age});
+ const finish:StoppedGroundReplay=Object.freeze({...current,world:draft,sequence:current.sequence+1,heldSteps:heldSteps+1,heldDisposition});
+ const body=JSON.stringify({schema:heldSchema,sequence:finish.sequence,heldSteps:finish.heldSteps,fromRevision:prior.revision,
+  toRevision:draft.revision,atUs,placementReceiptDigest:current.receiptDigest,pickupPlanId:held.pickup.planId,
+  effectId:held.lot.fruit.effectId,bornUs:held.lot.bornUs,expiresUs:held.lot.expiresUs,
+  beforeDigest:hash(bytes(prior)),afterDigest:hash(bytes(draft)),eventIds:events.map(e=>e.id),terminal:heldDisposition??null});
+ return Buffer.byteLength(body)<=maxStepBytes?{finish,body,events}:null;
+}
 function hasSteps(db:DatabaseSync){
  const header=db.prepare('SELECT type,sql FROM sqlite_schema WHERE lower(name)=?').get(stoppedContinuationTable);
  if(!header)return false;
@@ -118,20 +151,20 @@ export function assertStoppedEventArchive(db:DatabaseSync,w:World){
   if(count!==counts[table])invalid();
  }
 }
-export const stoppedGroundBody=(r:StoppedGroundReplay,effectId:string)=>JSON.stringify({version:2,worldId:r.world.id,effectId,items:r.lot?[r.lot]:[],...(r.held?{held:r.held}:{})});
+export const stoppedGroundBody=(r:StoppedGroundReplay,effectId:string)=>JSON.stringify({version:2,worldId:r.world.id,effectId,items:r.lot?[r.lot]:[],...(r.heldDisposition?{held:null,heldDisposition:r.heldDisposition}:r.held?{held:r.held}:{})});
 export function recoverStoppedGroundContinuation(db:DatabaseSync,origin:World,lot:AgedGroundLot,receiptDigest:string,
  current:Uint8Array,ground:Readonly<{body?:unknown;digest?:unknown}>|undefined):StoppedGroundReplay{
  let replay:StoppedGroundReplay={world:origin,lot,receiptDigest,sequence:0,discoveries:new Map(),expiry:null};
  const stepped=hasSteps(db);
  if(stepped){
   assertStoppedEventAuthority(db);
-  const rows=db.prepare(`SELECT sequence,CASE WHEN length(CAST(body AS BLOB))<=? THEN body END AS body FROM main.${stoppedContinuationTable} ORDER BY sequence LIMIT ?`).all(maxStepBytes,maxSteps+1);
-  if(!rows.length||rows.length>maxSteps)invalid();
+  const rows=db.prepare(`SELECT sequence,CASE WHEN length(CAST(body AS BLOB))<=? THEN body END AS body FROM main.${stoppedContinuationTable} ORDER BY sequence LIMIT ?`).all(maxStepBytes,maxSteps+maxHeldSteps+1);
+  if(!rows.length||rows.length>maxSteps+maxHeldSteps)invalid();
   for(const r of rows){
    if(typeof r.body!=='string')invalid();
    const version=JSON.parse(r.body)?.schema;
-   if(version!==pickupSchema&&version!=='ordinary-stopped-native-continuation/v1')invalid();
-   const next=prepareStoppedGroundReplayMinute(replay,version===pickupSchema);
+   if(version!==pickupSchema&&version!==heldSchema&&version!=='ordinary-stopped-native-continuation/v1')invalid();
+   const next=version===heldSchema?prepareStoppedHeldReplayMinute(replay):prepareStoppedGroundReplayMinute(replay,version===pickupSchema);
    if(!next||r.sequence!==next.finish.sequence||r.body!==next.body)invalid();
    replay=next.finish;
   }

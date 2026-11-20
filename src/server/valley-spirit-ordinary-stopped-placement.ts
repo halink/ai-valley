@@ -1,15 +1,15 @@
-import {assertStoppedEventArchive,assertStoppedEventAuthority,prepareStoppedGroundReplayMinute,recoverStoppedGroundContinuation,stoppedContinuationSql,stoppedContinuationTable,stoppedGroundBody,type StoppedGroundReplay} from './valley-spirit-ordinary-stopped-continuation.js';
+import {assertStoppedEventArchive,assertStoppedEventAuthority,prepareStoppedGroundReplayMinute,prepareStoppedHeldReplayMinute,recoverStoppedGroundContinuation,stoppedContinuationSql,stoppedContinuationTable,stoppedGroundBody,type StoppedGroundReplay} from './valley-spirit-ordinary-stopped-continuation.js';
 import {createHash,createHmac,createPublicKey,randomBytes,verify} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
 import {constants,fstatSync,lstatSync,mkdtempSync,openSync,closeSync,readFileSync,writeFileSync,realpathSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {basename,dirname,join} from 'node:path';
-import {gzipSync} from 'node:zlib';
+import {gzipSync,gunzipSync} from 'node:zlib';
 import type {World,WorldEvent} from '../shared/types.js';
 import {parseClimateUs} from '../world/mvp-climate.js';
 import {resolveMvpRainEpisode} from '../world/mvp-rain-provenance.js';
 import {validateMvpGroundFruitState} from '../world/mvp-ground-fruit.js';
-import {decodeSavedWorld} from './save-preflight.js';
+import {assertWorldCompatibility,decodeSavedWorld} from './save-preflight.js';
 import {acquireRuntimeOwnership,type RuntimeOwnership} from './runtime-lock.js';
 import {SqliteValleySpiritPermissions,readValleySpiritWeatherPermission} from './valley-spirit-permissions.js';
 import {publicWeatherProjection,ValleySpiritJournal} from './valley-spirit.js';
@@ -122,10 +122,30 @@ function authority(db:DatabaseSync){
  if(t&&(t.type!=='table'||t.sql!==ddl||db.prepare('SELECT 1 FROM sqlite_schema WHERE type=\'index\' AND lower(tbl_name)=?').get(table)))return bad();
  return !!t;
 }
+/** Pending native aged eating is legal only in this replay-guarded stopped
+ * lane. Generic save validation remains unchanged. Strip it solely from a
+ * validation copy, then require full original bytes to replay before use. */
+function decodeStoppedHead(db:DatabaseSync,state:Uint8Array):World{
+ try{return decodeSavedWorld(state) as unknown as World;}
+ catch(error){
+  if(!(error instanceof Error)||error.message!=='save_sealed_aged_pickup_requires_private_archive'||
+   !db.prepare('SELECT 1 FROM sqlite_schema WHERE name=?').get(stoppedContinuationTable))throw error;
+  const original=JSON.parse(gunzipSync(state,{maxOutputLength:32*1024*1024}).toString()) as World;
+  const check=structuredClone(original);
+  let found=false;
+  for(const r of check.residents){
+   if(r.activity?.action.type==='mvpAgedFruitEat'){found=true;r.activity=null;}
+   if(r.plan?.actions.some(a=>a.type==='mvpAgedFruitEat')){found=true;r.plan=null;}
+  }
+  if(!found)return bad();
+  assertWorldCompatibility(check);
+  return original;
+ }
+}
 function head(db:DatabaseSync){
  const rows=db.prepare('SELECT id,revision,CASE WHEN length(CAST(state AS BLOB))<=33554432 THEN state END AS state FROM main.worlds LIMIT 2').all();
  const r=rows[0];if(rows.length!==1||!(r.state instanceof Uint8Array)||!integer(r.revision))return bad();
- const w=decodeSavedWorld(r.state) as unknown as World;
+ const w=decodeStoppedHead(db,r.state);
  if(w.id!==r.id||w.revision!==r.revision||w.mode!=='validation'||!w.mvpClimate?.rainProvenance||w.clock.paused||
   Object.hasOwn(w,'simulationOnly')||Object.hasOwn(w.mvpClimate,'spiritEffects')||Object.hasOwn(w.mvpClimate,'spiritFruitSettlement')||
   !gzipSync(JSON.stringify(w),{level:1}).equals(r.state))return bad();
@@ -241,11 +261,12 @@ function append(db:DatabaseSync,w:World,events:readonly WorldEvent[]){
 }
 /** Owning placement path must verify the original dual signed archive first;
  * no generic caller or detached world can reach this function's committing path. */
-function stageStoppedGroundMinute(db:DatabaseSync,current:StoppedGroundReplay,old:Uint8Array,failAfterWorld:boolean,pickup=false){
- const draft=prepareStoppedGroundReplayMinute(current,pickup);
- if(!draft||!current.lot)return null;
+function stageStoppedGroundMinute(db:DatabaseSync,current:StoppedGroundReplay,old:Uint8Array,failAfterWorld:boolean,mode:'ground'|'pickup'|'held'){
+ const draft=mode==='held'?prepareStoppedHeldReplayMinute(current):prepareStoppedGroundReplayMinute(current,mode==='pickup');
+ const fruit=current.lot??current.held?.lot;
+ if(!draft||!fruit)return null;
  assertStoppedEventAuthority(db);assertStoppedEventArchive(db,current.world);
- const state=gzipSync(JSON.stringify(draft.finish.world),{level:1}),ground=stoppedGroundBody(draft.finish,current.lot.fruit.effectId),prior=stoppedGroundBody(current,current.lot.fruit.effectId);
+ const state=gzipSync(JSON.stringify(draft.finish.world),{level:1}),ground=stoppedGroundBody(draft.finish,fruit.fruit.effectId),prior=stoppedGroundBody(current,fruit.fruit.effectId);
  if(state.length>32*1024*1024||db.prepare('UPDATE main.worlds SET revision=?,state=? WHERE id=? AND revision=? AND state=?')
   .run(draft.finish.world.revision,state,current.world.id,current.world.revision,old).changes!==1)bad();
  if(failAfterWorld)bad();
@@ -260,14 +281,17 @@ function stageStoppedGroundMinute(db:DatabaseSync,current:StoppedGroundReplay,ol
 /** One explicit native minute on the exact joined head. Calling this routine
  * does not grant discovery to observers or change the original fruit age. */
 export function advanceStoppedOrdinaryGround(key:StoppedPlacementKey,expectedRevision:number,fault?:'after-world-cas'){
- return advanceStoppedGroundAuthority(key,expectedRevision,false,fault);
+ return advanceStoppedGroundAuthority(key,expectedRevision,'ground',fault);
 }
 /** No requested resident: the actual native idle chooser selects from all
  * previously recorded eligible observers in ordinary roster order. */
 export function pickUpStoppedOrdinaryGround(key:StoppedPlacementKey,expectedRevision:number,fault?:'after-world-cas'){
- return advanceStoppedGroundAuthority(key,expectedRevision,true,fault);
+ return advanceStoppedGroundAuthority(key,expectedRevision,'pickup',fault);
 }
-function advanceStoppedGroundAuthority(key:StoppedPlacementKey,expectedRevision:number,pickup:boolean,fault?:'after-world-cas'){
+export function advanceStoppedOrdinaryHeldFruit(key:StoppedPlacementKey,expectedRevision:number,fault?:'after-world-cas'){
+ return advanceStoppedGroundAuthority(key,expectedRevision,'held',fault);
+}
+function advanceStoppedGroundAuthority(key:StoppedPlacementKey,expectedRevision:number,mode:'ground'|'pickup'|'held',fault?:'after-world-cas'){
  if(!integer(expectedRevision)||fault!==undefined&&fault!=='after-world-cas')return null;
  try{
   const {owner,assert,p}=owned(key);
@@ -278,16 +302,20 @@ function advanceStoppedGroundAuthority(key:StoppedPlacementKey,expectedRevision:
     if(!authority(db))return null;
     const live=head(db);
     const before=recover(db,key,p,live);
-    if(pickup&&before.replay.held?.pickup.baseRevision===expectedRevision&&fault===undefined){
+    if(mode==='pickup'&&before.replay.held?.pickup.baseRevision===expectedRevision&&fault===undefined){
      assert();
-     return Object.freeze({status:'picked-up' as const,replay:true,sequence:before.replay.sequence,revision:live.w.revision,productionEnabled:false as const});
+     return Object.freeze({status:before.replay.heldSteps?'historical-pickup' as const:'picked-up' as const,replay:true,
+      sequence:before.replay.sequence-(before.replay.heldSteps??0),revision:before.replay.held.pickup.draftRevision,productionEnabled:false as const});
     }
     if(live.w.revision!==expectedRevision)return null;
-    const draft=stageStoppedGroundMinute(db,before.replay,live.bytes,fault==='after-world-cas',pickup);
+    const draft=stageStoppedGroundMinute(db,before.replay,live.bytes,fault==='after-world-cas',mode);
     if(!draft)return null;
     const checked=recover(db,key,p,head(db)).replay;
     if(checked.sequence!==draft.sequence||checked.world.revision!==draft.world.revision)return bad();
     assert();db.exec('COMMIT');
+    if(mode==='held')return Object.freeze({status:checked.heldDisposition?.kind==='eaten'?'held-eaten' as const:
+     checked.heldDisposition?.kind==='expired'?'held-expired' as const:'held-advanced' as const,
+     revision:checked.world.revision,atUs:checked.world.mvpClimate!.lastUs,sequence:checked.sequence,productionEnabled:false as const});
     if(checked.held)return Object.freeze({status:'picked-up' as const,replay:false,sequence:checked.sequence,revision:checked.world.revision,productionEnabled:false as const});
     return Object.freeze({status:checked.expiry?'expired' as const:'advanced' as const,sequence:checked.sequence,
      revision:checked.world.revision,atUs:checked.world.mvpClimate!.lastUs,expiry:checked.expiry,productionEnabled:false as const});
@@ -301,6 +329,9 @@ export function readStoppedOrdinaryGroundDiscovery(key:StoppedPlacementKey,resid
 export function readStoppedOrdinaryHeldFruit(key:StoppedPlacementKey,residentId:string){
  return readStoppedResidentFact(key,residentId)?.held??null;
 }
+export function readStoppedOrdinaryHeldDisposition(key:StoppedPlacementKey,residentId:string){
+ return readStoppedResidentFact(key,residentId)?.heldDisposition??null;
+}
 function readStoppedResidentFact(key:StoppedPlacementKey,residentId:string){
  if(typeof residentId!=='string'||!residentId||residentId.length>200)return null;
  try{
@@ -312,7 +343,9 @@ function readStoppedResidentFact(key:StoppedPlacementKey,residentId:string){
     if(!authority(db))return null;
     const replay=recover(db,key,p,head(db)).replay;
     assert();
-    return {discovery:replay.discoveries.get(residentId)??null,held:replay.held?.holderId===residentId?replay.held:null};
+    const owns=replay.held?.holderId===residentId;
+    return {discovery:replay.discoveries.get(residentId)??null,held:owns&&!replay.heldDisposition?replay.held:null,
+     heldDisposition:owns?replay.heldDisposition??null:null};
    }finally{if(db.isTransaction)db.exec('ROLLBACK');db.close();}
   }finally{owner.release();}
  }catch{return null;}
