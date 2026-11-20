@@ -1,3 +1,4 @@
+import {pinDisposableNativeAgedTransfer} from './disposable-native-aged-transfer.js';
 import {createFreshDisposableRulesStorage,isDisposableRulesScratchPath} from './disposable-native-rules-save.js';
 import {prepareOrdinaryAgedG1ReviewEncoding,pinOrdinaryAgedG1Review,unavailableOrdinaryAgedG1,type OrdinaryAgedG1ReviewOptions} from './valley-spirit-ordinary-aged-g1-review.js';
 import {canInstallEmptyOrdinaryAgedGround,hasNativeEmptyGroundCheckpoint,openEmptyOrdinaryAgedGround,pinOrdinaryAgedGround,type OrdinaryAgedGroundPin} from './valley-spirit-ordinary-aged-ground.js';
@@ -34,12 +35,13 @@ export async function startPersistentRulesMvp(options:PersistentRulesOptions){
  const running=await openPersistentRulesCore(options);
  const server=running.server;
  if(!server){await running.close();throw Error('mvp_rules_missing_server');}
- return {...running,server};
+ const {transactPrivateDisposableAgedTransfer:_developerOnly,disposableRebaseRequired:_rebase,...normal}=running;
+ return {...normal,server};
 }
 type DisposableRulesOptions=Pick<PersistentRulesOptions,'privateSpiritGeographyQueue'|'privateNativeFruitRenewal'|
- 'privateAgedFruitPreflight'|'privateEmptyAgedGround'|'privateNativeEmptyAgedGround'|'privateOrdinaryAgedG1Review'>;
+ 'privateAgedFruitPreflight'|'privateEmptyAgedGround'|'privateNativeEmptyAgedGround'|'privateOrdinaryAgedG1Review'>&{privateDisposableAgedEffectPublicKeyPem?:string};
 const disposableOptions=['privateSpiritGeographyQueue','privateNativeFruitRenewal','privateAgedFruitPreflight',
- 'privateEmptyAgedGround','privateNativeEmptyAgedGround','privateOrdinaryAgedG1Review'] as const;
+ 'privateEmptyAgedGround','privateNativeEmptyAgedGround','privateOrdinaryAgedG1Review','privateDisposableAgedEffectPublicKeyPem'] as const;
 /** Internal operator fixture. The closure is the capability; it can neither
  * import nor adopt an existing path, and its lifetime is this process only. */
 export function createDisposableNativeRulesSave(){
@@ -54,11 +56,13 @@ export function createDisposableNativeRulesSave(){
     throw Error('disposable_native_rules_options');
    assertDisposable();open=true;
    try{
-    const run=await openPersistentRulesCore({...pinned,database,port:0,autoStart:false},storage);
+    const {privateDisposableAgedEffectPublicKeyPem,...nativeOptions}=pinned;
+    const run=await openPersistentRulesCore({...nativeOptions,database,port:0,autoStart:false},storage,privateDisposableAgedEffectPublicKeyPem);
     // No server, raw draft, store, OS path, timer or external provider.
     let closing:Promise<void>|undefined;
     const live=<T>(read:()=>T):T=>{
      if(closing)throw Error('disposable_native_rules_closed');
+     if(run.disposableRebaseRequired())throw Error('disposable_native_aged_transfer_committed_reopen_required');
      assertDisposable();return read();
     };
     return Object.freeze({
@@ -68,6 +72,7 @@ export function createDisposableNativeRulesSave(){
      readPrivateAgedFruitPreflight:()=>live(run.readPrivateAgedFruitPreflight),
      readPrivateOrdinaryAgedGround:()=>live(run.readPrivateOrdinaryAgedGround),
      readPrivateOrdinaryAgedG1Review:(signed?:unknown)=>live(()=>run.readPrivateOrdinaryAgedG1Review(signed)),
+     transactPrivateDisposableAgedTransfer:(g1?:unknown,g2?:unknown)=>live(()=>run.transactPrivateDisposableAgedTransfer(g1,g2)),
      close:()=>closing??=(run.close().then(()=>{open=false;}).catch(e=>{closing=undefined;throw e;})),
     });
    }catch(e){open=false;throw e;}
@@ -78,7 +83,7 @@ export function createDisposableNativeRulesSave(){
   },
  });
 }
-async function openPersistentRulesCore(options:PersistentRulesOptions,disposable?:ReturnType<typeof createFreshDisposableRulesStorage>){
+async function openPersistentRulesCore(options:PersistentRulesOptions,disposable?:ReturnType<typeof createFreshDisposableRulesStorage>,disposableEffectKey?:string){
  const assertDisposable=disposable?.assertOwned;
  if(typeof options.database!=='string'||!options.database.trim())throw Error('mvp_rules_database_required');
  if(!Number.isInteger(options.port)||options.port<0||options.port>65535)throw Error('godot_mvp_invalid_port');
@@ -100,6 +105,9 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
  if(options.privateNativeEmptyAgedGround!==undefined&&(!nativeEmpty||!agedGroundPin||options.privateOrdinaryAgedG1Review!==undefined))
   throw Error('ordinary_native_empty_ground_scope');
  const ordinaryReview=pinOrdinaryAgedG1Review(options.privateOrdinaryAgedG1Review);
+ const disposableAgedTransfer=disposableEffectKey===undefined?undefined:pinDisposableNativeAgedTransfer(disposableEffectKey,ordinaryReview);
+ if(disposableEffectKey!==undefined&&(!disposable||!disposableAgedTransfer||!nativeRenewal?.lotShelfLifeGameMinutes||!agedGroundPin||!queuePin))
+  throw Error('disposable_native_aged_transfer_scope');
  if(options.privateOrdinaryAgedG1Review!==undefined&&(!ordinaryReview||!agedPreflight||!agedGroundPin||!queuePin||
    agedGroundPin.worldId!==queuePin.worldId||agedGroundPin.sourceId!==queuePin.site.sourceId||
    agedGroundPin.target.x!==queuePin.site.target.x||agedGroundPin.target.y!==queuePin.site.target.y))
@@ -163,7 +171,7 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
    await new Promise<void>((resolve,reject)=>{server!.once('error',reject);server!.listen(options.port,'127.0.0.1',resolve);});
   }
   const nativeGround=nativeEmpty&&agedGroundPin&&'lockPath' in owner?{owner,pin:agedGroundPin}:undefined;
-  store=new WorldStore(owner.database,{privateDisposableSave,nativeEmptyGround:nativeGround,allowMvpClimate:true,developerSpiritFixtureOwner:privateOwner,nativeWeatherCredit:weatherCredit?true:undefined,nativeRulesFruitRenewal:nativeRenewal??undefined});
+  store=new WorldStore(owner.database,{privateDisposableSave,disposableAgedTransfer:disposableAgedTransfer??undefined,nativeEmptyGround:nativeGround,allowMvpClimate:true,developerSpiritFixtureOwner:privateOwner,nativeWeatherCredit:weatherCredit?true:undefined,nativeRulesFruitRenewal:nativeRenewal??undefined});
   const saved=store.load(),world=structuredClone(saved??createMvpWorld()),previous=saved?.revision??null;
   if(custodyPin&&world.id!==custodyPin.worldId)throw Error(mealPin?'mvp_rules_private_meal_world':'mvp_rules_private_speech_world');
   assertMvpWorld(world);
@@ -176,7 +184,7 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
   if(adopted||soilAdopted||agricultureAdopted||rainAdopted)world.revision++;
   if(!saved||upgraded||adopted||soilAdopted||agricultureAdopted||rainAdopted)store.commit(world,previous);
   let lastCommittedMinute=world.minute;
-  session=createMvpSession({world,persistent:true,captureAddressedSpeechCustody:speechPin?true:undefined,captureSameSaveNativeWeather:privateOwner?.rulesWeatherAccountScope?true:undefined,captureAtomicNativeMeals:mealPin?true:undefined,captureAtomicNativeFruitRenewal:nativeRenewal?true:undefined,captureNativeEmptyGroundMinute:nativeEmpty?true:undefined,captureAtomicNativeFruitLot:nativeRenewal?.lotShelfLifeGameMinutes?true:undefined,commit:(draft,revision,speech,meals)=>{
+  const startSession=(head:World)=>createMvpSession({world:head,persistent:true,captureAddressedSpeechCustody:speechPin?true:undefined,captureSameSaveNativeWeather:privateOwner?.rulesWeatherAccountScope?true:undefined,captureAtomicNativeMeals:mealPin?true:undefined,captureAtomicNativeFruitRenewal:nativeRenewal?true:undefined,captureNativeEmptyGroundMinute:nativeEmpty?true:undefined,captureAtomicNativeFruitLot:nativeRenewal?.lotShelfLifeGameMinutes?true:undefined,commit:(draft,revision,speech,meals)=>{
    owner!.assertOwned();assertDisposable?.();
    if(mealPin){
     if(draft.id!==mealPin.worldId)throw Error('mvp_rules_private_meal_world');
@@ -192,6 +200,7 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
    try{valleySpirit?.observe(publicWeatherProjection(draft),sample);}catch{valleySpirit?.isolate();}
    shadow?.onCommitted(draft);
    if(exactHour&&!draft.clock.paused)geographicProposalQueue?.onCommitted(beforeMinute,draft);}});
+  session=startSession(world);
   const initialPublicFact=publicWeatherProjection(session.world);
   if(initialPublicFact){try{spiritPermissions=new SqliteValleySpiritPermissions(owner.database,initialPublicFact.worldId,()=>owner!.assertOwned());valleySpirit=new ValleySpiritJournal(owner.database,initialPublicFact,()=>owner!.assertOwned(),spiritPermissions,weatherCredit?{persistEmpty:true}:undefined);if(!weatherCredit)valleySpirit.observe(initialPublicFact);}catch{valleySpirit?.isolate();}}
   if(valleySpirit){
@@ -230,7 +239,7 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
     return store.readCurrentNativeRulesAgedPreflight(session.world,queuePin,geographicProposalQueue);
    }catch{return unavailableAgedRulesPreflight();}
   };
-  const readPrivateOrdinaryAgedGround=()=>agedGround&&session?agedGround.review(session.world):null;
+  const readPrivateOrdinaryAgedGround=()=>agedGround&&session&&!store!.hasDisposableAgedTransfer()?agedGround.review(session.world):null;
   const readPrivateOrdinaryAgedG1Review=(signed?:unknown)=>{
    if(!ordinaryReview)return {status:'disabled',executionAuthorized:false} as const;
    try{
@@ -244,6 +253,22 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
     return Object.freeze({...encoded,status:signed===undefined?'g1-review-signing-input' as const:'g1-review-verified' as const});
    }catch{return unavailableOrdinaryAgedG1();}
   };
-  return {session,server,snapshot,readPrivateSpiritCandidate,readPrivateSpiritGeographicProposal,readPrivateNativeFruitRenewal,readPrivateNativeFruitLot,readPrivateAgedFruitPreflight,readPrivateOrdinaryAgedGround,readPrivateOrdinaryAgedG1Review,close};
+  let rebaseRequired=false;
+  const transactPrivateDisposableAgedTransfer=(g1?:unknown,g2?:unknown)=>{
+   if(!disposableAgedTransfer||!queuePin||!agedGroundPin||!geographicProposalQueue||!owner||!('lockPath' in owner)||!store||!session)return null;
+   const result=store.transactDisposableAgedTransfer(owner,session.world,queuePin,agedGroundPin,geographicProposalQueue,g1,g2);
+   if(result?.status==='placed'&&!result.replay){
+    rebaseRequired=true;
+    try{
+     const committed=store.load();
+     if(!committed||committed.id!==session.world.id||committed.minute!==session.world.minute||
+      committed.revision!==result.receipt.placementRevision)throw Error('invalid_committed_head');
+     session=startSession(committed);
+     rebaseRequired=false;
+    }catch{throw Error('disposable_native_aged_transfer_committed_reopen_required');}
+   }
+   return result;
+  };
+  return {get session(){return session!;},server,snapshot,transactPrivateDisposableAgedTransfer,disposableRebaseRequired:()=>rebaseRequired,readPrivateSpiritCandidate,readPrivateSpiritGeographicProposal,readPrivateNativeFruitRenewal,readPrivateNativeFruitLot,readPrivateAgedFruitPreflight,readPrivateOrdinaryAgedGround,readPrivateOrdinaryAgedG1Review,close};
  }catch(error){await close();throw error;}
 }

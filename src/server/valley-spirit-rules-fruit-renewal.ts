@@ -183,3 +183,17 @@ export function readRulesNativeFruitLot(db:DatabaseSync,p:RulesNativeFruitRenewa
   revision:w.revision,lot:Object.freeze({...row.lot}),otherStockUnitAgesKnown:false as const,
   groundCapability:false as const,selectionAuthorized:false as const,executionAuthorized:false as const});
 }
+
+/** Exact same-clock removal of the native tracked cohort at an already
+ * independently authorized transfer. A transfer is never a natural credit. */
+export function consumeRulesNativeFruitLot(db:DatabaseSync,p:RulesNativeFruitRenewalPin,before:World,after:World,lotId:string){
+ const s=source(before,p),next=source(after,p),old=stored(db),head=digestHead(db,after);
+ if(!db.isTransaction||!s||!next||!head||!p.lotShelfLifeGameMinutes||old.schemaVersion!==2||old.lot?.id!==lotId||
+  old.worldDigest!==hash(gzipSync(JSON.stringify(before),{level:1}))||old.revision!==before.revision||
+  old.atUs!==minuteToClimateUs(before.minute)||old.balance!==s.amount||old.shelfLife!==p.lotShelfLifeGameMinutes||
+  after.id!==before.id||after.revision!==before.revision+1||after.minute!==before.minute||next.amount!==s.amount-1)
+  throw Error('disposable_native_aged_transfer_lot_cas');
+ const entry={...old,revision:after.revision,balance:next.amount,worldDigest:head,lot:null,renewal:null};
+ put(db,true,entry);
+ if(JSON.stringify(stored(db))!==JSON.stringify(entry))throw Error('disposable_native_aged_transfer_lot_cas');
+}

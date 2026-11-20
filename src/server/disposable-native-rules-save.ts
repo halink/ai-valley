@@ -117,3 +117,9 @@ export function guardDisposableRulesSaveCommit(db:DatabaseSync,authority:Disposa
  }
  if(readDisposableRulesSaveMarker(db,authority)!==id)throw Error('save_disposable_rules_world');
 }
+
+/** Private authenticated annexes share this process-only owning closure, not
+ * a signing key or an independent effect authorization. */
+export function authenticateDisposableRulesPayload(authority:DisposableRulesSaveAuthority,domain:string,body:string){
+ return createHmac('sha256',requireLease(authority).key).update('disposable-native-rules-annex\0').update(domain+'\0').update(body).digest('hex');
+}
