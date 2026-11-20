@@ -1,11 +1,11 @@
+import {createFreshDisposableRulesStorage,isDisposableRulesScratchPath} from './disposable-native-rules-save.js';
 import {prepareOrdinaryAgedG1ReviewEncoding,pinOrdinaryAgedG1Review,unavailableOrdinaryAgedG1,type OrdinaryAgedG1ReviewOptions} from './valley-spirit-ordinary-aged-g1-review.js';
 import {canInstallEmptyOrdinaryAgedGround,hasNativeEmptyGroundCheckpoint,openEmptyOrdinaryAgedGround,pinOrdinaryAgedGround,type OrdinaryAgedGroundPin} from './valley-spirit-ordinary-aged-ground.js';
 import {unavailableAgedRulesPreflight} from './valley-spirit-rules-aged-preflight.js';
 import {pinRulesNativeFruitRenewal,type RulesNativeFruitRenewalPin} from './valley-spirit-rules-fruit-renewal.js';
 import {openRulesGeographyQueue,pinRulesGeographyQueue,type RulesGeographyQueueOptions} from './valley-spirit-rules-geography-queue.js';
 import {nativeWeatherHourTransition} from './valley-spirit-weather-credit.js';
-import {basename,dirname,join,resolve} from 'node:path';
-import {tmpdir} from 'node:os';
+import {dirname,join} from 'node:path';
 import {acquireDeveloperMvpSpiritFixtureOwner,type DeveloperMvpSpiritFixtureOwner,type DeveloperMvpSpiritFixtureKey} from './valley-spirit-fixture-files.js';
 import {openPersistentGeographyCustody,type PersistentGeographyCustody} from './valley-spirit-geography-custody.js';
 import {inspectPersistentRulesLifeFixture,openPersistentRulesLifeFixture,pinPersistentRulesLifeFixture,type PersistentRulesLifeFixture} from './persistent-rules-life-view.js';
@@ -16,7 +16,7 @@ import {SqliteValleySpiritPermissions} from './valley-spirit-permissions.js';
 import {ValleySpiritJournal,publicWeatherProjection,valleySpiritUnavailable} from './valley-spirit.js';
 import {adoptMvpAgriculture} from '../world/mvp-agriculture.js';
 import {adoptMvpSoil} from '../world/mvp-soil.js';
-import {closeSync,constants,fstatSync,lstatSync,mkdtempSync,openSync,readdirSync,realpathSync,rmdirSync,unlinkSync} from 'node:fs';
+import {lstatSync} from 'node:fs';
 /** Explicit opt-in durable RULE demonstration. Never reads model configuration or dispatches a model. */
 import {createMvpSession,createMvpServer,createMvpWorld} from './godot-mvp.js';
 import {assertMvpWorld,upgradeMvpWorld} from './godot-mvp-persistent.js';
@@ -28,24 +28,13 @@ import {acquireRuntimeOwnership,type RuntimeOwnership} from './runtime-lock.js';
 import {assertGodotWebExport} from './godot-web.js';
 import type {World} from '../shared/types.js';
 type PersistentRulesOptions={database:string;port:number;webRoot?:string;autoStart?:boolean;tickMs?:number;privateSpiritShadow?:PersistentRulesShadowOptions;privateSpiritGeographyQueue?:RulesGeographyQueueOptions;privateNativeFruitRenewal?:RulesNativeFruitRenewalPin;privateAgedFruitPreflight?:true;privateEmptyAgedGround?:OrdinaryAgedGroundPin;privateNativeEmptyAgedGround?:true;privateOrdinaryAgedG1Review?:OrdinaryAgedG1ReviewOptions;privateLifeFixture?:PersistentRulesLifeFixture;privateSpeechCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string;nativeWeatherCredit?:true}>;privateMealCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string}>};
-const disposablePrefix='valley-disposable-native-';
-const disposableFilename='rules.sqlite';
 export async function startPersistentRulesMvp(options:PersistentRulesOptions){
  if(typeof options.database!=='string'||!options.database.trim())throw Error('mvp_rules_database_required');
- const parent=dirname(resolve(options.database));
- if(basename(options.database)===disposableFilename&&basename(parent).startsWith(disposablePrefix)&&
-  dirname(parent)===realpathSync(tmpdir()))throw Error('disposable_native_rules_no_http');
+ if(isDisposableRulesScratchPath(options.database))throw Error('disposable_native_rules_no_http');
  const running=await openPersistentRulesCore(options);
  const server=running.server;
  if(!server){await running.close();throw Error('mvp_rules_missing_server');}
  return {...running,server};
-}
-function disposableIdentity(path:string,directory=false){
- const info=lstatSync(path,{bigint:true});
- if((directory?!info.isDirectory():!info.isFile()||info.nlink!==1n)||
-  info.uid!==BigInt(process.getuid!())||(info.mode&0o777n)!==(directory?0o700n:0o600n))
-  throw Error('disposable_native_rules_identity');
- return info.dev+':'+info.ino;
 }
 type DisposableRulesOptions=Pick<PersistentRulesOptions,'privateSpiritGeographyQueue'|'privateNativeFruitRenewal'|
  'privateAgedFruitPreflight'|'privateEmptyAgedGround'|'privateNativeEmptyAgedGround'|'privateOrdinaryAgedG1Review'>;
@@ -54,34 +43,8 @@ const disposableOptions=['privateSpiritGeographyQueue','privateNativeFruitRenewa
 /** Internal operator fixture. The closure is the capability; it can neither
  * import nor adopt an existing path, and its lifetime is this process only. */
 export function createDisposableNativeRulesSave(){
- const directory=mkdtempSync(join(realpathSync(tmpdir()),disposablePrefix)),database=join(directory,disposableFilename);
- const fresh=lstatSync(directory,{bigint:true}),directoryId=fresh.dev+':'+fresh.ino;
- let fd:number|undefined,databaseId:string|undefined;
- try{
-  if(disposableIdentity(directory,true)!==directoryId)throw Error('disposable_native_rules_identity');
-  fd=openSync(database,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600);
-  const info=fstatSync(fd,{bigint:true});databaseId=info.dev+':'+info.ino;
-  closeSync(fd);fd=undefined;
-  if(disposableIdentity(database)!==databaseId)throw Error('disposable_native_rules_identity');
- }catch(error){
-  if(fd!==undefined)try{closeSync(fd);}catch{/* Keep the original startup error. */}
-  try{
-   const current=lstatSync(directory,{bigint:true});
-   if(current.isDirectory()&&current.dev+':'+current.ino===directoryId){
-    if(databaseId){
-     const file=lstatSync(database,{bigint:true});
-     if(file.isFile()&&file.nlink===1n&&file.dev+':'+file.ino===databaseId)unlinkSync(database);
-    }
-    rmdirSync(directory);
-   }
-  }catch{/* Unexpected entries are left untouched. */}
-  throw error;
- }
- let open=false,disposed=false;
- const assertDisposable=()=>{
-  if(disposed||disposableIdentity(directory,true)!==directoryId||disposableIdentity(database)!==databaseId)
-   throw Error('disposable_native_rules_identity');
- };
+ const storage=createFreshDisposableRulesStorage(),{database,assertOwned:assertDisposable}=storage;
+ let open=false;
  return Object.freeze({
   async open(options:DisposableRulesOptions={}){
    if(open)throw Error('disposable_native_rules_already_open');
@@ -91,7 +54,7 @@ export function createDisposableNativeRulesSave(){
     throw Error('disposable_native_rules_options');
    assertDisposable();open=true;
    try{
-    const run=await openPersistentRulesCore({...pinned,database,port:0,autoStart:false},assertDisposable);
+    const run=await openPersistentRulesCore({...pinned,database,port:0,autoStart:false},storage);
     // No server, raw draft, store, OS path, timer or external provider.
     let closing:Promise<void>|undefined;
     const live=<T>(read:()=>T):T=>{
@@ -111,16 +74,12 @@ export function createDisposableNativeRulesSave(){
   },
   dispose(){
    if(open)throw Error('disposable_native_rules_already_open');
-   assertDisposable();
-   // The native owner deliberately leaves its lease file behind. Do not
-   // reclaim it or any unexpected entry here; never recursively remove a save.
-   const entries=readdirSync(directory);
-   if(entries.length!==1||entries[0]!==disposableFilename){disposed=true;return false;}
-   assertDisposable();unlinkSync(database);disposed=true;rmdirSync(directory);return true;
+   return storage.dispose();
   },
  });
 }
-async function openPersistentRulesCore(options:PersistentRulesOptions,assertDisposable?:()=>void){
+async function openPersistentRulesCore(options:PersistentRulesOptions,disposable?:ReturnType<typeof createFreshDisposableRulesStorage>){
+ const assertDisposable=disposable?.assertOwned;
  if(typeof options.database!=='string'||!options.database.trim())throw Error('mvp_rules_database_required');
  if(!Number.isInteger(options.port)||options.port<0||options.port>65535)throw Error('godot_mvp_invalid_port');
  const tickMs=options.tickMs??500,shadowOptions=pinPersistentRulesShadowOptions(options.privateSpiritShadow);
@@ -182,9 +141,11 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,assertDisp
    if((privateOwner.rulesWeatherHourCredit===true)!==weatherCredit)throw Error('mvp_rules_private_weather_scope');
   }else owner=acquireRuntimeOwnership(options.database,agedGroundPin?{existingOnly:true}:undefined);
   owner.assertOwned();assertDisposable?.();
+  const privateDisposableSave=disposable&&'lockPath' in owner?disposable.bind(owner):undefined;
+  if(disposable&&!privateDisposableSave)throw Error('disposable_native_rules_owner');
   try{lstatSync(owner.database+'.self-hosted-session');throw Error('mvp_rules_unresolved_session');}catch(error){if(!(error&&typeof error==='object'&&'code' in error&&error.code==='ENOENT'))throw error;}
   let almanacReadable=true,nativeGroundAlreadyBound=false;
-  const probe=preflightWorldSave(owner.database,{requireWorld:true,developerSpiritFixtureOwner:privateOwner,nativeEmptyGround:nativeEmpty?agedGroundPin??undefined:undefined,inspectOptionalAlmanac:(db,w)=>{if(nativeEmpty)nativeGroundAlreadyBound=hasNativeEmptyGroundCheckpoint(db);try{inspectValleySpiritAlmanac(db,(w as unknown as World).id);}catch{almanacReadable=false;}if(lifePin)try{inspectPersistentRulesLifeFixture(db,w,lifePin);lifeReadable=true;}catch{/* isolate optional life */}},validateWorld:value=>{const w=value as unknown as World;assertMvpWorld(w);assertMvpClimateWorld(w);const m=w.metrics;
+  const probe=preflightWorldSave(owner.database,{requireWorld:true,privateDisposableSave,developerSpiritFixtureOwner:privateOwner,nativeEmptyGround:nativeEmpty?agedGroundPin??undefined:undefined,inspectOptionalAlmanac:(db,w)=>{if(nativeEmpty)nativeGroundAlreadyBound=hasNativeEmptyGroundCheckpoint(db);try{inspectValleySpiritAlmanac(db,(w as unknown as World).id);}catch{almanacReadable=false;}if(lifePin)try{inspectPersistentRulesLifeFixture(db,w,lifePin);lifeReadable=true;}catch{/* isolate optional life */}},validateWorld:value=>{const w=value as unknown as World;assertMvpWorld(w);assertMvpClimateWorld(w);const m=w.metrics;
    if(!m||!Array.isArray(m.inFlight)||m.inFlight.length||m.configured!==false||[m.requests,m.successes,m.failures,m.inputTokens,m.outputTokens].some(n=>n!==0)||m.lastAttemptModel!==undefined||m.admissionCancellation!==undefined||m.routing!==undefined||Object.keys(m.usageWindow??{}).length||Object.keys(m.selfHostedCooldowns??{}).length||m.unmeteredFailures)throw Error('mvp_rules_model_history_unsupported');}});
   if(agedGroundPin){
    if(probe?.id!==agedGroundPin.worldId)throw Error('ordinary_aged_ground_existing_save_required');
@@ -202,7 +163,7 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,assertDisp
    await new Promise<void>((resolve,reject)=>{server!.once('error',reject);server!.listen(options.port,'127.0.0.1',resolve);});
   }
   const nativeGround=nativeEmpty&&agedGroundPin&&'lockPath' in owner?{owner,pin:agedGroundPin}:undefined;
-  store=new WorldStore(owner.database,{nativeEmptyGround:nativeGround,allowMvpClimate:true,developerSpiritFixtureOwner:privateOwner,nativeWeatherCredit:weatherCredit?true:undefined,nativeRulesFruitRenewal:nativeRenewal??undefined});
+  store=new WorldStore(owner.database,{privateDisposableSave,nativeEmptyGround:nativeGround,allowMvpClimate:true,developerSpiritFixtureOwner:privateOwner,nativeWeatherCredit:weatherCredit?true:undefined,nativeRulesFruitRenewal:nativeRenewal??undefined});
   const saved=store.load(),world=structuredClone(saved??createMvpWorld()),previous=saved?.revision??null;
   if(custodyPin&&world.id!==custodyPin.worldId)throw Error(mealPin?'mvp_rules_private_meal_world':'mvp_rules_private_speech_world');
   assertMvpWorld(world);
