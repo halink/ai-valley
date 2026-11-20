@@ -6,13 +6,14 @@ import type {NativeAgedEatCompletion,NativeAgedEatSelection} from '../world/mvp-
 import {goods} from '../shared/items.js';
 import type {DisposableNativePickupWitness} from './godot-mvp.js';
 import {same} from '../world/navigation.js';
-import {mvpFallenFruitDiscoveryId} from '../shared/valley-spirit-fairness.js';
+import {countValleySpiritFacts,mvpFallenFruitDiscoveryId} from '../shared/valley-spirit-fairness.js';
 import type {GroundDiscoveryHead,NativeOrdinaryAgedDiscovery,CommittedNativeOrdinaryAgedDiscovery} from '../world/mvp-ordinary-aged-ground-discovery.js';
 import {createHash,createPublicKey,verify} from 'node:crypto';
 import {gzipSync} from 'node:zlib';
 import type {DatabaseSync} from 'node:sqlite';
 import type {World} from '../shared/types.js';
 import {parseClimateUs,minuteToClimateUs} from '../world/mvp-climate.js';
+import type {MvpFruitFlowBatch} from '../world/mvp-resources.js';
 import {validateMvpGroundFruitState} from '../world/mvp-ground-fruit.js';
 import {resolveMvpRainEpisode} from '../world/mvp-rain-provenance.js';
 import {advanceAgedGroundExpiry,type AgedGroundLot,readOwnedEmptyGround} from './valley-spirit-ordinary-aged-ground.js';
@@ -83,12 +84,17 @@ export function makeDisposableNativeAgedBirth(pin:DisposableNativeAgedTransferPi
  draft.resources.find(r=>r.id===sourceId)!.amount--;
  const receipt={effectId,sourceId,sourceBefore:source.amount,sourceAfter:source.amount-1,sourceDebit:1 as const,groundCredit:1 as const,
   bornUs:lot.bornUs,expiresUs:lot.expiresUs,placedUs:lot.fruit.placedUs,placementRevision:draft.revision,productionEnabled:false as const};
- const entry={version:1 as const,p,g2:{terms:p.terms,signature:g2.signature},lot,receipt,head:digestWorld(draft),expiry:null as null|{revision:number;atUs:string;groundDebit:1}};
+ const sourceFlow:SourceFlow={baselineUs:receipt.placedUs,baselineRevision:receipt.placementRevision,
+  baselineQuantity:receipt.sourceAfter,observedMinutes:0,grossNaturalRenewal:0,grossOrdinaryGather:0,closingQuantity:receipt.sourceAfter};
+ const entry={version:1 as const,sourceFlow,p,g2:{terms:p.terms,signature:g2.signature},lot,receipt,head:digestWorld(draft),expiry:null as null|{revision:number;atUs:string;groundDebit:1}};
  return {draft,entry};
 }
 type PickupFact=Readonly<DisposableNativePickupWitness&{revision:number;groundDebit:1;heldCredit:1}>;
 type HeldExpiry=Readonly<{atUs:string;revision:number;heldDebit:1}>;
-type Entry=Omit<NonNullable<ReturnType<typeof makeDisposableNativeAgedBirth>>['entry'],'version'>&{
+type SourceFlow=Readonly<{baselineUs:string;baselineRevision:number;baselineQuantity:number;observedMinutes:number;
+ grossNaturalRenewal:number;grossOrdinaryGather:number;closingQuantity:number}>;
+type Entry=Omit<NonNullable<ReturnType<typeof makeDisposableNativeAgedBirth>>['entry'],'version'|'sourceFlow'>&{
+ readonly sourceFlow?:SourceFlow|null;
  readonly version:1|2|3|4|5|6;
  readonly discoveries?:readonly CommittedNativeOrdinaryAgedDiscovery[];
  readonly pickup?:PickupFact;
@@ -273,6 +279,8 @@ export function readDisposableNativeAgedTransfer(db:DatabaseSync,owner:Disposabl
   g1.status!=='encoding-only'||e.p.terms.g1Digest!==hash(JSON.stringify(e.p.g1))||e.p.terms.effectKeyId!==pin.keyId||
   !g2Valid(e.p.terms,e.g2,pin)||e.expiry===null&&!e.pickup&&parseClimateUs(minuteToClimateUs(w.minute))>=parseClimateUs(e.lot.expiresUs)||
   e.expiry!==null&&(e.expiry.atUs!==e.lot.expiresUs||e.expiry.revision>w.revision))throw Error('disposable_native_aged_transfer_head');
+ if(e.sourceFlow!==undefined&&e.sourceFlow!==null&&!validSourceFlow(e,e.sourceFlow,w))
+  throw Error('disposable_native_aged_source_flow_archive');
  const d=e.discoveries;
  if(d!==undefined&&(!Array.isArray(d)||d.length>MAX_DISCOVERIES||new Set(d.map(r=>r.residentId)).size!==d.length||
   d.some(({committedRevision,...r})=>!validDiscovery(e,r)||!Number.isSafeInteger(committedRevision)||committedRevision<=r.fromRevision||
@@ -438,4 +446,62 @@ export function readExactDisposableActiveEating(db:DatabaseSync,owner:Disposable
  if(!Array.isArray(w.residents)||!w.residents.some(agedEatActor))return null;
  const entry=readDisposableNativeAgedTransfer(db,owner,pin,w);
  return entry?.eating&&exactDisposableEating(w,entry.eating)?entry.eating:null;
+}
+
+/** A scoped view over the one authenticated native effect, not a census of
+ * proposals, residents or world fruit. Call only after the owning snapshot
+ * validates the archive, both historical signatures and the live disclosure. */
+export function projectDisposableNativeAgedFairness(e:Entry,head:GroundDiscoveryHead){
+ const discoveries=e.discoveries??[],pickups=e.pickup?[e.pickup]:[];
+ const byTarget=[{key:e.p.terms.targetId,count:1}];
+ return {
+  status:'ready',audience:'internal-audit',schemaVersion:1,coverage:'single-disposable-native-effect',
+  worldId:head.worldId,throughRevision:head.revision,throughUs:head.atUs,
+  proposalDirections:{status:'ready',coverage:'authenticated-linked-proposal-only',count:1,byTarget,
+   total:{status:'unavailable',code:'no-complete-proposal-coverage'}},
+  actualEffects:{status:'ready',count:1,byTarget},
+  actualDiscoveries:{status:'ready',count:discoveries.length,byResident:countValleySpiritFacts(discoveries,d=>d.residentId)},
+  actualPickups:{status:'ready',count:pickups.length,byResident:countValleySpiritFacts(pickups,p=>p.residentId)},
+  supply:{
+   item:'fruit',fallTransfer:{sourceDebit:e.receipt.sourceDebit,groundCredit:e.receipt.groundCredit,directNewSupply:0},
+   pickupTransfer:{groundDebit:e.pickup?.groundDebit??0,residentHeldCredit:e.pickup?.heldCredit??0},
+   groundExpiryDebit:e.expiry?.groundDebit??0,
+   sourceFlow:e.sourceFlow?{status:'ready',coverage:'contiguous-native-minutes-after-placement',...e.sourceFlow}:
+    {status:'unavailable',code:'no-cumulative-source-flow-coverage'},
+   causalGain:{status:'unavailable',code:'requires-counterfactual'},
+  },
+  executionAuthorized:false,productionEnabled:false,
+ } as const;
+}
+
+const count=(v:unknown):v is number=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=0;
+function validSourceFlow(e:Entry,x:SourceFlow,w:World):boolean{
+ const sources=w.resources.filter(r=>r.id===e.receipt.sourceId);
+ const source=sources[0];
+ return exact(x,['baselineUs','baselineRevision','baselineQuantity','observedMinutes','grossNaturalRenewal',
+  'grossOrdinaryGather','closingQuantity'])&&x.baselineUs===e.receipt.placedUs&&x.baselineRevision===e.receipt.placementRevision&&
+  x.baselineQuantity===e.receipt.sourceAfter&&[x.baselineQuantity,x.observedMinutes,x.grossNaturalRenewal,x.grossOrdinaryGather,x.closingQuantity].every(count)&&
+  BigInt(x.observedMinutes)*1_000_000n===parseClimateUs(minuteToClimateUs(w.minute))-parseClimateUs(x.baselineUs)&&
+  BigInt(x.baselineQuantity)+BigInt(x.grossNaturalRenewal)-BigInt(x.grossOrdinaryGather)===BigInt(x.closingQuantity)&&
+  sources.length===1&&source.kind==='bush'&&source.foodItem==='fruit'&&same(source.at,e.lot.fruit.sourceAt)&&source.amount===x.closingQuantity;
+}
+
+/** Join only the exact authenticated native minute carried into the same WorldStore
+ * transaction. A gap is permanently unavailable; never repair from net stock. */
+export function advanceDisposableNativeAgedSourceFlow(e:Entry,before:World,after:World,flow:MvpFruitFlowBatch|null):Entry{
+ const old=e.sourceFlow;
+ if(!old)return e;
+ const id=e.receipt.sourceId;
+ if(!flow||flow.worldId!==after.id||flow.fromRevision!==before.revision||flow.toRevision!==after.revision||
+  flow.fromUs!==minuteToClimateUs(before.minute)||flow.toUs!==minuteToClimateUs(after.minute)||
+  flow.opening.find(r=>r.sourceId===id)?.amount!==old.closingQuantity)return {...e,sourceFlow:null};
+ let grossNaturalRenewal=old.grossNaturalRenewal,grossOrdinaryGather=old.grossOrdinaryGather;
+ for(const op of flow.operations){
+  if(op.kind==='gather'&&op.sourceId===id)grossOrdinaryGather+=op.quantity;
+  if(op.kind==='renewal'&&op.witness.sourceId===id)grossNaturalRenewal+=op.witness.naturallyRenewed;
+ }
+ const closingQuantity=flow.closing.find(r=>r.sourceId===id)?.amount;
+ if(closingQuantity===undefined)return {...e,sourceFlow:null};
+ const sourceFlow={...old,observedMinutes:old.observedMinutes+1,grossNaturalRenewal,grossOrdinaryGather,closingQuantity};
+ return {...e,sourceFlow:validSourceFlow(e,sourceFlow,after)?sourceFlow:null};
 }

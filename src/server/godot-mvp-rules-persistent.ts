@@ -39,7 +39,7 @@ export async function startPersistentRulesMvp(options:PersistentRulesOptions){
  const running=await openPersistentRulesCore(options);
  const server=running.server;
  if(!server){await running.close();throw Error('mvp_rules_missing_server');}
- const {transactPrivateDisposableAgedTransfer:_developerOnly,disposableRebaseRequired:_rebase,readPrivateDisposableResidentGroundDiscovery:_discovery,readPrivateDisposableNativeSpeech:_speech,...normal}=running;
+ const {transactPrivateDisposableAgedTransfer:_developerOnly,disposableRebaseRequired:_rebase,readPrivateDisposableResidentGroundDiscovery:_discovery,readPrivateDisposableNativeAgedFairness:_fairness,readPrivateDisposableNativeSpeech:_speech,...normal}=running;
  return {...normal,server};
 }
 type DisposableRulesOptions=Pick<PersistentRulesOptions,'privateSpiritGeographyQueue'|'privateNativeFruitRenewal'|
@@ -87,6 +87,7 @@ export function createDisposableNativeRulesSave(){
      readPrivateOrdinaryAgedGround:()=>live(run.readPrivateOrdinaryAgedGround),
      readPrivateOrdinaryAgedG1Review:(signed?:unknown)=>live(()=>run.readPrivateOrdinaryAgedG1Review(signed)),
      transactPrivateDisposableAgedTransfer:(g1?:unknown,g2?:unknown)=>live(()=>run.transactPrivateDisposableAgedTransfer(g1,g2)),
+     readPrivateDisposableNativeAgedFairness:()=>live(run.readPrivateDisposableNativeAgedFairness),
      readPrivateDisposableResidentGroundDiscovery:(residentId:string)=>live(()=>run.readPrivateDisposableResidentGroundDiscovery(residentId)),
      close:()=>closing??=(run.close().then(()=>{open=false;}).catch(e=>{closing=undefined;throw e;})),
     });
@@ -347,11 +348,16 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
    }
    return result;
   };
+  const readPrivateDisposableNativeAgedFairness=()=>{
+   owner!.assertOwned();assertDisposable?.();
+   const w=session!.world;
+   return store!.readDisposableNativeAgedFairness({worldId:w.id,revision:w.revision,atUs:minuteToClimateUs(w.minute)});
+  };
   const readPrivateDisposableResidentGroundDiscovery=(residentId:string)=>{
    if(!disposableAgedTransfer||!session||session.world.clock.paused||!store)return null;
    const w=session.world;
    return store.readDisposableResidentGroundDiscovery({worldId:w.id,revision:w.revision,atUs:minuteToClimateUs(w.minute)},residentId);
   };
-  return {get session(){return session!;},server,snapshot,readPrivateDisposableNativeSpeech:(head:Readonly<DisposableSpeechHead>)=>speechReader?.latest(head)??null,transactPrivateDisposableAgedTransfer,readPrivateDisposableResidentGroundDiscovery,disposableRebaseRequired:()=>rebaseRequired,readPrivateSpiritCandidate,readPrivateSpiritGeographicProposal,readPrivateNativeFruitRenewal,readPrivateNativeFruitLot,readPrivateAgedFruitPreflight,readPrivateOrdinaryAgedGround,readPrivateOrdinaryAgedG1Review,close};
+  return {get session(){return session!;},server,snapshot,readPrivateDisposableNativeSpeech:(head:Readonly<DisposableSpeechHead>)=>speechReader?.latest(head)??null,transactPrivateDisposableAgedTransfer,readPrivateDisposableNativeAgedFairness,readPrivateDisposableResidentGroundDiscovery,disposableRebaseRequired:()=>rebaseRequired,readPrivateSpiritCandidate,readPrivateSpiritGeographicProposal,readPrivateNativeFruitRenewal,readPrivateNativeFruitLot,readPrivateAgedFruitPreflight,readPrivateOrdinaryAgedGround,readPrivateOrdinaryAgedG1Review,close};
  }catch(error){await close();throw error;}
 }

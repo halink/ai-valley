@@ -1,6 +1,6 @@
 import {appendDisposableNativeSpeech,ownsDisposableSpeechPurpose,type DisposableSpeechPurpose} from './disposable-native-addressed-speech.js';
 import type {GroundDiscoveryHead} from '../world/mvp-ordinary-aged-ground-discovery.js';
-import {advanceDisposableNativeAgedTransfer,hasDisposableNativeAgedTransfer,makeDisposableNativeAgedBirth,prepareDisposableNativeAgedTransfer,projectDisposableHeldForNativeEating,projectCurrentDisposableGroundApproach,type Eating,projectDisposableNativeAgedTransfer,projectActiveDisposableGroundForObservation,projectActiveDisposableGroundForPickup,projectDisposableGroundResidentDiscovery,readDisposableNativeAgedTransfer,writeDisposableNativeAgedTransfer,type DisposableNativeAgedTransferPin} from './disposable-native-aged-transfer.js';
+import {advanceDisposableNativeAgedSourceFlow,advanceDisposableNativeAgedTransfer,hasDisposableNativeAgedTransfer,makeDisposableNativeAgedBirth,prepareDisposableNativeAgedTransfer,projectDisposableHeldForNativeEating,projectCurrentDisposableGroundApproach,type Eating,projectDisposableNativeAgedTransfer,projectDisposableNativeAgedFairness,projectActiveDisposableGroundForObservation,projectActiveDisposableGroundForPickup,projectDisposableGroundResidentDiscovery,readDisposableNativeAgedTransfer,writeDisposableNativeAgedTransfer,type DisposableNativeAgedTransferPin} from './disposable-native-aged-transfer.js';
 import {assertDisposableRulesSavePath,guardDisposableRulesSaveCommit,readDisposableRulesSaveMarker,type DisposableRulesSaveAuthority} from './disposable-native-rules-save.js';
 import {advanceOrdinaryNativeEmptyGround,pinOrdinaryAgedGround,readOwnedEmptyGround,type OrdinaryAgedGroundPin} from './valley-spirit-ordinary-aged-ground.js';
 import {runtimeOwnershipAnchor,type RuntimeOwnership} from './runtime-lock.js';
@@ -864,7 +864,9 @@ export class WorldStore {
     if(!entry)throw Error('disposable_native_aged_transfer_missing');
     // A revoked weather provenance grant stops external readback; it
     // cannot make an already committed physical lot invisible to residents.
-    lifecycle=advanceDisposableNativeAgedTransfer(entry,before,world,native.groundObserved,native.groundPickup,native.agedEatingScope,native.agedEaten,native.agedApproach);
+    lifecycle=advanceDisposableNativeAgedSourceFlow(
+     advanceDisposableNativeAgedTransfer(entry,before,world,native.groundObserved,native.groundPickup,native.agedEatingScope,native.agedEaten,native.agedApproach),
+     before,world,native.flow);
    }
    if(this.#disposableAgedTransfer)this.assertWritable(world,lifecycle?.eating);
    speech=this.writeDraftWithCustody(world,previousRevision,appended,seasonalLedger,proof,
@@ -1187,6 +1189,10 @@ export class WorldStore {
  }
  readDisposableResidentGroundDiscovery(head:GroundDiscoveryHead,residentId:string){
   return this.withCurrentDisposableGround(head,true,e=>projectDisposableGroundResidentDiscovery(e,residentId));
+ }
+ readDisposableNativeAgedFairness(head:GroundDiscoveryHead){
+  return this.withCurrentDisposableGround(head,true,e=>projectDisposableNativeAgedFairness(e,head))??
+   {status:'unavailable',code:'no-authorized-coherent-native-effect',executionAuthorized:false,productionEnabled:false} as const;
  }
  hasDisposableAgedTransfer(){
   return !!this.#privateDisposableSave&&hasDisposableNativeAgedTransfer(this.db);
