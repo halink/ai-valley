@@ -45,6 +45,8 @@ export function encodeOrdinaryCandidateSelection(t:unknown){
  if(!exact(t,termKeys)||t.schema!==SIGN||!termKeys.slice(1).every(k=>hex(t[k])))return null;
  return Buffer.from(JSON.stringify([MODE,...termKeys.map(k=>t[k])]));
 }
+const nativeReviewProofs=new WeakSet<object>();
+export function ownsOrdinaryCandidateReviewProof(v:unknown){return typeof v==='object'&&v!==null&&nativeReviewProofs.has(v);}
 type Result=Readonly<{status:'selected-detached-preview';number:number;snapshot:string;selectionOperative:false;executionAuthorized:false}>;
 /** This is ephemeral operator preview only: no durable ledger, queue, quota,
  * network, or authority. One claimed memory request per owned handle. */
@@ -57,6 +59,7 @@ export function openOrdinaryCandidateSelection(owner:RuntimeOwnership,pin:Pinned
  const scope=digest(JSON.stringify([MODE,String(f.dev),String(f.ino),pin.fingerprint]));
  const token=randomBytes(32).toString('hex'),abort=new AbortController();
  let used=false,closed=false,selected:Result|null=null;
+ let proof:Readonly<{approvalDigest:string;wireDigest:string;token:string;selection:Result}>|null=null;
  const get=()=>{
   try{
    if(closed)return null;
@@ -98,6 +101,9 @@ export function openOrdinaryCandidateSelection(owner:RuntimeOwnership,pin:Pinned
     const response=await pin.invoke(s.wire,abort.signal),number=valid(response,s.m.selectionTraits),after=get();
     if(number===null||!after||after.m.snapshot!==s.m.snapshot||after.wire!==s.wire)return null;
     selected=Object.freeze({status:'selected-detached-preview',number,snapshot:s.m.snapshot,selectionOperative:false,executionAuthorized:false});
+    proof=Object.freeze({approvalDigest:digest(JSON.stringify([bytes.toString('base64url'),a.signature])),
+     wireDigest:s.t.wireDigest,token,selection:selected});
+    nativeReviewProofs.add(proof);
     return selected;
    }catch{return null;}
   },
@@ -106,6 +112,11 @@ export function openOrdinaryCandidateSelection(owner:RuntimeOwnership,pin:Pinned
    const now=get();
    return now?.m.snapshot===selected.snapshot?selected:null;
   },
-  close(){closed=true;selected=null;abort.abort();},
+  reviewProof(){
+   if(!proof)return null;
+   const now=get();
+   return now?.m.snapshot===proof.selection.snapshot&&now.t.wireDigest===proof.wireDigest?proof:null;
+  },
+  close(){closed=true;selected=null;proof=null;abort.abort();},
  });
 }

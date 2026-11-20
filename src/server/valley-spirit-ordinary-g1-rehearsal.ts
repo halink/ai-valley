@@ -33,6 +33,22 @@ export function rehearseOrdinaryAgedG1(current:World,site:Site,advice:Advice,rev
    Number(now)!==p.validFromMicroMinute||parseClimateUs(now)>=parseClimateUs(reviewUntilUs)||
    geo.source.resourceInstanceId!==p.sourceResourceInstanceId||geo.targetId!==p.targetId||
    geo.source.ownerId!==aged.ownerId||comparison.after.ground!==aged)return blocked('unavailable');
+  return rehearseDetachedNativeLot(current,site,{
+   worldId:p.worldId,opportunityId:p.opportunityId,sourceResourceInstanceId:p.sourceResourceInstanceId,targetId:p.targetId,
+   rainEventId:p.rainEventId,atUs:now,reviewUntilUs,lot:{id:aged.id,ownerId:aged.ownerId,bornUs:aged.bornUs,expiresUs:aged.expiresUs},
+  });
+ }catch{return blocked('unavailable');}
+}
+
+type DetachedLotBasis=Readonly<{worldId:string;opportunityId:string;sourceResourceInstanceId:string;targetId:string;rainEventId:string;
+ atUs:string;reviewUntilUs:string;lot:Readonly<{id:string;ownerId:string;bornUs:string;expiresUs:string}>}>;
+/** Clone-only executor. Evidence must be checked by the owning caller. This helper grants no real or test placement authority. */
+export function rehearseDetachedNativeLot(current:World,site:Site,p:DetachedLotBasis){
+ try{
+  const now=minuteToClimateUs(current.minute),aged=p.lot,geo=inspectMvpGroundFruitGeography(current,site.sourceId,site.target);
+  if(!geo||!resolveMvpRainEpisode(current,p.rainEventId)||p.worldId!==current.id||p.atUs!==now||current.clock.paused||
+   geo.source.resourceInstanceId!==p.sourceResourceInstanceId||geo.targetId!==p.targetId||geo.source.ownerId!==aged.ownerId||
+   parseClimateUs(aged.bornUs)>parseClimateUs(now)||parseClimateUs(now)>=parseClimateUs(p.reviewUntilUs))return blocked('unavailable');
   // Only the physical lot expiry limits hypothetical minutes. The real start
   // and final recapture verify review and proposal currency at the actual head.
   if(parseClimateUs(now)+2n*UNIT>=parseClimateUs(aged.expiresUs))return blocked('near_expiry');

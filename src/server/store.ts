@@ -1,3 +1,4 @@
+import {currentClosedRain} from './valley-spirit-persistent-rules-shadow.js';
 import {buildOrdinaryMultiCandidatePreview,type CandidateJournal,type OrdinaryMultiCandidatePin} from './valley-spirit-ordinary-multi-candidate.js';
 import {openOrdinaryNativeShelterLease,type OrdinaryNativeShelterOptions} from './ordinary-native-shelter-custody.js';
 import {openOrdinaryNativeSpeechLease,type OrdinaryNativeSpeechOptions} from './ordinary-native-speech-custody.js';
@@ -1339,6 +1340,33 @@ export class WorldStore {
     assertOrdinaryAgedGroundStartup(this.db,w as unknown as Record<string,unknown>,true);
     const finalGrant=readValleySpiritWeatherPermission(this.db,w.id);
     return after&&after.snapshot===m.snapshot&&finalGrant?.publicWeather&&finalGrant.version===grant.version?m:null;
+   }finally{this.db.exec('ROLLBACK');}
+  }catch{return null;}
+ }
+ readExactSelectedOrdinaryRehearsal(head:Readonly<{id:string;revision:number;minute:number}>,pin:OrdinaryMultiCandidatePin,
+  journal:CandidateJournal,snapshot:string,number:number){
+  if(!this.nativeMultiFruit||this.nativeMultiFruit.worldId!==head.id||pin.worldId!==head.id)return null;
+  try{
+   this.db.exec('BEGIN');
+   try{
+    const w=this.readWorld(false,false);
+    if(!w||w.id!==head.id||w.revision!==head.revision||w.minute!==head.minute)return null;
+    assertOrdinaryAgedGroundStartup(this.db,w as unknown as Record<string,unknown>,true);
+    const grant=readValleySpiritWeatherPermission(this.db,w.id);
+    if(!grant?.publicWeather)return null;
+    const lots=this.nativeMultiFruit.inspect(this.db,w);
+    const m=lots&&buildOrdinaryMultiCandidatePreview(w,pin,lots,journal);
+    if(!m||m.snapshot!==snapshot||m.permissionVersion!==grant.version)return null;
+    const offer=m.offers.find(o=>o.number===number);
+    const site=offer&&pin.sites.find(s=>s.sourceId===offer.sourceId);
+    const lot=offer&&lots.lots.find(l=>l.lot.id===offer.lotId&&l.sourceId===offer.sourceId);
+    const rain=currentClosedRain(w,pin.maxAgeGameMinutes);
+    const row=this.db.prepare('SELECT id,revision,state FROM main.worlds LIMIT 2').all();
+    if(!offer||!site||!lot||!rain||row.length!==1||row[0].id!==w.id||row[0].revision!==w.revision||!(row[0].state instanceof Uint8Array))return null;
+    // The candidate read already proved exact compressed bytes in this
+    // transaction. Bind a separate raw head digest in the review terms.
+    const headDigest=createHash('sha256').update(row[0].state).digest('hex');
+    return {w,site,offer,lot,rain,headDigest,permissionVersion:m.permissionVersion};
    }finally{this.db.exec('ROLLBACK');}
   }catch{return null;}
  }
