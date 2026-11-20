@@ -34,6 +34,8 @@ VALLEY_MVP_RULES_DB="$PWD/runtime/rules-demo/world.sqlite" npm run dev:web:rules
 
 `npm run dev`、`npm run dev:web` 与 `npm run demo:godot:web` 是同一规则 Web 服务入口，不必同时启动。`npm run build` 仅做 TypeScript 检查与后台编译，之后 `npm start` 启动编译后的同一服务；Web 资源仍须单独执行 `npm run build:godot:web`。这些命令都不是持久模型启动入口。
 
+需要在独立审核前核对停档的离线天气年鉴文字，可用[本机只读待签预览](docs/implementation/valley-spirit-ordinary-offline-weather.md#本机开发导出待签预览)。它不会发布刊物，也不会启动模型。
+
 ## 当前验收约定（2026-11-19）
 
 助手承担开发工程师职责，交付范围止于功能实现、本地单元测试与可提测交接；允许快速功能冒烟。详细测试、长时测试及系统性浏览器验收交由测试组，不代做、不等待 QA 完成，也不自动联系测试组。助手仅执行本地单元测试与快速功能验证，不再启动、续跑或代跑长时间测试；长跑由用户自行负责，取消助手每批实际运行 30 分钟的强制门槛。任何测试文件均不得提交或推送，必要的本地临时验证文件也不入库；已在历史提交中的测试文件仅清点，不擅自删除或改写历史。真实模型测试仍禁止。按实际范围记录通过、失败与未验证项；构建、原生预览与短时检查不能替代未完成的浏览器或长期稳定性证据。

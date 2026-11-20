@@ -15,7 +15,8 @@
     "demo:godot:web": "node --import tsx src/server/godot-web-main.ts",
     "dev:web:persistent": "node --import tsx src/server/godot-mvp-persistent-main.ts",
     "start:web:persistent": "node build/server/godot-mvp-persistent-main.js",
-    "dev:web:rules:persistent": "node --import tsx src/server/godot-mvp-rules-persistent-main.ts"
+    "dev:web:rules:persistent": "node --import tsx src/server/godot-mvp-rules-persistent-main.ts",
+    "dev:weather-editorial:preview": "node --import tsx src/server/ordinary-weather-editorial-preview-main.ts"
   },
   "devDependencies": {
     "@types/node": "22.19.0",

@@ -3,6 +3,7 @@ export {encodeOrdinaryWeatherWithdrawal} from './valley-spirit-ordinary-weather-
 import {createHash,createPublicKey,verify} from 'node:crypto';
 import {lstatSync} from 'node:fs';
 import {DatabaseSync} from 'node:sqlite';
+import {pathToFileURL} from 'node:url';
 import {acquireRuntimeOwnership} from './runtime-lock.js';
 import {readNativeValidationWeatherHead} from './valley-spirit-native-basis.js';
 import {readValleySpiritWeatherPermission} from './valley-spirit-permissions.js';
@@ -20,8 +21,8 @@ const exact=(v:unknown,keys:readonly string[]):v is Record<string,unknown>=>!!v&
 /** Local operator seam, not imported by any service entrypoint. The trusted
  * caller pins an independent reviewer in configuration. No fixture DBs,
  * automatic startup, signing capability, provider, or HTTP write surface. */
-export function openOrdinaryOfflineWeatherRelease(options:{database:string;worldId:string;reviewerPublicKeyPem:string}){
- const {database,worldId,reviewerPublicKeyPem}=options;
+export function openOrdinaryOfflineWeatherRelease(options:{database:string;worldId:string;reviewerPublicKeyPem:string;previewOnly?:true}){
+ const {database,worldId,reviewerPublicKeyPem,previewOnly}=options;
  if(!WORLD.test(worldId)||typeof reviewerPublicKeyPem!=='string'||reviewerPublicKeyPem.length>256||
   !/^-----BEGIN PUBLIC KEY-----\r?\n[A-Za-z0-9+/=]+\r?\n-----END PUBLIC KEY-----\r?\n?$/.test(reviewerPublicKeyPem))
   throw Error('ordinary_weather_review_pin_invalid');
@@ -32,12 +33,22 @@ export function openOrdinaryOfflineWeatherRelease(options:{database:string;world
  const owner=acquireRuntimeOwnership(database,{existingOnly:true});
  let sqlite:DatabaseSync|undefined;
  try{
-  const db=sqlite=new DatabaseSync(owner.database,{readOnly:true});
+  const assertNoJournal=()=>{
+   if(!previewOnly)return;
+   for(const suffix of ['-wal','-shm','-journal']){
+    try{lstatSync(owner.database+suffix);}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')continue;throw e;}
+    throw Error('ordinary_weather_preview_pending_journal');
+   }
+  };
+  assertNoJournal();
+  const readPath=previewOnly?pathToFileURL(owner.database):undefined;
+  readPath?.searchParams.set('immutable','1');
+  const db=sqlite=new DatabaseSync(readPath?.href??owner.database,{readOnly:true});
   db.exec('PRAGMA trusted_schema=OFF; PRAGMA query_only=ON');
   const file=lstatSync(owner.database,{bigint:true});
   const saveScope=ordinaryReviewSaveScope(owner.database,worldId);
   const requireOrdinary=()=>{
-   owner.assertOwned();
+   owner.assertOwned();assertNoJournal();
    const current=lstatSync(owner.database,{bigint:true});
    if(current.dev!==file.dev||current.ino!==file.ino||
     db.prepare("SELECT 1 FROM sqlite_master WHERE name='mvp_spirit_developer_fixture'").get())throw Error('ordinary_weather_release_scope');
@@ -73,7 +84,7 @@ export function openOrdinaryOfflineWeatherRelease(options:{database:string;world
     try{const candidate=snapshot(structuredClone(range));return candidate?{terms:candidate.terms,edition:candidate.view}:null;}catch{return null;}
    },
    release(range:Omit<ValleySpiritAlmanacRange,'worldId'>,approval:unknown):string|null{
-    if(closed)return null;
+    if(closed||previewOnly)return null;
     try{
      const a=structuredClone(approval);
      if(!exact(a,['terms','signature'])||typeof a.signature!=='string'||!SIG.test(a.signature))return null;
@@ -99,7 +110,7 @@ export function openOrdinaryOfflineWeatherRelease(options:{database:string;world
     }catch{return null;}
    },
    withdraw(entryId:string,reason:OrdinaryWeatherWithdrawalReason,approval:unknown):boolean{
-    if(closed)return false;
+    if(closed||previewOnly)return false;
     try{
      const a=structuredClone(approval);
      if(!exact(a,['terms','signature'])||typeof a.signature!=='string'||!SIG.test(a.signature))return false;
