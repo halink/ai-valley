@@ -38,10 +38,18 @@ export interface ValleySpiritAlmanacTopicSelection {
  coverage:typeof COVERAGE;
  topic:ValleySpiritAlmanacTopic;
 }
+function fieldForKind(kind:TopicKind){
+ return kind.startsWith('temperature-')?'temperatureDeciC':kind.startsWith('humidity-')?'relativeHumidityPermille':'condition';
+}
+function topicSpecs(pair:boolean):ReadonlyArray<readonly [TopicKind,readonly ('oldest'|'latest')[]]>{
+ const single=[['weather-point',['latest']],['temperature-point',['latest']],['humidity-point',['latest']]] as const;
+ return pair?[...single,['temperature-two-points',['oldest','latest']],['humidity-two-points',['oldest','latest']]]:single;
+}
+
 const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const record=(v:unknown):v is Record<string,unknown>=>!!v&&typeof v==='object'&&!Array.isArray(v);
 function topic(kind:TopicKind,points:readonly Point[],packetFingerprint:string):ValleySpiritAlmanacTopic{
- const field=kind.startsWith('temperature-')?'temperatureDeciC':kind.startsWith('humidity-')?'relativeHumidityPermille':'condition';
+ const field=fieldForKind(kind);
  const evidence:Evidence[]=points.map(p=>({sourceRef:p.sourceRef,minute:p.minute,field,value:p[field]}));
  return {topicId:'valley-topic-'+hash([MENU_VERSION,packetFingerprint,kind,evidence]),kind,label:LABELS[kind],evidence};
 }
@@ -49,14 +57,8 @@ function menuNow(range:ValleySpiritAlmanacRange,authority:ValleySpiritAlmanacAut
  const packet=createValleySpiritAlmanacPacket(range,authority);
  if(!packet)return null;
  const fingerprint=hash(packet),points=packet.points,oldest=points[0],latest=points.at(-1)!;
- const candidates=[
-  topic('weather-point',[latest],fingerprint),
-  topic('temperature-point',[latest],fingerprint),
-  topic('humidity-point',[latest],fingerprint),
- ];
- if(oldest!==latest){
-  candidates.push(topic('temperature-two-points',[oldest,latest],fingerprint),topic('humidity-two-points',[oldest,latest],fingerprint));
- }
+ const sites={oldest,latest};
+ const candidates=topicSpecs(oldest!==latest).map(([kind,targets])=>topic(kind,targets.map(k=>sites[k]),fingerprint));
  return {menuVersion:MENU_VERSION,menuId:'valley-topics-'+hash([MENU_VERSION,fingerprint,candidates.map(c=>c.topicId)]),projectionVersion:packet.projectionVersion,permissionVersion:packet.permissionVersion,worldId:packet.worldId,fromMinute:packet.fromMinute,throughMinute:packet.throughMinute,coverage:COVERAGE,unselectedHourBuckets:[...packet.unselectedHourBuckets],candidates};
 }
 function readSelection(value:unknown):{menuId:string;topicId:string}|null{
@@ -91,4 +93,18 @@ export class ValleySpiritAlmanacTopics {
   if(!menu||!candidate)return null;
   return currentChoice(menuNow(range,this.authority),{menuId:menu.menuId,topicId:candidate.topicId},'synthetic-offline');
  }
+}
+
+/** Pure presentation for the private owner after separate exact grants are
+ * validated. No public archive authority and no persistent identifiers. */
+export function nativeSeasonalWeatherPairMenu(early:Omit<Point,'sourceRef'>,late:Omit<Point,'sourceRef'>){
+ if(!Number.isSafeInteger(early.minute)||!Number.isSafeInteger(late.minute)||early.minute%60!==0||late.minute!==early.minute+60)return null;
+ const sites={oldest:{point:early,ref:'point-1'},latest:{point:late,ref:'point-2'}} as const;
+ return Object.freeze({menuVersion:1 as const,coverage:COVERAGE,options:Object.freeze(topicSpecs(true).map(([kind,targets],index)=>{
+  const field=fieldForKind(kind);
+  return Object.freeze({number:index+1,kind,evidence:Object.freeze(targets.map(k=>{
+   const {ref,point}=sites[k];
+   return Object.freeze({ref,observedMinute:point.minute,field,value:point[field]});
+  }))});
+ }))});
 }

@@ -73,7 +73,7 @@ type SeasonalWeatherAnchor=Readonly<{sourceDigest:string;stateDigest:string;vers
 type SeasonalWeatherAdvance=Readonly<{previous:SeasonalWeatherAnchor|null;next:SeasonalWeatherAnchor}>;
 type SeasonalDraftAnchor=Readonly<{sequence:number;digest:string}>;
 type SeasonalDraftAdvance=Readonly<{previous:SeasonalDraftAnchor|null;next:SeasonalDraftAnchor}>;
-type OwnerState={registryDirectory:string;scope:string;directory:{dev:number;ino:number};registryIdentity:string;assert:()=>void;marker:()=>string|null;enroll:(binding:string)=>void;claim:(request:string,register:boolean)=>boolean;hasRecovery:(request:string)=>boolean;seasonalWorld:(binding?:string)=>string|null;seasonalWeather:(binding:string,advance?:SeasonalWeatherAdvance)=>SeasonalWeatherAnchor|null;seasonalDraft:(binding:string,request:string,advance?:SeasonalDraftAdvance)=>SeasonalDraftAnchor|null;quota?:QuotaChild;};
+type OwnerState={registryDirectory:string;scope:string;directory:{dev:number;ino:number};registryIdentity:string;assert:()=>void;marker:()=>string|null;enroll:(binding:string)=>void;claim:(request:string,register:boolean)=>boolean;hasRecovery:(request:string)=>boolean;seasonalWorld:(binding?:string)=>string|null;seasonalWeather:(binding:string,advance?:SeasonalWeatherAdvance,slot?:'topic-second')=>SeasonalWeatherAnchor|null;seasonalDraft:(binding:string,request:string,advance?:SeasonalDraftAdvance)=>SeasonalDraftAnchor|null;quota?:QuotaChild;};
 const quotaHandles=new WeakSet<object>();
 const owners=new WeakMap<ProductionModelAccountOwnership,OwnerState>();
 
@@ -145,6 +145,9 @@ export function attachProductionAccountQuotaRehearsal(ownership:ProductionModelA
   seasonalPrivateWeatherAnchor(binding:string,advance?:SeasonalWeatherAdvance){
    current();return state.seasonalWeather(binding,advance);
   },
+  seasonalPrivateWeatherTopicSecondAnchor(binding:string,advance?:SeasonalWeatherAdvance){
+   current();return state.seasonalWeather(binding,advance,'topic-second');
+  },
   seasonalPrivateWeatherDraftRequest(request:string){
    current();
    if(!/^seasonal-private-almanac-[a-f0-9]{64}$/.test(request))throw Error('seasonal_weather_draft_request');
@@ -215,10 +218,10 @@ export function acquireProductionModelAccountOwnership(options:AccountOwnershipO
     seasonalWorld(binding){
      assertOwned();return seasonalResidentWorld(r.db,options.runId,binding);
     },
-    seasonalWeather(binding,advance){
+    seasonalWeather(binding,advance,slot){
      assertOwned();
      if(seasonalResidentWorld(r.db,options.runId)!==binding)throw Error('seasonal_weather_registry_world_binding');
-     return seasonalWeatherAnchor(r.db,options.runId,binding,advance);
+     return seasonalWeatherAnchor(r.db,options.runId,binding,advance,slot);
     },
     seasonalDraft(binding,request,advance){
      assertOwned();
@@ -390,17 +393,21 @@ function seasonalDraftAnchor(db:DatabaseSync,run:string,binding:string,request:s
   db.exec('COMMIT');return next;
  }catch(error){db.exec('ROLLBACK');throw error;}
 }
-function seasonalWeatherAnchor(db:DatabaseSync,run:string,binding:string,advance?:SeasonalWeatherAdvance):SeasonalWeatherAnchor|null{
+function seasonalWeatherAnchor(db:DatabaseSync,run:string,binding:string,advance?:SeasonalWeatherAdvance,slot?:'topic-second'):SeasonalWeatherAnchor|null{
+ const name=slot==='topic-second'?'account_seasonal_private_weather_topic_second':'account_seasonal_private_weather';
+ const ddl=slot==='topic-second'?SEASONAL_WEATHER_SQL.replace('account_seasonal_private_weather',name):SEASONAL_WEATHER_SQL;
  const hex=(v:unknown)=>typeof v==='string'&&/^[0-9a-f]{64}$/.test(v);
  const integer=(n:unknown):n is number=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=0;
  const valid=(a:SeasonalWeatherAnchor)=>hex(a.sourceDigest)&&hex(a.stateDigest)&&integer(a.version)&&a.version<=32&&integer(a.wallFloor);
  const read=()=>{
-  const table=db.prepare("SELECT type,sql FROM sqlite_schema WHERE name='account_seasonal_private_weather'").get();
+  if(db.prepare('SELECT 1 FROM sqlite_temp_schema WHERE lower(name)=? OR lower(tbl_name)=?').get(name,name))
+   throw Error('seasonal_weather_registry_temp_schema');
+  const table=db.prepare("SELECT type,sql FROM main.sqlite_schema WHERE name=? COLLATE NOCASE").get(name);
   if(!table)return {table:false,row:null};
-  if(table.type!=='table'||table.sql!==SEASONAL_WEATHER_SQL||
-     db.prepare("SELECT 1 FROM sqlite_schema WHERE tbl_name=? AND (type='trigger' OR (type='index' AND sql IS NOT NULL))").get('account_seasonal_private_weather'))
+  if(table.type!=='table'||table.sql!==ddl||
+     db.prepare("SELECT 1 FROM sqlite_schema WHERE tbl_name=? AND (type='trigger' OR (type='index' AND sql IS NOT NULL))").get(name))
    throw Error('seasonal_weather_registry_schema');
-  const rows=db.prepare('SELECT binding,source_digest,state_digest,version,wall_floor FROM account_seasonal_private_weather WHERE run=? LIMIT 2').all(run);
+  const rows=db.prepare(`SELECT binding,source_digest,state_digest,version,wall_floor FROM main.${name} WHERE run=? LIMIT 2`).all(run);
   if(!rows.length)return {table:true,row:null};
   const r=rows[0],row={sourceDigest:r.source_digest,stateDigest:r.state_digest,version:r.version,wallFloor:r.wall_floor} as SeasonalWeatherAnchor;
   if(rows.length!==1||r.binding!==binding||!valid(row))throw Error('seasonal_weather_registry_anchor');
@@ -415,14 +422,14 @@ function seasonalWeatherAnchor(db:DatabaseSync,run:string,binding:string,advance
        a.version<row.version||a.version>row.version+1||
        (a.version===row.version?a.stateDigest!==row.stateDigest:a.stateDigest===row.stateDigest)):a.version!==0))
    throw Error('seasonal_weather_registry_compare_and_swap');
-  if(!table)db.exec(SEASONAL_WEATHER_SQL);
+  if(!table)db.exec(ddl);
   if(row){
-   if(db.prepare('UPDATE account_seasonal_private_weather SET state_digest=?,version=?,wall_floor=? WHERE run=? AND binding=?')
+   if(db.prepare(`UPDATE main.${name} SET state_digest=?,version=?,wall_floor=? WHERE run=? AND binding=?`)
     .run(a.stateDigest,a.version,a.wallFloor,run,binding).changes!==1)throw Error('seasonal_weather_registry_write');
   }else{
-   if(Number(db.prepare('SELECT count(*) AS n FROM account_seasonal_private_weather').get()?.n)>=4096)
+   if(Number(db.prepare(`SELECT count(*) AS n FROM main.${name}`).get()?.n)>=4096)
     throw Error('seasonal_weather_registry_capacity');
-   db.prepare('INSERT INTO account_seasonal_private_weather VALUES (?,?,?,?,?,?)').run(run,binding,a.sourceDigest,a.stateDigest,a.version,a.wallFloor);
+   db.prepare(`INSERT INTO main.${name} VALUES (?,?,?,?,?,?)`).run(run,binding,a.sourceDigest,a.stateDigest,a.version,a.wallFloor);
   }
   db.exec('COMMIT');return Object.freeze({...a});
  }catch(e){db.exec('ROLLBACK');throw e;}
