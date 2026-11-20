@@ -1,3 +1,5 @@
+import {encodeOrdinaryWeatherWithdrawal,type OrdinaryWeatherWithdrawalReason} from './valley-spirit-ordinary-weather-withdrawal.js';
+export {encodeOrdinaryWeatherWithdrawal} from './valley-spirit-ordinary-weather-withdrawal.js';
 import {createHash,createPublicKey,verify} from 'node:crypto';
 import {lstatSync} from 'node:fs';
 import {DatabaseSync} from 'node:sqlite';
@@ -6,7 +8,7 @@ import {readNativeValidationWeatherHead} from './valley-spirit-native-basis.js';
 import {readValleySpiritWeatherPermission} from './valley-spirit-permissions.js';
 import {readExistingPublicWeatherJournal} from './valley-spirit.js';
 import {composeOfflineWeatherEdition,type ValleySpiritAlmanacRange} from './valley-spirit-almanac.js';
-import {SqliteValleySpiritAlmanacStore,readValleySpiritAlmanacSnapshot} from './valley-spirit-almanac-store.js';
+import {SqliteValleySpiritAlmanacStore,readOrdinaryWeatherWithdrawalBasis,readValleySpiritAlmanacReviewBasis} from './valley-spirit-almanac-store.js';
 
 import {encodeOrdinaryOfflineWeatherReview,ordinaryReviewDigest as digest,ordinaryReviewSaveScope,
  ORDINARY_OFFLINE_REVIEW_SCHEMA as SCHEMA,ORDINARY_REVIEW_SIGNATURE as SIG,ORDINARY_REVIEW_WORLD as WORLD,
@@ -54,7 +56,7 @@ export function openOrdinaryOfflineWeatherRelease(options:{database:string;world
     const refs=new Map(journal.entries.filter(r=>r.permissionVersion===grant.version).map(r=>[r.sourceRef,r]));
     const built=composeOfflineWeatherEdition({...range,worldId},{permission:()=>grant,resolve:ref=>refs.get(ref)??null});
     if(!built)return null;
-    const before=readValleySpiritAlmanacSnapshot(db,worldId,saveScope),p=built.entry.packet;
+    const before=readValleySpiritAlmanacReviewBasis(db,worldId,saveScope),p=built.entry.packet;
     // This deliberately supports a first edition only, not correction/replacement.
     if(before.some(e=>e.packet.fromMinute===p.fromMinute&&e.packet.throughMinute===p.throughMinute))return null;
     const terms:OrdinaryOfflineWeatherReview={schema:SCHEMA,worldId,saveScope,reviewerFingerprint,
@@ -87,6 +89,27 @@ export function openOrdinaryOfflineWeatherRelease(options:{database:string;world
      try{return store.recordOrdinaryReview(current.before,current.entry,{terms:current.terms,signature:a.signature,reviewerDer:reviewerDer.toString('base64url')})?current.entry.entryId:null;}
      finally{store.close();}
     }catch{return null;}
+   },
+   previewWithdrawal(entryId:string,reason:OrdinaryWeatherWithdrawalReason){
+    if(closed)return null;
+    try{
+     requireOrdinary();db.exec('BEGIN');
+     try{return readOrdinaryWeatherWithdrawalBasis(db,worldId,saveScope,entryId,reason,reviewerFingerprint);}
+     finally{db.exec('ROLLBACK');}
+    }catch{return null;}
+   },
+   withdraw(entryId:string,reason:OrdinaryWeatherWithdrawalReason,approval:unknown):boolean{
+    if(closed)return false;
+    try{
+     const a=structuredClone(approval);
+     if(!exact(a,['terms','signature'])||typeof a.signature!=='string'||!SIG.test(a.signature))return false;
+     const bytes=encodeOrdinaryWeatherWithdrawal(a.terms),sig=Buffer.from(a.signature,'base64url');
+     if(!bytes||sig.length!==64||sig.toString('base64url')!==a.signature||!verify(null,bytes,reviewer,sig))return false;
+     requireOrdinary();
+     const store=new SqliteValleySpiritAlmanacStore(owner.database,worldId,requireOrdinary);
+     try{return store.recordOrdinaryWithdrawal(entryId,reason,a);}
+     finally{store.close();}
+    }catch{return false;}
    },
    close(){if(!closed){closed=true;try{db.close();}finally{owner.release();}}}
   });

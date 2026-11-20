@@ -27,7 +27,7 @@ export interface ValleySpiritPublicReaders {
   {status:'invalid'|'unavailable'};
 }
 /** Intentionally has no transport, generation, store/write or scheduling seam. */
-export function createValleySpiritPublicReaders(journal:JournalReader,reader?:Pick<SqliteValleySpiritAlmanacReader,'read'>&Partial<Pick<SqliteValleySpiritAlmanacReader,'matchesReviewedSources'>>):ValleySpiritPublicReaders {
+export function createValleySpiritPublicReaders(journal:JournalReader,reader?:Pick<SqliteValleySpiritAlmanacReader,'read'>&Partial<Pick<SqliteValleySpiritAlmanacReader,'matchesReviewedSources'|'withPublicationSnapshot'>>):ValleySpiritPublicReaders {
  const authority:ValleySpiritAlmanacAuthority={
   permission:()=>journal.publicWeatherPermission(),
   resolve:ref=>journal.resolveSource(ref),
@@ -40,13 +40,16 @@ export function createValleySpiritPublicReaders(journal:JournalReader,reader?:Pi
  };
  const almanac=reader?new ValleySpiritAlmanac({read:()=>reader.read(),replace:()=>false},authority):null;
  const topics=new ValleySpiritAlmanacTopics(authority);
+ const publication=<T>(read:()=>T):T|null=>{
+  try{return reader?.withPublicationSnapshot?reader.withPublicationSnapshot(read):read();}catch{return null;}
+ };
  return {
-  almanac:id=>almanac?.get(id)??null,
+  almanac:id=>publication(()=>almanac?.get(id)??null),
   latestAlmanac:()=>{
    const observed=journal.publicNarrationInput();
    if(!observed)return {status:'unavailable'};
    const {worldId,permissionVersion}=observed;
-   const entry=almanac?.latest(worldId,permissionVersion);
+   const entry=publication(()=>almanac?.latest(worldId,permissionVersion)??null);
    const current=journal.publicWeatherPermission();
    if(!current?.publicWeather||current.version!==permissionVersion)return {status:'unavailable'};
    return entry?{status:'ready',worldId,permissionVersion,entry}:{status:'objective-only',worldId,permissionVersion};
