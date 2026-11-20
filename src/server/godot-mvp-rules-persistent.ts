@@ -90,7 +90,7 @@ export async function startPersistentRulesMvp(options:{database:string;port:numb
   if(adopted||soilAdopted||agricultureAdopted||rainAdopted)world.revision++;
   if(!saved||upgraded||adopted||soilAdopted||agricultureAdopted||rainAdopted)store.commit(world,previous);
   let lastCommittedMinute=world.minute;
-  session=createMvpSession({world,persistent:true,captureAddressedSpeechCustody:speechPin?true:undefined,captureSameSaveNativeWeather:privateOwner?.rulesWeatherAccountScope?true:undefined,captureAtomicNativeMeals:mealPin?true:undefined,captureAtomicNativeFruitRenewal:nativeRenewal?true:undefined,commit:(draft,revision,speech,meals)=>{
+  session=createMvpSession({world,persistent:true,captureAddressedSpeechCustody:speechPin?true:undefined,captureSameSaveNativeWeather:privateOwner?.rulesWeatherAccountScope?true:undefined,captureAtomicNativeMeals:mealPin?true:undefined,captureAtomicNativeFruitRenewal:nativeRenewal?true:undefined,captureAtomicNativeFruitLot:nativeRenewal?.lotShelfLifeGameMinutes?true:undefined,commit:(draft,revision,speech,meals)=>{
    owner!.assertOwned();
    if(mealPin){
     if(draft.id!==mealPin.worldId)throw Error('mvp_rules_private_meal_world');
@@ -135,6 +135,7 @@ export async function startPersistentRulesMvp(options:{database:string;port:numb
    return geographicProposalQueue.review(session.world);
   };
   const readPrivateNativeFruitRenewal=()=>nativeRenewal&&session&&!session.world.clock.paused?store?.readCurrentNativeRulesFruitRenewal(session.world)??null:null;
-  return {session,server,snapshot,readPrivateSpiritCandidate,readPrivateSpiritGeographicProposal,readPrivateNativeFruitRenewal,close};
+  const readPrivateNativeFruitLot=()=>nativeRenewal?.lotShelfLifeGameMinutes&&session&&!session.world.clock.paused?store?.readCurrentNativeRulesFruitLot(session.world)??null:null;
+  return {session,server,snapshot,readPrivateSpiritCandidate,readPrivateSpiritGeographicProposal,readPrivateNativeFruitRenewal,readPrivateNativeFruitLot,close};
  }catch(error){await close();throw error;}
 }

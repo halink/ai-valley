@@ -432,10 +432,10 @@ export function followsPostCommitMvpFruitFlow(previous:MvpFruitFlowBatch,next:Mv
  return !!before&&!!after&&before.sessionToken===after.sessionToken&&after.deliveredSequence===before.deliveredSequence+1;
 }
 const atomicNativeMealMinutes=new WeakMap<World,Readonly<{before:string;after:string}>>();
-const atomicNativeRenewalMinutes=new WeakMap<World,Readonly<{before:string;after:string;renewal:readonly MvpFruitRenewalWitness[]}>>();
+const atomicNativeRenewalMinutes=new WeakMap<World,Readonly<{before:string;after:string;renewal:readonly MvpFruitRenewalWitness[];flow:MvpFruitFlowBatch|null}>>();
 export function readAtomicNativeRulesRenewal(previous:World,draft:World){
  const recorded=atomicNativeRenewalMinutes.get(draft);
- return recorded&&recorded.before===sameSaveWorldFingerprint(previous)&&recorded.after===sameSaveWorldFingerprint(draft)?recorded.renewal:[];
+ return recorded&&recorded.before===sameSaveWorldFingerprint(previous)&&recorded.after===sameSaveWorldFingerprint(draft)?recorded:undefined;
 }
 const sameSaveNativeWeatherMinutes=new WeakMap<World,Readonly<{before:string;after:string}>>();
 // Validation saves persist the complete JSON World. Bind to that exact
@@ -458,7 +458,7 @@ export function isAtomicNativeMealMinute(previous:World,draft:World):boolean{
  const observed=atomicNativeMealMinutes.get(draft);
  return !!observed&&observed.before===sameSaveWorldFingerprint(previous)&&observed.after===sameSaveWorldFingerprint(draft);
 }
-export function createMvpSession(options:{observeSessionWeather?:true;world?:World;commit?:(world:World,previousRevision:number,speech?:AddressedSpeechObservation,atomicMeals?:readonly ValleySpiritMvpMealWitness[])=>void;persistent?:boolean;captureAddressedSpeechCustody?:true;captureSameSaveNativeWeather?:true;captureAtomicNativeMeals?:true;captureAtomicNativeFruitRenewal?:true;observeCommittedMeals?:(witnesses:readonly ValleySpiritMvpMealWitness[])=>void;observeCommittedFruitRenewal?:(witnesses:readonly MvpFruitRenewalWitness[])=>void;observeCommittedFruitFlow?:(flow:MvpFruitFlowBatch)=>void}={}){
+export function createMvpSession(options:{observeSessionWeather?:true;world?:World;commit?:(world:World,previousRevision:number,speech?:AddressedSpeechObservation,atomicMeals?:readonly ValleySpiritMvpMealWitness[])=>void;persistent?:boolean;captureAddressedSpeechCustody?:true;captureSameSaveNativeWeather?:true;captureAtomicNativeMeals?:true;captureAtomicNativeFruitRenewal?:true;captureAtomicNativeFruitLot?:true;observeCommittedMeals?:(witnesses:readonly ValleySpiritMvpMealWitness[])=>void;observeCommittedFruitRenewal?:(witnesses:readonly MvpFruitRenewalWitness[])=>void;observeCommittedFruitFlow?:(flow:MvpFruitFlowBatch)=>void}={}){
  const fruitFlowSessionToken=Symbol();let deliveredFruitFlowSequence=0;
  let world=structuredClone(options.world??createMvpWorld());
  if(options.world)inheritReceiptHistory(options.world,world);
@@ -505,7 +505,7 @@ export function createMvpSession(options:{observeSessionWeather?:true;world?:Wor
     try{
     const minute=advanceMvpRuleMinuteDraft(world,current,serial,decisions,{
      meals:!!(options.persistent&&options.commit&&(options.captureAtomicNativeMeals||options.observeCommittedMeals)),
-     fruitFlow:!!(options.persistent&&options.commit&&options.observeCommittedFruitFlow),
+     fruitFlow:!!(options.persistent&&options.commit&&(options.observeCommittedFruitFlow||options.captureAtomicNativeFruitLot)),
      fruitRenewal:!!(options.persistent&&options.commit&&(options.observeCommittedFruitRenewal||options.captureAtomicNativeFruitRenewal)),
      addressedSpeech:!!(options.persistent&&options.commit&&options.captureAddressedSpeechCustody),
     });
@@ -515,8 +515,8 @@ export function createMvpSession(options:{observeSessionWeather?:true;world?:Wor
     const atomic=options.persistent&&options.commit&&options.captureAtomicNativeMeals;
     if(atomic&&witnesses.length&&world.minute===current.minute+1)
      atomicNativeMealMinutes.set(world,Object.freeze({before:sameSaveWorldFingerprint(current),after:sameSaveWorldFingerprint(world)}));
-    if(options.persistent&&options.commit&&options.captureAtomicNativeFruitRenewal&&renewal.length)
-     atomicNativeRenewalMinutes.set(world,Object.freeze({before:sameSaveWorldFingerprint(current),after:sameSaveWorldFingerprint(world),renewal}));
+    if(options.persistent&&options.commit&&(options.captureAtomicNativeFruitLot||options.captureAtomicNativeFruitRenewal&&renewal.length))
+     atomicNativeRenewalMinutes.set(world,Object.freeze({before:sameSaveWorldFingerprint(current),after:sameSaveWorldFingerprint(world),renewal,flow:fruitFlow}));
     try{
      if(atomic)options.commit?.(world,current.revision,speech,witnesses);
      else if(speech?.receipts.length)options.commit?.(world,current.revision,speech);
@@ -524,7 +524,7 @@ export function createMvpSession(options:{observeSessionWeather?:true;world?:Wor
     }finally{
      if(options.captureSameSaveNativeWeather)sameSaveNativeWeatherMinutes.delete(draft);
      if(options.captureAtomicNativeMeals)atomicNativeMealMinutes.delete(draft);
-     if(options.captureAtomicNativeFruitRenewal)atomicNativeRenewalMinutes.delete(draft);
+     if(options.captureAtomicNativeFruitRenewal||options.captureAtomicNativeFruitLot)atomicNativeRenewalMinutes.delete(draft);
     }
     try{observeCommittedWeather();}catch{sessionWeather=undefined;}
     if(witnesses.length)try{options.observeCommittedMeals?.(witnesses);}catch{/* committed world is independent */}

@@ -1,4 +1,4 @@
-import {appendRulesNativeFruitRenewal,pinRulesNativeFruitRenewal,readRulesNativeFruitRenewal,type RulesNativeFruitRenewalPin} from './valley-spirit-rules-fruit-renewal.js';
+import {advanceRulesNativeFruitLot,appendRulesNativeFruitRenewal,pinRulesNativeFruitRenewal,readRulesNativeFruitLot,readRulesNativeFruitRenewal,type RulesNativeFruitRenewalPin} from './valley-spirit-rules-fruit-renewal.js';
 import {appendFormalAddressedSpeech,readFormalAddressedSpeech} from './valley-spirit-formal-speech-custody.js';
 import {appendFormalAppointmentChoices,readFormalAppointmentChoice} from './valley-spirit-formal-choice-custody.js';
 import {nativeFormalAppointmentChoice} from '../world/social-appointments.js';
@@ -826,11 +826,14 @@ export class WorldStore {
   const previous=this.writeCommit(world,previousRevision,appended,seasonalLedger);
   const nativeRenewal=this.nativeRulesFruitRenewal;
   if(nativeRenewal&&previous&&world.id===nativeRenewal.worldId){
-   const observed=readAtomicNativeRulesRenewal(previous,world).filter(w=>w.sourceId===nativeRenewal.sourceId);
-   if(observed.length===1){
+   const marker=readAtomicNativeRulesRenewal(previous,world);
+   const renewal=marker?.renewal.filter(w=>w.sourceId===nativeRenewal.sourceId)??[];
+   const flow=nativeRenewal.lotShelfLifeGameMinutes?marker?.flow:null;
+   if(flow||!nativeRenewal.lotShelfLifeGameMinutes&&renewal.length===1){
     this.db.exec('SAVEPOINT optional_native_rules_fruit_renewal');
     try{
-     appendRulesNativeFruitRenewal(this.db,nativeRenewal,previous,world,observed[0]);
+     if(flow)advanceRulesNativeFruitLot(this.db,nativeRenewal,previous,world,flow);
+     else appendRulesNativeFruitRenewal(this.db,nativeRenewal,previous,world,renewal[0]);
      this.db.exec('RELEASE optional_native_rules_fruit_renewal');
     }catch{
      this.db.exec('ROLLBACK TO optional_native_rules_fruit_renewal');
@@ -1036,6 +1039,17 @@ export class WorldStore {
    try{
     const w=this.readWorld(false,false);
     return w&&w.id===head.id&&w.revision===head.revision&&w.minute===head.minute?readRulesNativeFruitRenewal(this.db,pin,w):null;
+   }finally{this.db.exec('ROLLBACK');}
+  }catch{return null;}
+ }
+ readCurrentNativeRulesFruitLot(head:Readonly<{id:string;revision:number;minute:number}>){
+  const pin=this.nativeRulesFruitRenewal;
+  if(!pin?.lotShelfLifeGameMinutes||pin.worldId!==head.id)return null;
+  try{
+   this.db.exec('BEGIN');
+   try{
+    const w=this.readWorld(false,false);
+    return w&&w.id===head.id&&w.revision===head.revision&&w.minute===head.minute?readRulesNativeFruitLot(this.db,pin,w):null;
    }finally{this.db.exec('ROLLBACK');}
   }catch{return null;}
  }
