@@ -3,6 +3,7 @@ import {gzipSync} from 'node:zlib';
 import type {DatabaseSync} from 'node:sqlite';
 import type {World} from '../shared/types.js';
 import type {NativeOrdinaryAgedDiscovery} from '../world/mvp-ordinary-aged-ground-discovery.js';
+import {prepareOrdinaryAgedGroundPickup} from './valley-spirit-ordinary-aged-pickup.js';
 import {prepareStoppedOrdinaryAgedGroundMinute} from './godot-mvp.js';
 import {advanceAgedGroundExpiry,type AgedGroundLot} from './valley-spirit-ordinary-aged-ground.js';
 
@@ -13,29 +14,60 @@ const hash=(v:string|Uint8Array)=>createHash('sha256').update(v).digest('hex');
 const bytes=(w:World)=>gzipSync(JSON.stringify(w),{level:1});
 const same=(a:unknown,b:unknown)=>JSON.stringify(a)===JSON.stringify(b);
 function invalid():never{throw Error('ordinary_stopped_continuation_invalid');}
+const pickupSchema='ordinary-stopped-native-pickup/v1';
+type Pickup=NonNullable<ReturnType<typeof prepareOrdinaryAgedGroundPickup>>['completion'];
+export interface StoppedOrdinaryHeldFruit {
+ readonly schema:'ordinary-stopped-held-fruit/v1';readonly holderId:string;readonly lot:AgedGroundLot;
+ readonly pickup:Pickup;readonly groundDebit:1;readonly heldCredit:1;
+}
 type Expiry=NonNullable<ReturnType<typeof advanceAgedGroundExpiry>>['expired'][number];
 export interface StoppedGroundReplay{
  readonly world:World;readonly lot:AgedGroundLot|null;readonly receiptDigest:string;readonly sequence:number;
  readonly discoveries:ReadonlyMap<string,NativeOrdinaryAgedDiscovery>;readonly expiry:Expiry|null;
+ readonly held?:StoppedOrdinaryHeldFruit;
 }
-export function prepareStoppedGroundReplayMinute(current:StoppedGroundReplay){
+function nativeEvents(prior:World,draft:World){
+ if(draft.events.length>maxEvents||!same(draft.events.slice(0,prior.events.length),prior.events))return null;
+ const events=draft.events.slice(prior.events.length);
+ return events.length>128||events.some(e=>e.kind==='conversation'||e.speechText!==undefined||e.mvpMeal||e.socialAppointmentArrival||e.mvpFruitFall||
+   e.id.length>320||!e.id.startsWith(prior.id+':event:')||e.at!==draft.minute)?null:events;
+}
+export function prepareStoppedGroundReplayMinute(current:StoppedGroundReplay,pickup=false){
  if(!current.lot||current.expiry||current.sequence>=maxSteps)return null;
  const prior=current.world,lot=current.lot;
+ if(pickup){
+  if(!current.sequence||!current.discoveries.size)return null;
+  const next=prepareOrdinaryAgedGroundPickup(prior,{readExactPickupEvidence(h){
+   if(h.worldId!==prior.id||h.revision!==prior.revision||h.atUs!==prior.mvpClimate?.lastUs)return null;
+   return {lot:{...h,schema:'ordinary-active-aged-ground-observation/v1',receiptDigest:current.receiptDigest,...lot},
+    discoveries:[...current.discoveries.values()]};
+  }});
+  if(!next||next.nativeCustody.mealWitnesses.length||next.nativeCustody.speech?.receipts.length)return null;
+  const events=nativeEvents(prior,next.draft),fact=next.completion;
+  if(!events||fact.effectId!==lot.fruit.effectId||fact.bornUs!==lot.bornUs||fact.expiresUs!==lot.expiresUs||fact.receiptDigest!==current.receiptDigest)return null;
+  const held:StoppedOrdinaryHeldFruit=Object.freeze({schema:'ordinary-stopped-held-fruit/v1',holderId:fact.residentId,
+   lot,pickup:fact,groundDebit:1,heldCredit:1});
+  const finish:StoppedGroundReplay=Object.freeze({sequence:current.sequence+1,world:next.draft,receiptDigest:current.receiptDigest,
+   lot:null,expiry:null,held,discoveries:current.discoveries});
+  const body=JSON.stringify({schema:pickupSchema,sequence:finish.sequence,fromRevision:prior.revision,toRevision:next.draft.revision,
+   atUs:fact.settledUs,placementReceiptDigest:current.receiptDigest,beforeDigest:hash(bytes(prior)),afterDigest:hash(bytes(next.draft)),
+   eventIds:events.map(e=>e.id),held});
+  return Buffer.byteLength(body)<=maxStepBytes?{finish,body,events}:null;
+ }
  const next=prepareStoppedOrdinaryAgedGroundMinute(prior,{readExactActiveLot(h){
   return h.worldId===prior.id&&h.revision===prior.revision&&h.atUs===prior.mvpClimate?.lastUs?
    {...h,schema:'ordinary-active-aged-ground-observation/v1',receiptDigest:current.receiptDigest,...lot}:null;
  }});
- if(!next||next.draft.events.length>maxEvents||!same(next.draft.events.slice(0,prior.events.length),prior.events))return null;
- const events=next.draft.events.slice(prior.events.length);
- if(events.length>128||events.some(e=>e.kind==='conversation'||e.speechText!==undefined||e.mvpMeal||e.socialAppointmentArrival||e.mvpFruitFall||
-  e.id.length>320||!e.id.startsWith(prior.id+':event:')||e.at!==next.draft.minute))return null;
+ if(!next)return null;
+ const events=nativeEvents(prior,next.draft);
+ if(!events)return null;
  const expiry=advanceAgedGroundExpiry(prior,next.draft,[lot]);
  if(!expiry||expiry.expired.length&&next.observed.length)return null;
  const first=next.observed.filter(d=>!current.discoveries.has(d.residentId));
  const discoveries=new Map(current.discoveries);
  if(discoveries.size+first.length>64)return null;
  for(const fact of first)discoveries.set(fact.residentId,fact);
- const finish=Object.freeze({sequence:current.sequence+1,world:next.draft,receiptDigest:current.receiptDigest,
+ const finish:StoppedGroundReplay=Object.freeze({sequence:current.sequence+1,world:next.draft,receiptDigest:current.receiptDigest,
   lot:expiry.remaining[0]??null,expiry:expiry.expired[0]??null,discoveries});
  const body=JSON.stringify({schema:'ordinary-stopped-native-continuation/v1',sequence:finish.sequence,fromRevision:prior.revision,
   toRevision:next.draft.revision,atUs:next.draft.mvpClimate?.lastUs,placementReceiptDigest:current.receiptDigest,
@@ -86,7 +118,7 @@ export function assertStoppedEventArchive(db:DatabaseSync,w:World){
   if(count!==counts[table])invalid();
  }
 }
-export const stoppedGroundBody=(r:StoppedGroundReplay,effectId:string)=>JSON.stringify({version:2,worldId:r.world.id,effectId,items:r.lot?[r.lot]:[]});
+export const stoppedGroundBody=(r:StoppedGroundReplay,effectId:string)=>JSON.stringify({version:2,worldId:r.world.id,effectId,items:r.lot?[r.lot]:[],...(r.held?{held:r.held}:{})});
 export function recoverStoppedGroundContinuation(db:DatabaseSync,origin:World,lot:AgedGroundLot,receiptDigest:string,
  current:Uint8Array,ground:Readonly<{body?:unknown;digest?:unknown}>|undefined):StoppedGroundReplay{
  let replay:StoppedGroundReplay={world:origin,lot,receiptDigest,sequence:0,discoveries:new Map(),expiry:null};
@@ -96,7 +128,10 @@ export function recoverStoppedGroundContinuation(db:DatabaseSync,origin:World,lo
   const rows=db.prepare(`SELECT sequence,CASE WHEN length(CAST(body AS BLOB))<=? THEN body END AS body FROM main.${stoppedContinuationTable} ORDER BY sequence LIMIT ?`).all(maxStepBytes,maxSteps+1);
   if(!rows.length||rows.length>maxSteps)invalid();
   for(const r of rows){
-   const next=prepareStoppedGroundReplayMinute(replay);
+   if(typeof r.body!=='string')invalid();
+   const version=JSON.parse(r.body)?.schema;
+   if(version!==pickupSchema&&version!=='ordinary-stopped-native-continuation/v1')invalid();
+   const next=prepareStoppedGroundReplayMinute(replay,version===pickupSchema);
    if(!next||r.sequence!==next.finish.sequence||r.body!==next.body)invalid();
    replay=next.finish;
   }
