@@ -195,7 +195,7 @@ export class WorldStore {
    throw Error('rules_native_renewal_scope');
   if(options.ordinaryG2DevelopmentOrigin!==undefined){
    if(!this.allowMvpClimate||this.seasonalModel||owner||fixture||options.privateDisposableSave||options.disposableAgedTransfer||
-    options.nativeEmptyGround||options.nativeRulesFruitRenewal||options.nativeMultiFruit||options.nativeWeatherCredit||options.dailySnapshots||
+    options.nativeEmptyGround||options.nativeRulesFruitRenewal||options.nativeWeatherCredit||options.dailySnapshots||
     options.ordinaryNativeMeal||options.ordinaryNativeSpeech||options.ordinaryNativeShelter||options.formalAppointmentChoiceCustody||
     options.formalAddressedSpeechCustody||options.formalRainProvenance||options.sealedAgedBirthExecution)
     throw Error('ordinary_g2_development_store_scope');

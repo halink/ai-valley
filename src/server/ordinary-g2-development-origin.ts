@@ -15,6 +15,8 @@ const worldPattern=/^godot-mvp-[A-Za-z0-9_-]{1,160}$/;
 export type OrdinaryG2DevelopmentOrigin=Readonly<{readonly ordinaryG2DevelopmentOrigin:unique symbol}>;
 type Lease=Readonly<{database:string;assertOriginal:()=>void;sealFor:(world:string)=>Buffer}>;
 const leases=new WeakMap<OrdinaryG2DevelopmentOrigin,Lease>();
+const storageOwners=new WeakSet<object>();
+export function ownsOrdinaryG2DevelopmentStorage(storage:unknown){return !!storage&&typeof storage==='object'&&storageOwners.has(storage);}
 
 export function isOrdinaryG2DevelopmentOriginScratch(path:string){
  let full=resolve(path);
@@ -48,7 +50,7 @@ export function createFreshOrdinaryG2DevelopmentOriginStorage(){
  const assertOriginal=()=>{
   if(identity(directory,true)!==dirId||identity(database)!==fileId)throw Error('ordinary_g2_development_identity');
  };
- return Object.freeze({database,assertOriginal,
+ const storage=Object.freeze({database,assertOriginal,
   bind(owner:RuntimeOwnership){
    const a=runtimeOwnershipAnchor(owner);
    if(!a||realpathSync(a.database)!==database)throw Error('ordinary_g2_development_owner');
@@ -60,6 +62,7 @@ export function createFreshOrdinaryG2DevelopmentOriginStorage(){
    return token;
   },
  });
+ storageOwners.add(storage);return storage;
 }
 function requireOrigin(origin:OrdinaryG2DevelopmentOrigin){
  const lease=leases.get(origin);

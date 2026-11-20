@@ -1,4 +1,4 @@
-import {createFreshOrdinaryG2DevelopmentOriginStorage,isOrdinaryG2DevelopmentOriginScratch} from './ordinary-g2-development-origin.js';
+import {createFreshOrdinaryG2DevelopmentOriginStorage,isOrdinaryG2DevelopmentOriginScratch,ownsOrdinaryG2DevelopmentStorage} from './ordinary-g2-development-origin.js';
 import {openSelectedOrdinaryRehearsal,pinSelectedOrdinaryRehearsal,type SelectedOrdinaryRehearsalOptions} from './valley-spirit-ordinary-selected-rehearsal.js';
 import {openOrdinaryCandidateSelection,pinOrdinaryCandidateSelection,type OrdinaryCandidateSelectionOptions} from './valley-spirit-ordinary-multi-selection.js';
 import {pinOrdinaryMultiCandidate,type OrdinaryMultiCandidatePin} from './valley-spirit-ordinary-multi-candidate.js';
@@ -155,30 +155,49 @@ export function createDisposableNativeSpeechSave(scenario:DisposableSpeechCase,c
 }
 /** Fresh local development only. No caller path, network listener, timer,
  * model, file handle or capability for gameplay-ground writes can escape. */
+type OwnedG2PreviewOptions=Pick<PersistentRulesOptions,'privateOrdinaryMultiFruit'|'privateOrdinaryMultiCandidate'|
+ 'privateOrdinaryMultiSelection'|'privateOrdinarySelectedRehearsal'>;
+const ownedG2PreviewKeys=['privateOrdinaryMultiFruit','privateOrdinaryMultiCandidate','privateOrdinaryMultiSelection',
+ 'privateOrdinarySelectedRehearsal'] as const;
 export function createOrdinaryG2DevelopmentOrigin(){
- const storage=createFreshOrdinaryG2DevelopmentOriginStorage();
+ return bindOrdinaryG2DevelopmentOriginPreview(createFreshOrdinaryG2DevelopmentOriginStorage());
+}
+/** Only an already freshly minted process capability, never a path, can
+ * bind this host-side closure. No raw session or gameplay writer escapes. */
+export function bindOrdinaryG2DevelopmentOriginPreview(storage:ReturnType<typeof createFreshOrdinaryG2DevelopmentOriginStorage>){
+ if(!ownsOrdinaryG2DevelopmentStorage(storage))throw Error('ordinary_g2_development_storage_untrusted');
+ storage.assertOriginal();
  let opened=false;
- return Object.freeze({async open(){
+ return Object.freeze({async open(options:OwnedG2PreviewOptions={}){
   if(opened)throw Error('ordinary_g2_development_already_open');
+  if(!options||typeof options!=='object'||Array.isArray(options)||
+    Object.keys(options).some(k=>!(ownedG2PreviewKeys as readonly string[]).includes(k)))throw Error('ordinary_g2_development_scope');
   opened=true;
   try{
-   const run=await openPersistentRulesCore({database:storage.database,port:0,autoStart:false},undefined,undefined,undefined,storage);
+   const run=await openPersistentRulesCore({...options,database:storage.database,port:0,autoStart:false},undefined,undefined,undefined,storage);
    let closed=false;
+   const ifLive=<T>(f:()=>T)=>closed?null:f();
    return Object.freeze({
-    head:()=>closed?null:Object.freeze({worldId:run.session.world.id,revision:run.session.world.revision,minute:run.session.world.minute}),
+    head:()=>ifLive(()=>Object.freeze({worldId:run.session.world.id,revision:run.session.world.revision,minute:run.session.world.minute})),
     advanceOne(){
      if(closed)throw Error('ordinary_g2_development_closed');
      run.session.advance(1);
     },
+    ...(options.privateOrdinaryMultiFruit?{readNativeLots:()=>ifLive(()=>run.readPrivateOrdinaryMultiFruit?.()??null)}:{}),
+    ...(options.privateOrdinaryMultiCandidate?{readCandidateMenu:()=>ifLive(()=>run.readPrivateOrdinaryMultiCandidate?.()??null)}:{}),
+    ...(options.privateOrdinaryMultiSelection?{previewSelection:()=>ifLive(()=>run.previewPrivateOrdinaryMultiSelection?.()??null),
+     selectCandidate:(input:unknown)=>closed?Promise.resolve(null):run.selectPrivateOrdinaryMultiCandidate?.(input)??Promise.resolve(null)}:{}),
+    ...(options.privateOrdinarySelectedRehearsal?{previewRehearsal:()=>ifLive(()=>run.previewPrivateSelectedOrdinaryRehearsal?.()??null),
+     rehearseSelected:(input:unknown)=>ifLive(()=>run.rehearsePrivateSelectedOrdinaryCandidate?.(input)??null)}:{}),
     async close(){if(!closed){closed=true;await run.close();opened=false;}},
    });
   }catch(e){opened=false;throw e;}
  }});
 }
 async function openPersistentRulesCore(options:PersistentRulesOptions,disposable?:ReturnType<typeof createFreshDisposableRulesStorage>,disposableEffectKey?:string,disposableSpeech?:DisposableSpeechCase,ordinaryG2Storage?:ReturnType<typeof createFreshOrdinaryG2DevelopmentOriginStorage>){
- if(ordinaryG2Storage&&(disposable||disposableEffectKey!==undefined||disposableSpeech||
+ if(ordinaryG2Storage&&(!ownsOrdinaryG2DevelopmentStorage(ordinaryG2Storage)||disposable||disposableEffectKey!==undefined||disposableSpeech||
    options.port!==0||options.autoStart!==false||options.database!==ordinaryG2Storage.database||
-   Object.keys(options).some(k=>!['database','port','autoStart'].includes(k))))throw Error('ordinary_g2_development_scope');
+   Object.keys(options).some(k=>!['database','port','autoStart',...ownedG2PreviewKeys].includes(k))))throw Error('ordinary_g2_development_scope');
  const assertDisposable=disposable?.assertOwned;
  if(disposableSpeech&&(!assertDisposable||disposableEffectKey!==undefined||
    Object.keys(options).some(k=>!['database','port','autoStart'].includes(k))||
