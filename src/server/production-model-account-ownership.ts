@@ -19,20 +19,47 @@ function registryIdentity(database:string,scope:string):string{
   String(dir.dev),String(dir.ino),String(f.dev),String(f.ino)])).digest('hex');
 }
 const label=(s:string)=>typeof s==='string'&&/^[a-zA-Z0-9][a-zA-Z0-9:_-]{0,159}$/.test(s);
-function openRegistry(options:AccountOwnershipOptions):Registry{
+function openRegistry(options:AccountOwnershipOptions,pinnedIdentity?:string):Registry{
  if(!label(options.accountScope)||!label(options.runId)||!isAbsolute(options.registryDirectory)
   ||resolve(options.registryDirectory)!==options.registryDirectory)throw Error('model_account_scope_invalid');
  const name=createHash('sha256').update('siliconflow\0'+options.accountScope).digest('hex')+'.sqlite';
- const lock=acquireRuntimeOwnership(join(options.registryDirectory,name));let db:DatabaseSync|undefined;
+ const lock=acquireRuntimeOwnership(join(options.registryDirectory,name),pinnedIdentity===undefined?undefined:{existingOnly:true});
+ let db:DatabaseSync|undefined;
  try{
   const directory=openSync(dirname(lock.database),constants.O_RDONLY|constants.O_DIRECTORY);
   try{const st=fstatSync(directory);if(st.uid!==process.getuid?.()||(st.mode&0o777)!==0o700)throw Error('model_account_registry_private_directory_required');}finally{closeSync(directory);}
+  const assertPinned=()=>{
+   if(pinnedIdentity===undefined)return;
+   lock.assertOwned();
+   if(registryIdentity(lock.database,options.accountScope)!==pinnedIdentity)throw Error('model_account_registry_pin_mismatch');
+  };
+  assertPinned();
+  if(pinnedIdentity!==undefined){
+   for(const suffix of ['-journal','-wal','-shm']){
+    try{lstatSync(lock.database+suffix);}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')continue;throw e;}
+    throw Error('model_account_registry_pending_journal');
+   }
+   assertExistingRollbackSqliteHeader(lock.database);
+  }
   let fresh=false,fd:number;
-  try{fd=openSync(lock.database,constants.O_RDWR|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600);fresh=true;}
+  if(pinnedIdentity!==undefined)fd=openSync(lock.database,constants.O_RDONLY|constants.O_NOFOLLOW);
+  else try{fd=openSync(lock.database,constants.O_RDWR|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600);fresh=true;}
   catch(e){if((e as NodeJS.ErrnoException).code!=='EEXIST')throw e;fd=openSync(lock.database,constants.O_RDONLY|constants.O_NOFOLLOW);}
   try{const s=fstatSync(fd);if(!s.isFile()||s.nlink!==1||s.uid!==process.getuid?.()||(s.mode&0o077)!==0)throw Error('model_account_registry_unsafe');if(fresh)fsyncSync(fd);}finally{closeSync(fd);}
   if(fresh){const parent=openSync(dirname(lock.database),constants.O_RDONLY|constants.O_DIRECTORY);try{fsyncSync(parent);}finally{closeSync(parent);}}
   db=new DatabaseSync(lock.database);
+  if(pinnedIdentity!==undefined){
+   db.exec('PRAGMA trusted_schema=OFF; PRAGMA query_only=ON;');
+   const core=db.prepare("SELECT type,name,sql FROM main.sqlite_schema WHERE lower(name) IN ('account_meta','account_runs') ORDER BY name").all();
+   if(core.length!==2||core[0].type!=='table'||core[0].name!=='account_meta'||
+    core[0].sql!=='CREATE TABLE account_meta(scope TEXT PRIMARY KEY, active_run TEXT)'||
+    core[1].type!=='table'||core[1].name!=='account_runs'||
+    core[1].sql!=='CREATE TABLE account_runs(run TEXT PRIMARY KEY, resolution TEXT, evidence TEXT)'||
+    db.prepare("SELECT 1 FROM main.sqlite_schema WHERE lower(tbl_name) IN ('account_meta','account_runs') AND (type='trigger' OR (type='index' AND sql IS NOT NULL))").get())
+    throw Error('model_account_registry_invalid');
+   assertPinned();
+   db.exec('PRAGMA query_only=OFF;');
+  }
   db.exec('PRAGMA busy_timeout=0; PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; PRAGMA trusted_schema=OFF;');
   if(fresh)db.exec(`BEGIN IMMEDIATE;
    CREATE TABLE account_meta(scope TEXT PRIMARY KEY, active_run TEXT);
@@ -43,8 +70,10 @@ function openRegistry(options:AccountOwnershipOptions):Registry{
   if(fresh)db.prepare('INSERT INTO account_meta(scope,active_run) VALUES (?,NULL)').run(options.accountScope);
   const rows=db.prepare('SELECT scope,active_run FROM account_meta').all() as {scope:string;active_run:string|null}[];
   if(rows.length!==1||rows[0].scope!==options.accountScope)throw Error('model_account_registry_invalid');
-  lock.assertOwned();const owned=db,identity=lstatSync(lock.database);
+  assertPinned();lock.assertOwned();const owned=db,identity=lstatSync(lock.database);
   const originalAssert=lock.assertOwned.bind(lock);lock.assertOwned=()=>{originalAssert();const current=lstatSync(lock.database);
+   if(pinnedIdentity!==undefined&&registryIdentity(lock.database,options.accountScope)!==pinnedIdentity)
+    throw Error('model_account_registry_pin_mismatch');
    if(current.dev!==identity.dev||current.ino!==identity.ino||!current.isFile()||current.nlink!==1
     ||current.uid!==process.getuid?.()||(current.mode&0o077)!==0)throw Error('model_account_registry_changed');};
   return {db:owned,lock,close:()=>{try{owned.close();}finally{lock.release();}}};
@@ -197,14 +226,25 @@ export function isProductionAccountQuotaRehearsal(value:unknown):value is Produc
  return value!==null&&typeof value==='object'&&quotaHandles.has(value);
 }
 export function acquireProductionModelAccountOwnership(options:AccountOwnershipOptions):ProductionModelAccountOwnership{
+ return acquireAccount(options);
+}
+/** Boot-only original registry. Never initializes a missing or replacement
+ * directory, database or lock; check identity while the OS owner lock is held. */
+export function acquirePinnedProductionModelAccountOwnership(options:AccountOwnershipOptions,registryPin:string):ProductionModelAccountOwnership{
+ if(typeof registryPin!=='string'||registryPin.length!==64||!/^[0-9a-f]{64}$/.test(registryPin))throw Error('model_account_registry_pin_invalid');
+ return acquireAccount(options,registryPin);
+}
+function acquireAccount(options:AccountOwnershipOptions,registryPin?:string):ProductionModelAccountOwnership{
  options={...options};
- const r=openRegistry(options);let closed=false,enrolled:string|null=null;
+ const r=openRegistry(options,registryPin);let closed=false,enrolled:string|null=null;
  try{
   enrolled=quotaEnrolled(r.db);
-  const row=r.db.prepare('SELECT active_run FROM account_meta').get() as {active_run:string|null};
-  if(row.active_run!==null)throw Error('model_account_unresolved_run');
   r.db.exec('BEGIN IMMEDIATE');
-  try{r.db.prepare('INSERT INTO account_runs(run,resolution,evidence) VALUES (?,NULL,NULL)').run(options.runId);
+  try{
+   r.lock.assertOwned();
+   const row=r.db.prepare('SELECT active_run FROM account_meta').get() as {active_run:string|null};
+   if(row.active_run!==null)throw Error('model_account_unresolved_run');
+   r.db.prepare('INSERT INTO account_runs(run,resolution,evidence) VALUES (?,NULL,NULL)').run(options.runId);
    r.db.prepare('UPDATE account_meta SET active_run=?').run(options.runId);r.db.exec('COMMIT');
   }catch(e){r.db.exec('ROLLBACK');throw e;}
  }catch(e){r.close();throw e;}
