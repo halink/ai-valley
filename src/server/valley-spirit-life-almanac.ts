@@ -91,6 +91,12 @@ export function renderObjectiveNativeHearing(observedAtUs:string){
  const dayLengthUs=1_440_000_000n,day=BigInt(observedAtUs)/dayLengthUs;
  return Object.freeze({atUs:String(day*dayLengthUs),kind:'conversation-completed' as const,text:`第 ${day+1n} 日：一次当面发言被听见。`});
 }
+/** Local actual entry only; neither the later dwell nor a formal appointment. */
+export function renderObjectiveNativeShelter(observedAtUs:string){
+ if(!clock(observedAtUs))return null;
+ const dayLengthUs=1_440_000_000n,day=BigInt(observedAtUs)/dayLengthUs;
+ return Object.freeze({atUs:String(day*dayLengthUs),kind:'shelter-entered' as const,text:`第 ${day+1n} 日：有人进共屋避雨。`});
+}
 function canonicalSection(packet:ValleySpiritLifeAlmanacPacket,choice:Selection):ValleySpiritLifeAlmanacSection{
  const lines=choice.indices.map(n=>{
   const f=packet.source.facts[n-1];

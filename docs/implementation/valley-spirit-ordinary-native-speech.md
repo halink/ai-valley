@@ -12,4 +12,4 @@
 
 在已实际保存原生听见凭证的原档，主持程序可为一个确切事件固定另一项 Ed25519 审核人和 `{mode:'explicit-local-ordinary-native-hearing-editorial', worldId, eventId, reviewerPublicKeyPem}`。停止运行后使用 `openOrdinaryHearingEditorial(database, pin)`，用 `preview('publish')` 或 `preview('revoke')` 取待签项，由独立审核人在外部签署 `encodeOrdinaryHearingEditorialTerms(terms)`，以 `apply({terms,signature})` 检查。绑定原档、原生听见凭证与事件人物索引、原始时间、精确世界头及固定匿名句；独立于进餐、天气及旧生活授权。只允许一次签批发布及一次签批撤回，不开 HTTP 写口。
 
-在原档关闭自动步进并显式配置 `privateOrdinaryNativeHearingView: pin` 后，既有生活档案及世界标记才会对直接本机回环同源请求显示「第 N 日：一次当面发言被听见。」。仅公开游戏日，不提供精确听见分钟、话语、人物、位置、来源及是否回应。与进餐视图共同使用须匹配同一原档、两个不同审核密钥；优先显示日号较近的可用记录，同日固定优先听见，不以私有顺序排序。任一视图失效可回退到另一个仍获准视图。撤回、只删除撤回尾项、换审核人、复制文件或原生证据失效均不显示旧记录；不承诺防绕过本机锁并一致改写整份存档及其锚。默认不启用，未开放外部发布或模型。
+在原档关闭自动步进并显式配置 `privateOrdinaryNativeHearingView: pin` 后，既有生活档案及世界标记才会对直接本机回环同源请求显示「第 N 日：一次当面发言被听见。」。仅公开游戏日，不提供精确听见分钟、话语、人物、位置、来源及是否回应。与进餐视图共同使用须匹配同一原档、两个不同审核密钥；优先显示日号较近的可用记录，同日固定优先听见，不以私有顺序排序。任一视图失效可回退到另一个仍获准视图；另见[共屋入门](valley-spirit-ordinary-native-shelter.md)的三视图兼容契约。撤回、只删除撤回尾项、换审核人、复制文件或原生证据失效均不显示旧记录；不承诺防绕过本机锁并一致改写整份存档及其锚。默认不启用，未开放外部发布或模型。

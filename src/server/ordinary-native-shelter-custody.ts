@@ -111,6 +111,19 @@ export function openOrdinaryNativeShelterLease(owner:RuntimeOwnership,path:strin
     v.committed_revision===r.committed_revision&&v.at_us===r.at_us&&v.body===r.body)))throw Error('ordinary_native_shelter_readback');
    assertOwned();
   },
+  readEditorialSourceAtHead(db:DatabaseSync,w:World,receiptId:string){
+   if(isolated||!db.isTransaction||w.id!==worldId||w.mode!=='validation'||typeof receiptId!=='string'||!UUID.test(receiptId))return null;
+   try{
+    if(!exactHead(db,w))return null;
+    const found=read(db,w),row=found?.rows.find(r=>r.receipt_id===receiptId);
+    if(found)for(const [key,value] of found.current)seen.set(key,value);
+    if(!row)return null;
+    assertOwned();
+    const receipt=Object.freeze({worldId,receiptId:row.receipt_id,atUs:row.at_us,kind:'shelter-entered' as const});
+    return Object.freeze({receipt,witnessDigest:hash(JSON.stringify([SCOPE,row])),
+     receiptDigest:hash(JSON.stringify(['ordinary-native-shelter-receipt/v1',receipt]))});
+   }catch{isolated=true;return null;}
+  },
   latest(db:DatabaseSync,w:World){
    if(isolated||!db.isTransaction||w.id!==worldId||w.mode!=='validation')return null;
    try{

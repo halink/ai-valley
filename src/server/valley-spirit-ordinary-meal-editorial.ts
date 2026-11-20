@@ -5,13 +5,15 @@ import {acquireRuntimeOwnership,runtimeOwnershipAnchor,type RuntimeOwnership} fr
 import {decodeSavedWorld} from './save-preflight.js';
 import {openOrdinaryNativeMealLease} from './valley-spirit-meal-custody.js';
 import {openOrdinaryNativeSpeechLease} from './ordinary-native-speech-custody.js';
-import {renderObjectiveNativeHearing,renderObjectiveNativeMeal} from './valley-spirit-life-almanac.js';
+import {openOrdinaryNativeShelterLease} from './ordinary-native-shelter-custody.js';
+import {renderObjectiveNativeHearing,renderObjectiveNativeMeal,renderObjectiveNativeShelter} from './valley-spirit-life-almanac.js';
 import {valleySpiritLifeBinding} from './valley-spirit-life-facts.js';
 import {minuteToClimateUs} from '../world/mvp-climate.js';
 import type {World} from '../shared/types.js';
 
 export const ORDINARY_NATIVE_MEAL_VIEW='independently-reviewed-native-meal' as const;
 export const ORDINARY_NATIVE_HEARING_VIEW='independently-reviewed-native-hearing' as const;
+export const ORDINARY_NATIVE_SHELTER_VIEW='independently-reviewed-native-shelter' as const;
 const meal=Object.freeze({
  kind:'meal',schema:'ordinary-native-meal-editorial/v1',mode:'explicit-local-ordinary-native-meal-editorial',
  table:'valley_spirit_ordinary_native_meal_editorial',purpose:'local-anonymous-native-meal-no-other-disclosure',view:ORDINARY_NATIVE_MEAL_VIEW,
@@ -20,7 +22,11 @@ const hearing=Object.freeze({
  kind:'hearing',schema:'ordinary-native-hearing-editorial/v1',mode:'explicit-local-ordinary-native-hearing-editorial',
  table:'valley_spirit_ordinary_native_hearing_editorial',purpose:'local-anonymous-native-hearing-no-other-disclosure',view:ORDINARY_NATIVE_HEARING_VIEW,
 } as const);
-type Profile=typeof meal|typeof hearing;
+const shelter=Object.freeze({
+ kind:'shelter',schema:'ordinary-native-shelter-editorial/v1',mode:'explicit-local-ordinary-native-shelter-editorial',
+ table:'valley_spirit_ordinary_native_shelter_editorial',purpose:'local-anonymous-native-shelter-entry-no-other-disclosure',view:ORDINARY_NATIVE_SHELTER_VIEW,
+} as const);
+type Profile=typeof meal|typeof hearing|typeof shelter;
 const META_DDL='CREATE TABLE archive_meta (key TEXT PRIMARY KEY,value TEXT NOT NULL)';
 const MAX=4096;
 const hex=(v:unknown):v is string=>typeof v==='string'&&/^[0-9a-f]{64}$/.test(v);
@@ -31,39 +37,48 @@ const revision=(v:unknown):v is number=>typeof v==='number'&&Number.isSafeIntege
 const exact=(v:unknown,keys:readonly string[]):v is Record<string,unknown>=>!!v&&typeof v==='object'&&!Array.isArray(v)&&
  Object.keys(v).length===keys.length&&keys.every(k=>Object.hasOwn(v,k));
 const digest=(v:unknown)=>createHash('sha256').update(JSON.stringify(v),'utf8').digest('hex');
-const keys=['schema','scope','reviewerFingerprint','worldId','eventId','decision','priorVersion','priorDigest','headRevision',
+const termKeys=(profile:Profile)=>['schema','scope','reviewerFingerprint','worldId',selectorKey(profile),'decision','priorVersion','priorDigest','headRevision',
  'headAtUs','headDigest','observedAtUs','witnessDigest','receiptDigest','renderDigest'] as const;
+const selectorKey=(profile:Profile)=>profile.kind==='shelter'?'receiptId':'eventId';
+const validSelector=(profile:Profile,v:unknown,w:string):v is string=>profile.kind==='shelter'?
+ typeof v==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(v):eventId(v,w);
+type Selector<P extends Profile>=P extends typeof shelter?Readonly<{receiptId:string}>:Readonly<{eventId:string}>;
 
-type Config<P extends Profile>=Readonly<{mode:P['mode'];worldId:string;eventId:string;reviewerPublicKeyPem:string;}>;
+type Config<P extends Profile>=Readonly<{mode:P['mode'];worldId:string;reviewerPublicKeyPem:string;}>&Selector<P>;
 export type OrdinaryMealEditorialPin=Config<typeof meal>;
 export type OrdinaryHearingEditorialPin=Config<typeof hearing>;
-type Pinned<P extends Profile>=Readonly<{worldId:string;eventId:string;reviewer:KeyObject;fingerprint:string;}>&{readonly __profile?:P['kind']};
+export type OrdinaryShelterEditorialPin=Config<typeof shelter>;
+type Pinned<P extends Profile>=Readonly<{worldId:string;reviewer:KeyObject;fingerprint:string;}>&Selector<P>&{readonly __profile?:P['kind']};
 const pinProfiles=new WeakMap<object,Profile>();
 function pinEditorial<P extends Profile>(profile:P,value:unknown):Pinned<P>|null{
- if(!exact(value,['mode','worldId','eventId','reviewerPublicKeyPem'])||value.mode!==profile.mode||!worldId(value.worldId)||
-  !eventId(value.eventId,value.worldId)||typeof value.reviewerPublicKeyPem!=='string'||value.reviewerPublicKeyPem.length>256||
+ const key=selectorKey(profile);
+ if(!exact(value,['mode','worldId',key,'reviewerPublicKeyPem'])||value.mode!==profile.mode||!worldId(value.worldId)||
+  !validSelector(profile,value[key],value.worldId)||typeof value.reviewerPublicKeyPem!=='string'||value.reviewerPublicKeyPem.length>256||
   !/^-----BEGIN PUBLIC KEY-----\r?\n[A-Za-z0-9+/=]+\r?\n-----END PUBLIC KEY-----\r?\n?$/.test(value.reviewerPublicKeyPem))return null;
  try{
   const reviewer=createPublicKey(value.reviewerPublicKeyPem);
   if(reviewer.asymmetricKeyType!=='ed25519')return null;
-  const pin=Object.freeze({worldId:value.worldId,eventId:value.eventId,reviewer,
+  const pin=Object.freeze({worldId:value.worldId,[key]:value[key],reviewer,
    fingerprint:createHash('sha256').update(reviewer.export({type:'spki',format:'der'})).digest('hex')});
   pinProfiles.set(pin,profile);
-  return pin;
+  return pin as unknown as Pinned<P>;
  }catch{return null;}
 }
 export const pinOrdinaryMealEditorial=(value:unknown)=>pinEditorial(meal,value);
 export const pinOrdinaryHearingEditorial=(value:unknown)=>pinEditorial(hearing,value);
-interface EditorialTerms<P extends Profile> {
- readonly schema:P['schema'];readonly scope:string;readonly reviewerFingerprint:string;readonly worldId:string;readonly eventId:string;
+export const pinOrdinaryShelterEditorial=(value:unknown)=>pinEditorial(shelter,value);
+type EditorialTerms<P extends Profile> = Readonly<{
+ readonly schema:P['schema'];readonly scope:string;readonly reviewerFingerprint:string;readonly worldId:string;
  readonly decision:'publish'|'revoke';readonly priorVersion:0|1;readonly priorDigest:string;readonly headRevision:number;
  readonly headAtUs:string;readonly headDigest:string;readonly observedAtUs:string;readonly witnessDigest:string;
  readonly receiptDigest:string;readonly renderDigest:string;
-}
+}>&Selector<P>;
 export type OrdinaryMealEditorialTerms=EditorialTerms<typeof meal>;
 export type OrdinaryHearingEditorialTerms=EditorialTerms<typeof hearing>;
+export type OrdinaryShelterEditorialTerms=EditorialTerms<typeof shelter>;
 function encodeEditorial(profile:Profile,t:unknown):Buffer|null{
- if(!exact(t,keys)||t.schema!==profile.schema||!worldId(t.worldId)||!eventId(t.eventId,t.worldId)||
+ const keys=termKeys(profile);
+ if(!exact(t,keys)||t.schema!==profile.schema||!worldId(t.worldId)||!validSelector(profile,t[selectorKey(profile)],t.worldId)||
   !(t.decision==='publish'&&t.priorVersion===0||t.decision==='revoke'&&t.priorVersion===1)||
   !revision(t.headRevision)||!clock(t.headAtUs)||!clock(t.observedAtUs)||BigInt(t.observedAtUs)>BigInt(t.headAtUs)||
   ![t.scope,t.reviewerFingerprint,t.priorDigest,t.headDigest,t.witnessDigest,t.receiptDigest,t.renderDigest].every(hex))return null;
@@ -71,8 +86,9 @@ function encodeEditorial(profile:Profile,t:unknown):Buffer|null{
 }
 export const encodeOrdinaryMealEditorialTerms=(t:unknown)=>encodeEditorial(meal,t);
 export const encodeOrdinaryHearingEditorialTerms=(t:unknown)=>encodeEditorial(hearing,t);
+export const encodeOrdinaryShelterEditorialTerms=(t:unknown)=>encodeEditorial(shelter,t);
 type Signed<P extends Profile>=Readonly<{terms:EditorialTerms<P>;signature:string;}>;
-type Line<P extends Profile>=NonNullable<ReturnType<P extends typeof meal?typeof renderObjectiveNativeMeal:typeof renderObjectiveNativeHearing>>;
+type Line<P extends Profile>=NonNullable<ReturnType<P extends typeof meal?typeof renderObjectiveNativeMeal:P extends typeof hearing?typeof renderObjectiveNativeHearing:typeof renderObjectiveNativeShelter>>;
 interface ObjectiveLifeView<P extends Profile> {
  readonly status:'ready';readonly generatedBy:P['view'];
  readonly worldId:string;readonly sectionId:string;
@@ -82,10 +98,12 @@ interface ObjectiveLifeView<P extends Profile> {
 
 export type OrdinaryNativeMealLifeView=ObjectiveLifeView<typeof meal>;
 export type OrdinaryNativeHearingLifeView=ObjectiveLifeView<typeof hearing>;
+export type OrdinaryNativeShelterLifeView=ObjectiveLifeView<typeof shelter>;
 
 function openWithOwner<P extends Profile>(profile:P,owner:RuntimeOwnership,pin:Pinned<P>,writable:boolean){
  if(pinProfiles.get(pin)!==profile)throw Error('ordinary_native_editorial_profile');
- const {schema,table:TABLE}=profile;
+ const {schema,table:TABLE}=profile,keys=termKeys(profile),key=selectorKey(profile);
+ const selection=(value:Selector<P>)=>(value as unknown as Record<typeof key,string>)[key];
  const DDL='CREATE TABLE '+TABLE+' (version INTEGER PRIMARY KEY NOT NULL, body TEXT NOT NULL)';
  const err=(suffix:string)=>Error('ordinary_native_'+profile.kind+'_editorial_'+suffix);
  const actualOwner=runtimeOwnershipAnchor(owner);
@@ -98,10 +116,11 @@ function openWithOwner<P extends Profile>(profile:P,owner:RuntimeOwnership,pin:P
    throw err('file');
  };
  guard();
- const {worldId,eventId,reviewer,fingerprint}=pin;
+ const {worldId,reviewer,fingerprint}=pin,selected=selection(pin);
  const scope=digest([schema,worldId,String(file.dev),String(file.ino),fingerprint]);
  const native=profile.kind==='meal'?openOrdinaryNativeMealLease(owner,path,{scope:'ordinary-native-meal-custody/v1',worldId}):
-  openOrdinaryNativeSpeechLease(owner,path,{scope:'ordinary-native-addressed-speech-custody/v1',worldId});
+  profile.kind==='hearing'?openOrdinaryNativeSpeechLease(owner,path,{scope:'ordinary-native-addressed-speech-custody/v1',worldId}):
+  openOrdinaryNativeShelterLease(owner,path,{scope:'ordinary-native-shelter-entry-custody/v1',worldId});
  const db=new DatabaseSync(path,{readOnly:!writable});
  try{db.exec(writable?'PRAGMA trusted_schema=OFF; PRAGMA synchronous=FULL':'PRAGMA trusted_schema=OFF; PRAGMA query_only=ON');}
  catch(e){db.close();throw e;}
@@ -110,7 +129,7 @@ function openWithOwner<P extends Profile>(profile:P,owner:RuntimeOwnership,pin:P
   if(!exact(x,['terms','signature'])||typeof x.signature!=='string'||!/^[A-Za-z0-9_-]{86}$/.test(x.signature))return null;
   const bytes=encodeEditorial(profile,x.terms),t=x.terms as EditorialTerms<P>,s=Buffer.from(x.signature,'base64url');
   return bytes&&s.length===64&&s.toString('base64url')===x.signature&&scope===t.scope&&t.reviewerFingerprint===fingerprint&&
-   t.worldId===worldId&&t.eventId===eventId&&verify(null,bytes,reviewer,s)?{terms:Object.fromEntries(keys.map(k=>[k,t[k]])) as unknown as EditorialTerms<P>,signature:x.signature}:null;
+   t.worldId===worldId&&selection(t)===selected&&verify(null,bytes,reviewer,s)?{terms:Object.fromEntries(keys.map(k=>[k,(t as unknown as Record<string,unknown>)[k]])) as unknown as EditorialTerms<P>,signature:x.signature}:null;
  };
  const sameSource=(a:EditorialTerms<P>,b:EditorialTerms<P>)=>
   a.witnessDigest===b.witnessDigest&&a.receiptDigest===b.receiptDigest&&a.renderDigest===b.renderDigest&&a.observedAtUs===b.observedAtUs;
@@ -159,18 +178,20 @@ function openWithOwner<P extends Profile>(profile:P,owner:RuntimeOwnership,pin:P
  function state(){
   const log=readLog(),head=current();
   if(!head)return {log,native:null};
-  const proof=native.readEditorialSourceAtHead(db,head.world,eventId);
-  const line=proof&&(profile.kind==='meal'?renderObjectiveNativeMeal(proof.receipt.atUs):renderObjectiveNativeHearing(proof.receipt.atUs)) as Line<P>|null;
+  const proof=native.readEditorialSourceAtHead(db,head.world,selected);
+  const line=proof&&(profile.kind==='meal'?renderObjectiveNativeMeal(proof.receipt.atUs):profile.kind==='hearing'?
+   renderObjectiveNativeHearing(proof.receipt.atUs):renderObjectiveNativeShelter(proof.receipt.atUs)) as Line<P>|null;
   if(!proof||!line)return {log,native:null};
-  return {log,native:{head,proof,line,basis:{witnessDigest:proof.witnessDigest,receiptDigest:valleySpiritLifeBinding(proof.receipt).receiptDigest,
+  const receiptDigest='receiptDigest' in proof?proof.receiptDigest:valleySpiritLifeBinding(proof.receipt).receiptDigest;
+  return {log,native:{head,proof,line,basis:{witnessDigest:proof.witnessDigest,receiptDigest,
    observedAtUs:proof.receipt.atUs,renderDigest:digest(line)}}};
  }
  function propose(s:ReturnType<typeof state>,decision:'publish'|'revoke'):EditorialTerms<P>|null{
   if(!s.native||!(decision==='publish'&&s.log.body.length===0||decision==='revoke'&&s.log.body.length===1))return null;
   const {head,basis}=s.native,prior=s.log.entries[0]?.terms;
-  const terms={schema,scope,reviewerFingerprint:fingerprint,worldId,eventId,decision,priorVersion:decision==='publish'?0 as const:1 as const,
+  const terms={schema,scope,reviewerFingerprint:fingerprint,worldId,[key]:selected,decision,priorVersion:decision==='publish'?0 as const:1 as const,
    priorDigest:digest(s.log.body),headRevision:head.world.revision,headAtUs:head.atUs,headDigest:head.headDigest,
-   observedAtUs:basis.observedAtUs,witnessDigest:basis.witnessDigest,receiptDigest:basis.receiptDigest,renderDigest:basis.renderDigest};
+   observedAtUs:basis.observedAtUs,witnessDigest:basis.witnessDigest,receiptDigest:basis.receiptDigest,renderDigest:basis.renderDigest} as unknown as EditorialTerms<P>;
   return prior&&(!sameSource(prior,terms)||prior.headRevision>terms.headRevision||BigInt(prior.headAtUs)>BigInt(terms.headAtUs)||
    prior.headRevision===terms.headRevision&&(prior.headAtUs!==terms.headAtUs||prior.headDigest!==terms.headDigest))?null:terms;
  }
@@ -247,6 +268,7 @@ function openEditor<P extends Profile>(profile:P,database:string,options:Config<
 }
 export const openOrdinaryMealEditorial=(database:string,options:OrdinaryMealEditorialPin)=>openEditor(meal,database,options);
 export const openOrdinaryHearingEditorial=(database:string,options:OrdinaryHearingEditorialPin)=>openEditor(hearing,database,options);
+export const openOrdinaryShelterEditorial=(database:string,options:OrdinaryShelterEditorialPin)=>openEditor(shelter,database,options);
 /** Borrow runtime ownership on a physically read-only SQLite connection. */
 function openViewer<P extends Profile>(profile:P,owner:RuntimeOwnership,pin:Pinned<P>,head:()=>World){
  const reader=openWithOwner(profile,owner,pin,false);
@@ -254,3 +276,5 @@ function openViewer<P extends Profile>(profile:P,owner:RuntimeOwnership,pin:Pinn
 }
 export const openOrdinaryMealEditorialViewer=(owner:RuntimeOwnership,pin:Pinned<typeof meal>,head:()=>World)=>openViewer(meal,owner,pin,head);
 export const openOrdinaryHearingEditorialViewer=(owner:RuntimeOwnership,pin:Pinned<typeof hearing>,head:()=>World)=>openViewer(hearing,owner,pin,head);
+
+export const openOrdinaryShelterEditorialViewer=(owner:RuntimeOwnership,pin:Pinned<typeof shelter>,head:()=>World)=>openViewer(shelter,owner,pin,head);

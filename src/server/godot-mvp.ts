@@ -9,7 +9,7 @@ import {planMvpFallenFruitAdjacentApproach,unsafeMvpApproachEndpoint} from './va
 import {observeMvpFallenFruit} from '../world/mvp-fallen-fruit-resident.js';
 import {captureAddressedSpeech,type AddressedSpeechObservation} from '../world/addressed-speech.js';
 import type {ValleySpiritPublishedLifeView} from './valley-spirit-life-publisher.js';
-import {ORDINARY_NATIVE_HEARING_VIEW,ORDINARY_NATIVE_MEAL_VIEW,type OrdinaryNativeHearingLifeView,type OrdinaryNativeMealLifeView} from './valley-spirit-ordinary-meal-editorial.js';
+import {ORDINARY_NATIVE_HEARING_VIEW,ORDINARY_NATIVE_MEAL_VIEW,ORDINARY_NATIVE_SHELTER_VIEW,type OrdinaryNativeHearingLifeView,type OrdinaryNativeMealLifeView,type OrdinaryNativeShelterLifeView} from './valley-spirit-ordinary-meal-editorial.js';
 import {captureValleySpiritMvpMealStep,type ValleySpiritMvpMealWitness} from './valley-spirit-meal-custody.js';
 import {parseValleySpiritAlmanacId,parseValleySpiritTopicWindow,type ValleySpiritPublicReaders} from './valley-spirit-reader.js';
 import {parseWeatherArchiveQuery,publicWeatherProjection,type PublicWeatherFact,type ValleySpiritJournal} from './valley-spirit.js';
@@ -613,7 +613,7 @@ export function createMvpSession(options:{observeSessionWeather?:true;world?:Wor
  };
  return {get world(){return world;},snapshot,advance};
 }
-type LifeReadView=ValleySpiritPublishedLifeView|OrdinaryNativeMealLifeView|OrdinaryNativeHearingLifeView;
+type LifeReadView=ValleySpiritPublishedLifeView|OrdinaryNativeMealLifeView|OrdinaryNativeHearingLifeView|OrdinaryNativeShelterLifeView;
 type LifeReadViewer={latest(id:string):LifeReadView|null};
 function anonymousOrdinaryLifeLoopback(req:IncomingMessage){
  const port=req.socket.localPort,host='127.0.0.1:'+port;
@@ -627,7 +627,7 @@ function currentLifeView(viewer:LifeReadViewer|undefined,world:World|undefined,r
  try{
   if(!viewer||!world||world.mode!=='validation'||Object.hasOwn(world,'simulationOnly'))return null;
   const view=viewer.latest(world.id);
-  return view&&((view.generatedBy!==ORDINARY_NATIVE_MEAL_VIEW&&view.generatedBy!==ORDINARY_NATIVE_HEARING_VIEW)||anonymousOrdinaryLifeLoopback(req))&&
+  return view&&((view.generatedBy!==ORDINARY_NATIVE_MEAL_VIEW&&view.generatedBy!==ORDINARY_NATIVE_HEARING_VIEW&&view.generatedBy!==ORDINARY_NATIVE_SHELTER_VIEW)||anonymousOrdinaryLifeLoopback(req))&&
    BigInt(view.range.throughUs)<=BigInt(minuteToClimateUs(world.minute))?view:null;
  }catch{return null;}
 }
