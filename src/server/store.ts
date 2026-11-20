@@ -1,3 +1,6 @@
+import {readValleySpiritWeatherPermission} from './valley-spirit-permissions.js';
+import {inspectRulesAgedFruitBasis,unavailableAgedRulesPreflight} from './valley-spirit-rules-aged-preflight.js';
+import type {openRulesGeographyQueue,RulesGeographyQueueOptions} from './valley-spirit-rules-geography-queue.js';
 import {advanceRulesNativeFruitLot,appendRulesNativeFruitRenewal,pinRulesNativeFruitRenewal,readRulesNativeFruitLot,readRulesNativeFruitRenewal,type RulesNativeFruitRenewalPin} from './valley-spirit-rules-fruit-renewal.js';
 import {appendFormalAddressedSpeech,readFormalAddressedSpeech} from './valley-spirit-formal-speech-custody.js';
 import {appendFormalAppointmentChoices,readFormalAppointmentChoice} from './valley-spirit-formal-choice-custody.js';
@@ -1052,6 +1055,27 @@ export class WorldStore {
     return w&&w.id===head.id&&w.revision===head.revision&&w.minute===head.minute?readRulesNativeFruitLot(this.db,pin,w):null;
    }finally{this.db.exec('ROLLBACK');}
   }catch{return null;}
+ }
+ /** Both proofs are examined at one owned SQLite read snapshot. Queue
+  * review rechecks its same-save weather grant and sidecar bytes each time. */
+ readCurrentNativeRulesAgedPreflight(head:Readonly<{id:string;revision:number;minute:number}>,pin:RulesGeographyQueueOptions,
+  queue:ReturnType<typeof openRulesGeographyQueue>){
+  const native=this.nativeRulesFruitRenewal,unavailable=unavailableAgedRulesPreflight();
+  if(!native?.lotShelfLifeGameMinutes||native.worldId!==head.id||pin.worldId!==head.id||pin.site.sourceId!==native.sourceId)return unavailable;
+  try{
+   this.db.exec('BEGIN');
+   try{
+    const w=this.readWorld(false,false);
+    if(!w||w.id!==head.id||w.revision!==head.revision||w.minute!==head.minute||w.clock.paused)return unavailable;
+    const lot=readRulesNativeFruitLot(this.db,native,w);
+    if(!lot)return unavailable;
+    const grant=readValleySpiritWeatherPermission(this.db,w.id);
+    if(!grant?.publicWeather)return unavailable;
+    const verified=queue.review(w);
+    if(verified.status!=='geography_only'||verified.recordedProposal.permissionVersion!==grant.version)return unavailable;
+    return inspectRulesAgedFruitBasis(w,pin,verified,lot);
+   }finally{this.db.exec('ROLLBACK');}
+  }catch{return unavailable;}
  }
  readDeveloperMvpFruitSourceCredit(worldId:string){
   const owner=this.developerSpiritFixtureOwner;

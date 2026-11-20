@@ -1,3 +1,4 @@
+import {unavailableAgedRulesPreflight} from './valley-spirit-rules-aged-preflight.js';
 import {pinRulesNativeFruitRenewal,type RulesNativeFruitRenewalPin} from './valley-spirit-rules-fruit-renewal.js';
 import {openRulesGeographyQueue,pinRulesGeographyQueue,type RulesGeographyQueueOptions} from './valley-spirit-rules-geography-queue.js';
 import {nativeWeatherHourTransition} from './valley-spirit-weather-credit.js';
@@ -23,7 +24,7 @@ import {WorldStore} from './store.js';
 import {acquireRuntimeOwnership,type RuntimeOwnership} from './runtime-lock.js';
 import {assertGodotWebExport} from './godot-web.js';
 import type {World} from '../shared/types.js';
-export async function startPersistentRulesMvp(options:{database:string;port:number;webRoot?:string;autoStart?:boolean;tickMs?:number;privateSpiritShadow?:PersistentRulesShadowOptions;privateSpiritGeographyQueue?:RulesGeographyQueueOptions;privateNativeFruitRenewal?:RulesNativeFruitRenewalPin;privateLifeFixture?:PersistentRulesLifeFixture;privateSpeechCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string;nativeWeatherCredit?:true}>;privateMealCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string}>}){
+export async function startPersistentRulesMvp(options:{database:string;port:number;webRoot?:string;autoStart?:boolean;tickMs?:number;privateSpiritShadow?:PersistentRulesShadowOptions;privateSpiritGeographyQueue?:RulesGeographyQueueOptions;privateNativeFruitRenewal?:RulesNativeFruitRenewalPin;privateAgedFruitPreflight?:true;privateLifeFixture?:PersistentRulesLifeFixture;privateSpeechCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string;nativeWeatherCredit?:true}>;privateMealCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string}>}){
  if(typeof options.database!=='string'||!options.database.trim())throw Error('mvp_rules_database_required');
  if(!Number.isInteger(options.port)||options.port<0||options.port>65535)throw Error('godot_mvp_invalid_port');
  const tickMs=options.tickMs??500,shadowOptions=pinPersistentRulesShadowOptions(options.privateSpiritShadow);
@@ -33,6 +34,10 @@ export async function startPersistentRulesMvp(options:{database:string;port:numb
  const nativeRenewal=pinRulesNativeFruitRenewal(options.privateNativeFruitRenewal);
  if(options.privateNativeFruitRenewal!==undefined&&(!nativeRenewal||options.privateSpeechCustody!==undefined||options.privateMealCustody!==undefined))
   throw Error('mvp_rules_private_native_renewal_scope');
+ const agedPreflight=options.privateAgedFruitPreflight===true;
+ if(options.privateAgedFruitPreflight!==undefined&&(!agedPreflight||!queuePin||!nativeRenewal?.lotShelfLifeGameMinutes||
+   nativeRenewal.worldId!==queuePin.worldId||nativeRenewal.sourceId!==queuePin.site.sourceId))
+  throw Error('mvp_rules_private_aged_preflight_scope');
  const speechPin=options.privateSpeechCustody===undefined?undefined:structuredClone(options.privateSpeechCustody);
  if(options.privateSpeechCustody!==undefined&&(!speechPin||!speechPin.fixture||typeof speechPin.worldId!=='string'||!/^godot-mvp-[A-Za-z0-9_-]{1,160}$/.test(speechPin.worldId)||
     Object.keys(speechPin).some(k=>!['fixture','worldId','nativeWeatherCredit'].includes(k))||
@@ -136,6 +141,14 @@ export async function startPersistentRulesMvp(options:{database:string;port:numb
   };
   const readPrivateNativeFruitRenewal=()=>nativeRenewal&&session&&!session.world.clock.paused?store?.readCurrentNativeRulesFruitRenewal(session.world)??null:null;
   const readPrivateNativeFruitLot=()=>nativeRenewal?.lotShelfLifeGameMinutes&&session&&!session.world.clock.paused?store?.readCurrentNativeRulesFruitLot(session.world)??null:null;
-  return {session,server,snapshot,readPrivateSpiritCandidate,readPrivateSpiritGeographicProposal,readPrivateNativeFruitRenewal,readPrivateNativeFruitLot,close};
+  const readPrivateAgedFruitPreflight=()=>{
+   if(!agedPreflight)return {status:'disabled',executionAuthorized:false} as const;
+   if(!owner||!store||!geographicProposalQueue||!session||session.world.clock.paused||!queuePin)return unavailableAgedRulesPreflight();
+   try{
+    owner.assertOwned();
+    return store.readCurrentNativeRulesAgedPreflight(session.world,queuePin,geographicProposalQueue);
+   }catch{return unavailableAgedRulesPreflight();}
+  };
+  return {session,server,snapshot,readPrivateSpiritCandidate,readPrivateSpiritGeographicProposal,readPrivateNativeFruitRenewal,readPrivateNativeFruitLot,readPrivateAgedFruitPreflight,close};
  }catch(error){await close();throw error;}
 }
