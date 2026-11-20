@@ -349,7 +349,7 @@ func _build_drawer() -> void:
 	spirit_almanac_text = _label(panes.spirit, "", 15, Art.INK, true)
 	spirit_almanac_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	spirit_almanac_text.hide()
-	spirit_life_button = _button(panes.spirit, "生活年鉴（离线）", func(): spirit_life_requested.emit(), "PaperButton", 16)
+	spirit_life_button = _button(panes.spirit, "生活年鉴", func(): spirit_life_requested.emit(), "PaperButton", 16)
 	spirit_life_button.hide()
 	spirit_life_text = _label(panes.spirit, "", 15, Art.INK)
 	spirit_life_text.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY

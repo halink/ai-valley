@@ -163,7 +163,7 @@ static func almanac_presentation(value: Variant, context: Dictionary) -> String:
 	if not _exact(entry.origin, ["schemaVersion", "kind"]) or not _eq_number(entry.origin.schemaVersion, 1): return ""
 	var attribution := ""
 	if _eq_string(entry.origin.kind, "offline-synthetic"):
-		attribution = "天气年鉴 · 离线"
+		attribution = "天气年鉴"
 	elif _eq_string(entry.origin.kind, "unverified-admission"):
 		attribution = "天气年鉴 · 生成方式未核验"
 	if attribution.is_empty(): return ""
