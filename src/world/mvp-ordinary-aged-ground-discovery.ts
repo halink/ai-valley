@@ -5,7 +5,7 @@ import {minuteToClimateUs,parseClimateUs} from './mvp-climate.js';
 import {validateMvpGroundFruitState} from './mvp-ground-fruit.js';
 import {captureMvpNativeObservationPhase} from './mvp-native-observation-phase.js';
 
-interface GroundDiscoveryHead {readonly worldId:string;readonly revision:number;readonly atUs:string}
+export interface GroundDiscoveryHead {readonly worldId:string;readonly revision:number;readonly atUs:string}
 /** Trusted owning port only: must verify the exact committed ground row,
  * receipt, live custody and head together. Empty normal installations have
  * no such port. This interface does not let callers submit a candidate lot. */
@@ -15,7 +15,7 @@ export interface OrdinaryAgedGroundDiscoveryRead {
   fruit:MvpGroundFruit;bornUs:string;expiresUs:string;
  }>|null;
 }
-interface NativeOrdinaryAgedDiscovery {
+export interface NativeOrdinaryAgedDiscovery {
  readonly schema:'native-ordinary-aged-ground-observation/v1';
  readonly worldId:string;readonly residentId:string;readonly effectId:string;readonly receiptDigest:string;
  readonly discoveryId:string;readonly atUs:string;readonly fromRevision:number;readonly observedRevision:number;
@@ -24,29 +24,32 @@ interface NativeOrdinaryAgedDiscovery {
 const exact=(v:unknown,keys:readonly string[])=>!!v&&typeof v==='object'&&!Array.isArray(v)&&
  Object.keys(v).length===keys.length&&keys.every(k=>Object.hasOwn(v,k));
 
+export function ordinaryAgedGroundObservationWorld(draft:World):boolean{
+ return draft.mode==='validation'&&!Object.hasOwn(draft,'simulationOnly')&&!draft.clock.paused&&
+  !!draft.mvpClimate&&!Object.hasOwn(draft.mvpClimate,'spiritEffects')&&!Object.hasOwn(draft.mvpClimate,'spiritFruitSettlement');
+}
+export function readOrdinaryAgedGroundObservationHead(draft:World,authority:OrdinaryAgedGroundDiscoveryRead){
+ try{
+  if(!ordinaryAgedGroundObservationWorld(draft)||!Number.isSafeInteger(draft.revision)||draft.revision<0)return null;
+  const h=Object.freeze({worldId:draft.id,revision:draft.revision,atUs:minuteToClimateUs(draft.minute)});
+  if(draft.mvpClimate?.lastUs!==h.atUs)return null;
+  const r=structuredClone(authority.readExactActiveLot(h));
+  if(!r||!exact(r,['schema','worldId','revision','atUs','receiptDigest','fruit','bornUs','expiresUs'])||
+   r.schema!=='ordinary-active-aged-ground-observation/v1'||r.worldId!==h.worldId||r.revision!==h.revision||r.atUs!==h.atUs||
+   typeof r.receiptDigest!=='string'||!/^[a-f0-9]{64}$/u.test(r.receiptDigest))return null;
+  validateMvpGroundFruitState(draft,{version:1,items:[r.fruit]});
+  const before=parseClimateUs(h.atUs),born=parseClimateUs(r.bornUs),expires=parseClimateUs(r.expiresUs);
+  if(born>parseClimateUs(r.fruit.placedUs)||before+1_000_000n>=expires)return null;
+  return {h,r,before};
+ }catch{return null;}
+}
+
 /** Internal detached phase. Calls the native draft advancement exactly once
  * even if evidence is missing or invalid. Never asserts commit, first-durable
  * discovery, knowledge transfer, placement, pickup, or any ordinary enablement. */
 export function captureOrdinaryAgedGroundDiscovery<T>(draft:World,authority:OrdinaryAgedGroundDiscoveryRead,advance:()=>T){
  const none=()=>Object.freeze([] as NativeOrdinaryAgedDiscovery[]);
- const ordinary=()=>draft.mode==='validation'&&!Object.hasOwn(draft,'simulationOnly')&&!draft.clock.paused&&
-  !!draft.mvpClimate&&!Object.hasOwn(draft.mvpClimate,'spiritEffects')&&!Object.hasOwn(draft.mvpClimate,'spiritFruitSettlement');
- const head=()=>{
-  try{
-   if(!ordinary()||!Number.isSafeInteger(draft.revision)||draft.revision<0)return null;
-   const h=Object.freeze({worldId:draft.id,revision:draft.revision,atUs:minuteToClimateUs(draft.minute)});
-   if(draft.mvpClimate?.lastUs!==h.atUs)return null;
-   const r=structuredClone(authority.readExactActiveLot(h));
-   if(!r||!exact(r,['schema','worldId','revision','atUs','receiptDigest','fruit','bornUs','expiresUs'])||
-    r.schema!=='ordinary-active-aged-ground-observation/v1'||r.worldId!==h.worldId||r.revision!==h.revision||r.atUs!==h.atUs||
-    typeof r.receiptDigest!=='string'||!/^[a-f0-9]{64}$/u.test(r.receiptDigest))return null;
-   validateMvpGroundFruitState(draft,{version:1,items:[r.fruit]});
-   const before=parseClimateUs(h.atUs),born=parseClimateUs(r.bornUs),expires=parseClimateUs(r.expiresUs);
-   if(born>parseClimateUs(r.fruit.placedUs)||before+1_000_000n>=expires)return null;
-   return {h,r,before};
-  }catch{return null;}
- };
- const selected=head();
+ const selected=readOrdinaryAgedGroundObservationHead(draft,authority);
  if(!selected)return {result:advance(),observed:none()};
  const {h,r,before}=selected;
  // The engine records only the real per-resident post-activity observe phase.
@@ -57,7 +60,7 @@ export function captureOrdinaryAgedGroundDiscovery<T>(draft:World,authority:Ordi
  if(!captured)return {result:advanced?result:advance(),observed:none()};
  try{
   const atUs=minuteToClimateUs(draft.minute);
-  if(!ordinary()||draft.id!==h.worldId||draft.mvpClimate?.lastUs!==atUs||
+  if(!ordinaryAgedGroundObservationWorld(draft)||draft.id!==h.worldId||draft.mvpClimate?.lastUs!==atUs||
    parseClimateUs(atUs)!==before+1_000_000n||draft.revision<=h.revision||
    !Number.isSafeInteger(draft.revision))return {result,observed:none()};
   const seen=new Set<string>(),observed:NativeOrdinaryAgedDiscovery[]=[];
