@@ -1,3 +1,6 @@
+import {readAtomicNativeRulesRenewal} from './godot-mvp.js';
+import {lstatSync} from 'node:fs';
+import {runtimeOwnershipAnchor,type RuntimeOwnership} from './runtime-lock.js';
 import {gzipSync} from 'node:zlib';
 import {createHash} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
@@ -40,12 +43,13 @@ function valid(p:Renewal){
   p.closingQuantity-p.openingQuantity===p.scalarNetChange&&typeof p.creditedAtUs==='string'&&/^[1-9][0-9]{0,15}$/u.test(p.creditedAtUs)&&
   hex.test(p.worldDigest);
 }
-function available(db:DatabaseSync){
- if(db.prepare("SELECT 1 FROM sqlite_temp_schema WHERE lower(name) IN ('worlds',?) OR lower(tbl_name) IN ('worlds',?)").get(table,table))
+function available(db:DatabaseSync,name=table){
+ const expected=ddl.replace(table,name);
+ if(db.prepare("SELECT 1 FROM sqlite_temp_schema WHERE lower(name) IN ('worlds',?) OR lower(tbl_name) IN ('worlds',?)").get(name,name))
   throw Error('rules_native_renewal_temp_shadow');
- const found=db.prepare('SELECT type,sql FROM sqlite_schema WHERE name=? COLLATE NOCASE').get(table);
+ const found=db.prepare('SELECT type,sql FROM main.sqlite_schema WHERE name=? COLLATE NOCASE').get(name);
  if(!found)return false;
- if(found.type!=='table'||found.sql!==ddl||db.prepare("SELECT 1 FROM sqlite_schema WHERE lower(tbl_name)=? AND type IN ('trigger','index')").get(table))
+ if(found.type!=='table'||found.sql!==expected||db.prepare("SELECT 1 FROM main.sqlite_schema WHERE lower(tbl_name)=? AND type IN ('trigger','index')").get(name))
   throw Error('rules_native_renewal_schema');
  return true;
 }
@@ -71,18 +75,18 @@ function validV2(p:LotCheckpoint){
  return r===null||valid(r)&&r.worldId===p.worldId&&r.sourceId===p.sourceId&&r.x===p.x&&r.y===p.y&&r.revision===p.revision&&
   r.creditedAtUs===p.atUs&&r.closingQuantity===p.balance&&r.worldDigest===p.worldDigest;
 }
-function stored(db:DatabaseSync):Renewal|LotCheckpoint {
- const rows=db.prepare(`SELECT slot,digest,CASE WHEN length(CAST(body AS BLOB))<=4096 THEN body END AS body FROM main.${table} LIMIT 2`).all();
+function stored(db:DatabaseSync,name=table):Renewal|LotCheckpoint {
+ const rows=db.prepare(`SELECT slot,digest,CASE WHEN length(CAST(body AS BLOB))<=4096 THEN body END AS body FROM main.${name} LIMIT 2`).all();
  if(rows.length!==1||rows[0].slot!==1||typeof rows[0].body!=='string'||hash(rows[0].body)!==rows[0].digest)
   throw Error('rules_native_renewal_corrupt');
  const p=JSON.parse(rows[0].body) as Renewal|LotCheckpoint;
  if(p?.schemaVersion===1? !valid(p):!validV2(p as LotCheckpoint))throw Error('rules_native_renewal_invalid');
  return p;
 }
-function put(db:DatabaseSync,exists:boolean,row:Renewal|LotCheckpoint){
- if(!exists)db.exec(ddl);
+function put(db:DatabaseSync,exists:boolean,row:Renewal|LotCheckpoint,name=table){
+ if(!exists)db.exec(ddl.replace(table,name));
  const body=JSON.stringify(row);
- db.prepare(`INSERT INTO main.${table} VALUES (1,?,?) ON CONFLICT(slot) DO UPDATE SET body=excluded.body,digest=excluded.digest`).run(body,hash(body));
+ db.prepare(`INSERT INTO main.${name} VALUES (1,?,?) ON CONFLICT(slot) DO UPDATE SET body=excluded.body,digest=excluded.digest`).run(body,hash(body));
 }
 function digestHead(db:DatabaseSync,w:World){
  const row=db.prepare('SELECT revision,state FROM main.worlds WHERE id=?').get(w.id);
@@ -129,7 +133,7 @@ export function readRulesNativeFruitRenewal(db:DatabaseSync,p:RulesNativeFruitRe
 
 /** Advance the same private checkpoint only along audited native flow. The caller
  * has bound its flow to this original before/after draft and world transaction. */
-export function advanceRulesNativeFruitLot(db:DatabaseSync,p:RulesNativeFruitRenewalPin,prior:World,w:World,flow:MvpFruitFlowBatch){
+function advanceLot(db:DatabaseSync,p:RulesNativeFruitRenewalPin,prior:World,w:World,flow:MvpFruitFlowBatch,name=table){
  const before=source(prior,p),after=source(w,p),shelf=p.lotShelfLifeGameMinutes;
  if(db.isTransaction===false||!shelf||!before||!after||prior.clock.paused||w.clock.paused||w.minute!==prior.minute+1||
   flow.worldId!==w.id||flow.fromRevision!==prior.revision||flow.toRevision!==w.revision||
@@ -143,7 +147,7 @@ export function advanceRulesNativeFruitLot(db:DatabaseSync,p:RulesNativeFruitRen
  const v=native[0]?.kind==='renewal'?native[0].witness:null;
  const gathered=flow.operations.some(op=>op.kind==='gather'&&op.sourceId===p.sourceId);
  if(native.length>1||v&&!isNativeMvpFruitRenewalWitness(v))throw Error('rules_native_fruit_lot_non_native_credit');
- const exists=available(db),old=exists?stored(db):null;
+ const exists=available(db,name),old=exists?stored(db,name):null;
  if(old&&(old.worldId!==p.worldId||old.sourceId!==p.sourceId||old.revision>prior.revision||
   old.schemaVersion===2&&old.shelfLife!==shelf))throw Error('rules_native_fruit_lot_lineage');
  // A v1 ordinary aggregate checkpoint never establishes unit age. If a
@@ -169,13 +173,13 @@ export function advanceRulesNativeFruitLot(db:DatabaseSync,p:RulesNativeFruitRen
  const row:LotCheckpoint={schemaVersion:2,worldId:w.id,sourceId:p.sourceId,x:after.at.x,y:after.at.y,revision:w.revision,atUs:flow.toUs,
   balance:after.amount,worldDigest,shelfLife:shelf,lot,renewal};
  if(!validV2(row))throw Error('rules_native_fruit_lot_invalid');
- put(db,exists,row);
- if(JSON.stringify(stored(db))!==JSON.stringify(row))throw Error('rules_native_fruit_lot_readback');
+ put(db,exists,row,name);
+ if(JSON.stringify(stored(db,name))!==JSON.stringify(row))throw Error('rules_native_fruit_lot_readback');
 }
-export function readRulesNativeFruitLot(db:DatabaseSync,p:RulesNativeFruitRenewalPin,w:World){
+function readLot(db:DatabaseSync,p:RulesNativeFruitRenewalPin,w:World,name=table){
  const r=source(w,p);
- if(!p.lotShelfLifeGameMinutes||!r||w.clock.paused||!available(db))return null;
- const row=stored(db);
+ if(!p.lotShelfLifeGameMinutes||!r||w.clock.paused||!available(db,name))return null;
+ const row=stored(db,name);
  if(row.schemaVersion!==2||row.shelfLife!==p.lotShelfLifeGameMinutes||row.worldId!==w.id||row.sourceId!==p.sourceId||
   row.revision!==w.revision||row.worldDigest!==digestHead(db,w)||row.atUs!==w.mvpClimate?.lastUs||row.atUs!==minuteToClimateUs(w.minute)||
   row.x!==r.at.x||row.y!==r.at.y||row.balance!==r.amount||!row.lot)return null;
@@ -196,4 +200,95 @@ export function consumeRulesNativeFruitLot(db:DatabaseSync,p:RulesNativeFruitRen
  const entry={...old,revision:after.revision,balance:next.amount,worldDigest:head,lot:null,renewal:null};
  put(db,true,entry);
  if(JSON.stringify(stored(db))!==JSON.stringify(entry))throw Error('disposable_native_aged_transfer_lot_cas');
+}
+
+export function advanceRulesNativeFruitLot(db:DatabaseSync,p:RulesNativeFruitRenewalPin,prior:World,w:World,flow:MvpFruitFlowBatch){
+ return advanceLot(db,p,prior,w,flow);
+}
+export function readRulesNativeFruitLot(db:DatabaseSync,p:RulesNativeFruitRenewalPin,w:World){return readLot(db,p,w);}
+
+const SLOT_NAMES=[1,2,3,4].map(n=>'valley_spirit_rules_multisource_fruit_'+n);
+const MANIFEST='valley_spirit_rules_multisource_fruit_owner';
+const MANIFEST_DDL='CREATE TABLE '+MANIFEST+' (slot INTEGER PRIMARY KEY NOT NULL CHECK(slot=1), binding TEXT NOT NULL)';
+type SourceSite=Readonly<{sourceId:string;x:number;y:number}>;
+export type RulesNativeMultiFruitPin=Readonly<{scope:'ordinary-multi-native-fruit-lots/v1';worldId:string;lotShelfLifeGameMinutes:number;sites:readonly SourceSite[]}>;
+export function pinRulesNativeMultiFruit(v:unknown):RulesNativeMultiFruitPin|null{
+ try{
+  const p=structuredClone(v) as RulesNativeMultiFruitPin;
+  if(!p||!exact(p,['scope','worldId','lotShelfLifeGameMinutes','sites'])||p.scope!=='ordinary-multi-native-fruit-lots/v1'||
+   typeof p.worldId!=='string'||!worldPattern.test(p.worldId)||!natural(p.lotShelfLifeGameMinutes)||
+   p.lotShelfLifeGameMinutes<1||p.lotShelfLifeGameMinutes>1440||!Array.isArray(p.sites)||p.sites.length<2||p.sites.length>4||
+   !p.sites.every(s=>s&&exact(s,['sourceId','x','y'])&&typeof s.sourceId==='string'&&sourcePattern.test(s.sourceId)&&natural(s.x)&&natural(s.y)&&s.x<=4095&&s.y<=4095)||
+   new Set(p.sites.map(s=>s.sourceId)).size!==p.sites.length||new Set(p.sites.map(s=>s.x+':'+s.y)).size!==p.sites.length)return null;
+  return Object.freeze({...p,sites:Object.freeze(p.sites.map(s=>Object.freeze({...s})).sort((a,b)=>a.sourceId<b.sourceId?-1:a.sourceId>b.sourceId?1:0))});
+ }catch{return null;}
+}
+
+/** Bounded read/capture sidecar; lane names are constants, never caller SQL. */
+export function openRulesNativeMultiFruitLease(owner:RuntimeOwnership,path:string,raw:RulesNativeMultiFruitPin){
+ const o=runtimeOwnershipAnchor(owner),pin=pinRulesNativeMultiFruit(raw);
+ if(!o||o.database!==path||!pin)throw Error('ordinary_multi_fruit_requires_owner');
+ o.assertOwned();
+ const initial=lstatSync(path,{bigint:true});
+ if(!initial.isFile()||initial.nlink!==1n)throw Error('ordinary_multi_fruit_file');
+ const binding=hash(JSON.stringify([pin.scope,pin.worldId,pin.lotShelfLifeGameMinutes,pin.sites,String(initial.dev),String(initial.ino)]));
+ let isolated=false;
+ const guard=()=>{
+  o.assertOwned();
+  const f=lstatSync(path,{bigint:true});
+  if(!f.isFile()||f.nlink!==1n||f.dev!==initial.dev||f.ino!==initial.ino)throw Error('ordinary_multi_fruit_file');
+ };
+ const manifest=(db:DatabaseSync)=>{
+  guard();
+  if(db.prepare("SELECT 1 FROM sqlite_temp_schema WHERE lower(name)=? OR lower(tbl_name)=?").get(MANIFEST,MANIFEST))
+   throw Error('ordinary_multi_fruit_manifest_shadow');
+  const t=db.prepare('SELECT type,sql FROM main.sqlite_schema WHERE lower(name)=?').get(MANIFEST);
+  if(!t){
+   if(SLOT_NAMES.some(name=>available(db,name)))throw Error('ordinary_multi_fruit_manifest_missing');
+   return false;
+  }
+  if(t.type!=='table'||t.sql!==MANIFEST_DDL||db.prepare("SELECT 1 FROM main.sqlite_schema WHERE lower(tbl_name)=? AND type IN ('trigger','index')").get(MANIFEST))
+   throw Error('ordinary_multi_fruit_manifest_schema');
+  const rows=db.prepare('SELECT slot,binding FROM main.'+MANIFEST+' LIMIT 2').all();
+  if(rows.length!==1||rows[0].slot!==1||rows[0].binding!==binding)throw Error('ordinary_multi_fruit_manifest_scope');
+  for(const [i,name] of SLOT_NAMES.entries())if(available(db,name)&&i>=pin.sites.length)throw Error('ordinary_multi_fruit_extra_slot');
+  return true;
+ };
+ const nativePin=(site:SourceSite)=>({worldId:pin.worldId,sourceId:site.sourceId,lotShelfLifeGameMinutes:pin.lotShelfLifeGameMinutes});
+ const matching=(w:World,site:SourceSite)=>{
+  const r=source(w,nativePin(site));
+  return r?.at.x===site.x&&r.at.y===site.y;
+ };
+ return Object.freeze({
+  worldId:pin.worldId,
+  append(db:DatabaseSync,prior:World,w:World,flow:MvpFruitFlowBatch){
+   if(isolated)return;
+   if(!db.isTransaction||readAtomicNativeRulesRenewal(prior,w)?.flow!==flow||w.id!==pin.worldId||prior.id!==pin.worldId||Object.hasOwn(w,'mvpSeasonalModelVersion')||
+    !pin.sites.every(s=>matching(prior,s)&&matching(w,s)))throw Error('ordinary_multi_fruit_scope');
+   const h=digestHead(db,w);
+   if(!h||h!==hash(gzipSync(JSON.stringify(w),{level:1})))throw Error('ordinary_multi_fruit_head');
+   if(!manifest(db)){
+    db.exec(MANIFEST_DDL);
+    db.prepare('INSERT INTO main.'+MANIFEST+' VALUES(1,?)').run(binding);
+   }
+   for(const [i,s] of pin.sites.entries())advanceLot(db,nativePin(s),prior,w,flow,SLOT_NAMES[i]);
+   if(digestHead(db,w)!==h||!manifest(db))throw Error('ordinary_multi_fruit_readback');
+  },
+  inspect(db:DatabaseSync,w:World){
+   if(isolated||!db.isTransaction||w.id!==pin.worldId||Object.hasOwn(w,'mvpSeasonalModelVersion'))return null;
+   try{
+    if(!manifest(db)||!pin.sites.every(s=>matching(w,s)))return null;
+    const h=digestHead(db,w);
+    if(!h||h!==hash(gzipSync(JSON.stringify(w),{level:1})))return null;
+    const lots=pin.sites.flatMap((s,i)=>{
+     const lot=readLot(db,nativePin(s),w,SLOT_NAMES[i]);
+     return lot?[Object.freeze({...lot,sourceAt:Object.freeze({x:s.x,y:s.y})})]:[];
+    });
+    guard();
+    return Object.freeze({status:'ordinary-native-multiple-source-coverage' as const,worldId:w.id,revision:w.revision,
+     atUs:minuteToClimateUs(w.minute),lots:Object.freeze(lots),selectionAuthorized:false as const,executionAuthorized:false as const});
+   }catch{isolated=true;return null;}
+  },
+  isolate(){isolated=true;},
+ });
 }

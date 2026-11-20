@@ -16,7 +16,7 @@ import {createFreshDisposableRulesStorage,isDisposableRulesScratchPath} from './
 import {inspectOrdinaryAgedG1Advisory,prepareOrdinaryAgedG1ReviewEncoding,pinOrdinaryAgedG1Review,unavailableOrdinaryAgedG1,type OrdinaryAgedG1ReviewOptions} from './valley-spirit-ordinary-aged-g1-review.js';
 import {canInstallEmptyOrdinaryAgedGround,hasNativeEmptyGroundCheckpoint,openEmptyOrdinaryAgedGround,pinOrdinaryAgedGround,type OrdinaryAgedGroundPin} from './valley-spirit-ordinary-aged-ground.js';
 import {unavailableAgedRulesPreflight} from './valley-spirit-rules-aged-preflight.js';
-import {pinRulesNativeFruitRenewal,type RulesNativeFruitRenewalPin} from './valley-spirit-rules-fruit-renewal.js';
+import {pinRulesNativeMultiFruit,type RulesNativeMultiFruitPin,pinRulesNativeFruitRenewal,type RulesNativeFruitRenewalPin} from './valley-spirit-rules-fruit-renewal.js';
 import {openRulesGeographyQueue,pinRulesGeographyQueue,type RulesGeographyQueueOptions} from './valley-spirit-rules-geography-queue.js';
 import {nativeWeatherHourTransition} from './valley-spirit-weather-credit.js';
 import {dirname,join} from 'node:path';
@@ -41,7 +41,7 @@ import {WorldStore} from './store.js';
 import {acquireRuntimeOwnership,type RuntimeOwnership} from './runtime-lock.js';
 import {assertGodotWebExport} from './godot-web.js';
 import type {World} from '../shared/types.js';
-type PersistentRulesOptions={database:string;port:number;webRoot?:string;autoStart?:boolean;tickMs?:number;privateSpiritShadow?:PersistentRulesShadowOptions;privateSpiritGeographyQueue?:RulesGeographyQueueOptions;privateNativeFruitRenewal?:RulesNativeFruitRenewalPin;privateAgedFruitPreflight?:true;privateEmptyAgedGround?:OrdinaryAgedGroundPin;privateNativeEmptyAgedGround?:true;privateOrdinaryAgedG1Review?:OrdinaryAgedG1ReviewOptions;privateOrdinaryAgedG1Decision?:true;privateOrdinaryG2BlockedHandoff?:OrdinaryG2BlockedHandoffOptions;privateLifeFixture?:PersistentRulesLifeFixture;privateSpeechCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string;nativeWeatherCredit?:true}>;privateOrdinaryNativeMeal?:OrdinaryNativeMealOptions;privateOrdinaryNativeSpeech?:OrdinaryNativeSpeechOptions;privateOrdinaryNativeShelter?:OrdinaryNativeShelterOptions;privateOrdinaryNativeMealView?:OrdinaryMealEditorialPin;privateOrdinaryNativeHearingView?:OrdinaryHearingEditorialPin;privateOrdinaryNativeShelterView?:OrdinaryShelterEditorialPin;privateMealCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string}>};
+type PersistentRulesOptions={database:string;port:number;webRoot?:string;autoStart?:boolean;tickMs?:number;privateSpiritShadow?:PersistentRulesShadowOptions;privateSpiritGeographyQueue?:RulesGeographyQueueOptions;privateNativeFruitRenewal?:RulesNativeFruitRenewalPin;privateOrdinaryMultiFruit?:RulesNativeMultiFruitPin;privateAgedFruitPreflight?:true;privateEmptyAgedGround?:OrdinaryAgedGroundPin;privateNativeEmptyAgedGround?:true;privateOrdinaryAgedG1Review?:OrdinaryAgedG1ReviewOptions;privateOrdinaryAgedG1Decision?:true;privateOrdinaryG2BlockedHandoff?:OrdinaryG2BlockedHandoffOptions;privateLifeFixture?:PersistentRulesLifeFixture;privateSpeechCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string;nativeWeatherCredit?:true}>;privateOrdinaryNativeMeal?:OrdinaryNativeMealOptions;privateOrdinaryNativeSpeech?:OrdinaryNativeSpeechOptions;privateOrdinaryNativeShelter?:OrdinaryNativeShelterOptions;privateOrdinaryNativeMealView?:OrdinaryMealEditorialPin;privateOrdinaryNativeHearingView?:OrdinaryHearingEditorialPin;privateOrdinaryNativeShelterView?:OrdinaryShelterEditorialPin;privateMealCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string}>};
 export async function startPersistentRulesMvp(options:PersistentRulesOptions){
  if(typeof options.database!=='string'||!options.database.trim())throw Error('mvp_rules_database_required');
  if(isDisposableRulesScratchPath(options.database))throw Error('disposable_native_rules_no_http');
@@ -226,6 +226,10 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
  const nativeLifePins=[ordinaryHearingView,ordinaryMealView,ordinaryShelterView].filter(p=>p!==null);
  if(new Set(nativeLifePins.map(p=>p.worldId)).size>1||new Set(nativeLifePins.map(p=>p.fingerprint)).size!==nativeLifePins.length)
   throw Error('ordinary_native_life_view_independent_scope');
+ const ordinaryMultiFruit=pinRulesNativeMultiFruit(options.privateOrdinaryMultiFruit);
+ if(options.privateOrdinaryMultiFruit!==undefined&&(!ordinaryMultiFruit||disposable||options.autoStart!==false||
+  Object.keys(options).some(k=>k.startsWith('private')&&k!=='privateOrdinaryMultiFruit')))
+  throw Error('ordinary_multi_fruit_explicit_scope');
  const custodyPin=speechPin??mealPin;
  const weatherCredit=speechPin?.nativeWeatherCredit===true;
  if(!Number.isFinite(tickMs)||tickMs<100)throw Error('mvp_rules_invalid_tick');
@@ -261,7 +265,7 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
    if(mealPin?privateOwner.rulesMealWorldId!==mealPin.worldId:privateOwner.rulesSpeechWorldId!==speechPin?.worldId)
     throw Error(mealPin?'mvp_rules_private_meal_world':'mvp_rules_private_speech_world');
    if((privateOwner.rulesWeatherHourCredit===true)!==weatherCredit)throw Error('mvp_rules_private_weather_scope');
-  }else owner=acquireRuntimeOwnership(options.database,agedGroundPin||ordinaryMeal||nativeLifePins.length||ordinarySpeech||ordinaryShelter?{existingOnly:true}:undefined);
+  }else owner=acquireRuntimeOwnership(options.database,agedGroundPin||ordinaryMeal||nativeLifePins.length||ordinarySpeech||ordinaryShelter||ordinaryMultiFruit?{existingOnly:true}:undefined);
   owner.assertOwned();assertDisposable?.();
   const privateDisposableSave=disposable&&'lockPath' in owner?disposable.bind(owner):undefined;
   if(disposable&&!privateDisposableSave)throw Error('disposable_native_rules_owner');
@@ -276,6 +280,7 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
     throw Error('ordinary_aged_ground_legal_commons_site_required');
   }
   if(nativeRenewal&&probe?.id!==nativeRenewal.worldId)throw Error('mvp_rules_private_native_renewal_world');
+  if(ordinaryMultiFruit&&probe?.id!==ordinaryMultiFruit.worldId)throw Error('ordinary_multi_fruit_world_mismatch');
   if(ordinaryShelter&&probe?.id!==ordinaryShelter.worldId)throw Error('ordinary_native_shelter_world_mismatch');
   if(ordinarySpeech&&probe?.id!==ordinarySpeech.worldId)throw Error('ordinary_native_speech_world_mismatch');
   if(ordinaryMeal&&probe?.id!==ordinaryMeal.worldId)throw Error('ordinary_native_meal_world_mismatch');
@@ -292,7 +297,7 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
    await new Promise<void>((resolve,reject)=>{server!.once('error',reject);server!.listen(options.port,'127.0.0.1',resolve);});
   }
   const nativeGround=nativeEmpty&&agedGroundPin&&'lockPath' in owner?{owner,pin:agedGroundPin}:undefined;
-  store=new WorldStore(owner.database,{privateDisposableSave,disposableAgedTransfer:disposableAgedTransfer??undefined,nativeEmptyGround:nativeGround,allowMvpClimate:true,developerSpiritFixtureOwner:privateOwner,nativeWeatherCredit:weatherCredit?true:undefined,nativeRulesFruitRenewal:nativeRenewal??undefined,
+  store=new WorldStore(owner.database,{privateDisposableSave,disposableAgedTransfer:disposableAgedTransfer??undefined,nativeEmptyGround:nativeGround,allowMvpClimate:true,developerSpiritFixtureOwner:privateOwner,nativeWeatherCredit:weatherCredit?true:undefined,nativeRulesFruitRenewal:nativeRenewal??undefined,nativeMultiFruit:ordinaryMultiFruit&&'lockPath' in owner?{owner,pin:ordinaryMultiFruit}:undefined,
    ordinaryNativeShelter:ordinaryShelter&&'lockPath' in owner?{owner,pin:ordinaryShelter}:undefined,
    ordinaryNativeSpeech:ordinarySpeech&&'lockPath' in owner?{owner,pin:ordinarySpeech}:undefined,
    ordinaryNativeMeal:ordinaryMeal&&'lockPath' in owner?{owner,pin:ordinaryMeal}:undefined});
@@ -315,7 +320,7 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
     readExactCurrentApproach:head=>store!.readDisposableCurrentGroundApproach(head),
     readExactActiveLot:head=>store!.readDisposableActiveGroundForNativeObservation(head),
     readExactPickupEvidence:head=>store!.readDisposableNativeGroundPickupEvidence(head),
-   }:undefined,captureAtomicShelterEntries:ordinaryShelter?true:undefined,captureAddressedSpeechCustody:speechPin||speechPurpose||ordinarySpeech?true:undefined,captureSameSaveNativeWeather:privateOwner?.rulesWeatherAccountScope?true:undefined,captureAtomicNativeMeals:mealPin||ordinaryMeal?true:undefined,captureAtomicNativeFruitRenewal:nativeRenewal?true:undefined,captureNativeEmptyGroundMinute:nativeEmpty?true:undefined,captureAtomicNativeFruitLot:nativeRenewal?.lotShelfLifeGameMinutes?true:undefined,commit:(draft,revision,speech,meals)=>{
+   }:undefined,captureAtomicShelterEntries:ordinaryShelter?true:undefined,captureAddressedSpeechCustody:speechPin||speechPurpose||ordinarySpeech?true:undefined,captureSameSaveNativeWeather:privateOwner?.rulesWeatherAccountScope?true:undefined,captureAtomicNativeMeals:mealPin||ordinaryMeal?true:undefined,captureAtomicNativeFruitRenewal:nativeRenewal?true:undefined,captureNativeEmptyGroundMinute:nativeEmpty?true:undefined,captureAtomicNativeFruitLot:nativeRenewal?.lotShelfLifeGameMinutes||ordinaryMultiFruit?true:undefined,commit:(draft,revision,speech,meals)=>{
    owner!.assertOwned();assertDisposable?.();
    if(mealPin){
     if(draft.id!==mealPin.worldId)throw Error('mvp_rules_private_meal_world');
@@ -542,6 +547,6 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
    const w=session.world;
    return store.readDisposableResidentGroundDiscovery({worldId:w.id,revision:w.revision,atUs:minuteToClimateUs(w.minute)},residentId);
   };
-  return {get session(){return session!;},server,snapshot,...(ordinaryShelter?{readPrivateOrdinaryNativeShelter:()=>session&&store?store.readOrdinaryNativeShelterAtHead(session.world):null}:{}),...(ordinarySpeech?{readPrivateOrdinaryNativeSpeech:(eventId:string)=>session&&store?store.readOrdinaryNativeSpeechAtHead(session.world,eventId):null}:{}),...(ordinaryMeal?{readPrivateOrdinaryNativeMeal:(eventId:string)=>session&&store?store.readOrdinaryNativeMealAtHead(session.world,eventId):null}:{}),readPrivateDisposableNativeSpeech:(head:Readonly<DisposableSpeechHead>)=>speechReader?.latest(head)??null,transactPrivateDisposableAgedTransfer,readPrivateDisposableNativeAgedFairness,readPrivateDisposableResidentGroundDiscovery,disposableRebaseRequired:()=>rebaseRequired,readPrivateSpiritCandidate,readPrivateSpiritGeographicProposal,readPrivateNativeFruitRenewal,readPrivateNativeFruitLot,readPrivateAgedFruitPreflight,readPrivateOrdinaryAgedGround,readPrivateOrdinaryAgedG1Review,previewPrivateOrdinaryAgedG1Decision,commitPrivateOrdinaryAgedG1Decision,readPrivateOrdinaryAgedG1Decision,previewPrivateOrdinaryG2BlockedHandoff,commitPrivateOrdinaryG2BlockedHandoff,readPrivateOrdinaryG2BlockedHandoff,close};
+  return {get session(){return session!;},server,snapshot,...(ordinaryMultiFruit?{readPrivateOrdinaryMultiFruit:()=>session&&store?store.readCurrentOrdinaryNativeMultiFruit(session.world):null}:{}),...(ordinaryShelter?{readPrivateOrdinaryNativeShelter:()=>session&&store?store.readOrdinaryNativeShelterAtHead(session.world):null}:{}),...(ordinarySpeech?{readPrivateOrdinaryNativeSpeech:(eventId:string)=>session&&store?store.readOrdinaryNativeSpeechAtHead(session.world,eventId):null}:{}),...(ordinaryMeal?{readPrivateOrdinaryNativeMeal:(eventId:string)=>session&&store?store.readOrdinaryNativeMealAtHead(session.world,eventId):null}:{}),readPrivateDisposableNativeSpeech:(head:Readonly<DisposableSpeechHead>)=>speechReader?.latest(head)??null,transactPrivateDisposableAgedTransfer,readPrivateDisposableNativeAgedFairness,readPrivateDisposableResidentGroundDiscovery,disposableRebaseRequired:()=>rebaseRequired,readPrivateSpiritCandidate,readPrivateSpiritGeographicProposal,readPrivateNativeFruitRenewal,readPrivateNativeFruitLot,readPrivateAgedFruitPreflight,readPrivateOrdinaryAgedGround,readPrivateOrdinaryAgedG1Review,previewPrivateOrdinaryAgedG1Decision,commitPrivateOrdinaryAgedG1Decision,readPrivateOrdinaryAgedG1Decision,previewPrivateOrdinaryG2BlockedHandoff,commitPrivateOrdinaryG2BlockedHandoff,readPrivateOrdinaryG2BlockedHandoff,close};
  }catch(error){await close();throw error;}
 }
