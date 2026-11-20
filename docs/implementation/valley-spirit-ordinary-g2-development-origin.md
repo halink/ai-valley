@@ -11,3 +11,29 @@
 显式加上 `privateOrdinaryDevelopmentV3`（`ordinary-g2-development-v3-one-unit/v1`、第三把独立 Ed25519 开发审核公钥）后，正向独立签审的原生分离演练才可生成一份待签报价。第三份签章与原档和确切持久世界内容、同头闭雨和授权、被选果批的原龄和原归属、目标及稳定机会一一绑定。签署前后不授予正式模式批准。事务重新验证当下来源、天气许可、真实候选，再以真正世界重跑分离演练。成功只扣除被选果源一份；同一 SQLite 事务消费该果批凭证、写一份同龄地面物和唯一机会回执。其它果源的旧头凭证不伪造重绑定，在这个暂停档头不可读。未给居民库存记入任何物品。
 
 只有同一原所有权与原开发公钥可重开读取地面物、回执及实际扣量。重放不能再扣量，撤权在首次提交前阻断。来源撤回不会改写已经安全提交的私人保管历史。异常或提交失败全部回滚；替换地面物、单项缺失或两表删除却保留锚时拒绝重新打开。已落地档暂不允许继续走原生时钟，直至实现真实观察、拾取、死亡与原龄到期处理。仍没有 HTTP、公开展示接口、自动调度、真实模型、普通／生产运行准入或生产执行批准。
+
+### Original V3 manual discovery and expiry
+
+After an actual V3 placement, only the same in-process original owner with the
+same third review key can ask the no-port closure to advance one ground minute
+at a time. Generic `advanceOne` and all selection/transfer work remain stopped,
+including after expiry. The dedicated method has no supplied resident, plan,
+geometry, time or world. It runs the real native chooser/observation phase on
+the committed head, retaining one personal first observation per actual resident.
+The private read is keyed to one resident; no observation is made a world event,
+mail, broadcast, ordinary/public read, or authorization to pick up.
+
+The stored birth and expiry never change. The native observation phase excludes
+the exact expiry minute, and the same transaction removes the one physical row
+at the first expired minute. World head, normal bounded event suffix, private
+continuation receipt and origin latch update atomically under exact archive and
+writer guards; expiry retains the stable opportunity and original signed
+placement permanently. The pre-existing weather grant cannot authorize later
+releases and withdrawal after a completed transfer does not erase physical age,
+discovery, or custody. Current personal evidence may be reread on exact original
+reopen; copies, wrong keys, damaged seams, and generic/player opens do not
+acquire the scope. There is no V3 pickup/eat or scheduler here. Other native
+changes to stock do not rebind candidate custody or reenable ordinary writing.
+A native minute that would also settle a meal or addressed speech, exceeds the
+bounded event/discovery archive, or sees an unknown writer is rejected before
+commit. No partial discovery, expiry, or ordinary event settlement is emitted.

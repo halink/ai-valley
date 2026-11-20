@@ -1,5 +1,10 @@
 import {createHash,createPublicKey,verify,type KeyObject} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
+import {prepareStoppedOrdinaryAgedGroundMinute} from './godot-mvp.js';
+import {advanceAgedGroundExpiry,type AgedGroundLot} from './valley-spirit-ordinary-aged-ground.js';
+import {assertStoppedEventAuthority,assertStoppedEventArchive} from './valley-spirit-ordinary-stopped-continuation.js';
+import type {CommittedNativeOrdinaryAgedDiscovery} from '../world/mvp-ordinary-aged-ground-discovery.js';
+import {mvpFallenFruitDiscoveryId} from '../shared/valley-spirit-fairness.js';
 import type {World} from '../shared/types.js';
 import {minuteToClimateUs} from '../world/mvp-climate.js';
 import {inspectMvpGroundFruitGeography} from '../world/mvp-ground-fruit.js';
@@ -71,6 +76,13 @@ function digestHead(db:DatabaseSync,w:World){
  const rows=db.prepare('SELECT id,revision,state FROM main.worlds LIMIT 2').all(),r=rows[0];
  return rows.length===1&&r.id===w.id&&r.revision===w.revision&&r.state instanceof Uint8Array?createHash('sha256').update(r.state).digest('hex'):null;
 }
+function assertLifecycleWorldWriter(db:DatabaseSync){
+ const table=db.prepare("SELECT name,type,sql FROM main.sqlite_schema WHERE lower(name)='worlds'").get();
+ if(table?.name!=='worlds'||table.type!=='table'||table.sql!=='CREATE TABLE worlds (id TEXT PRIMARY KEY,revision INTEGER NOT NULL,state BLOB NOT NULL)'||
+    db.prepare("SELECT 1 FROM main.sqlite_schema WHERE lower(tbl_name)='worlds' AND (type='trigger' OR (type='index' AND sql IS NOT NULL))").get()||
+    db.prepare("SELECT 1 FROM sqlite_temp_schema WHERE lower(name)='worlds' OR lower(tbl_name)='worlds'").get())
+  throw Error('ordinary_g2_dev_v3_continuation_world_writer');
+}
 function latch(db:DatabaseSync,strict=false){
  const m=db.prepare("SELECT name,type,sql FROM main.sqlite_schema WHERE lower(name)='archive_meta'").get();
  if(!m&&!strict)return null;
@@ -93,27 +105,110 @@ function tables(db:DatabaseSync){
   throw Error('ordinary_g2_dev_v3_schema');
  return true;
 }
+type Expiry=NonNullable<ReturnType<typeof advanceAgedGroundExpiry>>['expired'][number];
+type Lifecycle=Readonly<{schema:'ordinary-g2-development-continuation/v3';sequence:number;atUs:string;
+ revision:number;digest:string;placement:Ground;discoveries:readonly CommittedNativeOrdinaryAgedDiscovery[];expiry:Expiry|null}>;
+const archiveKeys=['schema','approval','sourceBefore','sourceAfter','afterRevision','afterDigest','groundDigest'];
+const lotOf=(g:Ground,c:Approval):AgedGroundLot=>({bornUs:g.bornUs,expiresUs:g.expiresUs,
+ fruit:{effectId:g.effectId,kind:'fallen-fruit',amount:1,ownerId:g.ownerId,sourceResourceId:g.sourceId,
+  sourceResourceInstanceId:g.sourceInstanceId,sourceAt:g.sourceAt,rainEventId:c.terms.rainEventId,at:g.at,placedUs:g.placedUs}});
+const verifiedArchiveReads=new WeakMap<object,{db:DatabaseSync;revision:number;world:string;content:string}>();
 export function readOrdinaryDevelopmentV3(db:DatabaseSync,origin:OrdinaryG2DevelopmentOrigin,pin:Pin,w:World){
  if(!tables(db))return null;
  const gr=db.prepare('SELECT slot,CASE WHEN length(CAST(body AS BLOB))<=4096 THEN body END AS body FROM main.'+GROUND+' LIMIT 2').all();
- const rr=db.prepare('SELECT opportunity,CASE WHEN length(CAST(body AS BLOB))<=8192 THEN body END AS body,seal FROM main.'+RECEIPT+' LIMIT 2').all();
+ const rr=db.prepare('SELECT opportunity,CASE WHEN length(CAST(body AS BLOB))<=65536 THEN body END AS body,seal FROM main.'+RECEIPT+' LIMIT 2').all();
  const rg=gr[0],ar=rr[0];
- if(gr.length!==1||rr.length!==1||rg.slot!==1||typeof rg.body!=='string'||typeof ar.body!=='string'||
+ if(gr.length>1||rr.length!==1||typeof ar.body!=='string'||
   ar.seal!==authenticateOrdinaryG2DevelopmentV3(origin,'v3-receipt',ar.body)||latch(db,true)!==ar.seal)throw Error('ordinary_g2_dev_v3_receipt');
- const g=JSON.parse(rg.body) as Ground,a=JSON.parse(ar.body) as Archive,c=verifyOrdinaryDevelopmentV3(a.approval,origin,pin);
- if(!c||!exact(a,['schema','approval','sourceBefore','sourceAfter','afterRevision','afterDigest','groundDigest'])||a.schema!=='ordinary-g2-development-receipt/v3'||
-  !int(a.sourceBefore)||!int(a.sourceAfter)||a.sourceAfter!==a.sourceBefore-1||a.afterRevision!==c.terms.revision+1||
-  w.revision!==a.afterRevision||w.id!==c.terms.worldId||minuteToClimateUs(w.minute)!==c.terms.atUs||
-  a.afterDigest!==digestHead(db,w)||a.groundDigest!==hash(g)||ar.opportunity!==c.terms.opportunityId||
+ const envelope=JSON.parse(ar.body),stepped=exact(envelope,['placementReceipt','lifecycle']);
+ const a=(stepped?envelope.placementReceipt:envelope) as Archive,l=stepped?envelope.lifecycle as Lifecycle:null;
+ const g=l?l.placement:typeof rg?.body==='string'?JSON.parse(rg.body) as Ground:null;
+ const c=verifyOrdinaryDevelopmentV3(a.approval,origin,pin);
+ if(!g||!c||!exact(a,archiveKeys)||a.schema!=='ordinary-g2-development-receipt/v3'||
+  !int(a.sourceBefore)||!int(a.sourceAfter)||a.sourceAfter!==a.sourceBefore-1||a.afterRevision!==c.terms.revision+1||!hex(a.afterDigest)||
+  w.id!==c.terms.worldId||a.groundDigest!==hash(g)||ar.opportunity!==c.terms.opportunityId||
   !exact(g,['schema','effectId','sourceId','sourceInstanceId','sourceAt','at','targetId','ownerId','quantity','lotId','bornUs','expiresUs','placedUs'])||
   g.schema!=='ordinary-g2-development-ground/v3'||g.effectId!=='ordinary-g2-dev-v3:'+hash(c.terms.opportunityId)||
   g.sourceId!==c.terms.sourceId||g.sourceInstanceId!==c.terms.sourceInstanceId||g.ownerId!==c.terms.ownerId||
   g.targetId!==c.terms.targetId||g.lotId!==c.terms.lotId||g.quantity!==1||g.bornUs!==c.terms.bornUs||g.expiresUs!==c.terms.expiresUs||g.placedUs!==c.terms.atUs||
   !point(g.sourceAt)||!point(g.at)||g.targetId!=='ground:'+g.at.x+':'+g.at.y||
-  valleySpiritFruitFallOpportunityId(w.id,c.terms.rainEventId,g.sourceInstanceId)!==c.terms.opportunityId||
-  w.resources.filter(r=>r.id===g.sourceId&&r.amount===a.sourceAfter&&r.at.x===g.sourceAt.x&&r.at.y===g.sourceAt.y).length!==1||
-  !resolveMvpRainEpisode(w,c.terms.rainEventId))throw Error('ordinary_g2_dev_v3_mismatch');
- return {ground:g,receipt:a,approval:c};
+  valleySpiritFruitFallOpportunityId(w.id,c.terms.rainEventId,g.sourceInstanceId)!==c.terms.opportunityId)
+  throw Error('ordinary_g2_dev_v3_mismatch');
+ const now=minuteToClimateUs(w.minute),before=BigInt(g.placedUs),expires=BigInt(g.expiresUs);
+ if(!l){
+  if(stepped||w.revision!==a.afterRevision||now!==c.terms.atUs||a.afterDigest!==digestHead(db,w)||
+   w.resources.filter(r=>r.id===g.sourceId&&r.amount===a.sourceAfter&&r.at.x===g.sourceAt.x&&r.at.y===g.sourceAt.y).length!==1||
+   !resolveMvpRainEpisode(w,c.terms.rainEventId))throw Error('ordinary_g2_dev_v3_placement_mismatch');
+ }else{
+  if(!exact(l,['schema','sequence','atUs','revision','digest','placement','discoveries','expiry'])||l.schema!=='ordinary-g2-development-continuation/v3'||
+   !int(l.sequence)||l.sequence<1||l.sequence>1440||BigInt(now)!==before+1_000_000n*BigInt(l.sequence)||
+   now!==l.atUs||w.revision!==l.revision||w.revision<=a.afterRevision||l.digest!==digestHead(db,w)||
+   !Array.isArray(l.discoveries)||l.discoveries.length>64||
+   new Set(l.discoveries.map(d=>d.residentId)).size!==l.discoveries.length)throw Error('ordinary_g2_dev_v3_continuation_mismatch');
+  for(const d of l.discoveries)if(d.schema!=='native-ordinary-aged-ground-observation/v1'||d.worldId!==w.id||d.effectId!==g.effectId||
+   d.receiptDigest!==hash(a)||d.discoveryId!==mvpFallenFruitDiscoveryId(w.id,d.residentId,g.effectId)||
+   !clock(d.atUs)||BigInt(d.atUs)<=before||BigInt(d.atUs)>=expires||BigInt(d.atUs)>BigInt(now)||
+   !int(d.committedRevision)||d.committedRevision>w.revision||d.committedRevision<=d.fromRevision||
+   d.fromRevision<a.afterRevision||hash(d.target)!==hash(g.at)||!point(d.observerAt))
+    throw Error('ordinary_g2_dev_v3_discovery');
+  if(l.expiry!==null){
+   if(!exact(l.expiry,['effectId','bornUs','expiresUs','settledUs','groundDebit'])||l.expiry.effectId!==g.effectId||l.expiry.bornUs!==g.bornUs||
+    l.expiry.expiresUs!==g.expiresUs||l.expiry.settledUs!==now||l.expiry.groundDebit!==1||BigInt(now)<expires||BigInt(now)-1_000_000n>=expires)
+     throw Error('ordinary_g2_dev_v3_expiry');
+  }else if(BigInt(now)>=expires)throw Error('ordinary_g2_dev_v3_unsettled_expiry');
+ }
+ if(l){assertStoppedEventAuthority(db);assertStoppedEventArchive(db,w);}
+ if(l?.expiry?gr.length!==0:rg?.slot!==1||rg.body!==JSON.stringify(g))throw Error('ordinary_g2_dev_v3_ground_row');
+ const own={ground:l?.expiry?null:g,receipt:a,approval:c,lifecycle:l,seal:ar.seal as string};
+ verifiedArchiveReads.set(own,{db,revision:w.revision,world:hash(w),content:hash(own)});
+ return own;
+}
+const preparedMinutes=new WeakMap<object,{db:DatabaseSync;priorSeal:string;content:string}>();
+/** Native minute for an actually placed, still owned lot. No user-supplied
+ * actor, plan, world, time, target or observations enter this path. */
+export function prepareOrdinaryDevelopmentV3Minute(db:DatabaseSync,w:World,owned:NonNullable<ReturnType<typeof readOrdinaryDevelopmentV3>>){
+ const g=owned.ground,l=owned.lifecycle;
+ const proven=verifiedArchiveReads.get(owned);
+ if(!db.isTransaction||!proven||proven.db!==db||proven.revision!==w.revision||proven.world!==hash(w)||proven.content!==hash(owned)||
+  !g||latch(db,true)!==owned.seal||(l?.sequence??0)>=1440)return null;
+ assertLifecycleWorldWriter(db);assertStoppedEventAuthority(db);assertStoppedEventArchive(db,w);
+ const lot=lotOf(g,owned.approval),receiptDigest=hash(owned.receipt);
+ const next=prepareStoppedOrdinaryAgedGroundMinute(w,{readExactActiveLot(h){
+  return h.worldId===w.id&&h.revision===w.revision&&h.atUs===w.mvpClimate?.lastUs?
+   {...h,schema:'ordinary-active-aged-ground-observation/v1',...lot,receiptDigest}:null;
+ }});
+ if(!next)return null;
+ const {draft,observed}=next,expiry=advanceAgedGroundExpiry(w,draft,[lot]);
+ if(!expiry||expiry.expired.length&&observed.length||draft.events.length>4096||draft.events.length-w.events.length>128||
+  hash(draft.events.slice(0,w.events.length))!==hash(w.events)||
+  draft.events.slice(w.events.length).some(e=>e.kind==='conversation'||e.speechText!==undefined||e.mvpMeal||e.socialAppointmentArrival||e.mvpFruitFall))return null;
+ const discoveries=[...l?.discoveries??[]],prior=new Set(discoveries.map(d=>d.residentId));
+ for(const seen of observed)if(!prior.has(seen.residentId)){
+  discoveries.push({...seen,committedRevision:draft.revision});prior.add(seen.residentId);
+ }
+ if(discoveries.length>64)return null;
+ const prepared={draft,placement:g,sequence:(l?.sequence??0)+1,discoveries,expiry:expiry.expired[0]??null};
+ preparedMinutes.set(prepared,{db,priorSeal:owned.seal,content:hash(prepared)});
+ return prepared;
+}
+export function writeOrdinaryDevelopmentV3Minute(db:DatabaseSync,origin:OrdinaryG2DevelopmentOrigin,pin:Pin,
+ owned:NonNullable<ReturnType<typeof readOrdinaryDevelopmentV3>>,step:NonNullable<ReturnType<typeof prepareOrdinaryDevelopmentV3Minute>>){
+ const h=digestHead(db,step.draft),prepared=preparedMinutes.get(step);
+ preparedMinutes.delete(step);
+ if(!db.isTransaction||!h||!prepared||prepared.db!==db||prepared.priorSeal!==owned.seal||prepared.content!==hash(step)||!owned.ground||!tables(db)||latch(db,true)!==owned.seal)throw Error('ordinary_g2_dev_v3_continuation_scope');
+ assertLifecycleWorldWriter(db);assertStoppedEventAuthority(db);assertStoppedEventArchive(db,step.draft);
+ const lifecycle:Lifecycle={schema:'ordinary-g2-development-continuation/v3',sequence:step.sequence,atUs:minuteToClimateUs(step.draft.minute),
+  revision:step.draft.revision,digest:h,placement:step.placement,discoveries:step.discoveries,expiry:step.expiry};
+ const raw=JSON.stringify({placementReceipt:owned.receipt,lifecycle}),seal=authenticateOrdinaryG2DevelopmentV3(origin,'v3-receipt',raw);
+ if(Buffer.byteLength(raw)>65536||
+  db.prepare('UPDATE main.'+RECEIPT+' SET body=?,seal=? WHERE opportunity=? AND seal=?')
+   .run(raw,seal,owned.approval.terms.opportunityId,owned.seal).changes!==1||
+  db.prepare('UPDATE main.archive_meta SET value=? WHERE key=? AND value=?').run(seal,LATCH,owned.seal).changes!==1||
+  step.expiry&&db.prepare('DELETE FROM main.'+GROUND+' WHERE slot=1').run().changes!==1)
+   throw Error('ordinary_g2_dev_v3_continuation_write');
+ const persisted=readOrdinaryDevelopmentV3(db,origin,pin,step.draft);
+ if(!persisted||persisted.seal!==seal||persisted.lifecycle?.digest!==h)throw Error('ordinary_g2_dev_v3_continuation_readback');
+ return persisted;
 }
 /** Invoke only from the original scoped WorldStore transaction after the actual debit. */
 export function writeOrdinaryDevelopmentV3(db:DatabaseSync,origin:OrdinaryG2DevelopmentOrigin,pin:Pin,
@@ -136,6 +231,6 @@ export function writeOrdinaryDevelopmentV3(db:DatabaseSync,origin:OrdinaryG2Deve
  db.prepare('INSERT INTO main.'+RECEIPT+' VALUES(?,?,?)').run(t.opportunityId,raw,seal);
  db.prepare('INSERT INTO main.archive_meta (key,value) VALUES(?,?)').run(LATCH,seal);
  if(!readOrdinaryDevelopmentV3(db,origin,pin,after))throw Error('ordinary_g2_dev_v3_readback');
- return {status:'development-v3-stored' as const,ground:g,sourceBefore:a.sourceBefore,sourceAfter:a.sourceAfter,approvalPresent:true as const,
+ return {status:'development-v3-stored' as const,ground:g,worldId:after.id,revision:after.revision,minute:after.minute,expiry:null,sourceBefore:a.sourceBefore,sourceAfter:a.sourceAfter,approvalPresent:true as const,
   productionApproved:false as const,executionAuthorized:false as const};
 }

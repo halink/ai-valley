@@ -98,7 +98,7 @@ export function inspectOrdinaryG2DevelopmentOrigin(db:DatabaseSync,origin?:Ordin
   throw Error('ordinary_g2_development_marker');
  return r.world_id;
 }
-export function guardOrdinaryG2DevelopmentOriginCommit(db:DatabaseSync,origin:OrdinaryG2DevelopmentOrigin,id:string,initial:boolean){
+export function guardOrdinaryG2DevelopmentOriginCommit(db:DatabaseSync,origin:OrdinaryG2DevelopmentOrigin,id:string,initial:boolean,permitV3=false){
  const lease=requireOrigin(origin),main=db.prepare('PRAGMA database_list').all().find(r=>r.name==='main')?.file;
  if(!db.isTransaction||typeof main!=='string'||realpathSync(main)!==lease.database||!worldPattern.test(id))
   throw Error('ordinary_g2_development_owner');
@@ -108,7 +108,7 @@ export function guardOrdinaryG2DevelopmentOriginCommit(db:DatabaseSync,origin:Or
   db.exec(DDL);
   db.prepare('INSERT INTO main.'+TABLE+' VALUES (1,?,?,?)').run(PURPOSE,id,lease.sealFor(id).toString('hex'));
  }
- if(inspectOrdinaryG2DevelopmentOrigin(db,origin)!==id)throw Error('ordinary_g2_development_world');
+ if(inspectOrdinaryG2DevelopmentOrigin(db,origin,permitV3&&!initial)!==id)throw Error('ordinary_g2_development_world');
 }
 
 export function authenticateOrdinaryG2DevelopmentV3(origin:OrdinaryG2DevelopmentOrigin,domain:string,body:string){

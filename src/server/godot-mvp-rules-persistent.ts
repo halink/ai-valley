@@ -195,6 +195,8 @@ export function bindOrdinaryG2DevelopmentOriginPreview(storage:ReturnType<typeof
     ...(options.privateOrdinaryDevelopmentV3?{
      previewDevelopmentTransfer:()=>ifLive(()=>run.previewPrivateOrdinaryDevelopmentV3?.()??null),
      transferDevelopmentFruit:(input:unknown)=>ifLive(()=>run.transferPrivateOrdinaryDevelopmentV3?.(input)??null),
+     advanceDevelopmentGroundMinute:()=>ifLive(()=>run.advancePrivateOrdinaryDevelopmentV3Minute?.()??null),
+     readDevelopmentDiscovery:(residentId:string)=>ifLive(()=>run.readPrivateOrdinaryDevelopmentV3Discovery?.(residentId)??null),
      readDevelopmentGround:()=>ifLive(()=>run.readPrivateOrdinaryDevelopmentV3?.()??null),}:{}),
     async close(){if(!closed){closed=true;await run.close();opened=false;}},
    });
@@ -629,7 +631,16 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
    const w=session.world;
    return store.readDisposableResidentGroundDiscovery({worldId:w.id,revision:w.revision,atUs:minuteToClimateUs(w.minute)},residentId);
   };
-  let committedV3Head:Readonly<{worldId:string;revision:number;minute:number}>|null=null;
+  const reopenedV3=ordinaryG2V3?store?.readOwnedOrdinaryDevelopmentV3():null;
+  let committedV3Head:Readonly<{worldId:string;revision:number;minute:number}>|null=reopenedV3?
+   Object.freeze({worldId:reopenedV3.worldId,revision:reopenedV3.revision,minute:reopenedV3.minute}):null;
+  const advanceDevelopmentGroundMinute=()=>{
+   if(!committedV3Head||!store)return null;
+   const settled=store.advanceOwnedOrdinaryDevelopmentV3Minute();
+   if(!settled)return null;
+   committedV3Head=Object.freeze({worldId:settled.worldId,revision:settled.revision,minute:settled.minute});
+   return settled;
+  };
   const transferDevelopmentFruit=(input:unknown)=>{
    if(committedV3Head||!store||!selectedReview||!valleySpirit||!ordinaryMultiCandidate)return null;
    const placed=store.transactOwnedOrdinaryDevelopmentV3(selectedReview.currentPositive(),ordinaryMultiCandidate,valleySpirit,input);
@@ -641,6 +652,8 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
   };
   return {get session(){return session!;},server,snapshot,...(ordinaryG2V3?{previewPrivateOrdinaryDevelopmentV3:()=>{
    const proof=!committedV3Head&&selectedReview?.currentPositive();return proof&&store?store.previewOrdinaryDevelopmentV3(proof):null;},
+   advancePrivateOrdinaryDevelopmentV3Minute:advanceDevelopmentGroundMinute,
+   readPrivateOrdinaryDevelopmentV3Discovery:(id:string)=>typeof id==='string'&&id.length&&id.length<=300?store?.readOwnedOrdinaryDevelopmentV3(id)?.discovery??null:null,
    transferPrivateOrdinaryDevelopmentV3:transferDevelopmentFruit,readPrivateOrdinaryDevelopmentV3:()=>store?.readOwnedOrdinaryDevelopmentV3()??null,
    readPrivateOrdinaryDevelopmentV3Head:()=>committedV3Head?(store?.readOwnedOrdinaryDevelopmentV3()?committedV3Head:null):
     session?Object.freeze({worldId:session.world.id,revision:session.world.revision,minute:session.world.minute}):null,

@@ -1,5 +1,5 @@
 import {rehearseDetachedNativeLot} from './valley-spirit-ordinary-g1-rehearsal.js';
-import {ownsOrdinaryDevelopmentV3Pin,ordinaryDevelopmentV3Terms,verifyOrdinaryDevelopmentV3,encodeOrdinaryDevelopmentV3,readOrdinaryDevelopmentV3,writeOrdinaryDevelopmentV3,type OrdinaryDevelopmentV3Pin} from './ordinary-g2-development-v3.js';
+import {ownsOrdinaryDevelopmentV3Pin,ordinaryDevelopmentV3Terms,verifyOrdinaryDevelopmentV3,encodeOrdinaryDevelopmentV3,readOrdinaryDevelopmentV3,writeOrdinaryDevelopmentV3,prepareOrdinaryDevelopmentV3Minute,writeOrdinaryDevelopmentV3Minute,type OrdinaryDevelopmentV3Pin} from './ordinary-g2-development-v3.js';
 import {ownsSelectedPositiveRehearsal,type openSelectedOrdinaryRehearsal} from './valley-spirit-ordinary-selected-rehearsal.js';
 import {assertOrdinaryG2DevelopmentPath,guardOrdinaryG2DevelopmentOriginCommit,inspectOrdinaryG2DevelopmentOrigin,type OrdinaryG2DevelopmentOrigin} from './ordinary-g2-development-origin.js';
 import {currentClosedRain} from './valley-spirit-persistent-rules-shadow.js';
@@ -1386,16 +1386,46 @@ export class WorldStore {
    sourceId:e.offer.sourceId,sourceInstanceId:e.offer.sourceInstanceId,targetId:e.offer.targetId,atUs:e.lot.atUs,
    eligibleUntilUs:e.offer.eligibleUntilUs,lotId:e.lot.lot.id,bornUs:e.lot.lot.bornUs,expiresUs:e.lot.lot.expiresUs,ownerId:'commons',quantity:1});
  }
- readOwnedOrdinaryDevelopmentV3(){
+ readOwnedOrdinaryDevelopmentV3():ReturnType<WorldStore['readOwnedOrdinaryDevelopmentV3Ground']>;
+ readOwnedOrdinaryDevelopmentV3(residentId:string):{readonly discovery:import('../world/mvp-ordinary-aged-ground-discovery.js').CommittedNativeOrdinaryAgedDiscovery|null}|null;
+ readOwnedOrdinaryDevelopmentV3(residentId?:string){
+  if(residentId===undefined)return this.readOwnedOrdinaryDevelopmentV3Ground();
+  return this.readOwnedOrdinaryDevelopmentV3Archive((r)=>({discovery:r.lifecycle?.discoveries.find(d=>d.residentId===residentId)??null}));
+ }
+ private readOwnedOrdinaryDevelopmentV3Ground(){
+  return this.readOwnedOrdinaryDevelopmentV3Archive((r,w)=>({status:r.ground?'development-v3-stored' as const:'development-v3-expired' as const,ground:r.ground,
+      worldId:w.id,revision:w.revision,minute:w.minute,expiry:r.lifecycle?.expiry??null,
+      sourceBefore:r.receipt.sourceBefore,sourceAfter:r.receipt.sourceAfter,approvalPresent:true as const,
+      productionApproved:false as const,executionAuthorized:false as const}));
+ }
+ private readOwnedOrdinaryDevelopmentV3Archive<T>(project:(r:NonNullable<ReturnType<typeof readOrdinaryDevelopmentV3>>,w:World)=>T){
   const origin=this.#ordinaryG2DevelopmentOrigin,pin=this.#ordinaryG2V3;
   if(!origin||!pin)return null;
   try{
    this.db.exec('BEGIN');
    try{
     const w=this.readWorld(false,false),r=w&&readOrdinaryDevelopmentV3(this.db,origin,pin,w);
-    return r?{status:'development-v3-stored' as const,ground:r.ground,sourceBefore:r.receipt.sourceBefore,sourceAfter:r.receipt.sourceAfter,
-      approvalPresent:true as const,productionApproved:false as const,executionAuthorized:false as const}:null;
+    if(!w||!r)return null;
+    return project(r,w);
    }finally{this.db.exec('ROLLBACK');}
+  }catch{return null;}
+ }
+ advanceOwnedOrdinaryDevelopmentV3Minute(){
+  const origin=this.#ordinaryG2DevelopmentOrigin,pin=this.#ordinaryG2V3;
+  if(!origin||!pin)return null;
+  try{
+   this.db.exec('BEGIN IMMEDIATE');
+   try{
+    const w=this.readWorld(false,false),r=w&&readOrdinaryDevelopmentV3(this.db,origin,pin,w);
+    const step=w&&r&&prepareOrdinaryDevelopmentV3Minute(this.db,w,r);
+    if(!w||!r||!step){this.db.exec('ROLLBACK');return null;}
+    this.assertWritable(step.draft);
+    this.writeCommit(step.draft,w.revision,undefined,undefined,undefined,undefined,true);
+    const stored=writeOrdinaryDevelopmentV3Minute(this.db,origin,pin,r,step);
+    this.db.exec('COMMIT');
+    return {status:stored.ground?'development-v3-native-minute' as const:'development-v3-expired' as const,
+     worldId:step.draft.id,revision:step.draft.revision,minute:step.draft.minute,expiry:stored.lifecycle?.expiry??null};
+   }catch(e){this.db.exec('ROLLBACK');throw e;}
   }catch{return null;}
  }
  transactOwnedOrdinaryDevelopmentV3(proof:NonNullable<ReturnType<ReturnType<typeof openSelectedOrdinaryRehearsal>['currentPositive']>>|null,
@@ -1912,13 +1942,13 @@ export class WorldStore {
   }catch(error){this.db.exec('ROLLBACK');throw error;}
  }
  private writeCommit(world:World,previousRevision:number|null,appended?:AppendedHistory,seasonalLedger?:SeasonalLedger,
-  settlementOperation?:MvpFallenFruitFixtureOperation,formalBerryAnchor?:FormalBerryFixtureAnchor):World|null {
+  settlementOperation?:MvpFallenFruitFixtureOperation,formalBerryAnchor?:FormalBerryFixtureAnchor,ownedDevelopmentV3Minute=false):World|null {
   this.assertDeveloperSpiritSeal();
   if(this.#ordinaryG2DevelopmentOrigin){
    if(world.mode!=='validation'||Object.hasOwn(world,'simulationOnly')||Object.hasOwn(world,'mvpSeasonalModelVersion')||
     Object.hasOwn(world.mvpClimate??{},'spiritEffects')||Object.hasOwn(world.mvpClimate??{},'spiritFruitSettlement'))
     throw Error('ordinary_g2_development_world');
-   guardOrdinaryG2DevelopmentOriginCommit(this.db,this.#ordinaryG2DevelopmentOrigin,world.id,previousRevision===null);
+   guardOrdinaryG2DevelopmentOriginCommit(this.db,this.#ordinaryG2DevelopmentOrigin,world.id,previousRevision===null,ownedDevelopmentV3Minute&&!!this.#ordinaryG2V3);
   }else inspectOrdinaryG2DevelopmentOrigin(this.db);
   assertDisposableNativeAgedTransferStorage(this.db,!!this.#privateDisposableSave&&isDisposableNativeAgedTransferPin(this.#disposableAgedTransfer));
   if(this.developerSpiritFixtureOwner)rejectSealedAgedBirthOnGenericPath(this.db);
