@@ -1,3 +1,4 @@
+import {createFreshOrdinaryG2DevelopmentOriginStorage,isOrdinaryG2DevelopmentOriginScratch} from './ordinary-g2-development-origin.js';
 import {openSelectedOrdinaryRehearsal,pinSelectedOrdinaryRehearsal,type SelectedOrdinaryRehearsalOptions} from './valley-spirit-ordinary-selected-rehearsal.js';
 import {openOrdinaryCandidateSelection,pinOrdinaryCandidateSelection,type OrdinaryCandidateSelectionOptions} from './valley-spirit-ordinary-multi-selection.js';
 import {pinOrdinaryMultiCandidate,type OrdinaryMultiCandidatePin} from './valley-spirit-ordinary-multi-candidate.js';
@@ -48,6 +49,7 @@ type PersistentRulesOptions={database:string;port:number;webRoot?:string;autoSta
 export async function startPersistentRulesMvp(options:PersistentRulesOptions){
  if(typeof options.database!=='string'||!options.database.trim())throw Error('mvp_rules_database_required');
  if(isDisposableRulesScratchPath(options.database))throw Error('disposable_native_rules_no_http');
+ if(isOrdinaryG2DevelopmentOriginScratch(options.database))throw Error('ordinary_g2_development_no_http');
  const running=await openPersistentRulesCore(options);
  const server=running.server;
  if(!server){await running.close();throw Error('mvp_rules_missing_server');}
@@ -151,7 +153,32 @@ export function createDisposableNativeSpeechSave(scenario:DisposableSpeechCase,c
   },
  });
 }
-async function openPersistentRulesCore(options:PersistentRulesOptions,disposable?:ReturnType<typeof createFreshDisposableRulesStorage>,disposableEffectKey?:string,disposableSpeech?:DisposableSpeechCase){
+/** Fresh local development only. No caller path, network listener, timer,
+ * model, file handle or capability for gameplay-ground writes can escape. */
+export function createOrdinaryG2DevelopmentOrigin(){
+ const storage=createFreshOrdinaryG2DevelopmentOriginStorage();
+ let opened=false;
+ return Object.freeze({async open(){
+  if(opened)throw Error('ordinary_g2_development_already_open');
+  opened=true;
+  try{
+   const run=await openPersistentRulesCore({database:storage.database,port:0,autoStart:false},undefined,undefined,undefined,storage);
+   let closed=false;
+   return Object.freeze({
+    head:()=>closed?null:Object.freeze({worldId:run.session.world.id,revision:run.session.world.revision,minute:run.session.world.minute}),
+    advanceOne(){
+     if(closed)throw Error('ordinary_g2_development_closed');
+     run.session.advance(1);
+    },
+    async close(){if(!closed){closed=true;await run.close();opened=false;}},
+   });
+  }catch(e){opened=false;throw e;}
+ }});
+}
+async function openPersistentRulesCore(options:PersistentRulesOptions,disposable?:ReturnType<typeof createFreshDisposableRulesStorage>,disposableEffectKey?:string,disposableSpeech?:DisposableSpeechCase,ordinaryG2Storage?:ReturnType<typeof createFreshOrdinaryG2DevelopmentOriginStorage>){
+ if(ordinaryG2Storage&&(disposable||disposableEffectKey!==undefined||disposableSpeech||
+   options.port!==0||options.autoStart!==false||options.database!==ordinaryG2Storage.database||
+   Object.keys(options).some(k=>!['database','port','autoStart'].includes(k))))throw Error('ordinary_g2_development_scope');
  const assertDisposable=disposable?.assertOwned;
  if(disposableSpeech&&(!assertDisposable||disposableEffectKey!==undefined||
    Object.keys(options).some(k=>!['database','port','autoStart'].includes(k))||
@@ -282,13 +309,15 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
     throw Error(mealPin?'mvp_rules_private_meal_world':'mvp_rules_private_speech_world');
    if((privateOwner.rulesWeatherHourCredit===true)!==weatherCredit)throw Error('mvp_rules_private_weather_scope');
   }else owner=acquireRuntimeOwnership(options.database,agedGroundPin||ordinaryMeal||nativeLifePins.length||ordinarySpeech||ordinaryShelter||ordinaryMultiFruit?{existingOnly:true}:undefined);
-  owner.assertOwned();assertDisposable?.();
+  owner.assertOwned();assertDisposable?.();ordinaryG2Storage?.assertOriginal();
   const privateDisposableSave=disposable&&'lockPath' in owner?disposable.bind(owner):undefined;
   if(disposable&&!privateDisposableSave)throw Error('disposable_native_rules_owner');
+  const ordinaryG2DevelopmentOrigin=ordinaryG2Storage&&'lockPath' in owner?ordinaryG2Storage.bind(owner):undefined;
+  if(ordinaryG2Storage&&!ordinaryG2DevelopmentOrigin)throw Error('ordinary_g2_development_owner');
   const speechPurpose=disposableSpeech&&privateDisposableSave?bindDisposableSpeechPurpose(owner.database,privateDisposableSave):undefined;
   try{lstatSync(owner.database+'.self-hosted-session');throw Error('mvp_rules_unresolved_session');}catch(error){if(!(error&&typeof error==='object'&&'code' in error&&error.code==='ENOENT'))throw error;}
   let almanacReadable=true,nativeGroundAlreadyBound=false;
-  const probe=preflightWorldSave(owner.database,{requireWorld:true,privateDisposableSave,privateDisposableAgedTransfer:disposableAgedTransfer??undefined,developerSpiritFixtureOwner:privateOwner,nativeEmptyGround:nativeEmpty?agedGroundPin??undefined:undefined,inspectOptionalAlmanac:(db,w)=>{if(nativeEmpty)nativeGroundAlreadyBound=hasNativeEmptyGroundCheckpoint(db);try{inspectValleySpiritAlmanac(db,(w as unknown as World).id);}catch{almanacReadable=false;}if(lifePin)try{inspectPersistentRulesLifeFixture(db,w,lifePin);lifeReadable=true;}catch{/* isolate optional life */}},validateWorld:value=>{const w=value as unknown as World;assertMvpWorld(w);assertMvpClimateWorld(w);const m=w.metrics;
+  const probe=preflightWorldSave(owner.database,{requireWorld:true,ordinaryG2DevelopmentOrigin,privateDisposableSave,privateDisposableAgedTransfer:disposableAgedTransfer??undefined,developerSpiritFixtureOwner:privateOwner,nativeEmptyGround:nativeEmpty?agedGroundPin??undefined:undefined,inspectOptionalAlmanac:(db,w)=>{if(nativeEmpty)nativeGroundAlreadyBound=hasNativeEmptyGroundCheckpoint(db);try{inspectValleySpiritAlmanac(db,(w as unknown as World).id);}catch{almanacReadable=false;}if(lifePin)try{inspectPersistentRulesLifeFixture(db,w,lifePin);lifeReadable=true;}catch{/* isolate optional life */}},validateWorld:value=>{const w=value as unknown as World;assertMvpWorld(w);assertMvpClimateWorld(w);const m=w.metrics;
    if(!m||!Array.isArray(m.inFlight)||m.inFlight.length||m.configured!==false||[m.requests,m.successes,m.failures,m.inputTokens,m.outputTokens].some(n=>n!==0)||m.lastAttemptModel!==undefined||m.admissionCancellation!==undefined||m.routing!==undefined||Object.keys(m.usageWindow??{}).length||Object.keys(m.selfHostedCooldowns??{}).length||m.unmeteredFailures)throw Error('mvp_rules_model_history_unsupported');}});
   if(agedGroundPin){
    if(probe?.id!==agedGroundPin.worldId)throw Error('ordinary_aged_ground_existing_save_required');
@@ -308,12 +337,12 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
   // Bind before any writable SQLite open or adoption.
   let session:ReturnType<typeof createMvpSession>|undefined;
   const snapshot=()=>({...session!.snapshot(),valleySpirit:valleySpirit?.view()??valleySpiritUnavailable()});
-  if(!assertDisposable){
+  if(!assertDisposable&&!ordinaryG2Storage){
    server=createMvpServer({snapshot,get world(){return session?.world;}},{webRoot:options.webRoot,privateSpeechWeatherOnly:custodyPin?true:undefined,valleySpiritLifeViewer:lifePin||nativeLifePins.length?{latest:id=>nativeLifePins.length?latestOrdinary(id):life?.latest(id)??null}:undefined,valleySpiritSource:ref=>valleySpirit?.resolveSource(ref)??null,valleySpiritArchive:query=>valleySpirit?.archive(query)??{status:'unavailable'},valleySpiritReaders:{almanac:id=>viewers?.almanac(id)??null,latestAlmanac:()=>viewers?.latestAlmanac()??{status:'unavailable'},topics:range=>viewers?.topics(range)??{status:'unavailable'}}});
    await new Promise<void>((resolve,reject)=>{server!.once('error',reject);server!.listen(options.port,'127.0.0.1',resolve);});
   }
   const nativeGround=nativeEmpty&&agedGroundPin&&'lockPath' in owner?{owner,pin:agedGroundPin}:undefined;
-  store=new WorldStore(owner.database,{privateDisposableSave,disposableAgedTransfer:disposableAgedTransfer??undefined,nativeEmptyGround:nativeGround,allowMvpClimate:true,developerSpiritFixtureOwner:privateOwner,nativeWeatherCredit:weatherCredit?true:undefined,nativeRulesFruitRenewal:nativeRenewal??undefined,nativeMultiFruit:ordinaryMultiFruit&&'lockPath' in owner?{owner,pin:ordinaryMultiFruit}:undefined,
+  store=new WorldStore(owner.database,{ordinaryG2DevelopmentOrigin,privateDisposableSave,disposableAgedTransfer:disposableAgedTransfer??undefined,nativeEmptyGround:nativeGround,allowMvpClimate:true,developerSpiritFixtureOwner:privateOwner,nativeWeatherCredit:weatherCredit?true:undefined,nativeRulesFruitRenewal:nativeRenewal??undefined,nativeMultiFruit:ordinaryMultiFruit&&'lockPath' in owner?{owner,pin:ordinaryMultiFruit}:undefined,
    ordinaryNativeShelter:ordinaryShelter&&'lockPath' in owner?{owner,pin:ordinaryShelter}:undefined,
    ordinaryNativeSpeech:ordinarySpeech&&'lockPath' in owner?{owner,pin:ordinarySpeech}:undefined,
    ordinaryNativeMeal:ordinaryMeal&&'lockPath' in owner?{owner,pin:ordinaryMeal}:undefined});
@@ -337,7 +366,7 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
     readExactActiveLot:head=>store!.readDisposableActiveGroundForNativeObservation(head),
     readExactPickupEvidence:head=>store!.readDisposableNativeGroundPickupEvidence(head),
    }:undefined,captureAtomicShelterEntries:ordinaryShelter?true:undefined,captureAddressedSpeechCustody:speechPin||speechPurpose||ordinarySpeech?true:undefined,captureSameSaveNativeWeather:privateOwner?.rulesWeatherAccountScope?true:undefined,captureAtomicNativeMeals:mealPin||ordinaryMeal?true:undefined,captureAtomicNativeFruitRenewal:nativeRenewal?true:undefined,captureNativeEmptyGroundMinute:nativeEmpty?true:undefined,captureAtomicNativeFruitLot:nativeRenewal?.lotShelfLifeGameMinutes||ordinaryMultiFruit?true:undefined,commit:(draft,revision,speech,meals)=>{
-   owner!.assertOwned();assertDisposable?.();
+   owner!.assertOwned();assertDisposable?.();ordinaryG2Storage?.assertOriginal();
    if(mealPin){
     if(draft.id!==mealPin.worldId)throw Error('mvp_rules_private_meal_world');
     store!.commitMvpWithAtomicMealCustody(draft,revision,meals??[]);
@@ -381,7 +410,7 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
   if(ordinaryHearingView&&'lockPath' in owner)try{hearingEditorialViewer=openOrdinaryHearingEditorialViewer(owner,ordinaryHearingView,()=>session!.world);}catch{/* objective hearing unavailable */}
   if(ordinaryShelterView&&'lockPath' in owner)try{shelterEditorialViewer=openOrdinaryShelterEditorialViewer(owner,ordinaryShelterView,()=>session!.world);}catch{/* objective shelter unavailable */}
   if(lifePin&&lifeReadable&&'lockPath' in owner)try{life=openPersistentRulesLifeFixture(owner,store,()=>session!.world,lifePin);}catch{/* no approved view */}
-  if(!assertDisposable&&options.autoStart!==false)timer=setInterval(()=>session!.advance(1),tickMs);
+  if(!assertDisposable&&!ordinaryG2Storage&&options.autoStart!==false)timer=setInterval(()=>session!.advance(1),tickMs);
   const readPrivateSpiritCandidate=()=>{
    if(!shadowOptions)return {status:'disabled'} as const;
    try{

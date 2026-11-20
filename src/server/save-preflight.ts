@@ -1,3 +1,4 @@
+import {assertOrdinaryG2DevelopmentPath,inspectOrdinaryG2DevelopmentOrigin,isOrdinaryG2DevelopmentOriginScratch,type OrdinaryG2DevelopmentOrigin} from './ordinary-g2-development-origin.js';
 import {assertDisposableNativeAgedTransferStorage,exactDisposableEating,isDisposableNativeAgedTransferPin,readDisposableNativeAgedTransfer,readExactDisposableActiveEating,type Eating,type DisposableNativeAgedTransferPin} from './disposable-native-aged-transfer.js';
 import {assertDisposableRulesSavePath,readDisposableRulesSaveMarker,type DisposableRulesSaveAuthority} from './disposable-native-rules-save.js';
 import {assertOrdinaryAgedGroundStartup,type OrdinaryAgedGroundPin} from './valley-spirit-ordinary-aged-ground.js';
@@ -162,7 +163,10 @@ export function assertDeveloperMvpEffectArchive(db:DatabaseSync,world:World):voi
   event.at!==archived[i].at||JSON.stringify(event)!==archived[i].body))fail('save_invalid_developer_effect_archive');
 }
 
-function inspectDatabase(db:DatabaseSync,rejectClimate:boolean,validateWorld?: (world:Record<string,unknown>)=>void,allowSeasonalModel=false,inspectSeasonalModel?:(s:SeasonalLedger|null)=>void,fixtureSeal?:string,formalOwner?:DeveloperMvpSpiritFixtureOwner,formalWeatherOwner?:DeveloperMvpSpiritFixtureOwner,nativeEmptyGround?:OrdinaryAgedGroundPin,privateDisposableSave?:DisposableRulesSaveAuthority,privateDisposableAgedTransfer?:DisposableNativeAgedTransferPin):Record<string,unknown>|null {
+function inspectDatabase(db:DatabaseSync,rejectClimate:boolean,validateWorld?: (world:Record<string,unknown>)=>void,allowSeasonalModel=false,inspectSeasonalModel?:(s:SeasonalLedger|null)=>void,fixtureSeal?:string,formalOwner?:DeveloperMvpSpiritFixtureOwner,formalWeatherOwner?:DeveloperMvpSpiritFixtureOwner,nativeEmptyGround?:OrdinaryAgedGroundPin,privateDisposableSave?:DisposableRulesSaveAuthority,privateDisposableAgedTransfer?:DisposableNativeAgedTransferPin,ordinaryG2DevelopmentOrigin?:OrdinaryG2DevelopmentOrigin):Record<string,unknown>|null {
+ let g2World:string|null=null;
+ try{g2World=inspectOrdinaryG2DevelopmentOrigin(db,ordinaryG2DevelopmentOrigin);}
+ catch{fail('save_ordinary_g2_development_origin');}
  const fixtureTable=db.prepare("SELECT name,type,sql FROM sqlite_master WHERE lower(name)='mvp_spirit_developer_fixture'").get();
  let disposableWorld:string|undefined;
  if(privateDisposableSave){
@@ -189,6 +193,9 @@ function inspectDatabase(db:DatabaseSync,rejectClimate:boolean,validateWorld?: (
   const world=privateDisposableSave&&privateDisposableAgedTransfer?
    decodeExactDisposableSavedWorld(row.state,db,privateDisposableSave,privateDisposableAgedTransfer):
    decodeSavedWorld(row.state,fixtureSeal!==undefined&&!formalOwner&&!formalWeatherOwner);
+  if(g2World&&(latest!==null||world.id!==g2World||world.mode!=='validation'||owns(world,'simulationOnly')||owns(world,'mvpSeasonalModelVersion')||
+   owns(world.mvpClimate as object??{},'spiritEffects')||owns(world.mvpClimate as object??{},'spiritFruitSettlement')))
+   fail('save_ordinary_g2_development_world');
   if(disposableWorld&&(latest!==null||world.mode!=='validation'||world.id!==disposableWorld))fail('save_disposable_rules_world');
   if(fixtureSeal&&(formalOwner||formalWeatherOwner)&&(latest!==null||world.mode!=='formal'||typeof world.id!=='string'||
    !/^valley-formal-[A-Za-z0-9_-]{1,180}$/.test(world.id)||world.mvpSeasonalModelVersion!==undefined||owns(world,'mvpClimate')))
@@ -285,8 +292,16 @@ function unchanged(path:string,files:ReadonlyArray<SourceFile|null>,suffixes:rea
  * checkpoint. WAL is copied alongside the DB and SQLite reads its latest state.
  * This is not a substitute for caller-held ownership against concurrent writers.
  */
-export function preflightWorldSave(path:string,options:{requireWorld?:boolean;rejectClimate?:boolean;allowSeasonalModel?:boolean;inspectSeasonalModel?:(s:SeasonalLedger|null)=>void;inspectOptionalAlmanac?:(snapshot:DatabaseSync,world:Record<string,unknown>)=>void;validateWorld?:(world:Record<string,unknown>)=>void;developerSpiritFixtureOwner?:DeveloperMvpSpiritFixtureOwner;nativeEmptyGround?:OrdinaryAgedGroundPin;privateDisposableSave?:DisposableRulesSaveAuthority;privateDisposableAgedTransfer?:DisposableNativeAgedTransferPin}={}):Record<string,unknown>|null {
+export function preflightWorldSave(path:string,options:{requireWorld?:boolean;rejectClimate?:boolean;allowSeasonalModel?:boolean;inspectSeasonalModel?:(s:SeasonalLedger|null)=>void;inspectOptionalAlmanac?:(snapshot:DatabaseSync,world:Record<string,unknown>)=>void;validateWorld?:(world:Record<string,unknown>)=>void;developerSpiritFixtureOwner?:DeveloperMvpSpiritFixtureOwner;nativeEmptyGround?:OrdinaryAgedGroundPin;privateDisposableSave?:DisposableRulesSaveAuthority;privateDisposableAgedTransfer?:DisposableNativeAgedTransferPin;ordinaryG2DevelopmentOrigin?:OrdinaryG2DevelopmentOrigin}={}):Record<string,unknown>|null {
  const fixture=options.developerSpiritFixtureOwner,disposable=options.privateDisposableSave;
+ const g2=options.ordinaryG2DevelopmentOrigin;
+ if(!g2&&path!==':memory:'&&isOrdinaryG2DevelopmentOriginScratch(path))fail('save_ordinary_g2_development_origin');
+ if(g2){
+  if(path===':memory:'||options.rejectClimate||options.allowSeasonalModel||fixture||disposable||options.nativeEmptyGround)
+   fail('save_ordinary_g2_development_origin');
+  try{assertOrdinaryG2DevelopmentPath(g2,path);}catch{fail('save_ordinary_g2_development_origin');}
+ }
+
  if(options.privateDisposableAgedTransfer!==undefined&&(!disposable||!isDisposableNativeAgedTransferPin(options.privateDisposableAgedTransfer)))
   fail('save_disposable_rules_owner');
  if(disposable!==undefined){
@@ -314,12 +329,13 @@ export function preflightWorldSave(path:string,options:{requireWorld?:boolean;re
   unchanged(path,files,suffixes);
   // readOnly may create SHM on this PRIVATE copy, never on the user's save.
   db=new DatabaseSync(copy,{readOnly:true});
-  if(fixture||disposable)db.exec('PRAGMA trusted_schema=OFF; PRAGMA query_only=ON');
-  const result=inspectDatabase(db,options.rejectClimate===true,options.validateWorld,options.allowSeasonalModel===true,options.inspectSeasonalModel,fixture?.seal,fixture?.formalApprovalKeyPem?fixture:undefined,fixture?.formalWeatherPurpose?fixture:undefined,options.nativeEmptyGround,disposable,options.privateDisposableAgedTransfer);
+  if(fixture||disposable||g2)db.exec('PRAGMA trusted_schema=OFF; PRAGMA query_only=ON');
+  const result=inspectDatabase(db,options.rejectClimate===true,options.validateWorld,options.allowSeasonalModel===true,options.inspectSeasonalModel,fixture?.seal,fixture?.formalApprovalKeyPem?fixture:undefined,fixture?.formalWeatherPurpose?fixture:undefined,options.nativeEmptyGround,disposable,options.privateDisposableAgedTransfer,g2);
   if(!result&&options.requireWorld)fail('save_missing_world');
   if(result&&options.inspectOptionalAlmanac){db.exec('PRAGMA trusted_schema=OFF; PRAGMA query_only=ON');options.inspectOptionalAlmanac(db,result);}
   unchanged(path,files,suffixes);
   fixture?.assertOwned();
+  if(g2)assertOrdinaryG2DevelopmentPath(g2,path);
   return result;
  }catch(error){if(error instanceof SaveCompatibilityError)throw error;throw new SaveCompatibilityError('save_preflight_failed');}
  finally{
