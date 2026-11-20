@@ -109,6 +109,16 @@ export function assertOrdinaryAgedGroundStartup(db:DatabaseSync,world:Record<str
 export function hasNativeEmptyGroundCheckpoint(db:DatabaseSync):boolean{
  return readInstalled(db,true)?.version===2;
 }
+/** Query-only evidence for the current native empty substrate, never a writer.
+ * A static V1 installation is not evidence of the current native minute. */
+export function readNativeOrdinaryEmptyGroundCheckpoint(db:DatabaseSync,w:World,pin:OrdinaryAgedGroundPin){
+ assertOrdinaryAgedGroundStartup(db,w as unknown as Record<string,unknown>,true,pin);
+ const state=readInstalled(db,true),site=readSite(w,pin);
+ if(!state||state.version!==2||!site||!exactHead(db,w)||w.clock.paused||
+  state.sourceResourceInstanceId!==site.source.resourceInstanceId||state.targetId!==site.target.id)return null;
+ return Object.freeze({sourceResourceInstanceId:state.sourceResourceInstanceId,targetId:state.targetId,
+  headDigest:state.nativeCheckpoint.worldDigest,checkpointDigest:digest(JSON.stringify(state))});
+}
 function exactHead(db:DatabaseSync,w:World){
  const rows=db.prepare('SELECT id,revision,state FROM main.worlds LIMIT 2').all();
  const row=rows[0];
