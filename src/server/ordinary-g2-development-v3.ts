@@ -110,8 +110,9 @@ type Expiry=NonNullable<ReturnType<typeof advanceAgedGroundExpiry>>['expired'][n
 type Pickup=NonNullable<ReturnType<typeof prepareOrdinaryAgedGroundPickup>>['completion'];
 type Held=Readonly<{schema:'ordinary-g2-development-held/v3';holderId:string;ownerId:'commons';effectId:string;lotId:string;
  bornUs:string;expiresUs:string;groundDebit:1;heldCredit:1;pickup:Pickup}>;
+type HeldExpiry=Readonly<{settledUs:string;heldDebit:1}>;
 type Lifecycle=Readonly<{schema:'ordinary-g2-development-continuation/v3';sequence:number;atUs:string;
- revision:number;digest:string;placement:Ground;discoveries:readonly CommittedNativeOrdinaryAgedDiscovery[];expiry:Expiry|null;held?:Held}>;
+ revision:number;digest:string;placement:Ground;discoveries:readonly CommittedNativeOrdinaryAgedDiscovery[];expiry:Expiry|null;held?:Held;heldExpiry?:HeldExpiry}>;
 const archiveKeys=['schema','approval','sourceBefore','sourceAfter','afterRevision','afterDigest','groundDigest'];
 const lotOf=(g:Ground,c:Approval):AgedGroundLot=>({bornUs:g.bornUs,expiresUs:g.expiresUs,
  fruit:{effectId:g.effectId,kind:'fallen-fruit',amount:1,ownerId:g.ownerId,sourceResourceId:g.sourceId,
@@ -144,7 +145,7 @@ export function readOrdinaryDevelopmentV3(db:DatabaseSync,origin:OrdinaryG2Devel
    w.resources.filter(r=>r.id===g.sourceId&&r.amount===a.sourceAfter&&r.at.x===g.sourceAt.x&&r.at.y===g.sourceAt.y).length!==1||
    !resolveMvpRainEpisode(w,c.terms.rainEventId))throw Error('ordinary_g2_dev_v3_placement_mismatch');
  }else{
-  if(!exact(l,['schema','sequence','atUs','revision','digest','placement','discoveries','expiry',...(Object.hasOwn(l,'held')?['held']:[])])||l.schema!=='ordinary-g2-development-continuation/v3'||
+  if(!exact(l,['schema','sequence','atUs','revision','digest','placement','discoveries','expiry',...(Object.hasOwn(l,'held')?['held']:[]),...(Object.hasOwn(l,'heldExpiry')?['heldExpiry']:[])])||l.schema!=='ordinary-g2-development-continuation/v3'||
    !int(l.sequence)||l.sequence<1||l.sequence>1440||BigInt(now)!==before+1_000_000n*BigInt(l.sequence)||
    now!==l.atUs||w.revision!==l.revision||w.revision<=a.afterRevision||l.digest!==digestHead(db,w)||
    !Array.isArray(l.discoveries)||l.discoveries.length>64||
@@ -163,18 +164,25 @@ export function readOrdinaryDevelopmentV3(db:DatabaseSync,origin:OrdinaryG2Devel
     held.schema!=='ordinary-g2-development-held/v3'||l.expiry!==null||held.effectId!==g.effectId||held.lotId!==g.lotId||held.ownerId!==g.ownerId||
     held.bornUs!==g.bornUs||held.expiresUs!==g.expiresUs||held.groundDebit!==1||held.heldCredit!==1||
     !exact(p,['schema','worldId','baseRevision','draftRevision','effectId','receiptDigest','residentId','discoveryId','planId','settledUs','bornUs','expiresUs'])||
-    p.schema!=='native-ordinary-aged-ground-pickup-completion/v1'||p.worldId!==w.id||p.draftRevision!==w.revision||p.baseRevision>=p.draftRevision||
+    p.schema!=='native-ordinary-aged-ground-pickup-completion/v1'||p.worldId!==w.id||!int(p.draftRevision)||p.draftRevision>w.revision||p.baseRevision>=p.draftRevision||
     !int(p.baseRevision)||p.baseRevision<d.committedRevision||p.effectId!==g.effectId||p.receiptDigest!==hash(a)||p.residentId!==held.holderId||
-    p.discoveryId!==d.discoveryId||p.settledUs!==now||p.bornUs!==g.bornUs||p.expiresUs!==g.expiresUs||BigInt(d.atUs)>=BigInt(now)||
-    !string(p.planId)||!w.processed.includes('plan:'+p.planId)||resident.at.x!==g.at.x||resident.at.y!==g.at.y||
-    resident.status!=='alive'||resident.inside!==null||resident.residency==='outside'||resident.regionalLocation||resident.plan||resident.activity)
+    p.discoveryId!==d.discoveryId||!clock(p.settledUs)||BigInt(p.settledUs)>BigInt(now)||BigInt(p.settledUs)>=expires||p.bornUs!==g.bornUs||p.expiresUs!==g.expiresUs||BigInt(d.atUs)>=BigInt(p.settledUs)||
+    !string(p.planId)||!w.processed.includes('plan:'+p.planId)||
+    resident.status!=='alive'||resident.residency==='outside'||resident.regionalLocation||
+    (p.settledUs===now)!==(p.draftRevision===w.revision)||
+    p.settledUs===now&&(resident.at.x!==g.at.x||resident.at.y!==g.at.y||resident.inside!==null||resident.plan||resident.activity))
     throw Error('ordinary_g2_dev_v3_held');
+  }
+  if(Object.hasOwn(l,'heldExpiry')){
+   const x=l.heldExpiry;
+   if(!l.held||!x||!exact(x,['settledUs','heldDebit'])||
+    x.heldDebit!==1||x.settledUs!==now||BigInt(now)<expires||BigInt(now)-1_000_000n>=expires)throw Error('ordinary_g2_dev_v3_held_expiry');
   }
   if(l.expiry!==null){
    if(!exact(l.expiry,['effectId','bornUs','expiresUs','settledUs','groundDebit'])||l.expiry.effectId!==g.effectId||l.expiry.bornUs!==g.bornUs||
     l.expiry.expiresUs!==g.expiresUs||l.expiry.settledUs!==now||l.expiry.groundDebit!==1||BigInt(now)<expires||BigInt(now)-1_000_000n>=expires)
      throw Error('ordinary_g2_dev_v3_expiry');
-  }else if(BigInt(now)>=expires)throw Error('ordinary_g2_dev_v3_unsettled_expiry');
+  }else if(!l.heldExpiry&&BigInt(now)>=expires)throw Error('ordinary_g2_dev_v3_unsettled_expiry');
  }
  if(l){assertStoppedEventAuthority(db);assertStoppedEventArchive(db,w);}
  if(l?.expiry||l?.held?gr.length!==0:rg?.slot!==1||rg.body!==JSON.stringify(g))throw Error('ordinary_g2_dev_v3_ground_row');
@@ -182,15 +190,36 @@ export function readOrdinaryDevelopmentV3(db:DatabaseSync,origin:OrdinaryG2Devel
  verifiedArchiveReads.set(own,{db,revision:w.revision,world:hash(w),content:hash(own)});
  return own;
 }
+function eligibleLifecycleEvents(w:World,draft:World){
+ return draft.events.length<=4096&&draft.events.length-w.events.length<=128&&
+  hash(draft.events.slice(0,w.events.length))===hash(w.events)&&
+  !draft.events.slice(w.events.length).some(e=>e.kind==='conversation'||e.speechText!==undefined||e.mvpMeal||e.socialAppointmentArrival||e.mvpFruitFall);
+}
 const preparedMinutes=new WeakMap<object,{db:DatabaseSync;priorSeal:string;content:string}>();
 /** Native minute for an actually placed, still owned lot. No user-supplied
  * actor, plan, world, time, target or observations enter this path. */
-export function prepareOrdinaryDevelopmentV3Minute(db:DatabaseSync,w:World,owned:NonNullable<ReturnType<typeof readOrdinaryDevelopmentV3>>,pickup=false){
+export function prepareOrdinaryDevelopmentV3Minute(db:DatabaseSync,w:World,owned:NonNullable<ReturnType<typeof readOrdinaryDevelopmentV3>>,mode:'observe'|'pickup'|'held'='observe'){
+ const pickup=mode==='pickup';
  const g=owned.ground,l=owned.lifecycle;
  const proven=verifiedArchiveReads.get(owned);
  if(!db.isTransaction||!proven||proven.db!==db||proven.revision!==w.revision||proven.world!==hash(w)||proven.content!==hash(owned)||
-  !g||latch(db,true)!==owned.seal||(l?.sequence??0)>=1440)return null;
+  !(mode==='held'?l?.held&&!l.heldExpiry:g)||latch(db,true)!==owned.seal||(l?.sequence??0)>=1440)return null;
  assertLifecycleWorldWriter(db);assertStoppedEventAuthority(db);assertStoppedEventArchive(db,w);
+ if(mode==='held'){
+  if(!l?.held||l.heldExpiry)return null;
+  const held=l.held;
+  const next=prepareStoppedOrdinaryAgedGroundMinute(w,{readExactActiveLot:()=>null});
+  if(!next||next.observed.length||!eligibleLifecycleEvents(w,next.draft))return null;
+  const holder=next.draft.residents.find(r=>r.id===held.holderId);
+  if(!holder||holder.status!=='alive'||holder.residency==='outside'||holder.regionalLocation)return null;
+  const now=minuteToClimateUs(w.minute),after=minuteToClimateUs(next.draft.minute);
+  if(BigInt(now)>=BigInt(held.expiresUs)||BigInt(after)!==BigInt(now)+1_000_000n)return null;
+  const heldExpiry:HeldExpiry|undefined=BigInt(after)>=BigInt(held.expiresUs)?{settledUs:after,heldDebit:1}:undefined;
+  const prepared={draft:next.draft,placement:l.placement,sequence:l.sequence+1,discoveries:l.discoveries,expiry:null,held,...(heldExpiry?{heldExpiry}:{})};
+  preparedMinutes.set(prepared,{db,priorSeal:owned.seal,content:hash(prepared)});
+  return prepared;
+ }
+ if(!g)return null;
  const lot=lotOf(g,owned.approval),receiptDigest=hash(owned.receipt);
  const readLot=(h:{worldId:string;revision:number;atUs:string})=>
   h.worldId===w.id&&h.revision===w.revision&&h.atUs===w.mvpClimate?.lastUs?
@@ -206,15 +235,13 @@ export function prepareOrdinaryDevelopmentV3Minute(db:DatabaseSync,w:World,owned
  const {draft,observed}=next,expiry=advanceAgedGroundExpiry(w,draft,[lot]);
  const held:Held|undefined=picked?{schema:'ordinary-g2-development-held/v3',holderId:picked.completion.residentId,
   ownerId:g.ownerId,effectId:g.effectId,lotId:g.lotId,bornUs:g.bornUs,expiresUs:g.expiresUs,groundDebit:1,heldCredit:1,pickup:picked.completion}:undefined;
- if(!expiry||expiry.expired.length&&(observed.length||held)||draft.events.length>4096||draft.events.length-w.events.length>128||
-  hash(draft.events.slice(0,w.events.length))!==hash(w.events)||
-  draft.events.slice(w.events.length).some(e=>e.kind==='conversation'||e.speechText!==undefined||e.mvpMeal||e.socialAppointmentArrival||e.mvpFruitFall))return null;
+ if(!expiry||expiry.expired.length&&(observed.length||held)||!eligibleLifecycleEvents(w,draft))return null;
  const discoveries=[...l?.discoveries??[]],prior=new Set(discoveries.map(d=>d.residentId));
  for(const seen of observed)if(!prior.has(seen.residentId)){
   discoveries.push({...seen,committedRevision:draft.revision});prior.add(seen.residentId);
  }
  if(discoveries.length>64)return null;
- const prepared={draft,placement:g,sequence:(l?.sequence??0)+1,discoveries,expiry:expiry.expired[0]??null,...(held?{held}:{})};
+ const prepared={draft,placement:g,sequence:(l?.sequence??0)+1,discoveries,expiry:expiry.expired[0]??null,...(held?{held}:{}),heldExpiry:undefined};
  preparedMinutes.set(prepared,{db,priorSeal:owned.seal,content:hash(prepared)});
  return prepared;
 }
@@ -222,16 +249,16 @@ export function writeOrdinaryDevelopmentV3Minute(db:DatabaseSync,origin:Ordinary
  owned:NonNullable<ReturnType<typeof readOrdinaryDevelopmentV3>>,step:NonNullable<ReturnType<typeof prepareOrdinaryDevelopmentV3Minute>>){
  const h=digestHead(db,step.draft),prepared=preparedMinutes.get(step);
  preparedMinutes.delete(step);
- if(!db.isTransaction||!h||!prepared||prepared.db!==db||prepared.priorSeal!==owned.seal||prepared.content!==hash(step)||!owned.ground||!tables(db)||latch(db,true)!==owned.seal)throw Error('ordinary_g2_dev_v3_continuation_scope');
+ if(!db.isTransaction||!h||!prepared||prepared.db!==db||prepared.priorSeal!==owned.seal||prepared.content!==hash(step)||(!owned.ground&&!owned.lifecycle?.held)||!tables(db)||latch(db,true)!==owned.seal)throw Error('ordinary_g2_dev_v3_continuation_scope');
  assertLifecycleWorldWriter(db);assertStoppedEventAuthority(db);assertStoppedEventArchive(db,step.draft);
  const lifecycle:Lifecycle={schema:'ordinary-g2-development-continuation/v3',sequence:step.sequence,atUs:minuteToClimateUs(step.draft.minute),
-  revision:step.draft.revision,digest:h,placement:step.placement,discoveries:step.discoveries,expiry:step.expiry,...(step.held?{held:step.held}:{})};
+  revision:step.draft.revision,digest:h,placement:step.placement,discoveries:step.discoveries,expiry:step.expiry,...(step.held?{held:step.held}:{}),...(step.heldExpiry?{heldExpiry:step.heldExpiry}:{})};
  const raw=JSON.stringify({placementReceipt:owned.receipt,lifecycle}),seal=authenticateOrdinaryG2DevelopmentV3(origin,'v3-receipt',raw);
  if(Buffer.byteLength(raw)>65536||
   db.prepare('UPDATE main.'+RECEIPT+' SET body=?,seal=? WHERE opportunity=? AND seal=?')
    .run(raw,seal,owned.approval.terms.opportunityId,owned.seal).changes!==1||
   db.prepare('UPDATE main.archive_meta SET value=? WHERE key=? AND value=?').run(seal,LATCH,owned.seal).changes!==1||
-  (step.expiry||step.held)&&db.prepare('DELETE FROM main.'+GROUND+' WHERE slot=1').run().changes!==1)
+  owned.ground&&(step.expiry||step.held)&&db.prepare('DELETE FROM main.'+GROUND+' WHERE slot=1').run().changes!==1)
    throw Error('ordinary_g2_dev_v3_continuation_write');
  const persisted=readOrdinaryDevelopmentV3(db,origin,pin,step.draft);
  if(!persisted||persisted.seal!==seal||persisted.lifecycle?.digest!==h)throw Error('ordinary_g2_dev_v3_continuation_readback');

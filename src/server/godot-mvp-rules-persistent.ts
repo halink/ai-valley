@@ -196,7 +196,8 @@ export function bindOrdinaryG2DevelopmentOriginPreview(storage:ReturnType<typeof
      previewDevelopmentTransfer:()=>ifLive(()=>run.previewPrivateOrdinaryDevelopmentV3?.()??null),
      transferDevelopmentFruit:(input:unknown)=>ifLive(()=>run.transferPrivateOrdinaryDevelopmentV3?.(input)??null),
      advanceDevelopmentGroundMinute:()=>ifLive(()=>run.advancePrivateOrdinaryDevelopmentV3Minute?.()??null),
-     tryDevelopmentGroundPickupMinute:()=>ifLive(()=>run.advancePrivateOrdinaryDevelopmentV3Minute?.(true)??null),
+     tryDevelopmentGroundPickupMinute:()=>ifLive(()=>run.advancePrivateOrdinaryDevelopmentV3Minute?.('pickup')??null),
+     advanceDevelopmentHeldMinute:()=>ifLive(()=>run.advancePrivateOrdinaryDevelopmentV3Minute?.('held')??null),
      readDevelopmentHeld:(residentId:string)=>ifLive(()=>run.readPrivateOrdinaryDevelopmentV3Held?.(residentId)??null),
      readDevelopmentDiscovery:(residentId:string)=>ifLive(()=>run.readPrivateOrdinaryDevelopmentV3Discovery?.(residentId)??null),
      readDevelopmentGround:()=>ifLive(()=>run.readPrivateOrdinaryDevelopmentV3?.()??null),}:{}),
@@ -636,9 +637,9 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
   const reopenedV3=ordinaryG2V3?store?.readOwnedOrdinaryDevelopmentV3():null;
   let committedV3Head:Readonly<{worldId:string;revision:number;minute:number}>|null=reopenedV3?
    Object.freeze({worldId:reopenedV3.worldId,revision:reopenedV3.revision,minute:reopenedV3.minute}):null;
-  const advanceDevelopmentGroundMinute=(pickup=false)=>{
+  const advanceDevelopmentGroundMinute=(mode:'observe'|'pickup'|'held'='observe')=>{
    if(!committedV3Head||!store)return null;
-   const settled=store.advanceOwnedOrdinaryDevelopmentV3Minute(pickup);
+   const settled=store.advanceOwnedOrdinaryDevelopmentV3Minute(mode);
    if(!settled)return null;
    committedV3Head=Object.freeze({worldId:settled.worldId,revision:settled.revision,minute:settled.minute});
    return settled;

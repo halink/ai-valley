@@ -56,7 +56,14 @@ held unit with the same lot, owner, birth and expiry, and attests the native
 resident/action/observation receipt under the original latch and archive.
 No scalar inventory, nutrition, movement intent, public event or public
 view is credited. The original private host can read a held fact only by
-the exact resident key. Possession remains paused after pickup, including
-after reopen; no held time advance, eating or held-expiry settlement is
-implemented by this slice. Opportunity replay and generic advance remain
+the exact resident key. The ordinary controls stay paused after
+pickup. The original no-port host has a separate manual held minute that
+runs the native engine without an eating or other V3 effect capability.
+It preserves the inherited timestamp, keeps the first pickup receipt
+as history and, at the first elapsed expiry boundary, debits the one
+held unit and advances the head and receipt/latch atomically. Closed or
+reopened terminal scopes cannot advance or replay. If the holder leaves
+the supported in-world living custody or the native minute requires an
+unsupported event settlement, the entire minute refuses unchanged.
+No V3 eating or hall path is implemented by this slice. Opportunity replay and generic advance remain
 blocked. Weather withdrawal after actual placement does not erase custody.
