@@ -426,6 +426,15 @@ export function prepareSealedMvpEcologyMinute(current:World,captureMeals=false,p
  }catch{return null;}
 }
 
+export function prepareOrdinaryDevelopmentDueNativeMinute(current:World){
+ if(Object.hasOwn(current,'simulationOnly')||Object.hasOwn(current.mvpClimate??{},'spiritEffects')||
+  Object.hasOwn(current.mvpClimate??{},'spiritFruitSettlement'))return null;
+ const next=prepareSealedMvpEcologyMinute(current,true,undefined,undefined,undefined,undefined,true);
+ if(!next?.fruitFlow||next.mealWitnesses.length||next.speech?.receipts.length)return null;
+ atomicNativeRenewalMinutes.set(next.draft,Object.freeze({before:sameSaveWorldFingerprint(current),
+  after:sameSaveWorldFingerprint(next.draft),flow:next.fruitFlow,renewal:next.renewal}));
+ return next;
+}
 /** One normal chooser/engine minute for the stopped ordinary archive only.
  * The provided read port is built from the verified owning snapshot. */
 export function prepareStoppedOrdinaryAgedGroundMinute(current:World,ownedGround:OrdinaryAgedGroundDiscoveryRead,ordinaryFruitFlow?:true){

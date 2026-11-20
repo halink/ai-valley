@@ -193,6 +193,10 @@ export function bindOrdinaryG2DevelopmentOriginPreview(storage:ReturnType<typeof
     ...(options.privateOrdinarySelectedRehearsal?{previewRehearsal:()=>ifLive(()=>run.previewPrivateSelectedOrdinaryRehearsal?.()??null),
      rehearseSelected:(input:unknown)=>ifLive(()=>run.rehearsePrivateSelectedOrdinaryCandidate?.(input)??null)}:{}),
     ...(options.privateOrdinaryDevelopmentV3?{
+     previewDevelopmentDue:()=>ifLive(()=>run.previewPrivateOrdinaryDevelopmentDue?.()??null),
+     acceptDevelopmentDue:(input:unknown)=>ifLive(()=>run.acceptPrivateOrdinaryDevelopmentDue?.(input)??null),
+     readDevelopmentDue:()=>ifLive(()=>run.readPrivateOrdinaryDevelopmentDue?.()??null),
+     advanceDevelopmentDueMinute:()=>ifLive(()=>run.advancePrivateOrdinaryDevelopmentDue?.()??null),
      previewDevelopmentTransfer:()=>ifLive(()=>run.previewPrivateOrdinaryDevelopmentV3?.()??null),
      transferDevelopmentFruit:(input:unknown)=>ifLive(()=>run.transferPrivateOrdinaryDevelopmentV3?.(input)??null),
      advanceDevelopmentGroundMinute:()=>ifLive(()=>run.advancePrivateOrdinaryDevelopmentV3Minute?.()??null),
@@ -639,6 +643,26 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
    const w=session.world;
    return store.readDisposableResidentGroundDiscovery({worldId:w.id,revision:w.revision,atUs:minuteToClimateUs(w.minute)},residentId);
   };
+  let dueOwned=ordinaryG2V3?store?.readOwnedDevelopmentDue()??null:null;
+  const previewDevelopmentDue=()=>{
+   owner!.assertOwned();ordinaryG2Storage?.assertOriginal();
+   const proof=!dueOwned&&!committedV3Head&&selectedReview?.currentPositive();
+   return proof&&store&&ordinaryMultiCandidate&&valleySpirit?store.previewOrdinaryDevelopmentDue(proof,ordinaryMultiCandidate,valleySpirit):null;
+  };
+  const acceptDevelopmentDue=(input:unknown)=>{
+   owner!.assertOwned();ordinaryG2Storage?.assertOriginal();
+   if(dueOwned||committedV3Head||!store||!ordinaryMultiCandidate||!valleySpirit)return null;
+   const accepted=store.acceptOwnedDevelopmentDue(selectedReview?.currentPositive()??null,ordinaryMultiCandidate,valleySpirit,input);
+   if(accepted)dueOwned=accepted;
+   return accepted;
+  };
+  const advanceDevelopmentDue=()=>{
+   owner!.assertOwned();ordinaryG2Storage?.assertOriginal();
+   if(dueOwned?.status!=='pending'||!store||!ordinaryMultiCandidate||!valleySpirit)return null;
+   const settled=store.advanceOwnedDevelopmentDue(ordinaryMultiCandidate,valleySpirit);
+   if(settled)dueOwned=settled;
+   return settled;
+  };
   const reopenedV3=ordinaryG2V3?store?.readOwnedOrdinaryDevelopmentV3():null;
   let committedV3Head:Readonly<{worldId:string;revision:number;minute:number}>|null=reopenedV3?
    Object.freeze({worldId:reopenedV3.worldId,revision:reopenedV3.revision,minute:reopenedV3.minute}):null;
@@ -650,7 +674,7 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
    return settled;
   };
   const transferDevelopmentFruit=(input:unknown)=>{
-   if(committedV3Head||!store||!selectedReview||!valleySpirit||!ordinaryMultiCandidate)return null;
+   if(dueOwned||committedV3Head||!store||!selectedReview||!valleySpirit||!ordinaryMultiCandidate)return null;
    const placed=store.transactOwnedOrdinaryDevelopmentV3(selectedReview.currentPositive(),ordinaryMultiCandidate,valleySpirit,input);
    if(!placed)return null;
    // Do not invoke the session builder after COMMIT. A failed refresh must
@@ -659,7 +683,9 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
    return placed.view;
   };
   return {get session(){return session!;},server,snapshot,...(ordinaryG2V3?{previewPrivateOrdinaryDevelopmentV3:()=>{
-   const proof=!committedV3Head&&selectedReview?.currentPositive();return proof&&store?store.previewOrdinaryDevelopmentV3(proof):null;},
+   const proof=!dueOwned&&!committedV3Head&&selectedReview?.currentPositive();return proof&&store?store.previewOrdinaryDevelopmentV3(proof):null;},
+   previewPrivateOrdinaryDevelopmentDue:previewDevelopmentDue,acceptPrivateOrdinaryDevelopmentDue:acceptDevelopmentDue,
+   readPrivateOrdinaryDevelopmentDue:()=>store?.readOwnedDevelopmentDue()??null,advancePrivateOrdinaryDevelopmentDue:advanceDevelopmentDue,
    advancePrivateOrdinaryDevelopmentV3Minute:advanceDevelopmentGroundMinute,
    readPrivateOrdinaryDevelopmentV3Fairness:()=>store?.readOwnedOrdinaryDevelopmentV3Fairness()??null,
    readPrivateOrdinaryDevelopmentV3Route:(id:string)=>typeof id==='string'&&id.length&&id.length<=300?store?.readOwnedOrdinaryDevelopmentV3Route(id)??null:null,
@@ -667,8 +693,10 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
    readPrivateOrdinaryDevelopmentV3Held:(id:string)=>typeof id==='string'&&id.length&&id.length<=300?store?.readOwnedOrdinaryDevelopmentV3Held(id)??null:null,
    readPrivateOrdinaryDevelopmentV3Discovery:(id:string)=>typeof id==='string'&&id.length&&id.length<=300?store?.readOwnedOrdinaryDevelopmentV3(id)?.discovery??null:null,
    transferPrivateOrdinaryDevelopmentV3:transferDevelopmentFruit,readPrivateOrdinaryDevelopmentV3:()=>store?.readOwnedOrdinaryDevelopmentV3()??null,
-   readPrivateOrdinaryDevelopmentV3Head:()=>committedV3Head?(store?.readOwnedOrdinaryDevelopmentV3()?committedV3Head:null):
+   readPrivateOrdinaryDevelopmentV3Head:()=>dueOwned?(()=>{
+    const d=store?.readOwnedDevelopmentDue();return d?Object.freeze({worldId:d.worldId,revision:d.revision,minute:d.minute}):null;
+   })():committedV3Head?(store?.readOwnedOrdinaryDevelopmentV3()?committedV3Head:null):
     session?Object.freeze({worldId:session.world.id,revision:session.world.revision,minute:session.world.minute}):null,
-   ordinaryDevelopmentV3AdvanceBlocked:()=>!!committedV3Head||!!store?.readOwnedOrdinaryDevelopmentV3()}:{}),...(selectedRehearsal?{previewPrivateSelectedOrdinaryRehearsal:()=>!committedV3Head?selectedReview?.preview()??null:null,rehearsePrivateSelectedOrdinaryCandidate:(input:unknown)=>!committedV3Head?selectedReview?.run(input)??null:null}:{}),...(ordinarySelection?{previewPrivateOrdinaryMultiSelection:()=>!committedV3Head?selection?.preview()??null:null,selectPrivateOrdinaryMultiCandidate:(input:unknown)=>!committedV3Head?selection?.select(input)??Promise.resolve(null):Promise.resolve(null),readPrivateOrdinaryMultiSelection:()=>!committedV3Head?selection?.latest()??null:null}:{}),...(ordinaryMultiCandidate?{readPrivateOrdinaryMultiCandidate:()=>!committedV3Head&&session&&store&&valleySpirit?store.readCurrentOrdinaryMultiCandidate(session.world,ordinaryMultiCandidate,valleySpirit):null}:{}),...(ordinaryMultiFruit?{readPrivateOrdinaryMultiFruit:()=>!committedV3Head&&session&&store?store.readCurrentOrdinaryNativeMultiFruit(session.world):null}:{}),...(ordinaryShelter?{readPrivateOrdinaryNativeShelter:()=>session&&store?store.readOrdinaryNativeShelterAtHead(session.world):null}:{}),...(ordinarySpeech?{readPrivateOrdinaryNativeSpeech:(eventId:string)=>session&&store?store.readOrdinaryNativeSpeechAtHead(session.world,eventId):null}:{}),...(ordinaryMeal?{readPrivateOrdinaryNativeMeal:(eventId:string)=>session&&store?store.readOrdinaryNativeMealAtHead(session.world,eventId):null}:{}),readPrivateDisposableNativeSpeech:(head:Readonly<DisposableSpeechHead>)=>speechReader?.latest(head)??null,transactPrivateDisposableAgedTransfer,readPrivateDisposableNativeAgedFairness,readPrivateDisposableResidentGroundDiscovery,disposableRebaseRequired:()=>rebaseRequired,readPrivateSpiritCandidate,readPrivateSpiritGeographicProposal,readPrivateNativeFruitRenewal,readPrivateNativeFruitLot,readPrivateAgedFruitPreflight,readPrivateOrdinaryAgedGround,readPrivateOrdinaryAgedG1Review,previewPrivateOrdinaryAgedG1Decision,commitPrivateOrdinaryAgedG1Decision,readPrivateOrdinaryAgedG1Decision,previewPrivateOrdinaryG2BlockedHandoff,commitPrivateOrdinaryG2BlockedHandoff,readPrivateOrdinaryG2BlockedHandoff,close};
+   ordinaryDevelopmentV3AdvanceBlocked:()=>!!dueOwned||!!committedV3Head||!!store?.readOwnedOrdinaryDevelopmentV3()}:{}),...(selectedRehearsal?{previewPrivateSelectedOrdinaryRehearsal:()=>!dueOwned&&!committedV3Head?selectedReview?.preview()??null:null,rehearsePrivateSelectedOrdinaryCandidate:(input:unknown)=>!dueOwned&&!committedV3Head?selectedReview?.run(input)??null:null}:{}),...(ordinarySelection?{previewPrivateOrdinaryMultiSelection:()=>!dueOwned&&!committedV3Head?selection?.preview()??null:null,selectPrivateOrdinaryMultiCandidate:(input:unknown)=>!dueOwned&&!committedV3Head?selection?.select(input)??Promise.resolve(null):Promise.resolve(null),readPrivateOrdinaryMultiSelection:()=>!dueOwned&&!committedV3Head?selection?.latest()??null:null}:{}),...(ordinaryMultiCandidate?{readPrivateOrdinaryMultiCandidate:()=>!dueOwned&&!committedV3Head&&session&&store&&valleySpirit?store.readCurrentOrdinaryMultiCandidate(session.world,ordinaryMultiCandidate,valleySpirit):null}:{}),...(ordinaryMultiFruit?{readPrivateOrdinaryMultiFruit:()=>!dueOwned&&!committedV3Head&&session&&store?store.readCurrentOrdinaryNativeMultiFruit(session.world):null}:{}),...(ordinaryShelter?{readPrivateOrdinaryNativeShelter:()=>session&&store?store.readOrdinaryNativeShelterAtHead(session.world):null}:{}),...(ordinarySpeech?{readPrivateOrdinaryNativeSpeech:(eventId:string)=>session&&store?store.readOrdinaryNativeSpeechAtHead(session.world,eventId):null}:{}),...(ordinaryMeal?{readPrivateOrdinaryNativeMeal:(eventId:string)=>session&&store?store.readOrdinaryNativeMealAtHead(session.world,eventId):null}:{}),readPrivateDisposableNativeSpeech:(head:Readonly<DisposableSpeechHead>)=>speechReader?.latest(head)??null,transactPrivateDisposableAgedTransfer,readPrivateDisposableNativeAgedFairness,readPrivateDisposableResidentGroundDiscovery,disposableRebaseRequired:()=>rebaseRequired,readPrivateSpiritCandidate,readPrivateSpiritGeographicProposal,readPrivateNativeFruitRenewal,readPrivateNativeFruitLot,readPrivateAgedFruitPreflight,readPrivateOrdinaryAgedGround,readPrivateOrdinaryAgedG1Review,previewPrivateOrdinaryAgedG1Decision,commitPrivateOrdinaryAgedG1Decision,readPrivateOrdinaryAgedG1Decision,previewPrivateOrdinaryG2BlockedHandoff,commitPrivateOrdinaryG2BlockedHandoff,readPrivateOrdinaryG2BlockedHandoff,close};
  }catch(error){await close();throw error;}
 }

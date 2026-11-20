@@ -79,17 +79,18 @@ export function assertOrdinaryG2DevelopmentPath(origin:OrdinaryG2DevelopmentOrig
  * origin-only stage. The preflight snapshot connection is intentionally a copy. */
 export function inspectOrdinaryG2DevelopmentOrigin(db:DatabaseSync,origin?:OrdinaryG2DevelopmentOrigin,permitV3=false){
  const names=db.prepare("SELECT name,type,sql FROM main.sqlite_schema WHERE lower(name) IN (?,?,?)").all(...RESERVED);
+ const dueMarker=db.prepare("SELECT 1 FROM main.sqlite_schema WHERE lower(name)='valley_spirit_ordinary_g2_dev_due_v3'").get();
  const metadata=db.prepare("SELECT type FROM main.sqlite_schema WHERE name='archive_meta' COLLATE NOCASE").get();
  const retainedLatch=metadata?.type==='table'&&db.prepare('PRAGMA main.table_info(archive_meta)').all().some(c=>c.name==='key')&&
-  !!db.prepare("SELECT 1 FROM main.archive_meta WHERE key='ordinary_g2_development_v3_placed' LIMIT 1").get();
- if(!origin){if(names.length||retainedLatch)throw Error('ordinary_g2_development_requires_owner');return null;}
+  !!db.prepare("SELECT 1 FROM main.archive_meta WHERE key IN ('ordinary_g2_development_v3_placed','ordinary_g2_development_v3_due_intent','ordinary_g2_development_v3_due_seal') LIMIT 1").get();
+ if(!origin){if(names.length||retainedLatch||dueMarker)throw Error('ordinary_g2_development_requires_owner');return null;}
  const lease=requireOrigin(origin);
  const marker=names.find(n=>n.name===TABLE);
- if(!permitV3&&retainedLatch)
+ if(!permitV3&&(retainedLatch||dueMarker))
   throw Error('ordinary_g2_development_v3_requires_pin');
  if((names.length!==1&&!(permitV3&&names.length===3))||marker?.type!=='table'||marker.sql!==DDL||
   db.prepare("SELECT 1 FROM main.sqlite_schema WHERE lower(tbl_name)=? AND type IN ('trigger','index')").get(TABLE)||
-  db.prepare("SELECT 1 FROM sqlite_temp_schema WHERE lower(name) IN (?,?,?,'worlds') OR lower(tbl_name) IN (?,?,?,'worlds')")
+  db.prepare("SELECT 1 FROM sqlite_temp_schema WHERE lower(name) IN (?,?,?,'worlds','valley_spirit_ordinary_g2_dev_due_v3') OR lower(tbl_name) IN (?,?,?,'worlds','valley_spirit_ordinary_g2_dev_due_v3')")
    .get(...RESERVED,...RESERVED))throw Error('ordinary_g2_development_marker');
  const rows=db.prepare("SELECT version,purpose,world_id,CASE WHEN length(seal)=64 THEN seal END AS seal FROM main."+TABLE+" LIMIT 2").all();
  const r=rows[0];

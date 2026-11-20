@@ -1,3 +1,4 @@
+import {readOrdinaryDevelopmentDue} from './ordinary-g2-development-due.js';
 import {stagedOrdinaryDevelopmentV3WorkActor,type prepareOrdinaryDevelopmentV3Minute} from './ordinary-g2-development-v3.js';
 import {ownsOrdinaryDevelopmentV3Pin,readOrdinaryDevelopmentV3,type OrdinaryDevelopmentV3Pin} from './ordinary-g2-development-v3.js';
 import {assertOrdinaryG2DevelopmentPath,inspectOrdinaryG2DevelopmentOrigin,isOrdinaryG2DevelopmentOriginScratch,type OrdinaryG2DevelopmentOrigin} from './ordinary-g2-development-origin.js';
@@ -215,7 +216,11 @@ function inspectDatabase(db:DatabaseSync,rejectClimate:boolean,validateWorld?: (
   if(g2World&&(latest!==null||world.id!==g2World||world.mode!=='validation'||owns(world,'simulationOnly')||owns(world,'mvpSeasonalModelVersion')||
    owns(world.mvpClimate as object??{},'spiritEffects')||owns(world.mvpClimate as object??{},'spiritFruitSettlement')))
    fail('save_ordinary_g2_development_world');
-  if(g2World&&ordinaryG2DevelopmentOrigin&&ordinaryG2V3)try{readOrdinaryDevelopmentV3(db,ordinaryG2DevelopmentOrigin,ordinaryG2V3,world as unknown as World);}
+  if(g2World&&ordinaryG2DevelopmentOrigin&&ordinaryG2V3)try{
+   const placed=readOrdinaryDevelopmentV3(db,ordinaryG2DevelopmentOrigin,ordinaryG2V3,world as unknown as World);
+   if(readOrdinaryDevelopmentDue(db,ordinaryG2DevelopmentOrigin,ordinaryG2V3,world as unknown as World)&&placed)
+    fail('save_ordinary_g2_development_due_collision');
+  }
   catch{fail('save_ordinary_g2_development_v3');}
   if(disposableWorld&&(latest!==null||world.mode!=='validation'||world.id!==disposableWorld))fail('save_disposable_rules_world');
   if(fixtureSeal&&(formalOwner||formalWeatherOwner)&&(latest!==null||world.mode!=='formal'||typeof world.id!=='string'||

@@ -55,7 +55,7 @@ export type OrdinaryDevelopmentV3Terms=Readonly<{schema:typeof SIGN;policy:strin
  atUs:string;eligibleUntilUs:string;lotId:string;bornUs:string;expiresUs:string;ownerId:'commons';quantity:1}>;
 export function ordinaryDevelopmentV3Terms(origin:OrdinaryG2DevelopmentOrigin,pin:Pin,input:Omit<OrdinaryDevelopmentV3Terms,'schema'|'policy'|'originScope'|'reviewer'>){
  if(!pins.has(pin))return null;
- const t={schema:SIGN,policy,originScope:authenticateOrdinaryG2DevelopmentV3(origin,'consent-scope',pin.fingerprint),
+ const t:OrdinaryDevelopmentV3Terms={schema:SIGN,policy,originScope:authenticateOrdinaryG2DevelopmentV3(origin,'consent-scope',pin.fingerprint),
   reviewer:pin.fingerprint,...input};
  return encodeOrdinaryDevelopmentV3(t)?Object.freeze(t):null;
 }
