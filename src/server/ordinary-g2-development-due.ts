@@ -20,7 +20,13 @@ type Terms=Readonly<{schema:typeof schema;basis:OrdinaryDevelopmentV3Terms;rainA
 type Approved=Readonly<{terms:Terms;signature:string}>;
 type Outcome='eligible-detached'|'expired'|'invalid';
 type Result=Readonly<{status:Outcome;atUs:string;revision:number;headDigest:string}>;
-type RecordBody=Readonly<{signed:Approved;result:Result|null}>;
+const executionSchema='ordinary-g2-development-due-execution-consent/v1';
+type ExecutionTerms=Readonly<{schema:typeof executionSchema;reviewer:string;originScope:string;
+ acceptedDigest:string;eligibleDigest:string;basis:OrdinaryDevelopmentV3Terms}>;
+type ExecutionApproval=Readonly<{terms:ExecutionTerms;signature:string}>;
+type Consumed=Readonly<{placementDigest:string;consentDigest:string}>;
+type RecordBody=Readonly<{signed:Approved;result:Result|null;consumed?:Consumed}>;
+type DueEvidence=Readonly<{record:RecordBody;seal:string;body:string}>;
 export function ordinaryDevelopmentDueTerms(basis:OrdinaryDevelopmentV3Terms,rainArchiveDigest:string){
  const next={schema,basis,rainArchiveDigest,dueUs:(BigInt(basis.atUs)+1_000_000n).toString()} as const;
  return encodeOrdinaryDevelopmentDue(next)?Object.freeze(next):null;
@@ -65,19 +71,81 @@ function archive(db:DatabaseSync){
  return {body,seal,anchor:sr.anchor};
 }
 export const hasOrdinaryDevelopmentDue=(db:DatabaseSync)=>!!archive(db);
-export function readOrdinaryDevelopmentDue(db:DatabaseSync,origin:OrdinaryG2DevelopmentOrigin,pin:OrdinaryDevelopmentV3Pin,w:World){
+export function readOrdinaryDevelopmentDueRecord(db:DatabaseSync,origin:OrdinaryG2DevelopmentOrigin,pin:OrdinaryDevelopmentV3Pin):DueEvidence|null{
  const raw=archive(db);
  if(!raw)return null;
  if(raw.seal!==authenticateOrdinaryG2DevelopmentV3(origin,schema,raw.body))throw Error('ordinary_g2_development_due_signature');
- const r=JSON.parse(raw.body) as RecordBody,a=verifyOrdinaryDevelopmentDue(r.signed,origin,pin),head=ordinaryDevelopmentDueHead(db,w);
- if(!head||!exact(r,['signed','result'])||!a||a.terms.basis.worldId!==w.id||
-  raw.anchor!==authenticateOrdinaryG2DevelopmentV3(origin,schema+'-immutable',JSON.stringify(a)))throw Error('ordinary_g2_development_due_scope');
- const result=r.result,now=minuteToClimateUs(w.minute),basis=a.terms.basis;
- if(result===null?(basis.headDigest!==head||basis.revision!==w.revision||basis.atUs!==now):
-  (!exact(result,['status','revision','atUs','headDigest'])||!['eligible-detached','expired','invalid'].includes(result.status)||
-   now!==a.terms.dueUs||result.atUs!==now||result.revision!==w.revision||result.revision<=basis.revision||result.headDigest!==head))
-  throw Error('ordinary_g2_development_due_head');
+ const r=JSON.parse(raw.body) as RecordBody,a=verifyOrdinaryDevelopmentDue(r.signed,origin,pin);
+ if(!exact(r,['signed','result',...(Object.hasOwn(r,'consumed')?['consumed']:[])])||!a||
+   raw.anchor!==authenticateOrdinaryG2DevelopmentV3(origin,schema+'-immutable',JSON.stringify(a)))throw Error('ordinary_g2_development_due_scope');
+ const x=r.result;
+ if(x!==null&&(!exact(x,['status','revision','atUs','headDigest'])||!['eligible-detached','expired','invalid'].includes(x.status)||
+  x.atUs!==a.terms.dueUs||!Number.isSafeInteger(x.revision)||x.revision<=a.terms.basis.revision||!hex(x.headDigest)))
+  throw Error('ordinary_g2_development_due_result_shape');
+ if(Object.hasOwn(r,'consumed')&&(!r.consumed||x?.status!=='eligible-detached'||!exact(r.consumed,['placementDigest','consentDigest'])||
+   !hex(r.consumed.placementDigest)||!hex(r.consumed.consentDigest)||!pin.dueTransfer))
+  throw Error('ordinary_g2_development_due_consumed_shape');
+ return {record:r,seal:raw.seal,body:raw.body};
+}
+export function readOrdinaryDevelopmentDue(db:DatabaseSync,origin:OrdinaryG2DevelopmentOrigin,pin:OrdinaryDevelopmentV3Pin,w:World,
+ placementDigest?:string){
+ const r=readOrdinaryDevelopmentDueRecord(db,origin,pin)?.record;
+ if(!r)return null;
+ const head=ordinaryDevelopmentDueHead(db,w),result=r.result,now=minuteToClimateUs(w.minute),basis=r.signed.terms.basis;
+ if(!head||basis.worldId!==w.id)throw Error('ordinary_g2_development_due_scope');
+ if(r.consumed){
+  if(placementDigest!==r.consumed.placementDigest||!result||w.revision<=result.revision||BigInt(now)<BigInt(result.atUs))
+   throw Error('ordinary_g2_development_due_unpaired');
+ }else if(placementDigest||(result===null?(basis.headDigest!==head||basis.revision!==w.revision||basis.atUs!==now):
+  (result.atUs!==now||result.revision!==w.revision||result.headDigest!==head)))throw Error('ordinary_g2_development_due_head');
  return r;
+}
+export function ordinaryDueExecutionTerms(origin:OrdinaryG2DevelopmentOrigin,pin:OrdinaryDevelopmentV3Pin,d:DueEvidence,forRead=false){
+ const f=pin.dueTransfer,r=d.record;
+ if(!ownsOrdinaryDevelopmentV3Pin(pin)||!f||r.result?.status!=='eligible-detached'||(!forRead&&r.consumed))return null;
+ const basis={...r.signed.terms.basis,revision:r.result.revision,atUs:r.result.atUs,headDigest:r.result.headDigest};
+ const t={schema:executionSchema,reviewer:f.fingerprint,originScope:authenticateOrdinaryG2DevelopmentV3(origin,executionSchema,f.fingerprint),
+  acceptedDigest:digestOrdinaryDue(r.signed),eligibleDigest:digestOrdinaryDue(r.result),basis} as const;
+ return encodeOrdinaryDueExecution(t)?Object.freeze(t):null;
+}
+export function encodeOrdinaryDueExecution(t:unknown){
+ if(!exact(t,['schema','reviewer','originScope','acceptedDigest','eligibleDigest','basis'])||t.schema!==executionSchema||
+    ![t.reviewer,t.originScope,t.acceptedDigest,t.eligibleDigest].every(hex))return null;
+ const basis=encodeOrdinaryDevelopmentV3(t.basis);
+ return basis?Buffer.from(JSON.stringify([executionSchema,t.reviewer,t.originScope,t.acceptedDigest,t.eligibleDigest,basis.toString('base64url')])):null;
+}
+export function verifyOrdinaryDueExecution(v:unknown,origin:OrdinaryG2DevelopmentOrigin,pin:OrdinaryDevelopmentV3Pin,d:DueEvidence,forRead=false):ExecutionApproval|null{
+ try{
+  if(!pin.dueTransfer||!exact(v,['terms','signature'])||typeof v.signature!=='string'||!/^[A-Za-z0-9_-]{86}$/.test(v.signature))return null;
+  const t=ordinaryDueExecutionTerms(origin,pin,d,forRead),wire=encodeOrdinaryDueExecution(v.terms),signature=Buffer.from(v.signature,'base64url');
+  if(!t||!wire||!wire.equals(encodeOrdinaryDueExecution(t)!)||signature.toString('base64url')!==v.signature||
+   !verify(null,wire,pin.dueTransfer.key,signature))return null;
+  return {terms:t,signature:v.signature};
+ }catch{return null;}
+}
+export function verifyDueExecutionPlacement(db:DatabaseSync,origin:OrdinaryG2DevelopmentOrigin,pin:OrdinaryDevelopmentV3Pin,input:unknown,placementDigest:string){
+ if(!pin.dueTransfer)return null;
+ const d=readOrdinaryDevelopmentDueRecord(db,origin,pin),consumed=d?.record.consumed;
+ if(!d||consumed?.placementDigest!==placementDigest)return null;
+ const a=verifyOrdinaryDueExecution(input,origin,pin,d,true);
+ return a&&consumed.consentDigest===digestOrdinaryDue(a)?{terms:a.terms.basis,signature:a.signature}:null;
+}
+export function consumeOrdinaryDevelopmentDue(db:DatabaseSync,origin:OrdinaryG2DevelopmentOrigin,pin:OrdinaryDevelopmentV3Pin,d:DueEvidence,
+ input:unknown,placementDigest:string){
+ const file=db.prepare('PRAGMA database_list').all().find(r=>r.name==='main')?.file,a=verifyOrdinaryDueExecution(input,origin,pin,d);
+ if(!db.isTransaction||typeof file!=='string'||!hex(placementDigest)||!a)throw Error('ordinary_g2_development_due_consume');
+ assertOrdinaryG2DevelopmentPath(origin,file);
+ const rows=db.prepare('SELECT opportunity,CASE WHEN length(body)<=8192 THEN body END AS body,seal FROM main.valley_spirit_ordinary_g2_dev_receipt_v3 LIMIT 2').all(),raw=rows[0];
+ const got=rows.length===1&&typeof raw.body==='string'?JSON.parse(raw.body):null;
+ const t=a.terms.basis;
+ if(!got||raw.opportunity!==t.opportunityId||raw.seal!==authenticateOrdinaryG2DevelopmentV3(origin,'v3-receipt',raw.body as string)||
+  digestOrdinaryDue(got)!==placementDigest||digestOrdinaryDue(got.approval)!==digestOrdinaryDue(a)||
+  got.afterRevision!==t.revision+1||!hex(got.afterDigest)||got.sourceBefore!==got.sourceAfter+1)
+  throw Error('ordinary_g2_development_due_missing_placed_half');
+ const consumed={placementDigest,consentDigest:digestOrdinaryDue(a)},body=JSON.stringify({...d.record,consumed});
+ if(db.prepare('UPDATE main.archive_meta SET value=? WHERE key=? AND value=?').run(body,BODY,d.body).changes!==1||
+  db.prepare('UPDATE main.archive_meta SET value=? WHERE key=? AND value=?').run(authenticateOrdinaryG2DevelopmentV3(origin,schema,body),SEAL,d.seal).changes!==1)
+  throw Error('ordinary_g2_development_due_consumed_CAS');
 }
 export function writeOrdinaryDevelopmentDue(db:DatabaseSync,origin:OrdinaryG2DevelopmentOrigin,pin:OrdinaryDevelopmentV3Pin,w:World,
  signed:Approved,evidence:{proof:NonNullable<ReturnType<ReturnType<typeof openSelectedOrdinaryRehearsal>['currentPositive']>>}|{before:World;outcome:Outcome}){

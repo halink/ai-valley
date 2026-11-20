@@ -195,6 +195,8 @@ export function bindOrdinaryG2DevelopmentOriginPreview(storage:ReturnType<typeof
     ...(options.privateOrdinaryDevelopmentV3?{
      previewDevelopmentDue:()=>ifLive(()=>run.previewPrivateOrdinaryDevelopmentDue?.()??null),
      acceptDevelopmentDue:(input:unknown)=>ifLive(()=>run.acceptPrivateOrdinaryDevelopmentDue?.(input)??null),
+     previewDevelopmentDueTransfer:()=>ifLive(()=>run.previewPrivateOrdinaryDueTransfer?.()??null),
+     transferDevelopmentDueFruit:(input:unknown)=>ifLive(()=>run.transferPrivateOrdinaryDueFruit?.(input)??null),
      readDevelopmentDue:()=>ifLive(()=>run.readPrivateOrdinaryDevelopmentDue?.()??null),
      advanceDevelopmentDueMinute:()=>ifLive(()=>run.advancePrivateOrdinaryDevelopmentDue?.()??null),
      previewDevelopmentTransfer:()=>ifLive(()=>run.previewPrivateOrdinaryDevelopmentV3?.()??null),
@@ -313,7 +315,8 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
   selectedRehearsal.fingerprint===ordinarySelection.fingerprint))throw Error('ordinary_selected_review_explicit_independent_scope');
  const ordinaryG2V3=options.privateOrdinaryDevelopmentV3===undefined?null:pinOrdinaryDevelopmentV3(options.privateOrdinaryDevelopmentV3);
  if(options.privateOrdinaryDevelopmentV3!==undefined&&(!ordinaryG2V3||!ordinaryG2Storage||!ordinarySelection||!selectedRehearsal||!ordinaryMultiCandidate||
-  ordinaryG2V3.fingerprint===ordinarySelection.fingerprint||ordinaryG2V3.fingerprint===selectedRehearsal.fingerprint))
+  ordinaryG2V3.fingerprint===ordinarySelection.fingerprint||ordinaryG2V3.fingerprint===selectedRehearsal.fingerprint||
+  ordinaryG2V3.dueTransfer&&(ordinaryG2V3.dueTransfer.fingerprint===ordinarySelection.fingerprint||ordinaryG2V3.dueTransfer.fingerprint===selectedRehearsal.fingerprint)))
   throw Error('ordinary_g2_dev_v3_independent_original_scope');
  const custodyPin=speechPin??mealPin;
  const weatherCredit=speechPin?.nativeWeatherCredit===true;
@@ -666,6 +669,20 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
   const reopenedV3=ordinaryG2V3?store?.readOwnedOrdinaryDevelopmentV3():null;
   let committedV3Head:Readonly<{worldId:string;revision:number;minute:number}>|null=reopenedV3?
    Object.freeze({worldId:reopenedV3.worldId,revision:reopenedV3.revision,minute:reopenedV3.minute}):null;
+  const previewDevelopmentDueTransfer=()=>{
+   owner!.assertOwned();ordinaryG2Storage?.assertOriginal();
+   if(dueOwned?.status!=='eligible-detached'||committedV3Head||!store||!ordinaryMultiCandidate||!valleySpirit)return null;
+   return store.previewOrdinaryDueTransfer(ordinaryMultiCandidate,valleySpirit);
+  };
+  const transferDevelopmentDueFruit=(input:unknown)=>{
+   owner!.assertOwned();ordinaryG2Storage?.assertOriginal();
+   if(dueOwned?.status!=='eligible-detached'||committedV3Head||!store||!ordinaryMultiCandidate||!valleySpirit)return null;
+   const placed=store.transactOrdinaryDueTransfer(ordinaryMultiCandidate,valleySpirit,input);
+   if(!placed)return null;
+   committedV3Head=Object.freeze({worldId:placed.next.id,revision:placed.next.revision,minute:placed.next.minute});
+   dueOwned={...dueOwned,...committedV3Head,status:'consumed'};
+   return placed.view;
+  };
   const advanceDevelopmentGroundMinute=(mode:'observe'|'pickup'|'held'|'approach'|'hall'='observe')=>{
    if(!committedV3Head||!store)return null;
    const settled=store.advanceOwnedOrdinaryDevelopmentV3Minute(mode);
@@ -684,6 +701,7 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
   };
   return {get session(){return session!;},server,snapshot,...(ordinaryG2V3?{previewPrivateOrdinaryDevelopmentV3:()=>{
    const proof=!dueOwned&&!committedV3Head&&selectedReview?.currentPositive();return proof&&store?store.previewOrdinaryDevelopmentV3(proof):null;},
+   previewPrivateOrdinaryDueTransfer:previewDevelopmentDueTransfer,transferPrivateOrdinaryDueFruit:transferDevelopmentDueFruit,
    previewPrivateOrdinaryDevelopmentDue:previewDevelopmentDue,acceptPrivateOrdinaryDevelopmentDue:acceptDevelopmentDue,
    readPrivateOrdinaryDevelopmentDue:()=>store?.readOwnedDevelopmentDue()??null,advancePrivateOrdinaryDevelopmentDue:advanceDevelopmentDue,
    advancePrivateOrdinaryDevelopmentV3Minute:advanceDevelopmentGroundMinute,

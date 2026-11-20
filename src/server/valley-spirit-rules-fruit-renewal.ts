@@ -1,3 +1,4 @@
+import {readOrdinaryDevelopmentDueRecord,verifyOrdinaryDueExecution} from './ordinary-g2-development-due.js';
 import {verifyOrdinaryDevelopmentV3,type OrdinaryDevelopmentV3Pin} from './ordinary-g2-development-v3.js';
 import type {OrdinaryG2DevelopmentOrigin} from './ordinary-g2-development-origin.js';
 import {ownsSelectedPositiveRehearsal,type openSelectedOrdinaryRehearsal} from './valley-spirit-ordinary-selected-rehearsal.js';
@@ -307,6 +308,17 @@ export function openRulesNativeMultiFruitLease(owner:RuntimeOwnership,path:strin
    if(isolated||i<0||!db.isTransaction||!manifest(db)||!available(db,SLOT_NAMES[i]))
     throw Error('ordinary_multi_fruit_v3_consumption_scope');
    consumeLot(db,nativePin(pin.sites[i]),before,after,a.terms.lotId,SLOT_NAMES[i]);
+   guard();
+  },
+  consumeDevelopmentDueV3(db:DatabaseSync,before:World,after:World,origin:OrdinaryG2DevelopmentOrigin,
+   reviewer:OrdinaryDevelopmentV3Pin,input:unknown){
+   const d=readOrdinaryDevelopmentDueRecord(db,origin,reviewer),approval=d&&verifyOrdinaryDueExecution(input,origin,reviewer,d);
+   if(!approval)throw Error('ordinary_multi_fruit_due_consumption_consent');
+   const t=approval.terms.basis,i=pin.sites.findIndex(site=>site.sourceId===t.sourceId);
+   if(isolated||i<0||!db.isTransaction||before.id!==pin.worldId||before.id!==t.worldId||before.revision!==t.revision||
+    minuteToClimateUs(before.minute)!==t.atUs||hash(gzipSync(JSON.stringify(before),{level:1}))!==t.headDigest||
+    !manifest(db)||!available(db,SLOT_NAMES[i]))throw Error('ordinary_multi_fruit_due_consumption_scope');
+   consumeLot(db,nativePin(pin.sites[i]),before,after,t.lotId,SLOT_NAMES[i]);
    guard();
   },
   isolate(){isolated=true;},

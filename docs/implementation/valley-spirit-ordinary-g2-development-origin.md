@@ -159,4 +159,29 @@ outcomes are eligible-detached, expired (including insufficient time
 remaining for the detached rehearsal), or invalid. There is no transfer,
 override, dispatch, account, provider, public report or automatic ticking;
 real ordinary native background changes are distinct from this advisory
-review. This one-shot review lane stays stopped after it settles.
+review. The one-shot review lane stops after settlement; only a separate
+opt-in fourth-key consent can start the original paired transfer below.
+
+
+### Separate fresh-head consent for an eligible due review
+
+A fourth independent key may be pinned only on the original no-port
+development host. Its separately domain-bound approval binds the immutable
+accepted and eligible due records, exact fresh compressed head, source lot
+cohort and original age, site, commons ownership, closed rain, unchanged
+permission and the single opportunity. The older due or immediate approval
+cannot execute this transfer. A fresh clone and current native source,
+weather grant, exact archived rain and site checks still run on the due head
+inside the final transaction.
+
+The transfer consumes the exact native lot slot, debits one physical source
+unit and creates one actual original-aged ground unit. The placement receipt
+contains the fourth signature; the consumed due receipt authenticates that
+signature and exact immutable placement receipt. Both halves and the won
+opportunity are required on reopen or lifecycle read; they are written and
+verified in the same transaction as the world and slot. No review history is
+reset, and no old approval or partial/copy can grant another debit.
+
+The resulting original-only ground lot uses the established private V3
+discovery, pickup and expiry paths. This is not a player save admission,
+production enablement, automatic scheduling, model dispatch or public reveal.

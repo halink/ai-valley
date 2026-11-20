@@ -1,3 +1,4 @@
+import {verifyDueExecutionPlacement,verifyOrdinaryDueExecution,readOrdinaryDevelopmentDueRecord,consumeOrdinaryDevelopmentDue} from './ordinary-g2-development-due.js';
 import type {MvpFruitFlowBatch} from '../world/mvp-resources.js';
 import {diningWorkClaim,readNativeAgedEatingState,type Eating} from './disposable-native-aged-transfer.js';
 import {agedGroundApproachPath,chooseLawfulAgedGroundPath,equalAgedGroundPath,type AgedGroundApproachPlan,type AgedGroundApproachWitness} from '../world/mvp-native-aged-ground-approach.js';
@@ -33,17 +34,24 @@ const int=(v:unknown)=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=0;
 const clock=(v:unknown):v is string=>typeof v==='string'&&/^(0|[1-9][0-9]{0,15})$/.test(v);
 const point=(v:unknown)=>exact(v,['x','y'])&&int(v.x)&&int(v.y);
 const policy=hash([MODE,'one-unit','native-closed-rain','original-lot-age','commons','no-advance-while-ground','not-production']);
-export type OrdinaryDevelopmentV3Options=Readonly<{mode:typeof MODE;reviewerPublicKeyPem:string}>;
-type Pin=Readonly<{key:KeyObject;fingerprint:string}>;
+export type OrdinaryDevelopmentV3Options=Readonly<{mode:typeof MODE;reviewerPublicKeyPem:string;dueTransferReviewerPublicKeyPem?:string}>;
+type PublicPin=Readonly<{key:KeyObject;fingerprint:string}>;
+type Pin=Readonly<PublicPin&{dueTransfer?:PublicPin}>;
 const pins=new WeakSet<Pin>();
 export type OrdinaryDevelopmentV3Pin=Pin;
+function parseDevelopmentReviewer(pem:unknown):PublicPin|null{
+ if(typeof pem!=='string'||pem.length>256||!/^-----BEGIN PUBLIC KEY-----\r?\n[A-Za-z0-9+/=]+\r?\n-----END PUBLIC KEY-----\r?\n?$/.test(pem))return null;
+ const key=createPublicKey(pem);
+ return key.asymmetricKeyType==='ed25519'?Object.freeze({key,fingerprint:createHash('sha256').update(key.export({type:'spki',format:'der'})).digest('hex')}):null;
+}
 export function pinOrdinaryDevelopmentV3(input:unknown):Pin|null{
  try{
-  if(!exact(input,['mode','reviewerPublicKeyPem'])||input.mode!==MODE||typeof input.reviewerPublicKeyPem!=='string'||
-   input.reviewerPublicKeyPem.length>256||!/^-----BEGIN PUBLIC KEY-----\r?\n[A-Za-z0-9+/=]+\r?\n-----END PUBLIC KEY-----\r?\n?$/.test(input.reviewerPublicKeyPem))return null;
-  const k=createPublicKey(input.reviewerPublicKeyPem);
-  if(k.asymmetricKeyType!=='ed25519')return null;
-  const p=Object.freeze({key:k,fingerprint:createHash('sha256').update(k.export({type:'spki',format:'der'})).digest('hex')});
+  if(!input||typeof input!=='object')return null;
+  const hasFourth=Object.hasOwn(input,'dueTransferReviewerPublicKeyPem');
+  if(!exact(input,['mode','reviewerPublicKeyPem',...(hasFourth?['dueTransferReviewerPublicKeyPem']:[])])||input.mode!==MODE)return null;
+  const original=parseDevelopmentReviewer(input.reviewerPublicKeyPem),fourth=hasFourth?parseDevelopmentReviewer(input.dueTransferReviewerPublicKeyPem):null;
+  if(!original||hasFourth&&(!fourth||fourth.fingerprint===original.fingerprint))return null;
+  const p=Object.freeze({...original,...(fourth?{dueTransfer:fourth}:{})});
   pins.add(p);return p;
  }catch{return null;}
 }
@@ -79,7 +87,7 @@ export function verifyOrdinaryDevelopmentV3(v:unknown,origin:OrdinaryG2Developme
 }
 type Ground=Readonly<{schema:'ordinary-g2-development-ground/v3';effectId:string;sourceId:string;sourceInstanceId:string;sourceAt:{x:number;y:number};
  at:{x:number;y:number};targetId:string;ownerId:'commons';quantity:1;lotId:string;bornUs:string;expiresUs:string;placedUs:string}>;
-type Archive=Readonly<{schema:'ordinary-g2-development-receipt/v3';approval:Approval;sourceBefore:number;sourceAfter:number;afterRevision:number;afterDigest:string;groundDigest:string}>;
+type Archive=Readonly<{schema:'ordinary-g2-development-receipt/v3';approval:Approval|NonNullable<ReturnType<typeof verifyOrdinaryDueExecution>>;sourceBefore:number;sourceAfter:number;afterRevision:number;afterDigest:string;groundDigest:string}>;
 function digestHead(db:DatabaseSync,w:World){
  const rows=db.prepare('SELECT id,revision,state FROM main.worlds LIMIT 2').all(),r=rows[0];
  return rows.length===1&&r.id===w.id&&r.revision===w.revision&&r.state instanceof Uint8Array?createHash('sha256').update(r.state).digest('hex'):null;
@@ -141,7 +149,7 @@ export function readOrdinaryDevelopmentV3(db:DatabaseSync,origin:OrdinaryG2Devel
  const envelope=JSON.parse(ar.body),stepped=exact(envelope,['placementReceipt','lifecycle']);
  const a=(stepped?envelope.placementReceipt:envelope) as Archive,l=stepped?envelope.lifecycle as Lifecycle:null;
  const g=l?l.placement:typeof rg?.body==='string'?JSON.parse(rg.body) as Ground:null;
- const c=verifyOrdinaryDevelopmentV3(a.approval,origin,pin);
+ const c=verifyOrdinaryDevelopmentV3(a.approval,origin,pin)??verifyDueExecutionPlacement(db,origin,pin,a.approval,hash(a));
  if(!g||!c||!exact(a,archiveKeys)||a.schema!=='ordinary-g2-development-receipt/v3'||
   !int(a.sourceBefore)||!int(a.sourceAfter)||a.sourceAfter!==a.sourceBefore-1||a.afterRevision!==c.terms.revision+1||!hex(a.afterDigest)||
   w.id!==c.terms.worldId||a.groundDigest!==hash(g)||ar.opportunity!==c.terms.opportunityId||
@@ -496,10 +504,11 @@ export function writeOrdinaryDevelopmentV3Minute(db:DatabaseSync,origin:Ordinary
 }
 /** Invoke only from the original scoped WorldStore transaction after the actual debit. */
 export function writeOrdinaryDevelopmentV3(db:DatabaseSync,origin:OrdinaryG2DevelopmentOrigin,pin:Pin,
- before:World,after:World,target:{x:number;y:number},signed:unknown){
- const approval=verifyOrdinaryDevelopmentV3(signed,origin,pin),h=digestHead(db,after);
+ before:World,after:World,target:{x:number;y:number},signed:unknown,paired=false){
+ const due=paired?readOrdinaryDevelopmentDueRecord(db,origin,pin):null;
+ const approval=paired?due&&verifyOrdinaryDueExecution(signed,origin,pin,due):verifyOrdinaryDevelopmentV3(signed,origin,pin),h=digestHead(db,after);
  if(!db.isTransaction||!approval||!h||tables(db))throw Error('ordinary_g2_dev_v3_scope');
- const t=approval.terms,geo=inspectMvpGroundFruitGeography(before,t.sourceId,target),source=before.resources.find(r=>r.id===t.sourceId);
+ const t='basis' in approval.terms?approval.terms.basis:approval.terms,geo=inspectMvpGroundFruitGeography(before,t.sourceId,target),source=before.resources.find(r=>r.id===t.sourceId);
  if(!geo||geo.targetId!==t.targetId||geo.source.resourceInstanceId!==t.sourceInstanceId||geo.source.ownerId!==t.ownerId||
    before.revision!==t.revision||after.revision!==t.revision+1||t.atUs!==minuteToClimateUs(before.minute)||!source||source.amount<1||
    after.resources.find(r=>r.id===t.sourceId)?.amount!==source.amount-1)throw Error('ordinary_g2_dev_v3_ground');
@@ -514,6 +523,7 @@ export function writeOrdinaryDevelopmentV3(db:DatabaseSync,origin:OrdinaryG2Deve
  db.prepare('INSERT INTO main.'+GROUND+' VALUES(1,?)').run(JSON.stringify(g));
  db.prepare('INSERT INTO main.'+RECEIPT+' VALUES(?,?,?)').run(t.opportunityId,raw,seal);
  db.prepare('INSERT INTO main.archive_meta (key,value) VALUES(?,?)').run(LATCH,seal);
+ if(paired&&due)consumeOrdinaryDevelopmentDue(db,origin,pin,due,approval,hash(a));
  if(!readOrdinaryDevelopmentV3(db,origin,pin,after))throw Error('ordinary_g2_dev_v3_readback');
  return {status:'development-v3-stored' as const,ground:g,worldId:after.id,revision:after.revision,minute:after.minute,expiry:null,sourceBefore:a.sourceBefore,sourceAfter:a.sourceAfter,approvalPresent:true as const,
   productionApproved:false as const,executionAuthorized:false as const};
