@@ -32,8 +32,31 @@ placement permanently. The pre-existing weather grant cannot authorize later
 releases and withdrawal after a completed transfer does not erase physical age,
 discovery, or custody. Current personal evidence may be reread on exact original
 reopen; copies, wrong keys, damaged seams, and generic/player opens do not
-acquire the scope. There is no V3 pickup/eat or scheduler here. Other native
+acquire the scope. There is no V3 eating or scheduler here. Other native
 changes to stock do not rebind candidate custody or reenable ordinary writing.
 A native minute that would also settle a meal or addressed speech, exceeds the
 bounded event/discovery archive, or sees an unknown writer is rejected before
 commit. No partial discovery, expiry, or ordinary event settlement is emitted.
+
+
+### Native at-site pickup and original held custody
+
+The original, same-key no-port owner can attempt one pickup minute separately
+from observation/expiry advancement. This does not accept a resident or a plan
+and does not reserve the lot. Without a prior committed personal discovery,
+a resident already standing at the exact accessible site, and the native
+idle-fallback chooser's actual completed one-minute action, the request does
+not change time or state. Ordinary health, food, water, rest and commitments
+retain their priority. The exact inherited expiry wins over any attempted
+pickup at that minute; use the ordinary ground-minute continuation to settle
+expiry.
+
+The same V3 transaction debits the single ground row, credits one privately
+held unit with the same lot, owner, birth and expiry, and attests the native
+resident/action/observation receipt under the original latch and archive.
+No scalar inventory, nutrition, movement intent, public event or public
+view is credited. The original private host can read a held fact only by
+the exact resident key. Possession remains paused after pickup, including
+after reopen; no held time advance, eating or held-expiry settlement is
+implemented by this slice. Opportunity replay and generic advance remain
+blocked. Weather withdrawal after actual placement does not erase custody.
