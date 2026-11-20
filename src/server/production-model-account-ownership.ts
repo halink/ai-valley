@@ -69,7 +69,9 @@ function quotaEnrolled(db:DatabaseSync):string|null{
  if(rows.length!==1||rows[0].slot!==1||rows[0].version!==1||typeof rows[0].attachment!=='string'||!/^[0-9a-f]{64}$/.test(rows[0].attachment))throw Error('model_account_quota_marker_invalid');
  return rows[0].attachment;
 }
-type OwnerState={registryDirectory:string;scope:string;directory:{dev:number;ino:number};registryIdentity:string;assert:()=>void;marker:()=>string|null;enroll:(binding:string)=>void;claim:(request:string,register:boolean)=>boolean;hasRecovery:(request:string)=>boolean;seasonalWorld:(binding?:string)=>string|null;quota?:QuotaChild;};
+type SeasonalWeatherAnchor=Readonly<{sourceDigest:string;stateDigest:string;version:number;wallFloor:number}>;
+type SeasonalWeatherAdvance=Readonly<{previous:SeasonalWeatherAnchor|null;next:SeasonalWeatherAnchor}>;
+type OwnerState={registryDirectory:string;scope:string;directory:{dev:number;ino:number};registryIdentity:string;assert:()=>void;marker:()=>string|null;enroll:(binding:string)=>void;claim:(request:string,register:boolean)=>boolean;hasRecovery:(request:string)=>boolean;seasonalWorld:(binding?:string)=>string|null;seasonalWeather:(binding:string,advance?:SeasonalWeatherAdvance)=>SeasonalWeatherAnchor|null;quota?:QuotaChild;};
 const quotaHandles=new WeakSet<object>();
 const owners=new WeakMap<ProductionModelAccountOwnership,OwnerState>();
 
@@ -138,6 +140,9 @@ export function attachProductionAccountQuotaRehearsal(ownership:ProductionModelA
   seasonalResidentWorld(binding?:string){
    current();return state.seasonalWorld(binding);
   },
+  seasonalPrivateWeatherAnchor(binding:string,advance?:SeasonalWeatherAdvance){
+   current();return state.seasonalWeather(binding,advance);
+  },
   seasonalResidentStates(requests:readonly string[]){
    current();
    if(!Array.isArray(requests)||requests.length>1000)throw Error('seasonal_model_canonical_request_limit');
@@ -197,6 +202,11 @@ export function acquireProductionModelAccountOwnership(options:AccountOwnershipO
     hasRecovery(request){assertOwned();return checkedRecoveryTable(r.db)&&!!r.db.prepare('SELECT 1 FROM account_quota_recovery WHERE request=?').get(request);},
     seasonalWorld(binding){
      assertOwned();return seasonalResidentWorld(r.db,options.runId,binding);
+    },
+    seasonalWeather(binding,advance){
+     assertOwned();
+     if(seasonalResidentWorld(r.db,options.runId)!==binding)throw Error('seasonal_weather_registry_world_binding');
+     return seasonalWeatherAnchor(r.db,options.runId,binding,advance);
     },
     enroll(binding){
      assertOwned();
@@ -330,6 +340,45 @@ function seasonalResidentWorld(db:DatabaseSync,run:string,binding?:string):strin
   if(db.prepare('INSERT INTO account_seasonal_resident_world VALUES (?,?)').run(run,binding).changes!==1)throw Error('seasonal_model_canonical_binding_write');
   db.exec('COMMIT');return binding;
  }catch(error){db.exec('ROLLBACK');throw error;}
+}
+
+const SEASONAL_WEATHER_SQL='CREATE TABLE account_seasonal_private_weather (run TEXT PRIMARY KEY, binding TEXT NOT NULL, source_digest TEXT NOT NULL, state_digest TEXT NOT NULL, version INTEGER NOT NULL, wall_floor INTEGER NOT NULL, FOREIGN KEY(run) REFERENCES account_runs(run))';
+function seasonalWeatherAnchor(db:DatabaseSync,run:string,binding:string,advance?:SeasonalWeatherAdvance):SeasonalWeatherAnchor|null{
+ const hex=(v:unknown)=>typeof v==='string'&&/^[0-9a-f]{64}$/.test(v);
+ const integer=(n:unknown):n is number=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=0;
+ const valid=(a:SeasonalWeatherAnchor)=>hex(a.sourceDigest)&&hex(a.stateDigest)&&integer(a.version)&&a.version<=32&&integer(a.wallFloor);
+ const read=()=>{
+  const table=db.prepare("SELECT type,sql FROM sqlite_schema WHERE name='account_seasonal_private_weather'").get();
+  if(!table)return {table:false,row:null};
+  if(table.type!=='table'||table.sql!==SEASONAL_WEATHER_SQL||
+     db.prepare("SELECT 1 FROM sqlite_schema WHERE tbl_name=? AND (type='trigger' OR (type='index' AND sql IS NOT NULL))").get('account_seasonal_private_weather'))
+   throw Error('seasonal_weather_registry_schema');
+  const rows=db.prepare('SELECT binding,source_digest,state_digest,version,wall_floor FROM account_seasonal_private_weather WHERE run=? LIMIT 2').all(run);
+  if(!rows.length)return {table:true,row:null};
+  const r=rows[0],row={sourceDigest:r.source_digest,stateDigest:r.state_digest,version:r.version,wallFloor:r.wall_floor} as SeasonalWeatherAnchor;
+  if(rows.length!==1||r.binding!==binding||!valid(row))throw Error('seasonal_weather_registry_anchor');
+  return {table:true,row:Object.freeze(row)};
+ };
+ if(advance===undefined)return read().row;
+ db.exec('BEGIN IMMEDIATE');
+ try{
+  const {table,row}=read(),a=advance.next;
+  if(!valid(a)||JSON.stringify(row)!==JSON.stringify(advance.previous)||
+     (row?(a.sourceDigest!==row.sourceDigest||a.wallFloor<row.wallFloor||
+       a.version<row.version||a.version>row.version+1||
+       (a.version===row.version?a.stateDigest!==row.stateDigest:a.stateDigest===row.stateDigest)):a.version!==0))
+   throw Error('seasonal_weather_registry_compare_and_swap');
+  if(!table)db.exec(SEASONAL_WEATHER_SQL);
+  if(row){
+   if(db.prepare('UPDATE account_seasonal_private_weather SET state_digest=?,version=?,wall_floor=? WHERE run=? AND binding=?')
+    .run(a.stateDigest,a.version,a.wallFloor,run,binding).changes!==1)throw Error('seasonal_weather_registry_write');
+  }else{
+   if(Number(db.prepare('SELECT count(*) AS n FROM account_seasonal_private_weather').get()?.n)>=4096)
+    throw Error('seasonal_weather_registry_capacity');
+   db.prepare('INSERT INTO account_seasonal_private_weather VALUES (?,?,?,?,?,?)').run(run,binding,a.sourceDigest,a.stateDigest,a.version,a.wallFloor);
+  }
+  db.exec('COMMIT');return Object.freeze({...a});
+ }catch(e){db.exec('ROLLBACK');throw e;}
 }
 
 const QUOTA_RECOVERY_SQL='CREATE TABLE account_quota_recovery (request TEXT PRIMARY KEY, evidence TEXT NOT NULL, completed_at INTEGER NOT NULL, input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, recorded INTEGER NOT NULL)';

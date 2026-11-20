@@ -1,11 +1,15 @@
 import {claimSeasonalAlmanacFixture,openSeasonalAlmanacFixture,type SeasonalAlmanacFixture} from './seasonal-almanac-runtime.js';
-import {createHash} from 'node:crypto';
+import {createHash,createPublicKey,verify} from 'node:crypto';
+import {DatabaseSync} from 'node:sqlite';
+import {nativeWeatherHourTransition} from './valley-spirit-weather-credit.js';
+import {publicWeatherProjection,validPublicWeatherFact,type PublicWeatherFact} from './valley-spirit.js';
 import {lstatSync} from 'node:fs';
 import {claimSeasonalResidentQuota} from './production-model-runtime-ownership.js';
 import {OfflineResidentAccountAdmission,type CanonicalSeasonalQuota,type ResidentAccountRound} from './shared-resident-admission.js';
 import {createServer} from 'node:http';
-import {acquireRuntimeOwnership} from './runtime-lock.js';
-import {preflightWorldSave} from './save-preflight.js';
+import type {ProductionAccountQuotaRehearsal} from './production-model-account-ownership.js';
+import {acquireRuntimeOwnership,type RuntimeOwnership} from './runtime-lock.js';
+import {decodeSavedWorld,preflightWorldSave} from './save-preflight.js';
 import {WorldStore} from './store.js';
 import {assertMvpWorld} from './godot-mvp-persistent.js';
 import {createMvpSession,createMvpWorld,mvpPhase} from './godot-mvp.js';
@@ -16,7 +20,7 @@ import {MODEL_CONTEXT_VERSION,MODEL_MENU_VERSION,seasonalModelContext} from './s
 import {DecisionError,prepareModelDecision,parseModelCompletion} from './decisions.js';
 import {ModelBudget} from './model-budget.js';
 import {modelRequestPayload,modelLimits,type ModelReply} from './model-completion.js';
-import {finishSeasonalCharge,modelDigest,seasonalModelPolicy as policy,type SeasonalLedger,type SeasonalRequest} from './seasonal-model-ledger.js';
+import {finishSeasonalCharge,modelDigest,readSeasonalLedger,seasonalModelPolicy as policy,type SeasonalLedger,type SeasonalRequest} from './seasonal-model-ledger.js';
 import {planStartError,stepWorld,submitPlan} from '../world/engine.js';
 import type {Resident,World} from '../shared/types.js';
 
@@ -57,9 +61,172 @@ function validateSyntheticReply(reply:ModelReply){
  return counts;
 }
 const ready=(w:World,r:Resident)=>r.status==='alive'&&r.residency!=='outside'&&r.canDecide&&r.canExpress&&!r.plan&&!r.activity&&r.decisionDue<=w.minute;
+const WEATHER_PURPOSE='private-seasonal-weather-use/v1';
+const WEATHER_LIMIT=32,WEATHER_WALL_WINDOW=300_000,WEATHER_JSON_LIMIT=32_768;
+const WEATHER_TABLE='seasonal_private_weather_use';
+const WEATHER_SQL=`CREATE TABLE ${WEATHER_TABLE}(singleton INTEGER PRIMARY KEY CHECK(singleton=1), body TEXT NOT NULL)`;
+const weatherDigest=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
+const exact=(v:unknown,ks:readonly string[]):v is Record<string,unknown>=>!!v&&typeof v==='object'&&!Array.isArray(v)&&
+ Object.keys(v).length===ks.length&&ks.every(k=>Object.hasOwn(v,k));
+const finiteInteger=(v:unknown):v is number=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=0;
+const hex=(v:unknown):v is string=>typeof v==='string'&&/^[a-f0-9]{64}$/.test(v);
+const hour=(v:unknown):v is number=>finiteInteger(v)&&v>0&&v<=1e9&&v%60===0;
+type SeasonalPrivateWeatherPin=Readonly<{mode:'explicit-private-seasonal-weather-use';hourMinute:number;reviewerPublicKeyPem:string}>;
+function pinSeasonalWeather(v:unknown){
+ if(!exact(v,['mode','hourMinute','reviewerPublicKeyPem'])||v.mode!=='explicit-private-seasonal-weather-use'||!hour(v.hourMinute)||
+    typeof v.reviewerPublicKeyPem!=='string'||v.reviewerPublicKeyPem.length>256||
+    !/^-----BEGIN PUBLIC KEY-----\r?\n[A-Za-z0-9+/=]+\r?\n-----END PUBLIC KEY-----\r?\n?$/.test(v.reviewerPublicKeyPem))
+  throw Error('seasonal_private_weather_pin');
+ const signer=createPublicKey(v.reviewerPublicKeyPem);
+ if(signer.asymmetricKeyType!=='ed25519')throw Error('seasonal_private_weather_pin');
+ const fingerprint=createHash('sha256').update(signer.export({type:'spki',format:'der'})).digest('hex');
+ return Object.freeze({signer,fingerprint,hourMinute:v.hourMinute});
+}
+const permitKeys=['schema','binding','worldId','hourMinute','sourceDigest','priorVersion','version','allow','startsAt','expiresAt'] as const;
+export interface SeasonalPrivateWeatherTerms {
+ schema:typeof WEATHER_PURPOSE;binding:string;worldId:string;hourMinute:number;sourceDigest:string;
+ priorVersion:number;version:number;allow:boolean;startsAt:number;expiresAt:number;
+}
+type SignedPermit={terms:SeasonalPrivateWeatherTerms;signature:string};
+export function encodeSeasonalPrivateWeatherTerms(v:unknown):Buffer|null{
+ if(!exact(v,permitKeys)||v.schema!==WEATHER_PURPOSE||!hex(v.binding)||
+    typeof v.worldId!=='string'||!/^godot-mvp-[a-f0-9-]{36}$/.test(v.worldId)||!hour(v.hourMinute)||!hex(v.sourceDigest)||
+    !finiteInteger(v.priorVersion)||!finiteInteger(v.version)||v.version!==v.priorVersion+1||v.version>WEATHER_LIMIT||
+    typeof v.allow!=='boolean'||!finiteInteger(v.startsAt)||!finiteInteger(v.expiresAt)||
+    v.expiresAt<=v.startsAt||v.expiresAt-v.startsAt>WEATHER_WALL_WINDOW)return null;
+ return Buffer.from(JSON.stringify(['offline-seasonal-native-hour-prepare-only',...permitKeys.map(k=>v[k])]));
+}
+/** Module-private: only the genuine seasonal postcommit hook can capture.
+ * This annex is deliberately not the authoritative world transaction. */
+function openSeasonalPrivateWeather(owner:RuntimeOwnership,worldId:string,binding:string,pin:ReturnType<typeof pinSeasonalWeather>,quota:ProductionAccountQuotaRehearsal,
+ assertCanonical:()=>void,current:()=>Pick<World,'id'|'revision'|'minute'>){
+ const db=new DatabaseSync(owner.database);
+ try{db.exec('PRAGMA trusted_schema=OFF; PRAGMA synchronous=FULL');}catch(e){db.close();throw e;}
+ let isolated=false,closed=false,seen:WeatherState|null=null,lastWall=-1;
+ type WeatherState={schemaVersion:1;binding:string;fact:PublicWeatherFact;history:SignedPermit[]};
+ const sourceDigest=(fact:PublicWeatherFact)=>weatherDigest([WEATHER_PURPOSE,binding,fact]);
+ const checked=(u:unknown):SignedPermit|null=>{
+  if(!exact(u,['terms','signature'])||typeof u.signature!=='string'||!/^[A-Za-z0-9_-]{86}$/.test(u.signature)||
+     !exact(u.terms,permitKeys))return null;
+  const body=encodeSeasonalPrivateWeatherTerms(u.terms),sig=Buffer.from(u.signature,'base64url');
+  if(!body||sig.length!==64||sig.toString('base64url')!==u.signature||!verify(null,body,pin.signer,sig))return null;
+  return {terms:Object.fromEntries(permitKeys.map(k=>[k,(u.terms as Record<string,unknown>)[k]])) as unknown as SeasonalPrivateWeatherTerms,signature:u.signature};
+ };
+ const next=(s:WeatherState,t:SeasonalPrivateWeatherTerms)=>{
+  const prior=s.history.at(-1)?.terms;
+  return t.binding===binding&&t.worldId===worldId&&t.hourMinute===pin.hourMinute&&t.sourceDigest===sourceDigest(s.fact)&&
+   t.priorVersion===s.history.length&&(!prior||t.startsAt>=prior.startsAt)&&
+   (t.allow?t.version<WEATHER_LIMIT:prior?.allow===true);
+ };
+ const readState=(head:PublicWeatherFact):WeatherState|null=>{
+  const table=db.prepare("SELECT type,sql FROM sqlite_schema WHERE name=?").get(WEATHER_TABLE);
+  if(!table){if(seen)throw Error('seasonal_private_weather_rewind');return null;}
+  if(table.type!=='table'||table.sql!==WEATHER_SQL||
+     db.prepare("SELECT 1 FROM sqlite_schema WHERE tbl_name=? AND (type='trigger' OR (type='index' AND sql IS NOT NULL))").get(WEATHER_TABLE))
+   throw Error('seasonal_private_weather_schema');
+  const rows=db.prepare(`SELECT singleton,CASE WHEN length(CAST(body AS BLOB))<=? THEN body END AS body FROM ${WEATHER_TABLE} LIMIT 2`).all(WEATHER_JSON_LIMIT);
+  if(rows.length!==1||rows[0].singleton!==1||typeof rows[0].body!=='string')throw Error('seasonal_private_weather_row');
+  const u:unknown=JSON.parse(rows[0].body);
+  if(!exact(u,['schemaVersion','binding','fact','history'])||u.schemaVersion!==1||u.binding!==binding||!validPublicWeatherFact(u.fact)||
+     u.fact.worldId!==worldId||u.fact.minute!==pin.hourMinute||u.fact.minute>head.minute||u.fact.worldRevision>head.worldRevision||
+     u.fact.worldRevision===head.worldRevision&&weatherDigest(u.fact)!==weatherDigest(head)||
+     !Array.isArray(u.history)||u.history.length>WEATHER_LIMIT)throw Error('seasonal_private_weather_state');
+  const rebuilt:WeatherState={schemaVersion:1,binding,fact:u.fact,history:[]};
+  for(const row of u.history){
+   const s=checked(row);if(!s||!next(rebuilt,s.terms))throw Error('seasonal_private_weather_history');
+   rebuilt.history.push(s);
+  }
+  if(JSON.stringify(rebuilt)!==rows[0].body||seen&&(sourceDigest(seen.fact)!==sourceDigest(rebuilt.fact)||
+     seen.history.length>rebuilt.history.length||seen.history.some((s,i)=>JSON.stringify(s)!==JSON.stringify(rebuilt.history[i]))))
+   throw Error('seasonal_private_weather_rewind');
+  return rebuilt;
+ };
+ const operate=<T>(write:boolean,fn:(head:PublicWeatherFact,state:WeatherState|null,now:number)=>{result:T;next?:WeatherState}):T|null=>{
+  if(isolated||closed)return null;
+  let begun=false;
+  try{
+   assertCanonical();db.exec(write?'BEGIN IMMEDIATE':'BEGIN');begun=true;
+   const rows=db.prepare('SELECT id,revision,state FROM worlds LIMIT 2').all();
+   if(rows.length!==1||rows[0].id!==worldId)throw Error('seasonal_private_weather_head');
+   const w=decodeSavedWorld(rows[0].state) as unknown as World,head=publicWeatherProjection(w),actual=current();
+   if(!head||head.worldId!==worldId||head.worldRevision!==rows[0].revision||w.mvpSeasonalModelVersion!==1||
+      actual.id!==head.worldId||actual.revision!==head.worldRevision||actual.minute!==head.minute)
+    throw Error('seasonal_private_weather_head');
+   const ledger=readSeasonalLedger(db,w,true);
+   if(ledger?.schemaVersion!==2||ledger.sharedAccountBinding!==binding)throw Error('seasonal_private_weather_binding');
+   const now=wall(),s=readState(head),anchor=quota.seasonalPrivateWeatherAnchor(binding);
+   if(now<lastWall||anchor&&now<anchor.wallFloor)throw Error('seasonal_private_weather_clock_rewind');
+   if(s?(!anchor||anchor.sourceDigest!==sourceDigest(s.fact)||anchor.stateDigest!==weatherDigest(s)||
+      anchor.version!==s.history.length):anchor!==null)throw Error('seasonal_private_weather_cross_store_gap');
+   const {result,next}=fn(head,s,now),latest=next??s;
+   assertCanonical();
+   // Durably anchor the exact state and time before returning any observation
+   // or permit. A failure before the world-annex COMMIT cannot be repaired by
+   // re-importing older evidence: the two states must match or isolate.
+   if(latest&&(next||!anchor||anchor.wallFloor!==now)){
+    const successor={sourceDigest:sourceDigest(latest.fact),stateDigest:weatherDigest(latest),
+     version:latest.history.length,wallFloor:now};
+    const written=quota.seasonalPrivateWeatherAnchor(binding,{previous:anchor,next:successor});
+    if(JSON.stringify(written)!==JSON.stringify(successor))throw Error('seasonal_private_weather_anchor_write');
+   }
+   assertCanonical();db.exec('COMMIT');begun=false;seen=latest;lastWall=now;return result;
+  }catch{
+   isolated=true;if(begun)try{db.exec('ROLLBACK');}catch{/* isolate optional annex */}
+   return null;
+  }
+ };
+ return {
+  capture(beforeMinute:number,committed:World){
+   if(committed.minute!==pin.hourMinute||!nativeWeatherHourTransition(beforeMinute,committed.minute))return;
+   operate(true,(head,state)=>{
+    const f=publicWeatherProjection(committed);
+    if(state||!f||head.worldRevision!==f.worldRevision||weatherDigest(head)!==weatherDigest(f))return {result:false};
+    const s:WeatherState={schemaVersion:1,binding,fact:head,history:[]};
+    db.exec(WEATHER_SQL);
+    db.prepare(`INSERT INTO ${WEATHER_TABLE} VALUES (1,?)`).run(JSON.stringify(s));
+    return {result:true,next:s};
+   });
+  },
+  terms(allow:boolean,startsAt:number,expiresAt:number){
+   return operate(false,(_h,s,now)=>{
+    if(!s||now<startsAt||now>=expiresAt)return {result:null};
+    const t:SeasonalPrivateWeatherTerms={schema:WEATHER_PURPOSE,binding,worldId,hourMinute:pin.hourMinute,
+     sourceDigest:sourceDigest(s.fact),priorVersion:s.history.length,version:s.history.length+1,allow,startsAt,expiresAt};
+    return {result:encodeSeasonalPrivateWeatherTerms(t)&&next(s,t)?Object.freeze(t):null};
+   });
+  },
+  record(input:unknown):boolean{
+   let signed:SignedPermit|null;
+   try{signed=checked(structuredClone(input));}catch{return false;}
+   if(!signed)return false;
+   const accepted=signed,t=accepted.terms;
+   return operate(true,(_h,s,now)=>{
+    if(!s||now<t.startsAt||now>=t.expiresAt||!next(s,t))return {result:false};
+    const amended:WeatherState={...s,history:[...s.history,accepted]},raw=JSON.stringify(amended);
+    if(Buffer.byteLength(raw)>WEATHER_JSON_LIMIT)return {result:false};
+    if(db.prepare(`UPDATE ${WEATHER_TABLE} SET body=? WHERE singleton=1 AND body=?`).run(raw,JSON.stringify(s)).changes!==1)
+     throw Error('seasonal_private_weather_write');
+    return {result:true,next:amended};
+   })===true;
+  },
+  packet(){
+   return operate(false,(_h,s,now)=>{
+    const t=s?.history.at(-1)?.terms;
+    if(!s||!t?.allow||now<t.startsAt||now>=t.expiresAt)return {result:null};
+    const {condition,temperatureDeciC,relativeHumidityPermille,cloudPermille,windPermille,daylightPermille,precipitationPermille}=s.fact;
+    return {result:Object.freeze({schemaVersion:1 as const,mode:'private-seasonal-weather-prepare-only' as const,
+     projectionVersion:1 as const,worldId,sourceRef:worldId+'/seasonal-hour-'+pin.hourMinute,
+     sourceDigest:t.sourceDigest,permitVersion:t.version,observedMinute:pin.hourMinute,
+     condition,temperatureDeciC,relativeHumidityPermille,cloudPermille,windPermille,daylightPermille,precipitationPermille})};
+   });
+  },
+  close(){if(!closed){closed=true;db.close();}}
+ };
+}
+
 /** Separate bounded seasonal mode. Caller explicitly pumps the server; the
  * normal rules runner and all pre-existing model entry points stay unchanged. */
-export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal';database:string;port?:number;transport?:MemoryTransport;sharedAccount?:OfflineResidentAccountAdmission;almanacFixture?:SeasonalAlmanacFixture;canonicalResidentQuota?:Readonly<CanonicalSeasonalQuota>}){
+export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal';database:string;port?:number;transport?:MemoryTransport;sharedAccount?:OfflineResidentAccountAdmission;almanacFixture?:SeasonalAlmanacFixture;canonicalResidentQuota?:Readonly<CanonicalSeasonalQuota>;privateWeatherUse?:SeasonalPrivateWeatherPin}){
  if(options.mode!=='offline-seasonal')throw Error('seasonal_model_explicit_mode_required');
  if(options.port!==undefined&&(!Number.isInteger(options.port)||options.port<0||options.port>65535))throw Error('seasonal_model_port');
  const transport=options.transport===undefined?undefined:transports.get(options.transport);
@@ -70,6 +237,8 @@ export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal'
   throw Error('seasonal_model_canonical_residents_only');
  const canonical=options.canonicalResidentQuota===undefined?undefined:
   OfflineResidentAccountAdmission.claimCanonical(options.canonicalResidentQuota,wall);
+ const weatherPin=options.privateWeatherUse===undefined?undefined:pinSeasonalWeather(options.privateWeatherUse);
+ if(weatherPin&&!canonical)throw Error('seasonal_private_weather_requires_canonical_residents');
  const shared=canonical?.admission??legacy;
  let binding=legacy?.fixtureBinding();
  if(options.almanacFixture!==undefined&&!legacy)throw Error('seasonal_almanac_requires_bound_resident_account');
@@ -86,12 +255,13 @@ export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal'
  })();
  let store:WorldStore|undefined,server:ReturnType<typeof createServer>|undefined,closed=false;
  let almanac:ReturnType<typeof openSeasonalAlmanacFixture>|undefined;
+ let privateWeather:ReturnType<typeof openSeasonalPrivateWeather>|undefined;
  const worldBinding=()=>{
   owner.assertOwned();
   const f=lstatSync(owner.database,{bigint:true});
   if(!f.isFile()||f.isSymbolicLink()||f.nlink!==1n)throw Error('seasonal_model_canonical_world_file');
-  return createHash('sha256').update(JSON.stringify(['seasonal-runtime-world/v1',canonical!.binding,
-   canonical!.worldId,String(f.dev),String(f.ino)])).digest('hex');
+  return weatherDigest(['seasonal-runtime-world/v1',canonical!.binding,canonical!.worldId,String(f.dev),String(f.ino),
+   ...(weatherPin?[WEATHER_PURPOSE,weatherPin.fingerprint,weatherPin.hourMinute]:[])]);
  };
  try{
   owner.assertOwned();
@@ -128,6 +298,7 @@ export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal'
    const initial=createMvpWorld();
    if(canonical)initial.id=canonical.worldId;
    w=createMvpSession({world:initial}).world;
+   if(weatherPin&&weatherPin.hourMinute!==(Math.floor(w.minute/60)+1)*60)throw Error('seasonal_private_weather_first_hour_pin');
    if(canonical){
     store=new WorldStore(owner.database,{allowMvpClimate:true,seasonalModel:true});
     binding=worldBinding();
@@ -181,6 +352,9 @@ export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal'
    commit(bound,{schemaVersion:2,worldId:w.id,sharedAccountBinding:binding,nextSequence:1,lastWall:wall(),charges:[],requests:[]});
   }
   synchronizePriority();
+  if(weatherPin&&binding&&canonical)try{
+   privateWeather=openSeasonalPrivateWeather(owner,w.id,binding,weatherPin,canonical.quota,assertCanonicalWorld,()=>w);
+  }catch{/* optional weather cannot alter resident/clock behavior */}
   if(claimedAlmanac){
    // Unknown optional data isolates the almanac without altering resident
    // accounting, clock behavior, or the previous world commit.
@@ -201,7 +375,10 @@ export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal'
     if(ledger&&now<ledger.lastWall)throw Error('seasonal_model_wall_clock_reversal');
     const actor=w.residents.filter(r=>ready(w,r)).sort((a,b)=>a.decisionDue-b.decisionDue||a.id.localeCompare(b.id))[0];
     if(!actor){
-     const draft=structuredClone(w);draft.clock={...draft.clock,paused:false,reason:null};stepWorld(draft,1);commit(draft);synchronizePriority();return read();
+     const before=w.minute,draft=structuredClone(w);
+     draft.clock={...draft.clock,paused:false,reason:null};stepWorld(draft,1);commit(draft);
+     privateWeather?.capture(before,draft);
+     synchronizePriority();return read();
     }
     if((ledger?.requests.length??0)>=1000)throw Error('seasonal_model_request_limit');
     const context=seasonalModelContext(w,actor),prepared=prepareModelDecision(context,undefined,policy.model);
@@ -279,7 +456,7 @@ export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal'
   let closing:Promise<void>|undefined;
   const close=()=>closing??=(async()=>{
    const dispatchWasLive=!!dispatch;
-   closed=true;controller?.abort();try{almanac?.close();}catch{/* isolate optional state */}
+   closed=true;controller?.abort();try{privateWeather?.close();}catch{/* optional annex */}try{almanac?.close();}catch{/* isolate optional state */}
    try{
     if(server){server.closeAllConnections();await new Promise<void>(resolve=>server!.close(()=>resolve()));}
     let clearCanonicalDemand=false;
@@ -310,7 +487,10 @@ export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal'
     return almanac.pump(w.minute);
    },
    latestAlmanac:()=>closed?null:almanac?.latest()??null,
+   privateWeatherUseTerms:(allow:boolean,startsAt:number,expiresAt:number)=>closed?null:privateWeather?.terms(allow,startsAt,expiresAt)??null,
+   recordPrivateWeatherUse:(approval:unknown)=>!closed&&(privateWeather?.record(approval)??false),
+   readPrivateWeatherUse:()=>closed?null:privateWeather?.packet()??null,
    setAlmanacPublicWeatherAllowed:(allowed:boolean)=>!closed&&(almanac?.setPublicWeatherAllowed(allowed)??false),
   };
- }catch(error){try{almanac?.close();}catch{/* optional state */}try{if(server?.listening){server.closeAllConnections();await new Promise<void>(resolve=>server!.close(()=>resolve()));}store?.close();}finally{try{owner.release();}finally{releaseQuota?.();}}throw error;}
+ }catch(error){try{privateWeather?.close();}catch{/* optional annex */}try{almanac?.close();}catch{/* optional state */}try{if(server?.listening){server.closeAllConnections();await new Promise<void>(resolve=>server!.close(()=>resolve()));}store?.close();}finally{try{owner.release();}finally{releaseQuota?.();}}throw error;}
 }
