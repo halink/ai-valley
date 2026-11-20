@@ -1,3 +1,4 @@
+import {ORDINARY_G2_HANDOFF_BLOCKERS,appendOrdinaryG2BlockedHandoff,encodeOrdinaryG2BlockedHandoffTerms,ordinaryG2BlockedHandoffSigningBytes,pinOrdinaryG2BlockedHandoff,readOrdinaryG2HandoffRecord,sameOrdinaryG2HandoffTerms,type OrdinaryG2BlockedHandoffOptions,type OrdinaryG2BlockedHandoffTerms} from './valley-spirit-ordinary-g2-blocked-handoff.js';
 import {DatabaseSync} from 'node:sqlite';
 import {ORDINARY_G1_DECISION_PURPOSE,advanceOrdinaryG1DecisionEpoch,appendOrdinaryG1Decision,ordinaryAgedG1DecisionSigningBytes,ordinaryG1DecisionDigest,ordinaryG1DecisionHash,ordinaryG1DecisionReviewDigest,ordinaryG1DecisionSaveScope,readOrdinaryG1DecisionHead,readOrdinaryG1DecisionRecord,type OrdinaryG1DecisionTerms} from './valley-spirit-ordinary-g1-decision.js';
 import {rehearseOrdinaryAgedG1} from './valley-spirit-ordinary-g1-rehearsal.js';
@@ -34,7 +35,7 @@ import {WorldStore} from './store.js';
 import {acquireRuntimeOwnership,type RuntimeOwnership} from './runtime-lock.js';
 import {assertGodotWebExport} from './godot-web.js';
 import type {World} from '../shared/types.js';
-type PersistentRulesOptions={database:string;port:number;webRoot?:string;autoStart?:boolean;tickMs?:number;privateSpiritShadow?:PersistentRulesShadowOptions;privateSpiritGeographyQueue?:RulesGeographyQueueOptions;privateNativeFruitRenewal?:RulesNativeFruitRenewalPin;privateAgedFruitPreflight?:true;privateEmptyAgedGround?:OrdinaryAgedGroundPin;privateNativeEmptyAgedGround?:true;privateOrdinaryAgedG1Review?:OrdinaryAgedG1ReviewOptions;privateOrdinaryAgedG1Decision?:true;privateLifeFixture?:PersistentRulesLifeFixture;privateSpeechCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string;nativeWeatherCredit?:true}>;privateMealCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string}>};
+type PersistentRulesOptions={database:string;port:number;webRoot?:string;autoStart?:boolean;tickMs?:number;privateSpiritShadow?:PersistentRulesShadowOptions;privateSpiritGeographyQueue?:RulesGeographyQueueOptions;privateNativeFruitRenewal?:RulesNativeFruitRenewalPin;privateAgedFruitPreflight?:true;privateEmptyAgedGround?:OrdinaryAgedGroundPin;privateNativeEmptyAgedGround?:true;privateOrdinaryAgedG1Review?:OrdinaryAgedG1ReviewOptions;privateOrdinaryAgedG1Decision?:true;privateOrdinaryG2BlockedHandoff?:OrdinaryG2BlockedHandoffOptions;privateLifeFixture?:PersistentRulesLifeFixture;privateSpeechCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string;nativeWeatherCredit?:true}>;privateMealCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string}>};
 export async function startPersistentRulesMvp(options:PersistentRulesOptions){
  if(typeof options.database!=='string'||!options.database.trim())throw Error('mvp_rules_database_required');
  if(isDisposableRulesScratchPath(options.database))throw Error('disposable_native_rules_no_http');
@@ -177,6 +178,9 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
  if(options.privateOrdinaryAgedG1Decision!==undefined&&
   (!g1DecisionEnabled||!ordinaryReview||!!disposable||options.autoStart!==false))
   throw Error('ordinary_aged_g1_decision_stopped_scope');
+ const g2Handoff=pinOrdinaryG2BlockedHandoff(options.privateOrdinaryG2BlockedHandoff);
+ if(options.privateOrdinaryG2BlockedHandoff!==undefined&&(!g2Handoff||!g1DecisionEnabled||!ordinaryReview||
+  g2Handoff.keyId===ordinaryReview.keyId))throw Error('ordinary_g2_blocked_handoff_independent_scope');
  const speechPin=options.privateSpeechCustody===undefined?undefined:structuredClone(options.privateSpeechCustody);
  if(options.privateSpeechCustody!==undefined&&(!speechPin||!speechPin.fixture||typeof speechPin.worldId!=='string'||!/^godot-mvp-[A-Za-z0-9_-]{1,160}$/.test(speechPin.worldId)||
     Object.keys(speechPin).some(k=>!['fixture','worldId','nativeWeatherCredit'].includes(k))||
@@ -403,13 +407,56 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
    if(JSON.stringify(captureG1Decision(db,database,review))!==JSON.stringify(terms))throw Error('ordinary_g1_decision_stale_readback');
    return {...g1DecisionView(result.id,terms),replay:result.replay};
   });
-  const readPrivateOrdinaryAgedG1Decision=()=>withG1DecisionDb(false,(db,database)=>{
+  // Same owning SQLite transaction as the caller. No DTO supplied by a
+  // caller or shadow queue is a live signed G1 decision.
+  const captureLiveG1Decision=(db:DatabaseSync,database:string)=>{
    const current=currentG1DecisionHead(db,database);
-   if(!current)return g1DecisionUnavailable();
+   if(!current)return null;
    const record=readOrdinaryG1DecisionRecord(db,current,ordinaryReview!.epoch,ordinaryReview!.keyId);
    const terms=record&&captureG1Decision(db,database,record.review);
    const live=terms&&ordinaryAgedG1DecisionSigningBytes(terms),stored=record&&ordinaryAgedG1DecisionSigningBytes(record.terms);
-   return terms&&live&&stored&&live.equals(stored)?g1DecisionView(ordinaryG1DecisionHash(live),terms):g1DecisionUnavailable();
+   return record&&terms&&live&&stored&&live.equals(stored)?{record,terms,id:ordinaryG1DecisionHash(live)}:null;
+  };
+  const readPrivateOrdinaryAgedG1Decision=()=>withG1DecisionDb(false,(db,database)=>{
+   const g1=captureLiveG1Decision(db,database);
+   return g1?g1DecisionView(g1.id,g1.terms):g1DecisionUnavailable();
+  });
+  const g2HandoffUnavailable=()=>({status:g2Handoff?'unavailable' as const:'disabled' as const,approvalPresent:false as const,
+   executionAuthorized:false as const,placementEligible:false as const,schedulingAuthorized:false as const,reservationAuthorized:false as const});
+  const withG2HandoffDb=<T>(write:boolean,fn:(db:DatabaseSync,database:string)=>T):T|ReturnType<typeof g2HandoffUnavailable>=>{
+   if(!g2Handoff||!g1DecisionEpochReady)return g2HandoffUnavailable();
+   const result=withG1DecisionDb(write,(db,database)=>({value:fn(db,database)}));
+   return 'value' in result?result.value:g2HandoffUnavailable();
+  };
+  const captureG2Handoff=(db:DatabaseSync,database:string)=>{
+   const g1=captureLiveG1Decision(db,database);
+   return g1&&encodeOrdinaryG2BlockedHandoffTerms(g1.record,g2Handoff!.keyId);
+  };
+  const g2HandoffView=(receiptId:string,terms:OrdinaryG2BlockedHandoffTerms)=>({
+   ...g2HandoffUnavailable(),status:'execution-blocked' as const,receiptId,terms,blockers:ORDINARY_G2_HANDOFF_BLOCKERS,
+  });
+  const previewPrivateOrdinaryG2BlockedHandoff=()=>withG2HandoffDb(false,(db,database)=>{
+   const terms=captureG2Handoff(db,database);
+   if(!terms)return g2HandoffUnavailable();
+   const stored=readOrdinaryG2HandoffRecord(db,terms);
+   if(stored&&!sameOrdinaryG2HandoffTerms(stored.terms,terms))return g2HandoffUnavailable();
+   return {...g2HandoffUnavailable(),status:'g2-blocked-handoff-review-signing-input' as const,terms,blockers:ORDINARY_G2_HANDOFF_BLOCKERS};
+  });
+  const commitPrivateOrdinaryG2BlockedHandoff=(signedHandoff:unknown)=>withG2HandoffDb(true,(db,database)=>{
+   const signed=structuredClone(signedHandoff),terms=captureG2Handoff(db,database);
+   if(!terms)return g2HandoffUnavailable();
+   const receipt=appendOrdinaryG2BlockedHandoff(db,terms,signed,g2Handoff!.key);
+   if(!receipt)return g2HandoffUnavailable();
+   const still=captureG2Handoff(db,database);
+   if(!still||!sameOrdinaryG2HandoffTerms(terms,still))throw Error('ordinary_g2_handoff_stale_readback');
+   return {...g2HandoffView(receipt.id,terms),replay:receipt.replay};
+  });
+  const readPrivateOrdinaryG2BlockedHandoff=()=>withG2HandoffDb(false,(db,database)=>{
+   const terms=captureG2Handoff(db,database);
+   if(!terms)return g2HandoffUnavailable();
+   const stored=readOrdinaryG2HandoffRecord(db,terms),bytes=ordinaryG2BlockedHandoffSigningBytes(terms);
+   return stored&&bytes&&sameOrdinaryG2HandoffTerms(stored.terms,terms)?
+    g2HandoffView(ordinaryG1DecisionHash(bytes),terms):g2HandoffUnavailable();
   });
   let rebaseRequired=false;
   const transactPrivateDisposableAgedTransfer=(g1?:unknown,g2?:unknown)=>{
@@ -437,6 +484,6 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
    const w=session.world;
    return store.readDisposableResidentGroundDiscovery({worldId:w.id,revision:w.revision,atUs:minuteToClimateUs(w.minute)},residentId);
   };
-  return {get session(){return session!;},server,snapshot,readPrivateDisposableNativeSpeech:(head:Readonly<DisposableSpeechHead>)=>speechReader?.latest(head)??null,transactPrivateDisposableAgedTransfer,readPrivateDisposableNativeAgedFairness,readPrivateDisposableResidentGroundDiscovery,disposableRebaseRequired:()=>rebaseRequired,readPrivateSpiritCandidate,readPrivateSpiritGeographicProposal,readPrivateNativeFruitRenewal,readPrivateNativeFruitLot,readPrivateAgedFruitPreflight,readPrivateOrdinaryAgedGround,readPrivateOrdinaryAgedG1Review,previewPrivateOrdinaryAgedG1Decision,commitPrivateOrdinaryAgedG1Decision,readPrivateOrdinaryAgedG1Decision,close};
+  return {get session(){return session!;},server,snapshot,readPrivateDisposableNativeSpeech:(head:Readonly<DisposableSpeechHead>)=>speechReader?.latest(head)??null,transactPrivateDisposableAgedTransfer,readPrivateDisposableNativeAgedFairness,readPrivateDisposableResidentGroundDiscovery,disposableRebaseRequired:()=>rebaseRequired,readPrivateSpiritCandidate,readPrivateSpiritGeographicProposal,readPrivateNativeFruitRenewal,readPrivateNativeFruitLot,readPrivateAgedFruitPreflight,readPrivateOrdinaryAgedGround,readPrivateOrdinaryAgedG1Review,previewPrivateOrdinaryAgedG1Decision,commitPrivateOrdinaryAgedG1Decision,readPrivateOrdinaryAgedG1Decision,previewPrivateOrdinaryG2BlockedHandoff,commitPrivateOrdinaryG2BlockedHandoff,readPrivateOrdinaryG2BlockedHandoff,close};
  }catch(error){await close();throw error;}
 }
