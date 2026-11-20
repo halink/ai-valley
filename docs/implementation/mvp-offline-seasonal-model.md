@@ -92,3 +92,9 @@ SQLite 同一世界事务的私有表保存请求身份、actor/revision、时�
 在原始、无端口的 canonical Seasonal 档，可额外显式提供 `publicWeatherResponse: {reviewerPublicKeyPem, transport}`。必须已固定独立的 `publicWeatherSource`，回包审核公钥不能是来源审核公钥，也不能是已配置的私用审核公钥。可以同档读已授权的私用来源，但不可同时启用私用天气草稿／结构化消息或私有选题派发；关闭回包装置重开可继续只读来源，不生成第二次请求。已有物理存档、用途配置绑定会阻挡跨私用派发配置重开。此路径不会把私用许可转作公开来源，也不会提供供应商、真实扣费、端口或发布能力。
 
 `previewPublicWeatherResponse` 仅在其原生小时闭合且当前来源许可有效时，生成目的分离的签署条款和需要批准的精确匿名消息字节。条款绑定原档／共享账号／单次机会、公开来源许可及现有年鉴素材包摘要与精确消息摘要。固定内存替身返回一项与同一实际天气相符的结构化事实；不可给文案或因果推断。共享事务仍居民优先，一次意向、回包用量结算且同账证明成功后才能读取规则渲染的待编审证据。无效回包会按可知用量结算但不展示；失联保留未决账、不会猜测或重发；已有安全门拒绝未决共享账重新启动。来源在回包期间被撤回也不会得到可读结果。已正常结算的回包重开时仍须复查原始来源、两份独立审核、确切响应／用量和当前权限。返回始终是 `publicationAuthorized:false`，不是最终刊物、玩家读端或现实供应商。
+
+### 独立编审一次本机离线天气刊
+
+在同一原档、明确无端口的 canonical Seasonal 环境，可在 `publicWeatherSource`、`publicWeatherResponse` 外另外启用 `localWeatherEditorial: {mode:'explicit-local-offline-weather-edition', reviewerPublicKeyPem}`。编审公钥必须与来源审核、准确回包审核及已配置私用审核不同。只有确实获得当前来源许可、已闭实测小时、共享账户已把同一准确回包结算完毕时才有发布预览。复用一条天气断言的现有校验和已有第一版渲染；如选中温度或湿度，不改写为默认天气状况。它没有公开网页、写接口或模型供应商。
+
+`previewLocalWeatherEditorial('publish'|'revoke')` 生成独立签署条款，其中绑定当前原档完整存档头、原始证据、各项精确摘要和前一段已签历史。`encodeLocalWeatherEditorialTerms` 只为该用途编码；`recordLocalWeatherEditorial` 同事务复查。每份档仅有一份本机离线刊，可独立撤回一次；本档 SQL 记录和同账号独立注册锚都必须吻合。一侧丢失或损坏不重造、不恢复已经撤回的刊，不承诺抵抗协调篡改或完整外部回滚。每次 `latestLocalWeatherEdition` 仅读取已签且仍能复核来源、配额和精确渲染内容的刊；来源过期／撤权立刻隐藏，仍可签撤回留痕。版本明确为本机 `offline-synthetic`，默认关闭，无玩家、HTTP、真实模型或新预算。

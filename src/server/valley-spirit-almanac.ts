@@ -211,6 +211,13 @@ function renderAlmanacTextV1(p:ValleySpiritAlmanacPacket,draft:GroundedDraft):Re
  });
  return {rendererVersion:TEXT_RENDERER_VERSION,facts,atmosphere:{kind:'editorial-register-only',value:draft.atmosphere}};
 }
+/** Renders one strictly grounded weather claim for an owner-level review.
+ * It grants no approval and does not install a reader or write an edition. */
+export function renderOneSeasonalWeatherReview(p:ValleySpiritAlmanacPacket,field:unknown,value:unknown){
+ if(p.points.length!==1)return null;
+ const d=groundValleySpiritAlmanacDraft(p,{claims:[{sourceRef:p.points[0].sourceRef,field,value}],atmosphere:'plain'});
+ return d?renderAlmanacTextV1(p,d):null;
+}
 /** Private editorial helper; uses the existing versioned renderer, never publishes. */
 export function previewGroundedSyntheticWeather(e:ValleySpiritAlmanacEntry,a:ValleySpiritAlmanacAuthority){
  if(e.origin.kind!=='offline-synthetic'||e.phase!=='grounded'||!permit(e.packet,a))return null;
