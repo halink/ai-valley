@@ -1,3 +1,4 @@
+import {appendDisposableNativeSpeech,ownsDisposableSpeechPurpose,type DisposableSpeechPurpose} from './disposable-native-addressed-speech.js';
 import type {GroundDiscoveryHead} from '../world/mvp-ordinary-aged-ground-discovery.js';
 import {advanceDisposableNativeAgedTransfer,hasDisposableNativeAgedTransfer,makeDisposableNativeAgedBirth,prepareDisposableNativeAgedTransfer,projectDisposableHeldForNativeEating,projectCurrentDisposableGroundApproach,type Eating,projectDisposableNativeAgedTransfer,projectActiveDisposableGroundForObservation,projectActiveDisposableGroundForPickup,projectDisposableGroundResidentDiscovery,readDisposableNativeAgedTransfer,writeDisposableNativeAgedTransfer,type DisposableNativeAgedTransferPin} from './disposable-native-aged-transfer.js';
 import {assertDisposableRulesSavePath,guardDisposableRulesSaveCommit,readDisposableRulesSaveMarker,type DisposableRulesSaveAuthority} from './disposable-native-rules-save.js';
@@ -795,6 +796,13 @@ export class WorldStore {
    throw Error('mvp_addressed_speech_store_required');
   return this.commitTransaction(world,previousRevision,undefined,undefined,proof);
  }
+ /** Native speech only on the independent socketless disposable profile. */
+ commitDisposableNativeSpeech(world:World,previousRevision:number,purpose:DisposableSpeechPurpose,proof?:AddressedSpeechObservation):void{
+  if(!this.#privateDisposableSave||!ownsDisposableSpeechPurpose(purpose,this.#privateDisposableSave)||
+   this.#disposableAgedTransfer||this.nativeEmptyGround||this.nativeRulesFruitRenewal||this.developerSpiritFixtureOwner||!this.allowMvpClimate||this.seasonalModel||world.mode!=='validation')
+   throw Error('disposable_native_speech_store_scope');
+  this.commitTransaction(world,previousRevision,undefined,undefined,proof,undefined,true);
+ }
  /** This scope has no public readback, disclosure, or legacy meal writer. */
  commitMvpWithAtomicMealCustody(world:World,previousRevision:number,witnesses:readonly ValleySpiritMvpMealWitness[]):void{
   if(!this.allowMvpClimate||this.seasonalModel||this.developerSpiritFixtureOwner?.rulesMealWorldId!==world.id||world.mode!=='validation')
@@ -828,7 +836,7 @@ export class WorldStore {
   return !this.allowMvpClimate&&!this.seasonalModel&&verifyValleySpiritFormalArrivalCustody(this.db,receipt);
  }
  private commitTransaction(world:World,previousRevision:number|null,appended?:AppendedHistory,seasonalLedger?:SeasonalLedger,
-  proof?:AddressedSpeechObservation,mealWitnesses?:readonly ValleySpiritMvpMealWitness[]):readonly ValleySpiritLifeReceipt[]{
+  proof?:AddressedSpeechObservation,mealWitnesses?:readonly ValleySpiritMvpMealWitness[],disposableSpeech=false):readonly ValleySpiritLifeReceipt[]{
   if(!this.#disposableAgedTransfer)this.assertWritable(world);
   const due=this.armedFormalDue,shadow=this.armedFormalShadow;
   const reached=(job:FormalArmedWindow|undefined)=>!!job&&previousRevision!==null&&
@@ -860,7 +868,8 @@ export class WorldStore {
    }
    if(this.#disposableAgedTransfer)this.assertWritable(world,lifecycle?.eating);
    speech=this.writeDraftWithCustody(world,previousRevision,appended,seasonalLedger,proof,
-    !!this.developerSpiritFixtureOwner?.rulesSpeechWorldId,mealWitnesses);
+    !!this.developerSpiritFixtureOwner?.rulesSpeechWorldId||disposableSpeech,mealWitnesses,disposableSpeech);
+   if(disposableSpeech)appendDisposableNativeSpeech(this.db,this.#privateDisposableSave!,world,speech);
    if(lifecycle&&this.#privateDisposableSave&&this.#disposableAgedTransfer){
     writeDisposableNativeAgedTransfer(this.db,this.#privateDisposableSave,lifecycle,false);
     readDisposableNativeAgedTransfer(this.db,this.#privateDisposableSave,this.#disposableAgedTransfer,world);
@@ -887,7 +896,7 @@ export class WorldStore {
  }
  /** Same write and receipt custody for normal and sealed-internal transactions. */
  private writeDraftWithCustody(world:World,previousRevision:number|null,appended?:AppendedHistory,seasonalLedger?:SeasonalLedger,
-  proof?:AddressedSpeechObservation,strict=false,mealWitnesses?:readonly ValleySpiritMvpMealWitness[]):readonly ValleySpiritLifeReceipt[]{
+  proof?:AddressedSpeechObservation,strict=false,mealWitnesses?:readonly ValleySpiritMvpMealWitness[],disposableSpeech=false):readonly ValleySpiritLifeReceipt[]{
   const previous=this.writeCommit(world,previousRevision,appended,seasonalLedger);
   const nativeRenewal=this.nativeRulesFruitRenewal;
   if(nativeRenewal&&previous&&world.id===nativeRenewal.worldId){
@@ -948,7 +957,7 @@ export class WorldStore {
   // Only this purpose-pinned runtime demands speech custody for every new
   // native addressed event. Group, ecological and unreceived speech are not
   // inferred from text or broad conversation category.
-  const speechStrict=strict&&!!this.developerSpiritFixtureOwner?.rulesSpeechWorldId;
+  const speechStrict=strict&&(!!this.developerSpiritFixtureOwner?.rulesSpeechWorldId||disposableSpeech);
   const addressedIds=new Set<string>();
   if(speechStrict){
    const priorIds=new Set(previous?.events.map(e=>e.id)??[]);

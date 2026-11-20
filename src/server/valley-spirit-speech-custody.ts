@@ -96,3 +96,25 @@ export function verifyValleySpiritSpeechCustody(db:DatabaseSync,value:Readonly<V
   return !!r&&validRow(r,value.worldId)&&r.at_us===value.atUs&&committedEvent(db,value.worldId,r,false);
  }catch{return false;}
 }
+
+/** Private integrity-only index for the owning speech annex. Uses the
+ * authoritative base custody, never event text, actors, or a candidate cache.
+ * Caller supplies the same SQLite snapshot and the exact current head bound. */
+export function latestValleySpiritSpeechCustodyKeys(db:DatabaseSync,worldId:string,headRevision:number,excludeCurrent=false){
+ if(!WORLD.test(worldId)||!integer(headRevision,1))throw Error('invalid_speech_custody_head');
+ if(!matchesSchema(db))return null;
+ const count=db.prepare('SELECT count(*) AS n FROM (SELECT 1 FROM valley_spirit_speech_custody LIMIT ?)').get(LIMIT+1)?.n;
+ if(!integer(count,1,LIMIT)||db.prepare('SELECT 1 FROM valley_spirit_speech_custody WHERE world_id<>? LIMIT 1').get(worldId))
+  throw Error('invalid_speech_custody_extent');
+ const top=db.prepare('SELECT committed_revision FROM valley_spirit_speech_custody WHERE world_id=? ORDER BY committed_revision DESC LIMIT 1').get(worldId)?.committed_revision;
+ if(top===undefined)return null;
+ if(!integer(top,1,headRevision))throw Error('future_speech_custody_revision');
+ const ceiling=excludeCurrent?headRevision-1:headRevision;
+ const revision=db.prepare('SELECT committed_revision FROM valley_spirit_speech_custody WHERE world_id=? AND committed_revision<=? ORDER BY committed_revision DESC LIMIT 1').get(worldId,ceiling)?.committed_revision;
+ if(revision===undefined)return null;
+ if(!integer(revision,1,ceiling))throw Error('invalid_speech_custody_revision');
+ const rows=db.prepare('SELECT * FROM valley_spirit_speech_custody WHERE world_id=? AND committed_revision=? LIMIT 17').all(worldId,revision) as unknown as Row[];
+ if(!rows.length||rows.length>16||new Set(rows.map(r=>r.receipt_id)).size!==rows.length||rows.some(r=>!validRow(r,worldId)||!committedEvent(db,worldId,r,false)))
+  throw Error('invalid_speech_custody_receipt_set');
+ return {revision,ids:rows.map(r=>r.receipt_id).sort()};
+}
