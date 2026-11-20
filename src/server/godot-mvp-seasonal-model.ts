@@ -258,6 +258,7 @@ function openSeasonalWeatherCustody(owner:RuntimeOwnership,worldId:string,bindin
  * normal rules runner and all pre-existing model entry points stay unchanged. */
 const NATIVE_DRAFT_PROFILE='private-canonical-seasonal-weather-draft/v1' as const;
 const WIRE_DRAFT_PROFILE='private-canonical-seasonal-weather-wire-draft/v1' as const;
+const PUBLIC_RESPONSE_PROFILE='seasonal-g0-public-weather-prepublication-response/v1' as const;
 const TOPIC_CHOICE_PROFILE='private-canonical-seasonal-weather-topic-choice/v1' as const;
 const TABLE='seasonal_native_private_weather_draft';
 const DDL='CREATE TABLE seasonal_native_private_weather_draft(singleton INTEGER PRIMARY KEY NOT NULL CHECK(singleton=1), body TEXT NOT NULL)';
@@ -267,9 +268,13 @@ const hash=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('h
 const int=(v:unknown,lo=0,hi=Number.MAX_SAFE_INTEGER):v is number=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=lo&&v<=hi;
 const keys=['schemaVersion','mode','projectionVersion','worldId','sourceRef','sourceDigest','permitVersion','observedMinute',
  'condition','temperatureDeciC','relativeHumidityPermille','cloudPermille','windPermille','daylightPermille','precipitationPermille'] as const;
-type NativeWeatherDraftPacket=Readonly<{schemaVersion:1;mode:'private-seasonal-weather-prepare-only';projectionVersion:1;
+type WeatherDraftPacket<Mode extends string=string>=Readonly<{schemaVersion:1;mode:Mode;projectionVersion:1;
  worldId:string;sourceRef:string;sourceDigest:string;permitVersion:number;observedMinute:number;condition:keyof typeof conditions;
  temperatureDeciC:number;relativeHumidityPermille:number;cloudPermille:number;windPermille:number;daylightPermille:number;precipitationPermille:number;}>;
+type NativeWeatherDraftPacket=WeatherDraftPacket<'private-seasonal-weather-prepare-only'>;
+const PUBLIC_PACKET_MODE='seasonal-public-weather-pending-editorial' as const;
+type PublicResponsePacket=WeatherDraftPacket<typeof PUBLIC_PACKET_MODE>&Readonly<{grantDigest:string;eligibilityPacketDigest:string}>;
+type DraftPacket=NativeWeatherDraftPacket|PublicResponsePacket;
 function nativeWeatherDraftPacket(t:SeasonalPrivateWeatherTerms,fact:PublicWeatherFact):NativeWeatherDraftPacket{
  const {condition,temperatureDeciC,relativeHumidityPermille,cloudPermille,windPermille,daylightPermille,precipitationPermille}=fact;
  return Object.freeze({schemaVersion:1,mode:'private-seasonal-weather-prepare-only',projectionVersion:1,
@@ -279,10 +284,10 @@ function nativeWeatherDraftPacket(t:SeasonalPrivateWeatherTerms,fact:PublicWeath
 }
 type TopicFieldPoint=Readonly<Pick<PublicWeatherFact,'minute'|'condition'|'temperatureDeciC'|'relativeHumidityPermille'>>;
 type TopicBasis=Readonly<{firstGrantDigest:string;secondGrantDigest:string;late:TopicFieldPoint}>;
-const topicOf=(p:NativeWeatherDraftPacket,t:TopicBasis)=>nativeSeasonalWeatherPairMenu({
+const topicOf=(p:DraftPacket,t:TopicBasis)=>nativeSeasonalWeatherPairMenu({
  minute:p.observedMinute,condition:p.condition,temperatureDeciC:p.temperatureDeciC,relativeHumidityPermille:p.relativeHumidityPermille,
 },t.late);
-function validTopicBasis(v:unknown,p:NativeWeatherDraftPacket):v is TopicBasis{
+function validTopicBasis(v:unknown,p:DraftPacket):v is TopicBasis{
  if(!exact(v,['firstGrantDigest','secondGrantDigest','late'])||!hex(v.firstGrantDigest)||!hex(v.secondGrantDigest)||
   v.firstGrantDigest===v.secondGrantDigest||!exact(v.late,['minute','condition','temperatureDeciC','relativeHumidityPermille']))return false;
  const l=v.late;
@@ -292,50 +297,52 @@ function validTopicBasis(v:unknown,p:NativeWeatherDraftPacket):v is TopicBasis{
 export interface NativeWeatherDraftTerms {schema:typeof NATIVE_DRAFT_PROFILE;binding:string;worldId:string;requestId:string;
  packetDigest:string;permitVersion:number;}
 type NativeWeatherWireDraftTerms=Omit<NativeWeatherDraftTerms,'schema'>&{schema:typeof WIRE_DRAFT_PROFILE;wireDigest:string;};
+type NativePublicWeatherResponseTerms=Omit<NativeWeatherWireDraftTerms,'schema'>&{schema:typeof PUBLIC_RESPONSE_PROFILE;};
 type NativeWeatherTopicChoiceTerms=Omit<NativeWeatherWireDraftTerms,'schema'>&{schema:typeof TOPIC_CHOICE_PROFILE;topicDigest:string;};
 const termsKeys=['schema','binding','worldId','requestId','packetDigest','permitVersion'] as const;
 const wireKeys=[...termsKeys,'wireDigest'] as const;
 const topicKeys=[...wireKeys,'topicDigest'] as const;
-const approvalKeys=(schema:string)=>schema===TOPIC_CHOICE_PROFILE?topicKeys:schema===WIRE_DRAFT_PROFILE?wireKeys:termsKeys;
+const approvalKeys=(schema:string)=>schema===TOPIC_CHOICE_PROFILE?topicKeys:(schema===WIRE_DRAFT_PROFILE||schema===PUBLIC_RESPONSE_PROFILE)?wireKeys:termsKeys;
 const requestPattern=/^seasonal-private-almanac-[a-f0-9]{64}$/;
 export function encodeNativeWeatherDraftTerms(t:unknown):Buffer|null {
  const topic=exact(t,topicKeys)&&t.schema===TOPIC_CHOICE_PROFILE&&hex(t.topicDigest)&&hex(t.wireDigest);
- const wire=exact(t,wireKeys)&&t.schema===WIRE_DRAFT_PROFILE&&hex(t.wireDigest);
+ const wire=exact(t,wireKeys)&&(t.schema===WIRE_DRAFT_PROFILE||t.schema===PUBLIC_RESPONSE_PROFILE)&&hex(t.wireDigest);
  if(!(topic||wire||exact(t,termsKeys)&&t.schema===NATIVE_DRAFT_PROFILE)||!hex(t.binding)||!hex(t.packetDigest)||
   typeof t.worldId!=='string'||!/^godot-mvp-[a-f0-9-]{36}$/.test(t.worldId)||typeof t.requestId!=='string'||
   !requestPattern.test(t.requestId)||!int(t.permitVersion,1,32))return null;
  return Buffer.from(JSON.stringify([topic?'explicit-numbered-weather-topic-no-world-authority':
-  wire?'explicit-versioned-memory-weather-claims-no-publication':'explicit-compiled-offline-claim-no-publication',
+  wire?t.schema===PUBLIC_RESPONSE_PROFILE?'explicit-seasonal-g0-source-response-pending-editorial':'explicit-versioned-memory-weather-claims-no-publication':'explicit-compiled-offline-claim-no-publication',
   ...approvalKeys(t.schema as string).map(k=>t[k])]));
 }
-type Approval={terms:NativeWeatherDraftTerms|NativeWeatherWireDraftTerms|NativeWeatherTopicChoiceTerms;signature:string;};
+type Approval={terms:NativeWeatherDraftTerms|NativeWeatherWireDraftTerms|NativeWeatherTopicChoiceTerms|NativePublicWeatherResponseTerms;signature:string;};
 type Proof=NonNullable<ReturnType<ProductionAccountQuotaRehearsal['proveOfflineAlmanacCompletion']>>;
 type Usage={at:number;inputTokens:number;outputTokens:number;proof:Proof;};
-const compose=(p:NativeWeatherDraftPacket)=>Object.freeze({observedMinute:p.observedMinute,
+const compose=(p:DraftPacket)=>Object.freeze({observedMinute:p.observedMinute,
  field:'condition' as const,value:p.condition,text:`第 ${p.observedMinute} 游戏分钟，天气：${conditions[p.condition]}`});
 type WeatherDraftFact=ReturnType<typeof compose>|NonNullable<ReturnType<typeof groundSeasonalWeatherWireReply>>;
 type TopicChoice={readonly number:number};
-type State={schemaVersion:1|2|3;topic?:TopicBasis;sequence:number;approval:Approval;packet:NativeWeatherDraftPacket;
+type State={schemaVersion:1|2|3|4;topic?:TopicBasis;sequence:number;approval:Approval;packet:DraftPacket;
  phase:'intent'|'sent-unknown'|'not-dispatched'|'grounded'|'settled-hidden';settlement:Usage|null;draft:WeatherDraftFact|TopicChoice|null;};
 
-function validPacket(p:unknown,worldId:string,hour:number):p is NativeWeatherDraftPacket{
- return exact(p,keys)&&p.schemaVersion===1&&p.mode==='private-seasonal-weather-prepare-only'&&p.projectionVersion===1&&
-  p.worldId===worldId&&p.observedMinute===hour&&p.sourceRef===worldId+'/seasonal-hour-'+hour&&hex(p.sourceDigest)&&
-  int(p.permitVersion,1,32)&&typeof p.condition==='string'&&Object.hasOwn(conditions,p.condition)&&
-  int(p.temperatureDeciC,-300,450)&&keys.slice(10).every(key=>int(p[key],0,1000));
+function validPacket(p:unknown,worldId:string,hour:number):p is DraftPacket{
+ const publicMode=exact(p,[...keys,'grantDigest','eligibilityPacketDigest'])&&p.mode===PUBLIC_PACKET_MODE&&hex(p.grantDigest)&&hex(p.eligibilityPacketDigest);
+ return (publicMode||exact(p,keys)&&p.mode==='private-seasonal-weather-prepare-only')&&p.schemaVersion===1&&p.projectionVersion===1&&
+  p.worldId===worldId&&p.observedMinute===hour&&hex(p.sourceDigest)&&int(p.permitVersion,1,32)&&
+  p.sourceRef===(publicMode?worldId+'/weather-'+p.permitVersion+'-'+hour/60:worldId+'/seasonal-hour-'+hour)&&
+  typeof p.condition==='string'&&Object.hasOwn(conditions,p.condition)&&int(p.temperatureDeciC,-300,450)&&keys.slice(10).every(key=>int(p[key],0,1000));
 }
 /** Operator-only attachment to the current world and permit. A single local
  * treatment uses either the compiled claim or a claimed data-only adapter. */
 function openNativeWeatherDraft(owner:RuntimeOwnership,quota:ProductionAccountQuotaRehearsal,opts:{
  binding:string;worldId:string;hour:number;signer:KeyObject;guard:()=>void;currentRevision:()=>number;
- packet:()=>NativeWeatherDraftPacket|null;residentPriority:()=>boolean;now:()=>number;
+ packet:()=>DraftPacket|null;publicResponse?:true;residentPriority:()=>boolean;now:()=>number;
  wire?:ReturnType<typeof claimSeasonalWeatherMemoryTransport>;
  topic?:()=>{packet:NativeWeatherDraftPacket;topic:TopicBasis}|null;
 }){
  const {binding,worldId,hour,signer,guard,currentRevision,residentPriority,now}=opts;
  // The compiled and versioned-wire treatments cannot both spend the same
  // approved source opportunity. Keep the existing request ID and anchor.
- const draftVersion=opts.topic?3:opts.wire?2:1;
+ const draftVersion=opts.publicResponse?4:opts.topic?3:opts.wire?2:1;
  const requestId='seasonal-private-almanac-'+hash([NATIVE_DRAFT_PROFILE,quota.accountScope,quota.runId,binding,worldId,hour]);
  const db=new DatabaseSync(owner.database);
  try{db.exec('PRAGMA trusted_schema=OFF; PRAGMA synchronous=FULL');}catch(e){db.close();throw e;}
@@ -352,18 +359,19 @@ function openNativeWeatherDraft(owner:RuntimeOwnership,quota:ProductionAccountQu
   const basis=opts.topic?opts.topic():{packet:opts.packet(),topic:undefined},p=basis?.packet;
   return validPacket(p,worldId,hour)?{packet:p,topic:basis?.topic}:null;
  };
- const wireFor=(p:NativeWeatherDraftPacket,version:State['schemaVersion'],basis?:TopicBasis)=>{
+ const wireFor=(p:DraftPacket,version:State['schemaVersion'],basis?:TopicBasis)=>{
   if(version===1)return null;
-  if(version===2)return seasonalWeatherWireRequest(p);
+  if(version===2||version===4)return seasonalWeatherWireRequest(p);
   const menu=basis?topicOf(p,basis):null;
   return menu?seasonalWeatherTopicChoiceRequest(menu):null;
  };
- const termsFor=(p:NativeWeatherDraftPacket,version:State['schemaVersion'],basis?:TopicBasis):Approval['terms']|null=>{
+ const termsFor=(p:DraftPacket,version:State['schemaVersion'],basis?:TopicBasis):Approval['terms']|null=>{
+  if((version===4)!==(p.mode===PUBLIC_PACKET_MODE))return null;
   const base={binding,worldId,requestId,packetDigest:hash(p),permitVersion:p.permitVersion};
   if(version===1)return {schema:NATIVE_DRAFT_PROFILE,...base};
   const wire=wireFor(p,version,basis);
   if(!wire)return null;
-  return version===2?{schema:WIRE_DRAFT_PROFILE,...base,wireDigest:wire.digest}:
+  return version===4?{schema:PUBLIC_RESPONSE_PROFILE,...base,wireDigest:wire.digest}:version===2?{schema:WIRE_DRAFT_PROFILE,...base,wireDigest:wire.digest}:
    {schema:TOPIC_CHOICE_PROFILE,...base,wireDigest:wire.digest,topicDigest:hash(basis)};
  };
  const active=(s:State)=>{
@@ -387,7 +395,7 @@ function openNativeWeatherDraft(owner:RuntimeOwnership,quota:ProductionAccountQu
   const u:unknown=JSON.parse(raw);
   const stateKeys=['schemaVersion','sequence','approval','packet','phase','settlement','draft'];
   const v3=typeof u==='object'&&u!==null&&'schemaVersion' in u&&u.schemaVersion===3;
-  if(!exact(u,v3?[...stateKeys,'topic']:stateKeys)||(u.schemaVersion!==1&&u.schemaVersion!==2&&u.schemaVersion!==3)||
+  if(!exact(u,v3?[...stateKeys,'topic']:stateKeys)||(u.schemaVersion!==1&&u.schemaVersion!==2&&u.schemaVersion!==3&&u.schemaVersion!==4)||
    !int(u.sequence,1,3)||!validPacket(u.packet,worldId,hour)||typeof u.phase!=='string'||!['intent','sent-unknown','not-dispatched','grounded','settled-hidden'].includes(u.phase)||
    u.phase==='intent'&&u.sequence!==1||u.phase==='sent-unknown'&&u.sequence!==2||
    (u.phase==='grounded'||u.phase==='settled-hidden')&&u.sequence!==3||u.phase==='not-dispatched'&&u.sequence<2)
@@ -478,7 +486,7 @@ function openNativeWeatherDraft(owner:RuntimeOwnership,quota:ProductionAccountQu
   if(!proof)return blocked;
   const visible=!!result&&active(row.state)&&(!opts.wire||!residentPriority());
   put(row,{...row.state,phase:visible?'grounded':'settled-hidden',settlement:{at,inputTokens,outputTokens,proof},draft:visible?result:null});
-  return {status:visible?(row.state.schemaVersion===3?'private-topic-selected' as const:'private-draft-grounded' as const):result?'not-current' as const:'invalid-response' as const};
+  return {status:visible?(row.state.schemaVersion===4?'public-weather-response-pending-editorial' as const:row.state.schemaVersion===3?'private-topic-selected' as const:'private-draft-grounded' as const):result?'not-current' as const:'invalid-response' as const};
  };
  return Object.freeze({
   terms(){
@@ -502,12 +510,12 @@ function openNativeWeatherDraft(owner:RuntimeOwnership,quota:ProductionAccountQu
     return t?.schema===TOPIC_CHOICE_PROFILE&&wire?Object.freeze({terms:Object.freeze(t),exactMenuBytes:wire.bytes}):null;
    }catch{isolated=true;return null;}
   },
-  async pumpWire(input:unknown,version:2|3=2){
+  async pumpWire(input:unknown,version:2|3|4=2){
    try{
     if(!opts.wire)return blocked;
     const s=start(input,version);
     if('status' in s)return s;
-    if(!s.wire||s.wire.digest!==(s.row.state.approval.terms as NativeWeatherWireDraftTerms|NativeWeatherTopicChoiceTerms).wireDigest)return blocked;
+    if(!s.wire||s.wire.digest!==(s.row.state.approval.terms as NativeWeatherWireDraftTerms|NativeWeatherTopicChoiceTerms|NativePublicWeatherResponseTerms).wireDigest)return blocked;
     const raw=await opts.wire(s.wire.bytes,abort.signal);
     if(typeof raw!=='string'||raw.length>SEASONAL_WEATHER_WIRE_REPLY_BYTES)return blocked;
     const size=Buffer.byteLength(raw);
@@ -529,6 +537,25 @@ function openNativeWeatherDraft(owner:RuntimeOwnership,quota:ProductionAccountQu
     return option?Object.freeze({status:'private-synthetic-weather-topic' as const,menuVersion:1 as const,option}):null;
    }catch{isolated=true;return null;}
   },
+  previewPublicResponse(){
+   if(closed||isolated||draftVersion!==4)return null;
+   try{
+    if(state())return null;const p=current();if(!p)return null;
+    const t=termsFor(p.packet,4),wire=wireFor(p.packet,4);
+    return t?.schema===PUBLIC_RESPONSE_PROFILE&&wire?Object.freeze({terms:Object.freeze(t),exactRequestBytes:wire.bytes}):null;
+   }catch{isolated=true;return null;}
+  },
+  readPublicResponse(){
+   if(closed||isolated||draftVersion!==4)return null;
+   try{
+    const row=state(),q=quota.summary(now()),s=row?.state;
+    if(s?.phase!=='grounded'||s.schemaVersion!==4||s.packet.mode!==PUBLIC_PACKET_MODE||!s.draft||
+       'number' in s.draft||!s.settlement||q.held||q.unknown||!active(s))return null;
+    return Object.freeze({status:'public-weather-response-pending-editorial' as const,publicationAuthorized:false as const,
+     grantDigest:s.packet.grantDigest,eligibilityPacketDigest:s.packet.eligibilityPacketDigest,
+     responseDigest:hash([s.approval,s.draft,s.settlement]),fact:Object.freeze({...s.draft})});
+   }catch{isolated=true;return null;}
+  },
   readPrivateDraft(){
    if(closed||isolated)return null;
    try{
@@ -541,7 +568,7 @@ function openNativeWeatherDraft(owner:RuntimeOwnership,quota:ProductionAccountQu
  });
 }
 
-export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal';database:string;port?:number;transport?:MemoryTransport;sharedAccount?:OfflineResidentAccountAdmission;almanacFixture?:SeasonalAlmanacFixture;canonicalResidentQuota?:Readonly<CanonicalSeasonalQuota>;privateWeatherUse?:SeasonalPrivateWeatherPin;privateWeatherDraft?:true;privateWeatherWire?:SeasonalWeatherMemoryTransport;privateWeatherTopics?:typeof TOPIC_MODE;privateWeatherTopicChoice?:SeasonalWeatherMemoryTransport;publicWeatherSource?:SeasonalPublicWeatherSourcePin}){
+export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal';database:string;port?:number;transport?:MemoryTransport;sharedAccount?:OfflineResidentAccountAdmission;almanacFixture?:SeasonalAlmanacFixture;canonicalResidentQuota?:Readonly<CanonicalSeasonalQuota>;privateWeatherUse?:SeasonalPrivateWeatherPin;privateWeatherDraft?:true;privateWeatherWire?:SeasonalWeatherMemoryTransport;privateWeatherTopics?:typeof TOPIC_MODE;privateWeatherTopicChoice?:SeasonalWeatherMemoryTransport;publicWeatherSource?:SeasonalPublicWeatherSourcePin;publicWeatherResponse?:Readonly<{reviewerPublicKeyPem:string;transport:SeasonalWeatherMemoryTransport}>}){
  if(options.mode!=='offline-seasonal')throw Error('seasonal_model_explicit_mode_required');
  if(options.port!==undefined&&(!Number.isInteger(options.port)||options.port<0||options.port>65535))throw Error('seasonal_model_port');
  const transport=options.transport===undefined?undefined:transports.get(options.transport);
@@ -571,6 +598,17 @@ export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal'
  const publicSourcePin=options.publicWeatherSource===undefined?undefined:pinSeasonalWeather(options.publicWeatherSource,PUBLIC_SOURCE_MODE);
  if(publicSourcePin&&(!canonical||options.port!==undefined||
   weatherPin&&weatherPin.fingerprint===publicSourcePin.fingerprint))throw Error('seasonal_public_weather_source_scope');
+ const publicResponseOption=options.publicWeatherResponse;
+ const publicResponsePin=publicResponseOption===undefined?undefined:(()=>{
+  if(!publicSourcePin||!canonical||draftEnabled||topicsEnabled||!exact(publicResponseOption,['reviewerPublicKeyPem','transport']))
+   throw Error('seasonal_public_weather_response_scope');
+  const pin=pinSeasonalWeather({mode:PUBLIC_SOURCE_MODE,hourMinute:publicSourcePin.hourMinute,
+   reviewerPublicKeyPem:publicResponseOption.reviewerPublicKeyPem},PUBLIC_SOURCE_MODE);
+  if(pin.fingerprint===publicSourcePin.fingerprint||pin.fingerprint===weatherPin?.fingerprint)
+   throw Error('seasonal_public_weather_response_reviewer');
+  return pin;
+ })();
+ const publicResponseTransport=publicResponsePin?claimSeasonalWeatherMemoryTransport(publicResponseOption!.transport):undefined;
  const shared=canonical?.admission??legacy;
  let binding=legacy?.fixtureBinding();
  if(options.almanacFixture!==undefined&&!legacy)throw Error('seasonal_almanac_requires_bound_resident_account');
@@ -717,6 +755,11 @@ export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal'
   if(publicSourcePin&&binding&&canonical)try{
    publicWeatherSource=openSeasonalWeatherCustody(owner,w.id,binding,publicSourcePin,canonical.quota,assertCanonicalWorld,()=>w,'public-source');
   }catch{/* optional disclosure is independent of private weather and residents */}
+  if(publicResponsePin&&publicResponseTransport&&publicWeatherSource&&binding&&canonical)try{
+   weatherDraft=openNativeWeatherDraft(owner,canonical.quota,{binding,worldId:w.id,hour:publicResponsePin.hourMinute,
+    signer:publicResponsePin.signer,guard:assertCanonicalWorld,currentRevision:()=>w.revision,
+    packet:publicResponsePacket,residentPriority:draftResidentPriority,now:wall,wire:publicResponseTransport,publicResponse:true});
+  }catch{/* Optional response has no effect on world, source approval or resident progression. */}
   if(claimedAlmanac){
    // Unknown optional data isolates the almanac without altering resident
    // accounting, clock behavior, or the previous world commit.
@@ -847,7 +890,7 @@ export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal'
   const topicMenu=()=>{
    const basis=topicContext();return basis?topicOf(basis.packet,basis.topic):null;
   };
-  const readPublicSource=()=>{
+  function readPublicSource(){
    if(closed)return null;
    const value=publicWeatherSource?.authorized();
    if(!value||value.terms.schema!==PUBLIC_SOURCE_PURPOSE)return null;
@@ -858,7 +901,7 @@ export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal'
    const source:ValleySpiritAlmanacWeatherSource=Object.freeze({sourceRef,permissionVersion,fact:Object.freeze({...fact})});
    return {terms,head,source};
   };
-  const previewPublicationEligibility=()=>{
+  function previewPublicationEligibility(){
    try{
     const basis=readPublicSource();
     if(!basis||basis.source.fact.minute>=Math.floor(basis.head.minute/60)*60)return null;
@@ -879,6 +922,17 @@ export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal'
     }):null;
    }catch{return null;}
   };
+  function publicResponsePacket():PublicResponsePacket|null{
+   const preview=previewPublicationEligibility(),basis=preview&&readPublicSource();
+   if(!preview||!basis||basis.head.worldRevision!==preview.headRevision||weatherDigest(basis.terms)!==preview.grantDigest||
+      basis.terms.sourceDigest!==preview.sourceDigest)return null;
+   const {fact,sourceRef,permissionVersion}=basis.source;
+   const {condition,temperatureDeciC,relativeHumidityPermille,cloudPermille,windPermille,daylightPermille,precipitationPermille}=fact;
+   return Object.freeze({schemaVersion:1,mode:PUBLIC_PACKET_MODE,projectionVersion:1,worldId:basis.terms.worldId,
+    sourceRef,sourceDigest:preview.sourceDigest,permitVersion:permissionVersion,observedMinute:fact.minute,condition,temperatureDeciC,
+    relativeHumidityPermille,cloudPermille,windPermille,daylightPermille,precipitationPermille,
+    grantDigest:preview.grantDigest,eligibilityPacketDigest:preview.packetDigest});
+  }
   return {status:read,pump,close,server,
    async pumpAlmanac(){
     if(closed||!almanac)return {status:'disabled' as const};
@@ -896,6 +950,12 @@ export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal'
     recordPublicWeatherSource:(approval:unknown)=>!closed&&(publicWeatherSource?.record(approval)??false),
     readAuthorizedPublicWeatherSource:()=>{try{return readPublicSource()?.source??null;}catch{return null;}},
     previewPublicWeatherPublicationEligibility:previewPublicationEligibility,
+   }:{}),
+   ...(publicResponsePin?{
+    previewPublicWeatherResponse:()=>closed?null:weatherDraft?.previewPublicResponse()??null,
+    pumpPublicWeatherResponse:async(approval:unknown)=>closed?{status:'blocked' as const}:
+     await weatherDraft?.pumpWire(approval,4)??{status:'blocked' as const},
+    readPublicWeatherResponse:()=>closed?null:weatherDraft?.readPublicResponse()??null,
    }:{}),
    ...(topicsEnabled?{
     privateWeatherTopicSecondTerms:(allow:boolean,startsAt:number,expiresAt:number)=>closed?null:privateWeatherSecond?.terms(allow,startsAt,expiresAt)??null,
