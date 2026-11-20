@@ -1,3 +1,4 @@
+import {noteNativeShelterEntry,prepareNativeShelterEntry} from './mvp-native-shelter-entry.js';
 import {noteAgedGroundApproachEdge,noteAgedGroundApproachHazardStop,noteDeclinedAgedGroundRacePickup,stopAgedGroundApproach,stopAgedGroundApproachOnEdge,supersedeAgedGroundApproachAfterPickup} from './mvp-native-aged-ground-approach.js';
 import {AGED_DINING_INVALID,AGED_EAT_INVALID,canRunMvpNativeAgedEat,completeMvpNativeAgedEat,workMvpNativeAgedEat,noteDisposableAgedDiningSeatDecline} from './mvp-aged-fruit-native-eat.js';
 import {canRunMvpNativeAgedPickup,completeMvpNativeAgedPickup} from './mvp-aged-fruit-native-pickup.js';
@@ -622,6 +623,7 @@ function processActivity(world:World,r:Resident,minutes:number,actionFailures?:S
  if(activity.action.type==='mvpAgedFruitEat'&&activity.action.dining&&!canRunMvpNativeAgedEat(world,r.id,activity.action)){
   noteDisposableAgedDiningSeatDecline(world,r);failure(world,r,AGED_DINING_INVALID);return;
  }
+ const shelterEntry=activity.action.type==='mvpShelter'?prepareNativeShelterEntry(world,r):null;
  const interior=moveInRoom(world,r,minutes);syncMedicalTransport(world);syncBodies(world);syncFamilyEscorts(world);if(interior.error){
   if(noteDisposableAgedDiningSeatDecline(world,r)){failure(world,r,AGED_DINING_INVALID);return;}
   // Only a live physical claim conflict creates this code; persisted text cannot
@@ -697,7 +699,7 @@ function processActivity(world:World,r:Resident,minutes:number,actionFailures?:S
  if(activity.action.type==='mvpShelter'&&activity.mvpShelterEnteredAt===undefined){
   // The room engine has now placed the resident at the real entry. Do
   // not count this entry step as one of the indoor waiting minutes.
-  activity.mvpShelterEnteredAt=world.minute;endDecisionProtection(world,r,'decision');return;
+  activity.mvpShelterEnteredAt=world.minute;noteNativeShelterEntry(world,r,shelterEntry);endDecisionProtection(world,r,'decision');return;
  }
  if(activity.action.type==='mvpAgedFruitEat'&&!workMvpNativeAgedEat(world,r,activity.action,minutes)){
   noteDisposableAgedDiningSeatDecline(world,r);failure(world,r,activity.action.dining?AGED_DINING_INVALID:AGED_EAT_INVALID);return;

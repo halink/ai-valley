@@ -1,3 +1,4 @@
+import {captureNativeShelterEntries,type NativeShelterEntry} from '../world/mvp-native-shelter-entry.js';
 import {captureAgedGroundApproach,hasAgedGroundApproachCapture,isDeclinedAgedGroundRacePickup,selectAgedGroundApproach,stoppedCurrentAgedGroundApproach,type AgedGroundApproachWitness} from '../world/mvp-native-aged-ground-approach.js';
 import {captureOrdinaryAgedGroundDiscovery,prepareOrdinaryNativePickupIntents,prepareOrdinaryNativeGroundApproach,type OrdinaryAgedGroundNativePickupRead,type OrdinaryAgedGroundDiscoveryRead,type NativeOrdinaryAgedDiscovery} from '../world/mvp-ordinary-aged-ground-discovery.js';
 import {AGED_DINING_INVALID,AGED_EAT_INVALID,type NativeAgedEatCompletion,captureMvpNativeAgedEat,hasDisposableAgedDiningCapture,selectMvpNativeAgedEat,wasDisposableAgedDiningSeatDecline,type NativeAgedEatSelection} from '../world/mvp-aged-fruit-native-eat.js';
@@ -462,6 +463,7 @@ export function followsPostCommitMvpFruitFlow(previous:MvpFruitFlowBatch,next:Mv
 export type DisposableNativePickupWitness=Readonly<{
  residentId:string;effectId:string;discoveryId:string;planId:string;settledUs:string;startedAt:number;
 }>;
+const nativeShelterEntryMinutes=new WeakMap<World,Readonly<{before:string;after:string;entries:readonly NativeShelterEntry[]}>>();
 const nativeAddressedSpeechMinutes=new WeakMap<World,Readonly<{before:string;after:string;proof:AddressedSpeechObservation}>>();
 const atomicNativeMealMinutes=new WeakMap<World,Readonly<{before:string;after:string}>>();
 const atomicNativeRenewalMinutes=new WeakMap<World,Readonly<{before:string;after:string;renewal:readonly MvpFruitRenewalWitness[];flow:MvpFruitFlowBatch|null;groundObserved?:readonly NativeOrdinaryAgedDiscovery[];groundPickup?:DisposableNativePickupWitness;agedEaten?:NativeAgedEatCompletion;agedEatingScope?:NativeAgedEatSelection;agedApproach?:AgedGroundApproachWitness}>>();
@@ -486,6 +488,10 @@ export function isSameSaveNativeWeatherMinute(previous:World,draft:World):boolea
  const observed=sameSaveNativeWeatherMinutes.get(draft);
  return !!observed&&observed.before===sameSaveWorldFingerprint(previous)&&observed.after===sameSaveWorldFingerprint(draft);
 }
+export function readAtomicNativeShelterEntries(previous:World,draft:World){
+ const x=nativeShelterEntryMinutes.get(draft);
+ return x&&x.before===sameSaveWorldFingerprint(previous)&&x.after===sameSaveWorldFingerprint(draft)?x.entries:null;
+}
 export function isAtomicNativeAddressedSpeechMinute(previous:World,draft:World,proof:AddressedSpeechObservation):boolean{
  const x=nativeAddressedSpeechMinutes.get(draft);
  return !!x&&x.proof===proof&&x.before===sameSaveWorldFingerprint(previous)&&x.after===sameSaveWorldFingerprint(draft);
@@ -494,7 +500,7 @@ export function isAtomicNativeMealMinute(previous:World,draft:World):boolean{
  const observed=atomicNativeMealMinutes.get(draft);
  return !!observed&&observed.before===sameSaveWorldFingerprint(previous)&&observed.after===sameSaveWorldFingerprint(draft);
 }
-export function createMvpSession(options:{observeSessionWeather?:true;world?:World;commit?:(world:World,previousRevision:number,speech?:AddressedSpeechObservation,atomicMeals?:readonly ValleySpiritMvpMealWitness[])=>void;persistent?:boolean;captureAddressedSpeechCustody?:true;captureSameSaveNativeWeather?:true;captureAtomicNativeMeals?:true;captureAtomicNativeFruitRenewal?:true;captureAtomicNativeFruitLot?:true;captureNativeEmptyGroundMinute?:true;privateAgedGroundDiscovery?:OrdinaryAgedGroundNativePickupRead;privateReadHeldAgedEat?:(head:{worldId:string;revision:number;atUs:string})=>NativeAgedEatSelection|null;observeCommittedMeals?:(witnesses:readonly ValleySpiritMvpMealWitness[])=>void;observeCommittedFruitRenewal?:(witnesses:readonly MvpFruitRenewalWitness[])=>void;observeCommittedFruitFlow?:(flow:MvpFruitFlowBatch)=>void}={}){
+export function createMvpSession(options:{observeSessionWeather?:true;world?:World;commit?:(world:World,previousRevision:number,speech?:AddressedSpeechObservation,atomicMeals?:readonly ValleySpiritMvpMealWitness[])=>void;persistent?:boolean;captureAddressedSpeechCustody?:true;captureAtomicShelterEntries?:true;captureSameSaveNativeWeather?:true;captureAtomicNativeMeals?:true;captureAtomicNativeFruitRenewal?:true;captureAtomicNativeFruitLot?:true;captureNativeEmptyGroundMinute?:true;privateAgedGroundDiscovery?:OrdinaryAgedGroundNativePickupRead;privateReadHeldAgedEat?:(head:{worldId:string;revision:number;atUs:string})=>NativeAgedEatSelection|null;observeCommittedMeals?:(witnesses:readonly ValleySpiritMvpMealWitness[])=>void;observeCommittedFruitRenewal?:(witnesses:readonly MvpFruitRenewalWitness[])=>void;observeCommittedFruitFlow?:(flow:MvpFruitFlowBatch)=>void}={}){
  const fruitFlowSessionToken=Symbol();let deliveredFruitFlowSequence=0;
  let world=structuredClone(options.world??createMvpWorld());
  if(options.world)inheritReceiptHistory(options.world,world);
@@ -539,12 +545,19 @@ export function createMvpSession(options:{observeSessionWeather?:true;world?:Wor
     const draft=structuredClone(current);inheritReceiptHistory(current,draft);forkCompletedMovement(current,draft);
     world=draft;
     try{
-    const advanceNative=()=>advanceMvpRuleMinuteDraft(world,current,serial,decisions,{
+    const asideShelter=()=>advanceMvpRuleMinuteDraft(world,current,serial,decisions,{
      meals:!!(options.persistent&&options.commit&&(options.captureAtomicNativeMeals||options.observeCommittedMeals)),
      fruitFlow:!!(options.persistent&&options.commit&&(options.observeCommittedFruitFlow||options.captureAtomicNativeFruitLot)),
      fruitRenewal:!!(options.persistent&&options.commit&&(options.observeCommittedFruitRenewal||options.captureAtomicNativeFruitRenewal)),
      addressedSpeech:!!(options.persistent&&options.commit&&options.captureAddressedSpeechCustody),
     });
+    let shelterEntries:readonly NativeShelterEntry[]|undefined;
+    const advanceNative=()=>{
+     if(!options.captureAtomicShelterEntries)return asideShelter();
+     const captured=captureNativeShelterEntries(world,asideShelter);
+     shelterEntries=captured.entries;
+     return captured.result;
+    };
     const owned=options.persistent&&options.commit?options.privateAgedGroundDiscovery:undefined;
     const head={worldId:current.id,revision:current.revision,atUs:minuteToClimateUs(current.minute)};
     const priorApproach=owned?.readExactCurrentApproach?.(head)??null;
@@ -567,6 +580,8 @@ export function createMvpSession(options:{observeSessionWeather?:true;world?:Wor
     serial=minute.serial;
     const {speech,witnesses,renewal,fruitFlow}=minute;
     if(options.persistent&&options.commit&&options.captureSameSaveNativeWeather)sealNativeWeatherMinute(current,world);
+    if(options.persistent&&options.commit&&shelterEntries?.length&&world.minute===current.minute+1)
+     nativeShelterEntryMinutes.set(world,Object.freeze({before:sameSaveWorldFingerprint(current),after:sameSaveWorldFingerprint(world),entries:shelterEntries}));
     if(options.persistent&&options.commit&&options.captureAddressedSpeechCustody&&speech?.receipts.length&&world.minute===current.minute+1)
      nativeAddressedSpeechMinutes.set(world,Object.freeze({before:sameSaveWorldFingerprint(current),after:sameSaveWorldFingerprint(world),proof:speech}));
     const atomic=options.persistent&&options.commit&&options.captureAtomicNativeMeals;
@@ -582,6 +597,7 @@ export function createMvpSession(options:{observeSessionWeather?:true;world?:Wor
      if(options.captureSameSaveNativeWeather)sameSaveNativeWeatherMinutes.delete(draft);
      if(options.captureAtomicNativeMeals)atomicNativeMealMinutes.delete(draft);
      if(options.captureAddressedSpeechCustody)nativeAddressedSpeechMinutes.delete(draft);
+     if(options.captureAtomicShelterEntries)nativeShelterEntryMinutes.delete(draft);
      if(options.captureAtomicNativeFruitRenewal||options.captureAtomicNativeFruitLot||options.captureNativeEmptyGroundMinute)atomicNativeRenewalMinutes.delete(draft);
     }
     try{observeCommittedWeather();}catch{sessionWeather=undefined;}
