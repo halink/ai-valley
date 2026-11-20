@@ -79,6 +79,12 @@ export function renderObjectiveDeliveredConversation(atUs:string){
  const kind='conversation-completed' as const;
  return Object.freeze({atUs,kind,text:renderLifeLine({atUs,kind},'time-first')});
 }
+/** Disclosure is day-bucketed; exact timestamps only enter private custody. */
+export function renderObjectiveNativeMeal(observedAtUs:string){
+ if(!clock(observedAtUs))return null;
+ const dayLengthUs=1_440_000_000n,day=BigInt(observedAtUs)/dayLengthUs;
+ return Object.freeze({atUs:String(day*dayLengthUs),kind:'meal-consumed' as const,text:`第 ${day+1n} 日：有人用过一餐。`});
+}
 function canonicalSection(packet:ValleySpiritLifeAlmanacPacket,choice:Selection):ValleySpiritLifeAlmanacSection{
  const lines=choice.indices.map(n=>{
   const f=packet.source.facts[n-1];

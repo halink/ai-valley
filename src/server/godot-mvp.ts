@@ -7,7 +7,8 @@ import {captureMvpNativeObservationPhase} from '../world/mvp-native-observation-
 import {planMvpFallenFruitAdjacentApproach,unsafeMvpApproachEndpoint} from './valley-spirit-mvp-fallen-fruit-approach.js';
 import {observeMvpFallenFruit} from '../world/mvp-fallen-fruit-resident.js';
 import {captureAddressedSpeech,type AddressedSpeechObservation} from '../world/addressed-speech.js';
-import type {ValleySpiritLifeViewer,ValleySpiritPublishedLifeView} from './valley-spirit-life-publisher.js';
+import type {ValleySpiritPublishedLifeView} from './valley-spirit-life-publisher.js';
+import {ORDINARY_NATIVE_MEAL_VIEW,type OrdinaryNativeMealLifeView} from './valley-spirit-ordinary-meal-editorial.js';
 import {captureValleySpiritMvpMealStep,type ValleySpiritMvpMealWitness} from './valley-spirit-meal-custody.js';
 import {parseValleySpiritAlmanacId,parseValleySpiritTopicWindow,type ValleySpiritPublicReaders} from './valley-spirit-reader.js';
 import {parseWeatherArchiveQuery,publicWeatherProjection,type PublicWeatherFact,type ValleySpiritJournal} from './valley-spirit.js';
@@ -40,7 +41,7 @@ import {enableCompletedMovement,forkCompletedMovement,completedMovementSnapshot,
  * engine owns pathfinding, needs, elapsed work and resource/food settlement.
  * This is NOT LLM autonomy, a formal save, or a longevity acceptance run. */
 import {createHash,randomUUID} from 'node:crypto';
-import {createServer,type Server} from 'node:http';
+import {createServer,type Server,type IncomingMessage} from 'node:http';
 import {createWorld} from '../world/seed.js';
 import {stepWorld,submitPlan,planStartError} from '../world/engine.js';
 import {distance,same} from '../world/navigation.js';
@@ -588,14 +589,25 @@ export function createMvpSession(options:{observeSessionWeather?:true;world?:Wor
  };
  return {get world(){return world;},snapshot,advance};
 }
-function currentLifeView(viewer:Pick<ValleySpiritLifeViewer,'latest'>|undefined,world:World|undefined):ValleySpiritPublishedLifeView|null{
+type LifeReadView=ValleySpiritPublishedLifeView|OrdinaryNativeMealLifeView;
+type LifeReadViewer={latest(id:string):LifeReadView|null};
+function anonymousMealLoopback(req:IncomingMessage){
+ const port=req.socket.localPort,host='127.0.0.1:'+port;
+ return req.socket.remoteAddress==='127.0.0.1'&&typeof port==='number'&&req.headers.host===host&&req.headersDistinct.host?.length===1&&
+  req.headers['sec-fetch-site']!=='cross-site'&&
+  !Object.keys(req.headers).some(key=>key==='forwarded'||key.startsWith('x-forwarded-'))&&req.headers['proxy-authorization']===undefined&&
+  req.headers.authorization===undefined&&req.headers.cookie===undefined&&
+  (req.headers.origin===undefined||req.headers.origin==='http://'+host);
+}
+function currentLifeView(viewer:LifeReadViewer|undefined,world:World|undefined,req:IncomingMessage):LifeReadView|null{
  try{
   if(!viewer||!world||world.mode!=='validation'||Object.hasOwn(world,'simulationOnly'))return null;
   const view=viewer.latest(world.id);
-  return view&&BigInt(view.range.throughUs)<=BigInt(minuteToClimateUs(world.minute))?view:null;
+  return view&&(view.generatedBy!==ORDINARY_NATIVE_MEAL_VIEW||anonymousMealLoopback(req))&&
+   BigInt(view.range.throughUs)<=BigInt(minuteToClimateUs(world.minute))?view:null;
  }catch{return null;}
 }
-export function createMvpServer(session:Pick<ReturnType<typeof createMvpSession>,'snapshot'>&Partial<Pick<ReturnType<typeof createMvpSession>,'world'>>,options:{webRoot?:string;valleySpiritSource?:(sourceRef:string)=>unknown;valleySpiritArchive?:ValleySpiritJournal['archive'];valleySpiritReaders?:ValleySpiritPublicReaders;valleySpiritLifeViewer?:Pick<ValleySpiritLifeViewer,'latest'>;privateSpeechWeatherOnly?:true}={}):Server {
+export function createMvpServer(session:Pick<ReturnType<typeof createMvpSession>,'snapshot'>&Partial<Pick<ReturnType<typeof createMvpSession>,'world'>>,options:{webRoot?:string;valleySpiritSource?:(sourceRef:string)=>unknown;valleySpiritArchive?:ValleySpiritJournal['archive'];valleySpiritReaders?:ValleySpiritPublicReaders;valleySpiritLifeViewer?:LifeReadViewer;privateSpeechWeatherOnly?:true}={}):Server {
  return createServer((req,res)=>{
   res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');
   if(options.privateSpeechWeatherOnly){
@@ -609,11 +621,11 @@ export function createMvpServer(session:Pick<ReturnType<typeof createMvpSession>
   if(req.method!=='GET'){res.writeHead(405,{'Allow':'GET'});res.end('Read-only MVP');return;}
   const lifeAlmanacPath='/ai-town/api/valley-spirit/almanac/life/latest';
   if(req.url===lifeAlmanacPath||req.url?.startsWith(lifeAlmanacPath+'?')){
-   let data:ValleySpiritPublishedLifeView|null=null;
+   let data:LifeReadView|null=null;
    try{
     const params=new URL(req.url,'http://localhost').searchParams,worldId=params.get('worldId');
     if(options.valleySpiritLifeViewer&&[...params.keys()].length===1&&worldId&&session.world?.id===worldId)
-     data=currentLifeView(options.valleySpiritLifeViewer,session.world);
+     data=currentLifeView(options.valleySpiritLifeViewer,session.world,req);
    }catch{/* fail closed */}
    res.writeHead(data?200:404,{'Content-Type':'application/json; charset=utf-8'});
    res.end(JSON.stringify(data??{status:'unavailable'}));return;
@@ -660,7 +672,7 @@ export function createMvpServer(session:Pick<ReturnType<typeof createMvpSession>
   // An opt-in fixture can advertise the exact current section without exposing
   // text or sources. Ordinary server starts omit this marker entirely.
   const life=world&&world.id===snapshot.world.id&&world.revision===snapshot.world.revision&&world.minute===snapshot.world.minute
-   ?currentLifeView(options.valleySpiritLifeViewer,world):null;
+   ?currentLifeView(options.valleySpiritLifeViewer,world,req):null;
   const body=life?{...snapshot,valleySpiritLifeYearbook:{schemaVersion:1,status:'ready',generatedBy:life.generatedBy,worldId:life.worldId,
    worldRevision:snapshot.world.revision,atMinute:snapshot.world.minute,sectionId:life.sectionId}}:snapshot;
   res.writeHead(200,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(body));

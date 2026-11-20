@@ -321,6 +321,19 @@ export function openOrdinaryNativeMealLease(owner:RuntimeOwnership,path:string,i
    db.prepare('SELECT 1 FROM main.event_animals WHERE event_id=? LIMIT 1').get(r.eventId))return null;
   return digest(event.body);
  }
+ function readEditorialSourceAtHead(db:DatabaseSync,w:World,eventId:string){
+   if(isolated||!db.isTransaction||w.id!==worldId||w.mode!=='validation'||typeof eventId!=='string'||!ID.test(eventId))return null;
+   try{
+    if(!exactHead(db,w))return null;
+    const current=read(db),row=current?.rows.find(r=>r.event_id===eventId);
+    if(current)for(const [key,value] of current.current)seen.set(key,value);
+    if(!row||BigInt(row.at_us)>BigInt(minuteToClimateUs(w.minute)))return null;
+    if(exactEventDigest(db,{worldId:w.id,revision:row.committed_revision,eventId,actorId:row.actor_id,atUs:row.at_us},false)!==row.event_digest)
+     throw Error('ordinary_native_meal_archive_changed');
+    assertOwned();
+    return Object.freeze({receipt:Object.freeze(asReceipt(row)),witnessDigest:digest(rowSignature(row)+'\0'+row.event_digest)});
+   }catch{isolated=true;return null;}
+ }
  return Object.freeze({
   worldId,
   isolate(){isolated=true;},
@@ -354,18 +367,10 @@ export function openOrdinaryNativeMealLease(owner:RuntimeOwnership,path:string,i
     throw Error('ordinary_native_meal_readback');
    assertOwned();
   },
+  readEditorialSourceAtHead,
   readAtHead(db:DatabaseSync,w:World,eventId:string){
-   if(isolated||!db.isTransaction||w.id!==worldId||w.mode!=='validation'||typeof eventId!=='string'||!ID.test(eventId))return null;
-   try{
-    if(!exactHead(db,w))return null;
-    const current=read(db),row=current?.rows.find(r=>r.event_id===eventId);
-    if(current)for(const [key,value] of current.current)seen.set(key,value);
-    if(!row||BigInt(row.at_us)>BigInt(minuteToClimateUs(w.minute)))return null;
-    if(exactEventDigest(db,{worldId:w.id,revision:row.committed_revision,eventId,actorId:row.actor_id,atUs:row.at_us},false)!==row.event_digest)
-     throw Error('ordinary_native_meal_archive_changed');
-    assertOwned();
-    return Object.freeze({status:'committed-private-meal' as const,receipt:Object.freeze(asReceipt(row)),disclosureAuthorized:false as const});
-   }catch{isolated=true;return null;}
+   const basis=readEditorialSourceAtHead(db,w,eventId);
+   return basis?Object.freeze({status:'committed-private-meal' as const,receipt:basis.receipt,disclosureAuthorized:false as const}):null;
   },
  });
 }

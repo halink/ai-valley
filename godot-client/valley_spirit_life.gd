@@ -3,6 +3,9 @@ extends RefCounted
 const MAX_CLOCK := 1000000000000000
 const MAX_VERSION := 9007199254740991.0
 const SECTION_PREFIX := "valley-life-section-"
+const LEGACY_VIEW := "offline-synthetic-selection"
+const OBJECTIVE_MEAL_VIEW := "independently-reviewed-native-meal"
+const DAY_US := 1440000000
 const FACT_NAMES := {
  "arrived": "记录到一次实际到场",
  "conversation-completed": "记录到一次已实际送达的交谈",
@@ -46,17 +49,17 @@ static func context(snapshot: Dictionary) -> Dictionary:
 	var marker: Variant = snapshot.get("valleySpiritLifeYearbook")
 	var world: Variant = snapshot.get("world")
 	if not _exact(marker, ["schemaVersion", "status", "generatedBy", "worldId", "worldRevision", "atMinute", "sectionId"]) or not world is Dictionary: return {}
-	if not _integer(marker.schemaVersion, 1) or marker.schemaVersion != 1 or not _equals(marker.status, "ready") or not _equals(marker.generatedBy, "offline-synthetic-selection"): return {}
+	if not _integer(marker.schemaVersion, 1) or marker.schemaVersion != 1 or not _equals(marker.status, "ready") or not (_equals(marker.generatedBy, LEGACY_VIEW) or _equals(marker.generatedBy, OBJECTIVE_MEAL_VIEW)): return {}
 	var world_id: Variant = world.get("id")
 	var minute: Variant = world.get("minute")
 	var revision: Variant = world.get("revision")
 	if not _world_id(world_id) or not _integer(revision, 0) or not (minute is float or minute is int) or not is_finite(minute) or minute < 0 or minute > 1000000000.0: return {}
 	if not _integer(marker.worldRevision, 0) or marker.worldRevision != revision or not _equals(marker.worldId, world_id) or not (marker.atMinute is int or marker.atMinute is float) or marker.atMinute != minute: return {}
 	if not _hex_ref(marker.sectionId, SECTION_PREFIX): return {}
-	return {"worldId": world_id, "sectionId": marker.sectionId, "asOfUs": roundi(float(minute) * 1000000.0)}
+	return {"worldId": world_id, "sectionId": marker.sectionId, "asOfUs": roundi(float(minute) * 1000000.0), "generatedBy": marker.generatedBy}
 
 static func same_authority(a: Dictionary, b: Dictionary) -> bool:
-	return not a.is_empty() and not b.is_empty() and a.worldId == b.worldId and a.sectionId == b.sectionId
+	return not a.is_empty() and not b.is_empty() and a.worldId == b.worldId and a.sectionId == b.sectionId and a.generatedBy == b.generatedBy
 
 @warning_ignore("integer_division")
 static func _game_minute(micro: int) -> String:
@@ -71,12 +74,22 @@ static func _game_minute(micro: int) -> String:
 # snippets, inferred people, extra fields, or alternate model attribution.
 static func presentation(dto: Variant, authority: Dictionary) -> String:
 	if authority.is_empty() or not _exact(dto, ["status", "generatedBy", "worldId", "range", "sectionId", "lines"]): return ""
-	if not _equals(dto.status, "ready") or not _equals(dto.generatedBy, "offline-synthetic-selection") or not _equals(dto.worldId, authority.worldId) or not _equals(dto.sectionId, authority.sectionId): return ""
+	var mode: Variant = authority.get("generatedBy")
+	if not (_equals(mode, LEGACY_VIEW) or _equals(mode, OBJECTIVE_MEAL_VIEW)): return ""
+	if not _equals(dto.status, "ready") or not _equals(dto.generatedBy, mode) or not _equals(dto.worldId, authority.worldId) or not _equals(dto.sectionId, authority.sectionId): return ""
 	if not _exact(dto.range, ["fromUs", "throughUs"]): return ""
 	var start := _clock(dto.range.fromUs)
 	var end := _clock(dto.range.throughUs)
 	if start < 0 or end < start or end > authority.asOfUs or end - start > 1440000000: return ""
 	if not dto.lines is Array or dto.lines.is_empty() or dto.lines.size() > 3: return ""
+	if mode == OBJECTIVE_MEAL_VIEW:
+		if dto.lines.size() != 1 or start != end or start % DAY_US != 0: return ""
+		var objective: Variant = dto.lines[0]
+		if not _exact(objective, ["atUs", "kind", "text"]) or _clock(objective.atUs) != start or not _equals(objective.kind, "meal-consumed"): return ""
+		@warning_ignore("integer_division")
+		var sentence := "第 " + str(start / DAY_US + 1) + " 日：有人用过一餐。"
+		if not _equals(objective.text, sentence): return ""
+		return "生活年鉴\n" + sentence
 	var rendered := PackedStringArray(["生活年鉴 · 离线"])
 	var seen := {}
 	var previous := start
