@@ -55,6 +55,8 @@ function readInstalled(db:DatabaseSync):InstalledEmpty|null{
 /** Before ANY persistent startup. No schema writes. An unknown/nonempty
  * future lane must not quietly run as today's empty ordinary installation. */
 export function assertOrdinaryAgedGroundStartup(db:DatabaseSync,world:Record<string,unknown>|null, ordinary:boolean){
+ if(db.prepare("SELECT 1 FROM sqlite_schema WHERE name='valley_spirit_ordinary_aged_transfer' COLLATE NOCASE").get())
+  throw Error('ordinary_aged_ground_stopped_lane');
  const state=readInstalled(db);
  if(!state)return;
  if(!ordinary||!world||world.mode!=='validation'||world.id!==state.config.worldId||!bounded(world.revision)||world.revision<state.installedRevision||
@@ -74,11 +76,27 @@ const readSite=(w:World,p:OrdinaryAgedGroundPin)=>w.id===p.worldId&&w.mode==='va
 export function canInstallEmptyOrdinaryAgedGround(w:World,pin:OrdinaryAgedGroundPin):boolean{
  return readSite(w,pin)!==null;
 }
+/** Checked read of the exact empty installation; no ordinary nonempty writer. */
+export function readOwnedEmptyGround(db:DatabaseSync,owner:RuntimeOwnership,pin:OrdinaryAgedGroundPin,w:World){
+ const authority=runtimeOwnershipAnchor(owner);
+ if(!authority||owner.database!==authority.database)return null;
+ authority.assertOwned();
+ const row=readInstalled(db);
+ if(!row||JSON.stringify(row.config)!==JSON.stringify(pin)||row.installedRevision>w.revision||
+  BigInt(row.installedAtUs)>BigInt(minuteToClimateUs(w.minute))||w.clock.paused||!exactHead(db,w))return null;
+ const site=readSite(w,pin);
+ if(!site||row.sourceResourceInstanceId!==site.source.resourceInstanceId||row.targetId!==site.target.id)return null;
+ const identity=lstatSync(authority.database,{bigint:true});
+ return Object.freeze({status:'empty_ground_capacity_installed' as const,worldId:w.id,revision:w.revision,atUs:minuteToClimateUs(w.minute),
+  sourceResourceInstanceId:row.sourceResourceInstanceId,targetId:row.targetId,
+  installationDigest:digest(JSON.stringify(['ordinary-ground-installation/v1',identity.dev.toString(),identity.ino.toString(),row])),
+  capacity:1 as const,occupied:0 as const,freeCapacity:1 as const,placementAuthorized:false as const,
+  discoveryInstalled:false as const,pickupInstalled:false as const});
+}
 export function openEmptyOrdinaryAgedGround(owner:RuntimeOwnership,pin:OrdinaryAgedGroundPin,readHead:()=>World|null){
  const authority=runtimeOwnershipAnchor(owner);
  if(!authority||owner.database!==authority.database)throw Error('ordinary_aged_ground_runtime_owner_required');
  authority.assertOwned();
- const identity=lstatSync(authority.database,{bigint:true});
  const db=new DatabaseSync(authority.database);
  try{
   db.exec('BEGIN IMMEDIATE');
@@ -104,19 +122,9 @@ export function openEmptyOrdinaryAgedGround(owner:RuntimeOwnership,pin:OrdinaryA
    try{
     authority.assertOwned();db.exec('BEGIN');
     try{
-     const row=readInstalled(db);
-     if(!row||JSON.stringify(row.config)!==JSON.stringify(pin)||row.installedRevision>expected.revision||
-      BigInt(row.installedAtUs)>BigInt(minuteToClimateUs(expected.minute)))return null;
      const w=readHead();
-     if(!w||w.id!==expected.id||w.revision!==expected.revision||w.minute!==expected.minute||w.clock.paused||
-      !exactHead(db,w))return null;
-     const site=readSite(w,pin);
-     if(!site||row.sourceResourceInstanceId!==site.source.resourceInstanceId||row.targetId!==site.target.id)return null;
-     return Object.freeze({status:'empty_ground_capacity_installed' as const,worldId:w.id,revision:w.revision,atUs:minuteToClimateUs(w.minute),
-      sourceResourceInstanceId:row.sourceResourceInstanceId,targetId:row.targetId,
-      installationDigest:digest(JSON.stringify(['ordinary-ground-installation/v1',identity.dev.toString(),identity.ino.toString(),row])),
-      capacity:1 as const,occupied:0 as const,
-      freeCapacity:1 as const,placementAuthorized:false as const,discoveryInstalled:false as const,pickupInstalled:false as const});
+     return w&&w.id===expected.id&&w.revision===expected.revision&&w.minute===expected.minute?
+      readOwnedEmptyGround(db,owner,pin,w):null;
     }finally{db.exec('ROLLBACK');}
    }catch{return null;}
   };
