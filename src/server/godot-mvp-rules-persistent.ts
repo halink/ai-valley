@@ -1,3 +1,4 @@
+import {prepareOrdinaryAgedG1ReviewEncoding,pinOrdinaryAgedG1Review,unavailableOrdinaryAgedG1,type OrdinaryAgedG1ReviewOptions} from './valley-spirit-ordinary-aged-g1-review.js';
 import {canInstallEmptyOrdinaryAgedGround,openEmptyOrdinaryAgedGround,pinOrdinaryAgedGround,type OrdinaryAgedGroundPin} from './valley-spirit-ordinary-aged-ground.js';
 import {unavailableAgedRulesPreflight} from './valley-spirit-rules-aged-preflight.js';
 import {pinRulesNativeFruitRenewal,type RulesNativeFruitRenewalPin} from './valley-spirit-rules-fruit-renewal.js';
@@ -25,7 +26,7 @@ import {WorldStore} from './store.js';
 import {acquireRuntimeOwnership,type RuntimeOwnership} from './runtime-lock.js';
 import {assertGodotWebExport} from './godot-web.js';
 import type {World} from '../shared/types.js';
-export async function startPersistentRulesMvp(options:{database:string;port:number;webRoot?:string;autoStart?:boolean;tickMs?:number;privateSpiritShadow?:PersistentRulesShadowOptions;privateSpiritGeographyQueue?:RulesGeographyQueueOptions;privateNativeFruitRenewal?:RulesNativeFruitRenewalPin;privateAgedFruitPreflight?:true;privateEmptyAgedGround?:OrdinaryAgedGroundPin;privateLifeFixture?:PersistentRulesLifeFixture;privateSpeechCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string;nativeWeatherCredit?:true}>;privateMealCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string}>}){
+export async function startPersistentRulesMvp(options:{database:string;port:number;webRoot?:string;autoStart?:boolean;tickMs?:number;privateSpiritShadow?:PersistentRulesShadowOptions;privateSpiritGeographyQueue?:RulesGeographyQueueOptions;privateNativeFruitRenewal?:RulesNativeFruitRenewalPin;privateAgedFruitPreflight?:true;privateEmptyAgedGround?:OrdinaryAgedGroundPin;privateOrdinaryAgedG1Review?:OrdinaryAgedG1ReviewOptions;privateLifeFixture?:PersistentRulesLifeFixture;privateSpeechCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string;nativeWeatherCredit?:true}>;privateMealCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string}>}){
  if(typeof options.database!=='string'||!options.database.trim())throw Error('mvp_rules_database_required');
  if(!Number.isInteger(options.port)||options.port<0||options.port>65535)throw Error('godot_mvp_invalid_port');
  const tickMs=options.tickMs??500,shadowOptions=pinPersistentRulesShadowOptions(options.privateSpiritShadow);
@@ -42,6 +43,11 @@ export async function startPersistentRulesMvp(options:{database:string;port:numb
  const agedGroundPin=pinOrdinaryAgedGround(options.privateEmptyAgedGround);
  if(options.privateEmptyAgedGround!==undefined&&(!agedGroundPin||options.privateSpeechCustody!==undefined||options.privateMealCustody!==undefined))
   throw Error('ordinary_aged_ground_runtime_scope');
+ const ordinaryReview=pinOrdinaryAgedG1Review(options.privateOrdinaryAgedG1Review);
+ if(options.privateOrdinaryAgedG1Review!==undefined&&(!ordinaryReview||!agedPreflight||!agedGroundPin||!queuePin||
+   agedGroundPin.worldId!==queuePin.worldId||agedGroundPin.sourceId!==queuePin.site.sourceId||
+   agedGroundPin.target.x!==queuePin.site.target.x||agedGroundPin.target.y!==queuePin.site.target.y))
+  throw Error('ordinary_aged_g1_review_scope');
  const speechPin=options.privateSpeechCustody===undefined?undefined:structuredClone(options.privateSpeechCustody);
  if(options.privateSpeechCustody!==undefined&&(!speechPin||!speechPin.fixture||typeof speechPin.worldId!=='string'||!/^godot-mvp-[A-Za-z0-9_-]{1,160}$/.test(speechPin.worldId)||
     Object.keys(speechPin).some(k=>!['fixture','worldId','nativeWeatherCredit'].includes(k))||
@@ -164,6 +170,19 @@ export async function startPersistentRulesMvp(options:{database:string;port:numb
    }catch{return unavailableAgedRulesPreflight();}
   };
   const readPrivateOrdinaryAgedGround=()=>agedGround&&session?agedGround.review(session.world):null;
-  return {session,server,snapshot,readPrivateSpiritCandidate,readPrivateSpiritGeographicProposal,readPrivateNativeFruitRenewal,readPrivateNativeFruitLot,readPrivateAgedFruitPreflight,readPrivateOrdinaryAgedGround,close};
+  const readPrivateOrdinaryAgedG1Review=(signed?:unknown)=>{
+   if(!ordinaryReview)return {status:'disabled',executionAuthorized:false} as const;
+   try{
+    // No caller-provided basis or ground capability. Both independent leases
+    // recheck the actual common head, and the final queue read rechecks grant.
+    const ground=readPrivateOrdinaryAgedGround(),basis=readPrivateAgedFruitPreflight();
+    if(!ground||basis.status!=='blocked'||JSON.stringify(ground)!==JSON.stringify(readPrivateOrdinaryAgedGround())||
+     JSON.stringify(basis)!==JSON.stringify(readPrivateAgedFruitPreflight()))return unavailableOrdinaryAgedG1();
+    const encoded=prepareOrdinaryAgedG1ReviewEncoding(ordinaryReview,basis,ground,signed);
+    if(encoded.status!=='encoding-only')return encoded;
+    return Object.freeze({...encoded,status:signed===undefined?'g1-review-signing-input' as const:'g1-review-verified' as const});
+   }catch{return unavailableOrdinaryAgedG1();}
+  };
+  return {session,server,snapshot,readPrivateSpiritCandidate,readPrivateSpiritGeographicProposal,readPrivateNativeFruitRenewal,readPrivateNativeFruitLot,readPrivateAgedFruitPreflight,readPrivateOrdinaryAgedGround,readPrivateOrdinaryAgedG1Review,close};
  }catch(error){await close();throw error;}
 }

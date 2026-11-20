@@ -25,7 +25,8 @@ export function inspectRulesAgedFruitBasis(w:World,pin:RulesGeographyQueueOption
  return Object.freeze({status:'blocked' as const,reason:'ordinary_ground_custody_not_installed' as const,
   missing:Object.freeze(['ordinary-aged-ground-placement','ordinary-aged-ground-capacity','ordinary-aged-ground-discovery','ordinary-aged-ground-pickup'] as const),
   worldId:w.id,revision:w.revision,atUs:now,proposalId:p.proposalId,opportunityId:p.opportunityId,
-  permissionVersion:p.permissionVersion,sourceResourceInstanceId:p.sourceResourceInstanceId,targetId:p.targetId,
+  permissionVersion:p.permissionVersion,proposalInputId:p.inputSnapshotId,proposalUntilUs:String(p.untilUs),
+  rainEventId:p.rainEventId,sourceRef:p.sourceRef,sourceResourceInstanceId:p.sourceResourceInstanceId,targetId:p.targetId,
   sourceLot:Object.freeze({...lot.lot}),conservationProjection:null,sandboxEligible:false,executionAuthorized:false,
  } as const);
 }

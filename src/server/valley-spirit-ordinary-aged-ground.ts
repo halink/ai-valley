@@ -1,3 +1,4 @@
+import {lstatSync} from 'node:fs';
 import {DatabaseSync} from 'node:sqlite';
 import {gzipSync} from 'node:zlib';
 import {createHash} from 'node:crypto';
@@ -77,6 +78,7 @@ export function openEmptyOrdinaryAgedGround(owner:RuntimeOwnership,pin:OrdinaryA
  const authority=runtimeOwnershipAnchor(owner);
  if(!authority||owner.database!==authority.database)throw Error('ordinary_aged_ground_runtime_owner_required');
  authority.assertOwned();
+ const identity=lstatSync(authority.database,{bigint:true});
  const db=new DatabaseSync(authority.database);
  try{
   db.exec('BEGIN IMMEDIATE');
@@ -111,7 +113,9 @@ export function openEmptyOrdinaryAgedGround(owner:RuntimeOwnership,pin:OrdinaryA
      const site=readSite(w,pin);
      if(!site||row.sourceResourceInstanceId!==site.source.resourceInstanceId||row.targetId!==site.target.id)return null;
      return Object.freeze({status:'empty_ground_capacity_installed' as const,worldId:w.id,revision:w.revision,atUs:minuteToClimateUs(w.minute),
-      sourceResourceInstanceId:row.sourceResourceInstanceId,targetId:row.targetId,capacity:1 as const,occupied:0 as const,
+      sourceResourceInstanceId:row.sourceResourceInstanceId,targetId:row.targetId,
+      installationDigest:digest(JSON.stringify(['ordinary-ground-installation/v1',identity.dev.toString(),identity.ino.toString(),row])),
+      capacity:1 as const,occupied:0 as const,
       freeCapacity:1 as const,placementAuthorized:false as const,discoveryInstalled:false as const,pickupInstalled:false as const});
     }finally{db.exec('ROLLBACK');}
    }catch{return null;}
