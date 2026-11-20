@@ -1,6 +1,6 @@
 import {appendDisposableNativeSpeech,ownsDisposableSpeechPurpose,type DisposableSpeechPurpose} from './disposable-native-addressed-speech.js';
 import type {GroundDiscoveryHead} from '../world/mvp-ordinary-aged-ground-discovery.js';
-import {advanceDisposableNativeAgedSourceFlow,advanceDisposableNativeAgedTransfer,hasDisposableNativeAgedTransfer,makeDisposableNativeAgedBirth,prepareDisposableNativeAgedTransfer,projectDisposableHeldForNativeEating,projectCurrentDisposableGroundApproach,type Eating,projectDisposableNativeAgedTransfer,projectDisposableNativeAgedFairness,projectActiveDisposableGroundForObservation,projectActiveDisposableGroundForPickup,projectDisposableGroundResidentDiscovery,readDisposableNativeAgedTransfer,writeDisposableNativeAgedTransfer,type DisposableNativeAgedTransferPin} from './disposable-native-aged-transfer.js';
+import {advanceDisposableNativeAgedSourceFlow,advanceDisposableNativeAgedTransfer,assertDisposableNativeAgedTransferStorage,isDisposableNativeAgedTransferPin,hasDisposableNativeAgedTransfer,makeDisposableNativeAgedBirth,prepareDisposableNativeAgedTransfer,projectDisposableHeldForNativeEating,projectCurrentDisposableGroundApproach,type Eating,projectDisposableNativeAgedTransfer,projectDisposableNativeAgedFairness,projectActiveDisposableGroundForObservation,projectActiveDisposableGroundForPickup,projectDisposableGroundResidentDiscovery,readDisposableNativeAgedTransfer,writeDisposableNativeAgedTransfer,type DisposableNativeAgedTransferPin} from './disposable-native-aged-transfer.js';
 import {assertDisposableRulesSavePath,guardDisposableRulesSaveCommit,readDisposableRulesSaveMarker,type DisposableRulesSaveAuthority} from './disposable-native-rules-save.js';
 import {advanceOrdinaryNativeEmptyGround,pinOrdinaryAgedGround,readOwnedEmptyGround,type OrdinaryAgedGroundPin} from './valley-spirit-ordinary-aged-ground.js';
 import {runtimeOwnershipAnchor,type RuntimeOwnership} from './runtime-lock.js';
@@ -161,8 +161,8 @@ export class WorldStore {
    assertDisposableRulesSavePath(options.privateDisposableSave,path);
    this.#privateDisposableSave=options.privateDisposableSave;
   }
-  if(options.disposableAgedTransfer){
-   if(!this.#privateDisposableSave||options.nativeEmptyGround||!pinRulesNativeFruitRenewal(options.nativeRulesFruitRenewal)?.lotShelfLifeGameMinutes)throw Error('disposable_native_aged_transfer_scope');
+  if(options.disposableAgedTransfer!==undefined){
+   if(!isDisposableNativeAgedTransferPin(options.disposableAgedTransfer)||!this.#privateDisposableSave||options.nativeEmptyGround||!pinRulesNativeFruitRenewal(options.nativeRulesFruitRenewal)?.lotShelfLifeGameMinutes)throw Error('disposable_native_aged_transfer_scope');
    this.#disposableAgedTransfer=options.disposableAgedTransfer;
   }
   this.formalAppointmentChoiceCustody=options.formalAppointmentChoiceCustody===true;
@@ -225,6 +225,7 @@ export class WorldStore {
   if(path!==':memory:'&&!owner)mkdirSync(dirname(path),{recursive:true,mode:0o700});
   this.db=new DatabaseSync(path);
   try{
+  assertDisposableNativeAgedTransferStorage(this.db,!!this.#privateDisposableSave&&isDisposableNativeAgedTransferPin(this.#disposableAgedTransfer));
   this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;');
   if(needsDeveloperSeal)this.db.exec('BEGIN IMMEDIATE');
   this.db.exec(`
@@ -308,6 +309,7 @@ export class WorldStore {
  private readWorld(working:boolean,indexedReceipts:boolean):World|null {
   this.developerSpiritFixtureOwner?.assertOwned();
   this.assertDeveloperSpiritSeal();
+  assertDisposableNativeAgedTransferStorage(this.db,!!this.#privateDisposableSave&&isDisposableNativeAgedTransferPin(this.#disposableAgedTransfer));
   if(this.developerSpiritFixtureOwner)rejectSealedAgedBirthOnGenericPath(this.db);
   const row=this.db.prepare('SELECT state FROM worlds ORDER BY rowid DESC LIMIT 1').get() as {state:string|Uint8Array}|undefined;
   if (!row) return null;
@@ -1628,6 +1630,7 @@ export class WorldStore {
  private writeCommit(world:World,previousRevision:number|null,appended?:AppendedHistory,seasonalLedger?:SeasonalLedger,
   settlementOperation?:MvpFallenFruitFixtureOperation,formalBerryAnchor?:FormalBerryFixtureAnchor):World|null {
   this.assertDeveloperSpiritSeal();
+  assertDisposableNativeAgedTransferStorage(this.db,!!this.#privateDisposableSave&&isDisposableNativeAgedTransferPin(this.#disposableAgedTransfer));
   if(this.developerSpiritFixtureOwner)rejectSealedAgedBirthOnGenericPath(this.db);
   if(this.developerSpiritFixtureOwner){
    const ids=this.db.prepare('SELECT id FROM worlds ORDER BY rowid LIMIT 2').all();

@@ -1,4 +1,4 @@
-import {exactDisposableEating,readExactDisposableActiveEating,type Eating,type DisposableNativeAgedTransferPin} from './disposable-native-aged-transfer.js';
+import {assertDisposableNativeAgedTransferStorage,exactDisposableEating,isDisposableNativeAgedTransferPin,readDisposableNativeAgedTransfer,readExactDisposableActiveEating,type Eating,type DisposableNativeAgedTransferPin} from './disposable-native-aged-transfer.js';
 import {assertDisposableRulesSavePath,readDisposableRulesSaveMarker,type DisposableRulesSaveAuthority} from './disposable-native-rules-save.js';
 import {assertOrdinaryAgedGroundStartup,type OrdinaryAgedGroundPin} from './valley-spirit-ordinary-aged-ground.js';
 import {rejectSealedAgedBirthOnGenericPath} from './valley-spirit-aged-birth-archive.js';
@@ -177,6 +177,9 @@ function inspectDatabase(db:DatabaseSync,rejectClimate:boolean,validateWorld?: (
   if(seals.length!==1||Object.keys(seals[0]).length!==2||seals[0].version!==1||seals[0].seal!==fixtureSeal)
    fail('save_unknown_developer_fixture');
  }
+ let nativeAgedStorage:boolean;
+ try{nativeAgedStorage=assertDisposableNativeAgedTransferStorage(db,!!disposableWorld&&isDisposableNativeAgedTransferPin(privateDisposableAgedTransfer));}
+ catch{fail('save_disposable_native_aged_transfer_requires_owner');}
  try{rejectSealedAgedBirthOnGenericPath(db,fixtureSeal!==undefined);}catch{fail('save_sealed_aged_birth_requires_private_archive');}
  const table=db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='worlds'").get();
  if(!table)fail('save_missing_worlds_table');
@@ -222,6 +225,13 @@ function inspectDatabase(db:DatabaseSync,rejectClimate:boolean,validateWorld?: (
    }
   }
   latest=world;
+ }
+ if(nativeAgedStorage){
+  try{
+   if(!latest||!privateDisposableSave||!privateDisposableAgedTransfer||
+    !readDisposableNativeAgedTransfer(db,privateDisposableSave,privateDisposableAgedTransfer,latest as unknown as World))
+    fail('save_disposable_native_aged_transfer_incompatible');
+  }catch{fail('save_disposable_native_aged_transfer_incompatible');}
  }
  if(!allowSeasonalModel&&latest?.mvpSeasonalModelVersion!==undefined)fail('save_seasonal_model_requires_explicit_entry');
  const seasonal=readSeasonalLedger(db,latest as unknown as World|null,allowSeasonalModel);
@@ -277,7 +287,8 @@ function unchanged(path:string,files:ReadonlyArray<SourceFile|null>,suffixes:rea
  */
 export function preflightWorldSave(path:string,options:{requireWorld?:boolean;rejectClimate?:boolean;allowSeasonalModel?:boolean;inspectSeasonalModel?:(s:SeasonalLedger|null)=>void;inspectOptionalAlmanac?:(snapshot:DatabaseSync,world:Record<string,unknown>)=>void;validateWorld?:(world:Record<string,unknown>)=>void;developerSpiritFixtureOwner?:DeveloperMvpSpiritFixtureOwner;nativeEmptyGround?:OrdinaryAgedGroundPin;privateDisposableSave?:DisposableRulesSaveAuthority;privateDisposableAgedTransfer?:DisposableNativeAgedTransferPin}={}):Record<string,unknown>|null {
  const fixture=options.developerSpiritFixtureOwner,disposable=options.privateDisposableSave;
- if(options.privateDisposableAgedTransfer&&!disposable)fail('save_disposable_rules_owner');
+ if(options.privateDisposableAgedTransfer!==undefined&&(!disposable||!isDisposableNativeAgedTransferPin(options.privateDisposableAgedTransfer)))
+  fail('save_disposable_rules_owner');
  if(disposable!==undefined){
   if(path===':memory:'||fixture!==undefined||options.allowSeasonalModel||options.rejectClimate)fail('save_disposable_rules_owner');
   try{assertDisposableRulesSavePath(disposable,path);}catch{fail('save_disposable_rules_owner');}

@@ -29,14 +29,21 @@ const digestWorld=(w:World)=>hash(gzipSync(JSON.stringify(w),{level:1}));
 const record=(v:unknown):v is Record<string,unknown>=>!!v&&typeof v==='object'&&!Array.isArray(v);
 const exact=(v:unknown,fields:readonly string[]):v is Record<string,unknown>=>record(v)&&Object.keys(v).length===fields.length&&fields.every(k=>Object.hasOwn(v,k));
 const hex=(v:unknown)=>typeof v==='string'&&/^[a-f0-9]{64}$/u.test(v);
+const transferPins=new WeakSet<object>();
 export const pinDisposableNativeAgedTransfer=(pem:unknown,review:ReturnType<typeof pinOrdinaryAgedG1Review>)=>{
  try{
   if(typeof pem!=='string'||pem.length>256||!review||!/^-----BEGIN PUBLIC KEY-----\r?\n[A-Za-z0-9+/=\r\n]+-----END PUBLIC KEY-----\r?\n?$/u.test(pem))return null;
   const key=createPublicKey(pem),keyId=hash(key.export({format:'der',type:'spki'}));
-  return key.asymmetricKeyType==='ed25519'&&keyId!==review.keyId?Object.freeze({key,keyId,review}):null;
+  if(key.asymmetricKeyType!=='ed25519'||keyId===review.keyId)return null;
+  const pin=Object.freeze({key,keyId,review});
+  transferPins.add(pin);
+  return pin;
  }catch{return null;}
 };
 export type DisposableNativeAgedTransferPin=NonNullable<ReturnType<typeof pinDisposableNativeAgedTransfer>>;
+export function isDisposableNativeAgedTransferPin(pin:unknown):pin is DisposableNativeAgedTransferPin{
+ return typeof pin==='object'&&pin!==null&&transferPins.has(pin);
+}
 const keys=['purpose','worldId','revision','atUs','untilUs','g1Digest','worldDigest','effectKeyId','lotId','targetId'] as const;
 type Terms={purpose:typeof lane;worldId:string;revision:number;atUs:string;untilUs:string;g1Digest:string;worldDigest:string;effectKeyId:string;lotId:string;targetId:string};
 export function disposableNativeAgedTransferSigningBytes(v:unknown){
@@ -269,6 +276,21 @@ export function projectActiveDisposableGroundForPickup(e:Entry,h:GroundDiscovery
 }
 export function projectDisposableGroundResidentDiscovery(e:Entry,id:string){
  return residentId(id)?structuredClone(e.discoveries?.find(d=>d.residentId===id)??null):null;
+}
+/** Read-before-write compatibility gate. Ordinary callers check presence,
+ * never the contents of a private transfer row or a lookalike view. An
+ * authenticated owning scope must still validate the actual archive/head. */
+export function assertDisposableNativeAgedTransferStorage(
+ db:DatabaseSync,supported=false,
+):boolean{
+ const named=db.prepare('SELECT 1 FROM main.sqlite_schema WHERE lower(name)=?').get(table);
+ // If somebody removed the table but left its archive anchor, do not treat
+ // the altered save as an ordinary one. Never select through a view.
+ const meta=named?null:db.prepare("SELECT 1 FROM main.sqlite_schema WHERE type='table' AND lower(name)='archive_meta'").get();
+ const anchor=meta?db.prepare('SELECT 1 FROM main.archive_meta WHERE key=?').get(lane):undefined;
+ if(!named&&!anchor)return false;
+ if(!supported)throw Error('save_disposable_native_aged_transfer_requires_owner');
+ return hasDisposableNativeAgedTransfer(db);
 }
 export function hasDisposableNativeAgedTransfer(db:DatabaseSync):boolean{
  const exists=db.prepare('SELECT type,sql FROM main.sqlite_schema WHERE lower(name)=?').get(table);
