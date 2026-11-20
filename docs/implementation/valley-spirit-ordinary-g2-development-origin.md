@@ -88,3 +88,23 @@ retrieve evidence by the one resident key. Without that V3 original archive
 and key, persisted work is unsupported and does not grant save access.
 There is no public detail, model, automatic scheduler, or alternative
 route on failure.
+
+### Native approach to personally discovered ground fruit
+
+On the original no-port owner, a separate attempt may let the normal idle
+fallback choose at most one bounded route of one or two legal cardinal
+steps. No host input selects the walker or path. The authenticated record
+contains the actual native move plan, verified position/pending path and
+only the edges the normal movement engine completed. Movement itself never
+debits the fruit, grants possession, or reserves the target. Resumed movement
+requires the same exact route on original reopen; expiry stops it before a
+tied step. After native arrival the resident still must independently choose
+pickup in a later minute.
+
+Another actual resident already at the site, with their own committed
+discovery and ordinary pickup priority, may take the fruit during movement.
+The normal native actor order governs whether a step has already happened;
+only the actual remaining path is cancelled. The ground debit, real pickup
+receipt, resulting held unit and route closure settle in one transaction.
+The route is available only under the original owner with the exact resident
+key, never in the normal player run or public view.

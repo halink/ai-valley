@@ -198,6 +198,8 @@ export function bindOrdinaryG2DevelopmentOriginPreview(storage:ReturnType<typeof
      advanceDevelopmentGroundMinute:()=>ifLive(()=>run.advancePrivateOrdinaryDevelopmentV3Minute?.()??null),
      tryDevelopmentGroundPickupMinute:()=>ifLive(()=>run.advancePrivateOrdinaryDevelopmentV3Minute?.('pickup')??null),
      advanceDevelopmentHeldMinute:()=>ifLive(()=>run.advancePrivateOrdinaryDevelopmentV3Minute?.('held')??null),
+     tryDevelopmentGroundApproachMinute:()=>ifLive(()=>run.advancePrivateOrdinaryDevelopmentV3Minute?.('approach')??null),
+     readDevelopmentGroundApproach:(residentId:string)=>ifLive(()=>run.readPrivateOrdinaryDevelopmentV3Route?.(residentId)??null),
      readDevelopmentEating:(residentId:string)=>ifLive(()=>run.readPrivateOrdinaryDevelopmentV3Eating?.(residentId)??null),
      readDevelopmentHeld:(residentId:string)=>ifLive(()=>run.readPrivateOrdinaryDevelopmentV3Held?.(residentId)??null),
      readDevelopmentDiscovery:(residentId:string)=>ifLive(()=>run.readPrivateOrdinaryDevelopmentV3Discovery?.(residentId)??null),
@@ -638,7 +640,7 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
   const reopenedV3=ordinaryG2V3?store?.readOwnedOrdinaryDevelopmentV3():null;
   let committedV3Head:Readonly<{worldId:string;revision:number;minute:number}>|null=reopenedV3?
    Object.freeze({worldId:reopenedV3.worldId,revision:reopenedV3.revision,minute:reopenedV3.minute}):null;
-  const advanceDevelopmentGroundMinute=(mode:'observe'|'pickup'|'held'='observe')=>{
+  const advanceDevelopmentGroundMinute=(mode:'observe'|'pickup'|'held'|'approach'='observe')=>{
    if(!committedV3Head||!store)return null;
    const settled=store.advanceOwnedOrdinaryDevelopmentV3Minute(mode);
    if(!settled)return null;
@@ -657,6 +659,7 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
   return {get session(){return session!;},server,snapshot,...(ordinaryG2V3?{previewPrivateOrdinaryDevelopmentV3:()=>{
    const proof=!committedV3Head&&selectedReview?.currentPositive();return proof&&store?store.previewOrdinaryDevelopmentV3(proof):null;},
    advancePrivateOrdinaryDevelopmentV3Minute:advanceDevelopmentGroundMinute,
+   readPrivateOrdinaryDevelopmentV3Route:(id:string)=>typeof id==='string'&&id.length&&id.length<=300?store?.readOwnedOrdinaryDevelopmentV3Route(id)??null:null,
    readPrivateOrdinaryDevelopmentV3Eating:(id:string)=>typeof id==='string'&&id.length&&id.length<=300?store?.readOwnedOrdinaryDevelopmentV3Eating(id)??null:null,
    readPrivateOrdinaryDevelopmentV3Held:(id:string)=>typeof id==='string'&&id.length&&id.length<=300?store?.readOwnedOrdinaryDevelopmentV3Held(id)??null:null,
    readPrivateOrdinaryDevelopmentV3Discovery:(id:string)=>typeof id==='string'&&id.length&&id.length<=300?store?.readOwnedOrdinaryDevelopmentV3(id)?.discovery??null:null,

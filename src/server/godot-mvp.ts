@@ -1,5 +1,5 @@
 import {captureNativeShelterEntries,type NativeShelterEntry} from '../world/mvp-native-shelter-entry.js';
-import {captureAgedGroundApproach,hasAgedGroundApproachCapture,isDeclinedAgedGroundRacePickup,selectAgedGroundApproach,stoppedCurrentAgedGroundApproach,type AgedGroundApproachWitness} from '../world/mvp-native-aged-ground-approach.js';
+import {captureAgedGroundApproach,hasAgedGroundApproachCapture,isDeclinedAgedGroundRacePickup,selectAgedGroundApproach,stoppedCurrentAgedGroundApproach,type AgedGroundApproachPlan,type AgedGroundApproachWitness} from '../world/mvp-native-aged-ground-approach.js';
 import {captureOrdinaryAgedGroundDiscovery,prepareOrdinaryNativePickupIntents,prepareOrdinaryNativeGroundApproach,type OrdinaryAgedGroundNativePickupRead,type OrdinaryAgedGroundDiscoveryRead,type NativeOrdinaryAgedDiscovery} from '../world/mvp-ordinary-aged-ground-discovery.js';
 import {AGED_DINING_INVALID,AGED_EAT_INVALID,type NativeAgedEatCompletion,captureMvpNativeAgedEat,hasDisposableAgedDiningCapture,selectMvpNativeAgedEat,wasDisposableAgedDiningSeatDecline,type NativeAgedEatSelection} from '../world/mvp-aged-fruit-native-eat.js';
 import {captureMvpNativeAgedPickup,selectMvpNativeAgedPickup,type NativeAgedPickupSelection} from '../world/mvp-aged-fruit-native-pickup.js';
@@ -438,6 +438,26 @@ export function prepareStoppedOrdinaryAgedGroundMinute(current:World,ownedGround
    advanceMvpRuleMinuteDraft(draft,current,0,{},{meals:true,fruitFlow:false,fruitRenewal:false,addressedSpeech:true}));
   if(draft.minute!==current.minute+1||result.speech?.receipts.length||result.witnesses.length)return null;
   return {draft,observed};
+ }catch{return null;}
+}
+
+/** Detached exact native route/pickup witness; the original V3 store owns commit. */
+export function prepareStoppedOrdinaryAgedGroundRouteMinute(current:World,owned:OrdinaryAgedGroundNativePickupRead,prior:AgedGroundApproachPlan|null){
+ if(current.mode!=='validation'||current.clock.paused||!current.mvpClimate?.rainProvenance||
+  Object.hasOwn(current.mvpClimate,'spiritEffects')||Object.hasOwn(current.mvpClimate,'spiritFruitSettlement'))return null;
+ const draft=structuredClone(current);
+ inheritReceiptHistory(current,draft);enableCompletedMovement(draft);
+ try{
+  const pickups=prepareOrdinaryNativePickupIntents(current,owned);
+  const intents=!prior&&!pickups.size?prepareOrdinaryNativeGroundApproach(current,owned):new Map();
+  if(!prior&&!intents.size)return null;
+  const advance=()=>captureAgedGroundApproach(draft,intents,prior,()=>captureOrdinaryAgedGroundDiscovery(draft,owned,()=>
+   advanceMvpRuleMinuteDraft(draft,current,0,{},{meals:true,fruitFlow:false,fruitRenewal:false,addressedSpeech:true})));
+  const pickup=pickups.size?captureMvpNativeAgedPickup(draft,pickups,advance):null;
+  if(pickups.size&&!pickup)return null;
+  const {result:{result,observed},witness}=pickup?pickup.result:advance();
+  if(draft.minute!==current.minute+1||result.speech?.receipts.length||result.witnesses.length)return null;
+  return {draft,observed,witness,pickup:pickup?.completion??null};
  }catch{return null;}
 }
 

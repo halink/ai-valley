@@ -1389,6 +1389,9 @@ export class WorldStore {
    sourceId:e.offer.sourceId,sourceInstanceId:e.offer.sourceInstanceId,targetId:e.offer.targetId,atUs:e.lot.atUs,
    eligibleUntilUs:e.offer.eligibleUntilUs,lotId:e.lot.lot.id,bornUs:e.lot.lot.bornUs,expiresUs:e.lot.lot.expiresUs,ownerId:'commons',quantity:1});
  }
+ readOwnedOrdinaryDevelopmentV3Route(residentId:string){
+  return this.readOwnedOrdinaryDevelopmentV3Archive(r=>r.lifecycle?.route?.plan.residentId===residentId?r.lifecycle.route:null);
+ }
  readOwnedOrdinaryDevelopmentV3Eating(residentId:string){
   return this.readOwnedOrdinaryDevelopmentV3Archive(r=>r.lifecycle?.held?.holderId===residentId?
    r.lifecycle.eaten??r.lifecycle.work??null:null);
@@ -1420,7 +1423,7 @@ export class WorldStore {
    }finally{this.db.exec('ROLLBACK');}
   }catch{return null;}
  }
- advanceOwnedOrdinaryDevelopmentV3Minute(mode:'observe'|'pickup'|'held'){
+ advanceOwnedOrdinaryDevelopmentV3Minute(mode:'observe'|'pickup'|'held'|'approach'){
   const origin=this.#ordinaryG2DevelopmentOrigin,pin=this.#ordinaryG2V3;
   if(!origin||!pin)return null;
   try{
