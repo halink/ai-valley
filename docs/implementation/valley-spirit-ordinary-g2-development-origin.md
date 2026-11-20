@@ -65,7 +65,7 @@ held unit and advances the head and receipt/latch atomically. Closed or
 reopened terminal scopes cannot advance or replay. If the holder leaves
 the supported in-world living custody or the native minute requires an
 unsupported event settlement, the entire minute refuses unchanged.
-No V3 hall route or table capability is implemented. Opportunity replay and generic advance remain
+The normal held minute never grants a hall route; see the separate original hall scope below. Opportunity replay and generic advance remain
 blocked. Weather withdrawal after actual placement does not erase custody.
 
 
@@ -108,3 +108,27 @@ only the actual remaining path is cancelled. The ground debit, real pickup
 receipt, resulting held unit and route closure settle in one transaction.
 The route is available only under the original owner with the exact resident
 key, never in the normal player run or public view.
+
+
+### Native shared-hall eating in the original held scope
+
+The original owner can separately advance a hall minute. The native chooser
+uses the holder’s known real shared hall, existing ordinary food priority,
+route and exact seat; there is no actor, destination or seat argument.
+An occupied seat cannot be taken over. Ordinary eligible food (including a
+carried berry or preserve) still receives its ordinary table/meal choice.
+
+Authenticated hall progress distinguishes outdoor travel, indoor travel,
+seated arrival and actual claimed work. Only the holder’s unique current seat
+claim can count; travel and arrival provide no nutrition. The first work
+minute requires enough time for all five native minutes strictly before
+original expiry. A persisted action can only be removed early by the exact
+same-run native typed refusal for that actor, plan and minute, or the exact
+expiry path with that cancellation. The refusal pays no nutrition and
+does not mint inventory. A successful fifth work minute sums native hunger
+and nutrition and writes the actual room-located observer-only event and resident
+index with the one held debit and original latch in the same transaction.
+
+The original scoped archive authenticates reopens during travel or work.
+This does not enable a player save, public broadcast, arbitrary room or
+table movement, other eating authority, model, or automatic scheduler.

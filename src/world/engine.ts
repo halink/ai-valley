@@ -369,7 +369,7 @@ function begin(world:World,r:Resident,elapsed=0,actionFailures?:StepActionFailur
  const definition=definitionFor(world,plan,action);
  if(!world.definitions[definition]){failure(world,r,'行为引用的定义版本不存在');return;}
  const route=targetFor(world,r,action,definition,elapsed);if(route.error){
-  noteDisposableAgedDiningSeatDecline(world,r,action,plan.id);
+  noteDisposableAgedDiningSeatDecline(world,r,action,plan.id,'route-unavailable');
   if(action.type==='gather'&&route.gatherDepletion)actionFailures?.push({actorId:r.id,planId:plan.id,actionType:'gather',...route.gatherDepletion});
   failure(world,r,route.error,action);return;
  }
@@ -387,7 +387,7 @@ function begin(world:World,r:Resident,elapsed=0,actionFailures?:StepActionFailur
  const springId=action.type==='gather'?action.resourceId:action.type==='waterSupply'&&action.operation==='fillSpring'||action.type==='frontierHazard'&&action.operation==='clearSpring'?action.sourceId:undefined;
  const spring=springId?world.resources.find(s=>s.id===springId&&s.kind==='spring'):undefined;
  if(path&&spring)path=springApproachPath(world,r.at,spring);
- if(path===null){noteDisposableAgedDiningSeatDecline(world,r,action,plan.id);failure(world,r,'目标目前没有可达路线',action);return;}
+ if(path===null){noteDisposableAgedDiningSeatDecline(world,r,action,plan.id,'route-unavailable');failure(world,r,'目标目前没有可达路线',action);return;}
  const outdoors=['mvpAgriculture','move','gather','plant','water','harvest','build','construction','landRights','regionSurvey','industry','leave','settle','lodge'].includes(action.type);
  if((path.length||outdoors)&&!world.rooms){r.inside=null;r.roomAt=null;}
  r.activity={planId:plan.id,action,startedAt:world.minute,remaining:route.duration,path,target:{...route.target},definition,travelProgress:0,...(route.cargo?{cargo:route.cargo}:{})};
@@ -702,7 +702,7 @@ function processActivity(world:World,r:Resident,minutes:number,actionFailures?:S
   activity.mvpShelterEnteredAt=world.minute;noteNativeShelterEntry(world,r,shelterEntry);endDecisionProtection(world,r,'decision');return;
  }
  if(activity.action.type==='mvpAgedFruitEat'&&!workMvpNativeAgedEat(world,r,activity.action,minutes)){
-  noteDisposableAgedDiningSeatDecline(world,r);failure(world,r,activity.action.dining?AGED_DINING_INVALID:AGED_EAT_INVALID);return;
+  noteDisposableAgedDiningSeatDecline(world,r,undefined,undefined,'work-invalid');failure(world,r,activity.action.dining?AGED_DINING_INVALID:AGED_EAT_INVALID);return;
  }
  if(activity.action.type==='mvpPreservation'){const problem=preservationReason(world,r,activity.action,true);if(problem){failure(world,r,problem);return;}activity.mvpPreservationWorked=(activity.mvpPreservationWorked??0)+Math.min(minutes,activity.remaining);}
  if(activity.action.type==='mvpAgriculture'){const problem=agricultureReason(world,r,activity.action,true);if(problem){failure(world,r,problem);return;}}

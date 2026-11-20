@@ -840,7 +840,7 @@ export class WorldStore {
    throw Error('mvp_rules_private_meal_world');
   if(privateEating&&this.#privateDisposableSave&&this.#disposableAgedTransfer)
    assertStagedDisposableEatingCompatibility(world,privateEating);
-  else if(originalStep?.work&&originalStep.draft===world&&this.#ordinaryG2DevelopmentOrigin&&this.#ordinaryG2V3)
+  else if(originalStep&&(originalStep.work||originalStep.hallWork)&&originalStep.draft===world&&this.#ordinaryG2DevelopmentOrigin&&this.#ordinaryG2V3)
    assertStagedOriginalOutdoorCompatibility(this.db,originalStep);
   else assertWorldCompatibility(world,!!this.mvpSpiritEffectFixture);
   if(this.formalAppointmentChoiceCustody&&world.mode!=='formal')throw Error('formal_appointment_choice_custody_scope');
@@ -1394,7 +1394,7 @@ export class WorldStore {
  }
  readOwnedOrdinaryDevelopmentV3Eating(residentId:string){
   return this.readOwnedOrdinaryDevelopmentV3Archive(r=>r.lifecycle?.held?.holderId===residentId?
-   r.lifecycle.eaten??r.lifecycle.work??null:null);
+   r.lifecycle.eaten??r.lifecycle.work??r.lifecycle.hallWork??r.lifecycle.hallDecline??null:null);
  }
  readOwnedOrdinaryDevelopmentV3Held(residentId:string){
   return this.readOwnedOrdinaryDevelopmentV3Archive(r=>r.lifecycle?.held?.holderId===residentId&&!r.lifecycle.heldExpiry&&!r.lifecycle.eaten?r.lifecycle.held:null);
@@ -1423,7 +1423,7 @@ export class WorldStore {
    }finally{this.db.exec('ROLLBACK');}
   }catch{return null;}
  }
- advanceOwnedOrdinaryDevelopmentV3Minute(mode:'observe'|'pickup'|'held'|'approach'){
+ advanceOwnedOrdinaryDevelopmentV3Minute(mode:'observe'|'pickup'|'held'|'approach'|'hall'){
   const origin=this.#ordinaryG2DevelopmentOrigin,pin=this.#ordinaryG2V3;
   if(!origin||!pin)return null;
   try{

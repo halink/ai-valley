@@ -201,7 +201,7 @@ function agedEatActor(r:World['residents'][number]){
  return r.activity?.action.type==='mvpAgedFruitEat'||r.plan?.actions.some(a=>a.type==='mvpAgedFruitEat')||
   r.activity?.mvpAgedEatWorkStartedAt!==undefined;
 }
-function diningWorkClaim(w:World,r:World['residents'][number],d:DiningPlace){
+export function diningWorkClaim(w:World,r:World['residents'][number],d:DiningPlace){
  return r.inside===d.buildingId&&!!r.roomAt&&same(r.roomAt,d.seat)&&w.rooms?.tick===w.minute&&
   w.rooms.claims.filter(c=>c.buildingId===d.buildingId&&c.key===d.key).length===1&&
   w.rooms.claims.some(c=>c.buildingId===d.buildingId&&c.key===d.key&&c.group===r.id&&c.people.length===1&&c.people[0]===r.id);
@@ -242,7 +242,7 @@ export function exactDisposableEating(w:World,expected?:Eating):boolean{
  return r.inside===null&&exact(a.action,['type','effectId'])&&a.path.length===0&&!a.room&&a.mvpAgedEatWorkStartedAt===undefined&&
   same(a.target,r.at)&&expected.worked>=1&&expected.worked<=4&&w.minute===expected.startedAt+expected.worked-1;
 }
-function readEating(w:World,holderId:string,effectId:string):Eating|undefined{
+export function readNativeAgedEatingState(w:World,holderId:string,effectId:string):Eating|undefined{
  if(!w.residents.some(agedEatActor))return undefined;
  const r=w.residents.find(r=>r.id===holderId),a=r?.activity;
  if(!r||!a||a.action.type!=='mvpAgedFruitEat')throw Error('disposable_native_aged_eat_foreign');
@@ -406,7 +406,7 @@ export function advanceDisposableNativeAgedTransfer(e:Entry,before:World,after:W
   if(!expected||!sameJson(scope,expected)||!exactDisposableEating(before,e.eating)||!livingHolder(before,holder)||!livingHolder(after,holder)||
    before.mvpClimate?.lastUs!==minuteToClimateUs(before.minute)||after.mvpClimate?.lastUs!==atUs||
    parseClimateUs(atUs)>parseClimateUs(e.lot.expiresUs))throw Error('disposable_native_aged_held_scope');
-  const work=readEating(after,holder,e.receipt.effectId);
+  const work=readNativeAgedEatingState(after,holder,e.receipt.effectId);
   if(atUs===e.lot.expiresUs){
    if(work||completed)throw Error('disposable_native_aged_eat_expiry_priority');
    const {eating:_old,...rest}=e;

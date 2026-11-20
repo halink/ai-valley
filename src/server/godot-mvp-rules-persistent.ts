@@ -201,6 +201,7 @@ export function bindOrdinaryG2DevelopmentOriginPreview(storage:ReturnType<typeof
      tryDevelopmentGroundApproachMinute:()=>ifLive(()=>run.advancePrivateOrdinaryDevelopmentV3Minute?.('approach')??null),
      readDevelopmentGroundApproach:(residentId:string)=>ifLive(()=>run.readPrivateOrdinaryDevelopmentV3Route?.(residentId)??null),
      readDevelopmentEating:(residentId:string)=>ifLive(()=>run.readPrivateOrdinaryDevelopmentV3Eating?.(residentId)??null),
+     advanceDevelopmentHallMinute:()=>ifLive(()=>run.advancePrivateOrdinaryDevelopmentV3Minute?.('hall')??null),
      readDevelopmentHeld:(residentId:string)=>ifLive(()=>run.readPrivateOrdinaryDevelopmentV3Held?.(residentId)??null),
      readDevelopmentDiscovery:(residentId:string)=>ifLive(()=>run.readPrivateOrdinaryDevelopmentV3Discovery?.(residentId)??null),
      readDevelopmentGround:()=>ifLive(()=>run.readPrivateOrdinaryDevelopmentV3?.()??null),}:{}),
@@ -640,7 +641,7 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
   const reopenedV3=ordinaryG2V3?store?.readOwnedOrdinaryDevelopmentV3():null;
   let committedV3Head:Readonly<{worldId:string;revision:number;minute:number}>|null=reopenedV3?
    Object.freeze({worldId:reopenedV3.worldId,revision:reopenedV3.revision,minute:reopenedV3.minute}):null;
-  const advanceDevelopmentGroundMinute=(mode:'observe'|'pickup'|'held'|'approach'='observe')=>{
+  const advanceDevelopmentGroundMinute=(mode:'observe'|'pickup'|'held'|'approach'|'hall'='observe')=>{
    if(!committedV3Head||!store)return null;
    const settled=store.advanceOwnedOrdinaryDevelopmentV3Minute(mode);
    if(!settled)return null;

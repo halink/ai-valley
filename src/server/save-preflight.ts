@@ -50,7 +50,7 @@ export function assertStagedOriginalOutdoorCompatibility(db:DatabaseSync,step:No
  if(!actor)fail('save_ordinary_g2_development_v3');
  assertWorldCompatibilityInternal(step.draft,false,undefined,actor);
 }
-function assertWorldCompatibilityInternal(value:unknown,allowMvpSpiritEffectFixture:boolean,privateEating?:Eating,originalOutdoorActor?:string):asserts value is Record<string,unknown>{
+function assertWorldCompatibilityInternal(value:unknown,allowMvpSpiritEffectFixture:boolean,privateEating?:Eating,originalV3Actor?:{id:string;hall:boolean}):asserts value is Record<string,unknown>{
  if(!record(value))fail('save_invalid_world');
  if(Array.isArray(value.events)&&value.events.some(e=>record(e)&&(owns(e,'mvpAgedFruitBirth')||owns(e,'mvpAgedFruitExpiry')||owns(e,'mvpAgedFruitPickup')||owns(e,'mvpAgedHeldFruitExpiry')||owns(e,'mvpAgedHeldFruitEaten'))))fail('save_sealed_aged_birth_requires_private_archive');
  // Reject presence, not a recognized version/truthy value. No upgrade escape.
@@ -78,8 +78,8 @@ function assertWorldCompatibilityInternal(value:unknown,allowMvpSpiritEffectFixt
   const plan=arrangement&&Array.isArray(arrangement.actions)?arrangement.actions:[];
   const activity=record(r.activity)?r.activity:null;
   if(plan.some(a=>record(a)&&(a.type==='mvpAgedFruitPickup'||a.type==='mvpAgedFruitEat'))||
-   activity&&(owns(activity,'mvpAgedEatWorkStartedAt')&&(!privateEating?.table||privateEating.residentId!==r.id)||record(activity.action)&&(activity.action.type==='mvpAgedFruitPickup'||
-    activity.action.type==='mvpAgedFruitEat'&&privateEating?.residentId!==r.id&&originalOutdoorActor!==r.id)))
+   activity&&(owns(activity,'mvpAgedEatWorkStartedAt')&&(!privateEating?.table||privateEating.residentId!==r.id)&&(!originalV3Actor?.hall||originalV3Actor.id!==r.id)||record(activity.action)&&(activity.action.type==='mvpAgedFruitPickup'||
+    activity.action.type==='mvpAgedFruitEat'&&privateEating?.residentId!==r.id&&originalV3Actor?.id!==r.id)))
    fail('save_sealed_aged_pickup_requires_private_archive');
   const pending=plan.some(a=>record(a)&&a.type==='mvpShelter');
   const shelter=activity&&record(activity.action)&&activity.action.type==='mvpShelter';
@@ -154,8 +154,8 @@ export function decodeExactOrdinaryDevelopmentV3World(body:unknown,db:DatabaseSy
  catch(error){
   if(!(error instanceof SaveCompatibilityError)||error.code!=='save_sealed_aged_pickup_requires_private_archive')throw error;
   const sealed=readOrdinaryDevelopmentV3(db,origin,pin,value as unknown as World);
-  if(!sealed?.lifecycle?.work||!sealed.lifecycle.held)throw error;
-  assertWorldCompatibilityInternal(value,false,undefined,sealed.lifecycle.held.holderId);return value;
+  if(!sealed?.lifecycle||!(sealed.lifecycle.work||sealed.lifecycle.hallWork)||!sealed.lifecycle.held)throw error;
+  assertWorldCompatibilityInternal(value,false,undefined,{id:sealed.lifecycle.held.holderId,hall:!!sealed.lifecycle.hallWork});return value;
  }
 }
 export function decodeExactDisposableSavedWorld(body:unknown,db:DatabaseSync,owner:DisposableRulesSaveAuthority,pin:DisposableNativeAgedTransferPin):Record<string,unknown>{

@@ -415,14 +415,14 @@ export function prepareSealedMvpEcologyMinute(current:World,captureMeals=false,p
   const advance=()=>advanceMvpRuleMinuteDraft(draft,current,0,{},{meals:captureMeals,fruitFlow:sealedReplayFruitFlow===true,fruitRenewal:true,addressedSpeech:true,sealedReplayFruitFlow});
   const observe=()=>privateFruitPoint?captureMvpNativeObservationPhase(draft,privateFruitPoint,advance):{result:advance(),observed:[],arrivals:[]};
   const pickup=()=>privatePickup?captureMvpNativeAgedPickup(draft,privatePickup,observe):{result:observe(),completion:null};
-  const eating=privateEat?captureMvpNativeAgedEat(draft,privateEat,pickup):{result:pickup(),completion:null};
+  const eating=privateEat?captureMvpNativeAgedEat(draft,privateEat,pickup):{result:pickup(),completion:null,seatDecline:null};
   const scoped=eating?.result;
   if(!scoped?.result)return null;
   const {result,observed,arrivals}=scoped.result;
   if(draft.minute!==current.minute+1||
    JSON.stringify(draft.mvpClimate?.spiritEffects)!==JSON.stringify(current.mvpClimate?.spiritEffects)||
    JSON.stringify(draft.mvpClimate?.spiritFruitSettlement)!==JSON.stringify(current.mvpClimate?.spiritFruitSettlement))return null;
-  return {draft,fruitFlow:result.fruitFlow,renewal:result.renewal,mealWitnesses:result.witnesses,speech:result.speech,observed,completion:scoped.completion,eaten:eating?.completion??null,movement:arrivals};
+  return {draft,fruitFlow:result.fruitFlow,renewal:result.renewal,mealWitnesses:result.witnesses,speech:result.speech,observed,completion:scoped.completion,eaten:eating?.completion??null,agedDiningDecline:eating?.seatDecline??null,movement:arrivals};
  }catch{return null;}
 }
 
