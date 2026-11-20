@@ -1,3 +1,4 @@
+import {rehearseOrdinaryAgedG1} from './valley-spirit-ordinary-g1-rehearsal.js';
 import {openDisposableSpeechEditorial,pinDisposableSpeechEditorialReviewer,type DisposableSpeechEditorialWatermark} from './disposable-native-speech-release.js';
 import {bindDisposableSpeechPurpose,disposableSpeechHead,openDisposableNativeSpeechReader,stageDisposableSpeechScenario,type DisposableSpeechCase,type DisposableSpeechHead} from './disposable-native-addressed-speech.js';
 import {minuteToClimateUs} from '../world/mvp-climate.js';
@@ -320,9 +321,14 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
     if(encoded.status!=='encoding-only')return encoded;
     if(signed===undefined)return Object.freeze({...encoded,status:'g1-review-signing-input' as const});
     const advisory=inspectOrdinaryAgedG1Advisory(ordinaryReview,basis,ground,signed);
-    if(!advisory||JSON.stringify(ground)!==JSON.stringify(readPrivateOrdinaryAgedGround())||
+    if(!advisory||!queuePin||!store||!session)return unavailableOrdinaryAgedG1();
+    const exactHead=store.load();
+    if(!exactHead||exactHead.id!==basis.worldId||exactHead.revision!==basis.revision||minuteToClimateUs(exactHead.minute)!==basis.atUs)
+     return unavailableOrdinaryAgedG1();
+    const rehearsal=rehearseOrdinaryAgedG1(exactHead,queuePin.site,advisory,encoded.terms.untilUs);
+    if(JSON.stringify(ground)!==JSON.stringify(readPrivateOrdinaryAgedGround())||
      JSON.stringify(basis)!==JSON.stringify(readPrivateAgedFruitPreflight()))return unavailableOrdinaryAgedG1();
-    return Object.freeze({...encoded,status:'g1-review-verified' as const,advisory});
+    return Object.freeze({...encoded,status:'g1-review-verified' as const,advisory,rehearsal});
    }catch{return unavailableOrdinaryAgedG1();}
   };
   let rebaseRequired=false;
