@@ -85,6 +85,12 @@ export function renderObjectiveNativeMeal(observedAtUs:string){
  const dayLengthUs=1_440_000_000n,day=BigInt(observedAtUs)/dayLengthUs;
  return Object.freeze({atUs:String(day*dayLengthUs),kind:'meal-consumed' as const,text:`第 ${day+1n} 日：有人用过一餐。`});
 }
+/** Local signed hearing is a fixed day-bucketed fact, never an utterance or reply. */
+export function renderObjectiveNativeHearing(observedAtUs:string){
+ if(!clock(observedAtUs))return null;
+ const dayLengthUs=1_440_000_000n,day=BigInt(observedAtUs)/dayLengthUs;
+ return Object.freeze({atUs:String(day*dayLengthUs),kind:'conversation-completed' as const,text:`第 ${day+1n} 日：一次当面发言被听见。`});
+}
 function canonicalSection(packet:ValleySpiritLifeAlmanacPacket,choice:Selection):ValleySpiritLifeAlmanacSection{
  const lines=choice.indices.map(n=>{
   const f=packet.source.facts[n-1];

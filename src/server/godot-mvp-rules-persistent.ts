@@ -1,6 +1,7 @@
 import {pinOrdinaryNativeShelterOptions,type OrdinaryNativeShelterOptions} from './ordinary-native-shelter-custody.js';
 import {pinOrdinaryNativeSpeechOptions,type OrdinaryNativeSpeechOptions} from './ordinary-native-speech-custody.js';
-import {openOrdinaryMealEditorialViewer,pinOrdinaryMealEditorial,type OrdinaryMealEditorialPin} from './valley-spirit-ordinary-meal-editorial.js';
+import {openOrdinaryHearingEditorialViewer,openOrdinaryMealEditorialViewer,pinOrdinaryHearingEditorial,pinOrdinaryMealEditorial,
+ type OrdinaryHearingEditorialPin,type OrdinaryMealEditorialPin} from './valley-spirit-ordinary-meal-editorial.js';
 import {pinOrdinaryNativeMealOptions,type OrdinaryNativeMealOptions} from './valley-spirit-meal-custody.js';
 import {ORDINARY_G2_HANDOFF_BLOCKERS,appendOrdinaryG2BlockedHandoff,encodeOrdinaryG2BlockedHandoffTerms,ordinaryG2BlockedHandoffSigningBytes,pinOrdinaryG2BlockedHandoff,readOrdinaryG2HandoffRecord,sameOrdinaryG2HandoffTerms,type OrdinaryG2BlockedHandoffOptions,type OrdinaryG2BlockedHandoffTerms} from './valley-spirit-ordinary-g2-blocked-handoff.js';
 import {DatabaseSync} from 'node:sqlite';
@@ -39,7 +40,7 @@ import {WorldStore} from './store.js';
 import {acquireRuntimeOwnership,type RuntimeOwnership} from './runtime-lock.js';
 import {assertGodotWebExport} from './godot-web.js';
 import type {World} from '../shared/types.js';
-type PersistentRulesOptions={database:string;port:number;webRoot?:string;autoStart?:boolean;tickMs?:number;privateSpiritShadow?:PersistentRulesShadowOptions;privateSpiritGeographyQueue?:RulesGeographyQueueOptions;privateNativeFruitRenewal?:RulesNativeFruitRenewalPin;privateAgedFruitPreflight?:true;privateEmptyAgedGround?:OrdinaryAgedGroundPin;privateNativeEmptyAgedGround?:true;privateOrdinaryAgedG1Review?:OrdinaryAgedG1ReviewOptions;privateOrdinaryAgedG1Decision?:true;privateOrdinaryG2BlockedHandoff?:OrdinaryG2BlockedHandoffOptions;privateLifeFixture?:PersistentRulesLifeFixture;privateSpeechCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string;nativeWeatherCredit?:true}>;privateOrdinaryNativeMeal?:OrdinaryNativeMealOptions;privateOrdinaryNativeSpeech?:OrdinaryNativeSpeechOptions;privateOrdinaryNativeShelter?:OrdinaryNativeShelterOptions;privateOrdinaryNativeMealView?:OrdinaryMealEditorialPin;privateMealCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string}>};
+type PersistentRulesOptions={database:string;port:number;webRoot?:string;autoStart?:boolean;tickMs?:number;privateSpiritShadow?:PersistentRulesShadowOptions;privateSpiritGeographyQueue?:RulesGeographyQueueOptions;privateNativeFruitRenewal?:RulesNativeFruitRenewalPin;privateAgedFruitPreflight?:true;privateEmptyAgedGround?:OrdinaryAgedGroundPin;privateNativeEmptyAgedGround?:true;privateOrdinaryAgedG1Review?:OrdinaryAgedG1ReviewOptions;privateOrdinaryAgedG1Decision?:true;privateOrdinaryG2BlockedHandoff?:OrdinaryG2BlockedHandoffOptions;privateLifeFixture?:PersistentRulesLifeFixture;privateSpeechCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string;nativeWeatherCredit?:true}>;privateOrdinaryNativeMeal?:OrdinaryNativeMealOptions;privateOrdinaryNativeSpeech?:OrdinaryNativeSpeechOptions;privateOrdinaryNativeShelter?:OrdinaryNativeShelterOptions;privateOrdinaryNativeMealView?:OrdinaryMealEditorialPin;privateOrdinaryNativeHearingView?:OrdinaryHearingEditorialPin;privateMealCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string}>};
 export async function startPersistentRulesMvp(options:PersistentRulesOptions){
  if(typeof options.database!=='string'||!options.database.trim())throw Error('mvp_rules_database_required');
  if(isDisposableRulesScratchPath(options.database))throw Error('disposable_native_rules_no_http');
@@ -211,9 +212,15 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
   Object.keys(options).some(k=>k.startsWith('private')&&k!=='privateOrdinaryNativeMeal')))
   throw Error('ordinary_native_meal_explicit_local_scope');
  const ordinaryMealView=pinOrdinaryMealEditorial(options.privateOrdinaryNativeMealView);
- if(options.privateOrdinaryNativeMealView!==undefined&&(!ordinaryMealView||!!disposable||options.autoStart!==false||
-  Object.keys(options).some(k=>k.startsWith('private')&&k!=='privateOrdinaryNativeMealView')))
+ const ordinaryHearingView=pinOrdinaryHearingEditorial(options.privateOrdinaryNativeHearingView);
+ const conflictingEditorialOptions=!!disposable||options.autoStart!==false||
+  Object.keys(options).some(k=>k.startsWith('private')&&!['privateOrdinaryNativeMealView','privateOrdinaryNativeHearingView'].includes(k));
+ if(options.privateOrdinaryNativeMealView!==undefined&&(!ordinaryMealView||conflictingEditorialOptions))
   throw Error('ordinary_native_meal_view_explicit_local_scope');
+ if(options.privateOrdinaryNativeHearingView!==undefined&&(!ordinaryHearingView||conflictingEditorialOptions))
+  throw Error('ordinary_native_hearing_view_explicit_local_scope');
+ if(ordinaryMealView&&ordinaryHearingView&&(ordinaryMealView.worldId!==ordinaryHearingView.worldId||
+  ordinaryMealView.fingerprint===ordinaryHearingView.fingerprint))throw Error('ordinary_native_life_view_independent_scope');
  const custodyPin=speechPin??mealPin;
  const weatherCredit=speechPin?.nativeWeatherCredit===true;
  if(!Number.isFinite(tickMs)||tickMs<100)throw Error('mvp_rules_invalid_tick');
@@ -230,15 +237,22 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
  const lifePin=pinPersistentRulesLifeFixture(options.privateLifeFixture);
  let life:ReturnType<typeof openPersistentRulesLifeFixture>|undefined,lifeReadable=false;
  let mealEditorialViewer:ReturnType<typeof openOrdinaryMealEditorialViewer>|undefined;
+ let hearingEditorialViewer:ReturnType<typeof openOrdinaryHearingEditorialViewer>|undefined;
+ const latestOrdinary=(id:string)=>{
+  const meal=mealEditorialViewer?.latest(id)??null,hearing=hearingEditorialViewer?.latest(id)??null;
+  // Compare only the disclosed day; on ties select the fixed hearing kind,
+  // never compare private source minutes or order unsigned records.
+  return !meal?hearing:!hearing?meal:BigInt(hearing.range.throughUs)>=BigInt(meal.range.throughUs)?hearing:meal;
+ };
  let closing:Promise<void>|undefined;
- const close=():Promise<void>=>closing??=(async()=>{if(timer)clearInterval(timer);timer=undefined;if(server){server.closeAllConnections();await new Promise<void>(resolve=>server!.close(()=>resolve()));server=undefined;}try{speechReader?.close();}catch{/* optional private snapshot */}speechReader=undefined;try{life?.close();}catch{/* optional isolated life reader */}life=undefined;try{mealEditorialViewer?.close();}catch{/* optional objective life viewer */}mealEditorialViewer=undefined;try{almanacReader?.close();}catch{/* optional isolated reader */}almanacReader=undefined;viewers=undefined;shadow=undefined;try{agedGround?.close();}catch{/* private closure */}agedGround=undefined;geographicProposalQueue=undefined;try{geographyCustody?.close();}catch{/* optional isolated custody */}geographyCustody=undefined;try{spiritPermissions?.close();}catch{valleySpirit?.isolate();}spiritPermissions=undefined;store?.close();store=undefined;owner?.release();owner=undefined;})().catch(error=>{closing=undefined;throw error;});
+ const close=():Promise<void>=>closing??=(async()=>{if(timer)clearInterval(timer);timer=undefined;if(server){server.closeAllConnections();await new Promise<void>(resolve=>server!.close(()=>resolve()));server=undefined;}try{speechReader?.close();}catch{/* optional private snapshot */}speechReader=undefined;try{life?.close();}catch{/* optional isolated life reader */}life=undefined;try{mealEditorialViewer?.close();}catch{/* optional objective life viewer */}mealEditorialViewer=undefined;try{hearingEditorialViewer?.close();}catch{/* optional objective hearing viewer */}hearingEditorialViewer=undefined;try{almanacReader?.close();}catch{/* optional isolated reader */}almanacReader=undefined;viewers=undefined;shadow=undefined;try{agedGround?.close();}catch{/* private closure */}agedGround=undefined;geographicProposalQueue=undefined;try{geographyCustody?.close();}catch{/* optional isolated custody */}geographyCustody=undefined;try{spiritPermissions?.close();}catch{valleySpirit?.isolate();}spiritPermissions=undefined;store?.close();store=undefined;owner?.release();owner=undefined;})().catch(error=>{closing=undefined;throw error;});
  try{
   if(custodyPin){
    owner=privateOwner=acquireDeveloperMvpSpiritFixtureOwner(custodyPin.fixture);
    if(mealPin?privateOwner.rulesMealWorldId!==mealPin.worldId:privateOwner.rulesSpeechWorldId!==speechPin?.worldId)
     throw Error(mealPin?'mvp_rules_private_meal_world':'mvp_rules_private_speech_world');
    if((privateOwner.rulesWeatherHourCredit===true)!==weatherCredit)throw Error('mvp_rules_private_weather_scope');
-  }else owner=acquireRuntimeOwnership(options.database,agedGroundPin||ordinaryMeal||ordinaryMealView||ordinarySpeech||ordinaryShelter?{existingOnly:true}:undefined);
+  }else owner=acquireRuntimeOwnership(options.database,agedGroundPin||ordinaryMeal||ordinaryMealView||ordinaryHearingView||ordinarySpeech||ordinaryShelter?{existingOnly:true}:undefined);
   owner.assertOwned();assertDisposable?.();
   const privateDisposableSave=disposable&&'lockPath' in owner?disposable.bind(owner):undefined;
   if(disposable&&!privateDisposableSave)throw Error('disposable_native_rules_owner');
@@ -256,6 +270,7 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
   if(ordinaryShelter&&probe?.id!==ordinaryShelter.worldId)throw Error('ordinary_native_shelter_world_mismatch');
   if(ordinarySpeech&&probe?.id!==ordinarySpeech.worldId)throw Error('ordinary_native_speech_world_mismatch');
   if(ordinaryMeal&&probe?.id!==ordinaryMeal.worldId)throw Error('ordinary_native_meal_world_mismatch');
+  if(ordinaryHearingView&&probe?.id!==ordinaryHearingView.worldId)throw Error('ordinary_native_hearing_view_world_mismatch');
   if(ordinaryMealView&&probe?.id!==ordinaryMealView.worldId)throw Error('ordinary_native_meal_view_world_mismatch');
   if(custodyPin&&probe?.id!==custodyPin.worldId)throw Error(mealPin?'mvp_rules_private_meal_world':'mvp_rules_private_speech_world');
   if(probe){assertMvpWorld(probe as unknown as World);validateMvpClimate(probe as unknown as World);}
@@ -263,7 +278,7 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
   let session:ReturnType<typeof createMvpSession>|undefined;
   const snapshot=()=>({...session!.snapshot(),valleySpirit:valleySpirit?.view()??valleySpiritUnavailable()});
   if(!assertDisposable){
-   server=createMvpServer({snapshot,get world(){return session?.world;}},{webRoot:options.webRoot,privateSpeechWeatherOnly:custodyPin?true:undefined,valleySpiritLifeViewer:lifePin||ordinaryMealView?{latest:id=>ordinaryMealView?mealEditorialViewer?.latest(id)??null:life?.latest(id)??null}:undefined,valleySpiritSource:ref=>valleySpirit?.resolveSource(ref)??null,valleySpiritArchive:query=>valleySpirit?.archive(query)??{status:'unavailable'},valleySpiritReaders:{almanac:id=>viewers?.almanac(id)??null,latestAlmanac:()=>viewers?.latestAlmanac()??{status:'unavailable'},topics:range=>viewers?.topics(range)??{status:'unavailable'}}});
+   server=createMvpServer({snapshot,get world(){return session?.world;}},{webRoot:options.webRoot,privateSpeechWeatherOnly:custodyPin?true:undefined,valleySpiritLifeViewer:lifePin||ordinaryMealView||ordinaryHearingView?{latest:id=>ordinaryMealView||ordinaryHearingView?latestOrdinary(id):life?.latest(id)??null}:undefined,valleySpiritSource:ref=>valleySpirit?.resolveSource(ref)??null,valleySpiritArchive:query=>valleySpirit?.archive(query)??{status:'unavailable'},valleySpiritReaders:{almanac:id=>viewers?.almanac(id)??null,latestAlmanac:()=>viewers?.latestAlmanac()??{status:'unavailable'},topics:range=>viewers?.topics(range)??{status:'unavailable'}}});
    await new Promise<void>((resolve,reject)=>{server!.once('error',reject);server!.listen(options.port,'127.0.0.1',resolve);});
   }
   const nativeGround=nativeEmpty&&agedGroundPin&&'lockPath' in owner?{owner,pin:agedGroundPin}:undefined;
@@ -325,6 +340,7 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
    viewers=createValleySpiritPublicReaders(valleySpirit,almanacReader);
   }
   if(ordinaryMealView&&'lockPath' in owner)try{mealEditorialViewer=openOrdinaryMealEditorialViewer(owner,ordinaryMealView,()=>session!.world);}catch{/* objective meal view unavailable */}
+  if(ordinaryHearingView&&'lockPath' in owner)try{hearingEditorialViewer=openOrdinaryHearingEditorialViewer(owner,ordinaryHearingView,()=>session!.world);}catch{/* objective hearing unavailable */}
   if(lifePin&&lifeReadable&&'lockPath' in owner)try{life=openPersistentRulesLifeFixture(owner,store,()=>session!.world,lifePin);}catch{/* no approved view */}
   if(!assertDisposable&&options.autoStart!==false)timer=setInterval(()=>session!.advance(1),tickMs);
   const readPrivateSpiritCandidate=()=>{

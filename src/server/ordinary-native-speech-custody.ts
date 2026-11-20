@@ -85,6 +85,20 @@ export function openOrdinaryNativeSpeechLease(owner:RuntimeOwnership,path:string
   if([...seen].some(([k,v])=>current.get(k)!==v))throw Error('ordinary_native_speech_observed_rollback');
   return {rows,current};
  }
+ function readEditorialSourceAtHead(db:DatabaseSync,w:World,eventId:string){
+   if(isolated||!db.isTransaction||w.id!==worldId||w.mode!=='validation'||!id(eventId))return null;
+   try{
+    if(!exactHead(db,w))return null;
+    const current=read(db),row=current?.rows.find(r=>r.event_id===eventId);
+    if(current)for(const [k,v] of current.current)seen.set(k,v);
+    if(!row)return null;
+    if(row.committed_revision>w.revision||BigInt(row.at_us)>BigInt(minuteToClimateUs(w.minute))||eventDigest(db,row)!==row.event_digest)
+     throw Error('ordinary_native_speech_changed');
+    assertOwned();
+    const indexed=db.prepare('SELECT world_id,person_id,event_seq FROM main.event_people WHERE event_id=? ORDER BY person_id LIMIT 3').all(row.event_id);
+    return Object.freeze({receipt:Object.freeze(receipt(row)),witnessDigest:digest(JSON.stringify([SCOPE,row,indexed]))});
+   }catch{isolated=true;return null;}
+  }
  return Object.freeze({
   worldId,
   isolate(){isolated=true;},
@@ -123,18 +137,10 @@ export function openOrdinaryNativeSpeechLease(owner:RuntimeOwnership,path:string
     throw Error('ordinary_native_speech_readback');
    assertOwned();
   },
+  readEditorialSourceAtHead,
   readAtHead(db:DatabaseSync,w:World,eventId:string){
-   if(isolated||!db.isTransaction||w.id!==worldId||w.mode!=='validation'||!id(eventId))return null;
-   try{
-    if(!exactHead(db,w))return null;
-    const current=read(db),row=current?.rows.find(r=>r.event_id===eventId);
-    if(current)for(const [k,v] of current.current)seen.set(k,v);
-    if(!row)return null;
-    if(row.committed_revision>w.revision||BigInt(row.at_us)>BigInt(minuteToClimateUs(w.minute))||eventDigest(db,row)!==row.event_digest)
-     throw Error('ordinary_native_speech_changed');
-    assertOwned();
-    return Object.freeze({status:'committed-private-addressed-speech' as const,receipt:Object.freeze(receipt(row)),disclosureAuthorized:false as const});
-   }catch{isolated=true;return null;}
+   const proof=readEditorialSourceAtHead(db,w,eventId);
+   return proof?Object.freeze({status:'committed-private-addressed-speech' as const,receipt:proof.receipt,disclosureAuthorized:false as const}):null;
   },
  });
 }

@@ -5,6 +5,7 @@ const MAX_VERSION := 9007199254740991.0
 const SECTION_PREFIX := "valley-life-section-"
 const LEGACY_VIEW := "offline-synthetic-selection"
 const OBJECTIVE_MEAL_VIEW := "independently-reviewed-native-meal"
+const OBJECTIVE_HEARING_VIEW := "independently-reviewed-native-hearing"
 const DAY_US := 1440000000
 const FACT_NAMES := {
  "arrived": "记录到一次实际到场",
@@ -49,7 +50,7 @@ static func context(snapshot: Dictionary) -> Dictionary:
 	var marker: Variant = snapshot.get("valleySpiritLifeYearbook")
 	var world: Variant = snapshot.get("world")
 	if not _exact(marker, ["schemaVersion", "status", "generatedBy", "worldId", "worldRevision", "atMinute", "sectionId"]) or not world is Dictionary: return {}
-	if not _integer(marker.schemaVersion, 1) or marker.schemaVersion != 1 or not _equals(marker.status, "ready") or not (_equals(marker.generatedBy, LEGACY_VIEW) or _equals(marker.generatedBy, OBJECTIVE_MEAL_VIEW)): return {}
+	if not _integer(marker.schemaVersion, 1) or marker.schemaVersion != 1 or not _equals(marker.status, "ready") or not (_equals(marker.generatedBy, LEGACY_VIEW) or _equals(marker.generatedBy, OBJECTIVE_MEAL_VIEW) or _equals(marker.generatedBy, OBJECTIVE_HEARING_VIEW)): return {}
 	var world_id: Variant = world.get("id")
 	var minute: Variant = world.get("minute")
 	var revision: Variant = world.get("revision")
@@ -75,19 +76,20 @@ static func _game_minute(micro: int) -> String:
 static func presentation(dto: Variant, authority: Dictionary) -> String:
 	if authority.is_empty() or not _exact(dto, ["status", "generatedBy", "worldId", "range", "sectionId", "lines"]): return ""
 	var mode: Variant = authority.get("generatedBy")
-	if not (_equals(mode, LEGACY_VIEW) or _equals(mode, OBJECTIVE_MEAL_VIEW)): return ""
+	if not (_equals(mode, LEGACY_VIEW) or _equals(mode, OBJECTIVE_MEAL_VIEW) or _equals(mode, OBJECTIVE_HEARING_VIEW)): return ""
 	if not _equals(dto.status, "ready") or not _equals(dto.generatedBy, mode) or not _equals(dto.worldId, authority.worldId) or not _equals(dto.sectionId, authority.sectionId): return ""
 	if not _exact(dto.range, ["fromUs", "throughUs"]): return ""
 	var start := _clock(dto.range.fromUs)
 	var end := _clock(dto.range.throughUs)
 	if start < 0 or end < start or end > authority.asOfUs or end - start > 1440000000: return ""
 	if not dto.lines is Array or dto.lines.is_empty() or dto.lines.size() > 3: return ""
-	if mode == OBJECTIVE_MEAL_VIEW:
+	if mode == OBJECTIVE_MEAL_VIEW or mode == OBJECTIVE_HEARING_VIEW:
 		if dto.lines.size() != 1 or start != end or start % DAY_US != 0: return ""
 		var objective: Variant = dto.lines[0]
-		if not _exact(objective, ["atUs", "kind", "text"]) or _clock(objective.atUs) != start or not _equals(objective.kind, "meal-consumed"): return ""
+		var fact_kind := "meal-consumed" if mode == OBJECTIVE_MEAL_VIEW else "conversation-completed"
+		if not _exact(objective, ["atUs", "kind", "text"]) or _clock(objective.atUs) != start or not _equals(objective.kind, fact_kind): return ""
 		@warning_ignore("integer_division")
-		var sentence := "第 " + str(start / DAY_US + 1) + " 日：有人用过一餐。"
+		var sentence := "第 " + str(start / DAY_US + 1) + (" 日：有人用过一餐。" if mode == OBJECTIVE_MEAL_VIEW else " 日：一次当面发言被听见。")
 		if not _equals(objective.text, sentence): return ""
 		return "生活年鉴\n" + sentence
 	var rendered := PackedStringArray(["生活年鉴 · 离线"])
