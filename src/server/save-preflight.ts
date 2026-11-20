@@ -1,3 +1,4 @@
+import {exactDisposableEating,readExactDisposableActiveEating,type Eating,type DisposableNativeAgedTransferPin} from './disposable-native-aged-transfer.js';
 import {assertDisposableRulesSavePath,readDisposableRulesSaveMarker,type DisposableRulesSaveAuthority} from './disposable-native-rules-save.js';
 import {assertOrdinaryAgedGroundStartup,type OrdinaryAgedGroundPin} from './valley-spirit-ordinary-aged-ground.js';
 import {rejectSealedAgedBirthOnGenericPath} from './valley-spirit-aged-birth-archive.js';
@@ -36,6 +37,12 @@ const MAX_STATE_BYTES=256*1024*1024;
 
 /** Validate only the compatibility envelope, not every game's domain rule. */
 export function assertWorldCompatibility(value:unknown,allowMvpSpiritEffectFixture=false):asserts value is Record<string,unknown> {
+ return assertWorldCompatibilityInternal(value,allowMvpSpiritEffectFixture);
+}
+export function assertStagedDisposableEatingCompatibility(value:World,work: Eating):void{
+ assertWorldCompatibilityInternal(value,false,work);
+}
+function assertWorldCompatibilityInternal(value:unknown,allowMvpSpiritEffectFixture:boolean,privateEating?:Eating):asserts value is Record<string,unknown>{
  if(!record(value))fail('save_invalid_world');
  if(Array.isArray(value.events)&&value.events.some(e=>record(e)&&(owns(e,'mvpAgedFruitBirth')||owns(e,'mvpAgedFruitExpiry')||owns(e,'mvpAgedFruitPickup')||owns(e,'mvpAgedHeldFruitExpiry')||owns(e,'mvpAgedHeldFruitEaten'))))fail('save_sealed_aged_birth_requires_private_archive');
  // Reject presence, not a recognized version/truthy value. No upgrade escape.
@@ -56,13 +63,15 @@ export function assertWorldCompatibility(value:unknown,allowMvpSpiritEffectFixtu
  }else if(value.schemaVersion!==1)fail('save_unsupported_world_schema');
  else if(owns(value,'mvpSeasonalModelVersion'))fail('save_seasonal_model_schema');
  try{validateMvpPreservation(value as unknown as World);}catch{fail('save_invalid_mvpPreservation');}
+ if(privateEating&&!exactDisposableEating(value as unknown as World,privateEating))fail('save_disposable_invalid_aged_eating');
  if(Array.isArray(value.residents))for(const r of value.residents){
   if(!record(r))continue;
   const arrangement=record(r.plan)?r.plan:null;
   const plan=arrangement&&Array.isArray(arrangement.actions)?arrangement.actions:[];
   const activity=record(r.activity)?r.activity:null;
   if(plan.some(a=>record(a)&&(a.type==='mvpAgedFruitPickup'||a.type==='mvpAgedFruitEat'))||
-   activity&&(owns(activity,'mvpAgedEatWorkStartedAt')||record(activity.action)&&(activity.action.type==='mvpAgedFruitPickup'||activity.action.type==='mvpAgedFruitEat')))
+   activity&&(owns(activity,'mvpAgedEatWorkStartedAt')||record(activity.action)&&(activity.action.type==='mvpAgedFruitPickup'||
+    activity.action.type==='mvpAgedFruitEat'&&privateEating?.residentId!==r.id)))
    fail('save_sealed_aged_pickup_requires_private_archive');
   const pending=plan.some(a=>record(a)&&a.type==='mvpShelter');
   const shelter=activity&&record(activity.action)&&activity.action.type==='mvpShelter';
@@ -118,14 +127,28 @@ export function assertWorldCompatibility(value:unknown,allowMvpSpiritEffectFixtu
    fail('save_invalid_mvpSpiritFruitSettlement');
  }
 }
-export function decodeSavedWorld(body:unknown,allowMvpSpiritEffectFixture=false):Record<string,unknown> {
+function parseSavedWorld(body:unknown):unknown {
  let value:unknown;
  try{
   const json=typeof body==='string'?body:body instanceof Uint8Array?gunzipSync(body,{maxOutputLength:MAX_STATE_BYTES}).toString():fail('save_invalid_state_encoding');
   if(Buffer.byteLength(json)>MAX_STATE_BYTES)fail('save_state_too_large');
   value=JSON.parse(json);
  }catch(error){if(error instanceof SaveCompatibilityError)throw error;fail('save_invalid_state_encoding');}
- assertWorldCompatibility(value,allowMvpSpiritEffectFixture);return value;
+ return value;
+}
+export function decodeSavedWorld(body:unknown,allowMvpSpiritEffectFixture=false):Record<string,unknown>{
+ const value=parseSavedWorld(body);assertWorldCompatibility(value,allowMvpSpiritEffectFixture);return value;
+}
+export function decodeExactDisposableSavedWorld(body:unknown,db:DatabaseSync,owner:DisposableRulesSaveAuthority,pin:DisposableNativeAgedTransferPin):Record<string,unknown>{
+ const value=parseSavedWorld(body);
+ if(!record(value))fail('save_invalid_world');
+ try{assertWorldCompatibility(value);return value;}
+ catch(error){
+  if(!(error instanceof SaveCompatibilityError)||error.code!=='save_sealed_aged_pickup_requires_private_archive')throw error;
+  const work=readExactDisposableActiveEating(db,owner,pin,value as unknown as World);
+  if(!work)throw error;
+  assertWorldCompatibilityInternal(value,false,work);return value;
+ }
 }
 function jsonBlob(body:unknown):unknown {
  if(!(body instanceof Uint8Array))fail('save_invalid_landscape_encoding');
@@ -139,7 +162,7 @@ export function assertDeveloperMvpEffectArchive(db:DatabaseSync,world:World):voi
   event.at!==archived[i].at||JSON.stringify(event)!==archived[i].body))fail('save_invalid_developer_effect_archive');
 }
 
-function inspectDatabase(db:DatabaseSync,rejectClimate:boolean,validateWorld?: (world:Record<string,unknown>)=>void,allowSeasonalModel=false,inspectSeasonalModel?:(s:SeasonalLedger|null)=>void,fixtureSeal?:string,formalOwner?:DeveloperMvpSpiritFixtureOwner,formalWeatherOwner?:DeveloperMvpSpiritFixtureOwner,nativeEmptyGround?:OrdinaryAgedGroundPin,privateDisposableSave?:DisposableRulesSaveAuthority):Record<string,unknown>|null {
+function inspectDatabase(db:DatabaseSync,rejectClimate:boolean,validateWorld?: (world:Record<string,unknown>)=>void,allowSeasonalModel=false,inspectSeasonalModel?:(s:SeasonalLedger|null)=>void,fixtureSeal?:string,formalOwner?:DeveloperMvpSpiritFixtureOwner,formalWeatherOwner?:DeveloperMvpSpiritFixtureOwner,nativeEmptyGround?:OrdinaryAgedGroundPin,privateDisposableSave?:DisposableRulesSaveAuthority,privateDisposableAgedTransfer?:DisposableNativeAgedTransferPin):Record<string,unknown>|null {
  const fixtureTable=db.prepare("SELECT name,type,sql FROM sqlite_master WHERE lower(name)='mvp_spirit_developer_fixture'").get();
  let disposableWorld:string|undefined;
  if(privateDisposableSave){
@@ -160,7 +183,9 @@ function inspectDatabase(db:DatabaseSync,rejectClimate:boolean,validateWorld?: (
  let latest:Record<string,unknown>|null=null;
  for(const row of db.prepare('SELECT id,revision,length(CAST(state AS BLOB)) AS stateBytes, CASE WHEN length(CAST(state AS BLOB))<=? THEN state ELSE NULL END AS state FROM worlds ORDER BY rowid').iterate(MAX_STATE_BYTES)){
   if(typeof row.stateBytes!=='number'||row.stateBytes>MAX_STATE_BYTES)fail('save_state_too_large');
-  const world=decodeSavedWorld(row.state,fixtureSeal!==undefined&&!formalOwner&&!formalWeatherOwner);
+  const world=privateDisposableSave&&privateDisposableAgedTransfer?
+   decodeExactDisposableSavedWorld(row.state,db,privateDisposableSave,privateDisposableAgedTransfer):
+   decodeSavedWorld(row.state,fixtureSeal!==undefined&&!formalOwner&&!formalWeatherOwner);
   if(disposableWorld&&(latest!==null||world.mode!=='validation'||world.id!==disposableWorld))fail('save_disposable_rules_world');
   if(fixtureSeal&&(formalOwner||formalWeatherOwner)&&(latest!==null||world.mode!=='formal'||typeof world.id!=='string'||
    !/^valley-formal-[A-Za-z0-9_-]{1,180}$/.test(world.id)||world.mvpSeasonalModelVersion!==undefined||owns(world,'mvpClimate')))
@@ -250,8 +275,9 @@ function unchanged(path:string,files:ReadonlyArray<SourceFile|null>,suffixes:rea
  * checkpoint. WAL is copied alongside the DB and SQLite reads its latest state.
  * This is not a substitute for caller-held ownership against concurrent writers.
  */
-export function preflightWorldSave(path:string,options:{requireWorld?:boolean;rejectClimate?:boolean;allowSeasonalModel?:boolean;inspectSeasonalModel?:(s:SeasonalLedger|null)=>void;inspectOptionalAlmanac?:(snapshot:DatabaseSync,world:Record<string,unknown>)=>void;validateWorld?:(world:Record<string,unknown>)=>void;developerSpiritFixtureOwner?:DeveloperMvpSpiritFixtureOwner;nativeEmptyGround?:OrdinaryAgedGroundPin;privateDisposableSave?:DisposableRulesSaveAuthority}={}):Record<string,unknown>|null {
+export function preflightWorldSave(path:string,options:{requireWorld?:boolean;rejectClimate?:boolean;allowSeasonalModel?:boolean;inspectSeasonalModel?:(s:SeasonalLedger|null)=>void;inspectOptionalAlmanac?:(snapshot:DatabaseSync,world:Record<string,unknown>)=>void;validateWorld?:(world:Record<string,unknown>)=>void;developerSpiritFixtureOwner?:DeveloperMvpSpiritFixtureOwner;nativeEmptyGround?:OrdinaryAgedGroundPin;privateDisposableSave?:DisposableRulesSaveAuthority;privateDisposableAgedTransfer?:DisposableNativeAgedTransferPin}={}):Record<string,unknown>|null {
  const fixture=options.developerSpiritFixtureOwner,disposable=options.privateDisposableSave;
+ if(options.privateDisposableAgedTransfer&&!disposable)fail('save_disposable_rules_owner');
  if(disposable!==undefined){
   if(path===':memory:'||fixture!==undefined||options.allowSeasonalModel||options.rejectClimate)fail('save_disposable_rules_owner');
   try{assertDisposableRulesSavePath(disposable,path);}catch{fail('save_disposable_rules_owner');}
@@ -278,7 +304,7 @@ export function preflightWorldSave(path:string,options:{requireWorld?:boolean;re
   // readOnly may create SHM on this PRIVATE copy, never on the user's save.
   db=new DatabaseSync(copy,{readOnly:true});
   if(fixture||disposable)db.exec('PRAGMA trusted_schema=OFF; PRAGMA query_only=ON');
-  const result=inspectDatabase(db,options.rejectClimate===true,options.validateWorld,options.allowSeasonalModel===true,options.inspectSeasonalModel,fixture?.seal,fixture?.formalApprovalKeyPem?fixture:undefined,fixture?.formalWeatherPurpose?fixture:undefined,options.nativeEmptyGround,disposable);
+  const result=inspectDatabase(db,options.rejectClimate===true,options.validateWorld,options.allowSeasonalModel===true,options.inspectSeasonalModel,fixture?.seal,fixture?.formalApprovalKeyPem?fixture:undefined,fixture?.formalWeatherPurpose?fixture:undefined,options.nativeEmptyGround,disposable,options.privateDisposableAgedTransfer);
   if(!result&&options.requireWorld)fail('save_missing_world');
   if(result&&options.inspectOptionalAlmanac){db.exec('PRAGMA trusted_schema=OFF; PRAGMA query_only=ON');options.inspectOptionalAlmanac(db,result);}
   unchanged(path,files,suffixes);

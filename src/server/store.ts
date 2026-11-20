@@ -1,5 +1,5 @@
 import type {GroundDiscoveryHead} from '../world/mvp-ordinary-aged-ground-discovery.js';
-import {advanceDisposableNativeAgedTransfer,hasDisposableNativeAgedTransfer,makeDisposableNativeAgedBirth,prepareDisposableNativeAgedTransfer,projectDisposableNativeAgedTransfer,projectActiveDisposableGroundForObservation,projectActiveDisposableGroundForPickup,projectDisposableGroundResidentDiscovery,readDisposableNativeAgedTransfer,writeDisposableNativeAgedTransfer,type DisposableNativeAgedTransferPin} from './disposable-native-aged-transfer.js';
+import {advanceDisposableNativeAgedTransfer,hasDisposableNativeAgedTransfer,makeDisposableNativeAgedBirth,prepareDisposableNativeAgedTransfer,projectDisposableHeldForNativeEating,type Eating,projectDisposableNativeAgedTransfer,projectActiveDisposableGroundForObservation,projectActiveDisposableGroundForPickup,projectDisposableGroundResidentDiscovery,readDisposableNativeAgedTransfer,writeDisposableNativeAgedTransfer,type DisposableNativeAgedTransferPin} from './disposable-native-aged-transfer.js';
 import {assertDisposableRulesSavePath,guardDisposableRulesSaveCommit,readDisposableRulesSaveMarker,type DisposableRulesSaveAuthority} from './disposable-native-rules-save.js';
 import {advanceOrdinaryNativeEmptyGround,pinOrdinaryAgedGround,readOwnedEmptyGround,type OrdinaryAgedGroundPin} from './valley-spirit-ordinary-aged-ground.js';
 import {runtimeOwnershipAnchor,type RuntimeOwnership} from './runtime-lock.js';
@@ -66,7 +66,7 @@ import type {World,WorldEvent,Resource} from '../shared/types.js';
 import {AtomicDailySnapshots} from './acceptance-daily-store.js';
 import type {DailySnapshotConfig} from './acceptance-daily-snapshots.js';
 import {attachReceiptHistory} from '../world/receipts.js';
-import {assertDeveloperMvpEffectArchive,assertWorldCompatibility,decodeSavedWorld,preflightWorldSave} from './save-preflight.js';
+import {assertDeveloperMvpEffectArchive,assertWorldCompatibility,assertStagedDisposableEatingCompatibility,decodeExactDisposableSavedWorld,decodeSavedWorld,preflightWorldSave} from './save-preflight.js';
 import {claimDeveloperMvpSpiritFixtureOwner,isDeveloperMvpSpiritFixtureOwner,type DeveloperMvpSpiritFixtureOwner} from './valley-spirit-fixture-files.js';
 function decodeAgedBirthPredecessor(state:Uint8Array):World {
  return decodeSavedWorld(state,true) as unknown as World;
@@ -202,7 +202,7 @@ export class WorldStore {
     !validMvpSpiritFixtureCapacity(fixture))throw Error('mvp_spirit_fixture_requires_disposable_memory');
    this.mvpSpiritEffectFixture=Object.freeze({...fixture});
   }
-  const savedHeader=preflightWorldSave(path,{rejectClimate:!this.allowMvpClimate,allowSeasonalModel:this.seasonalModel,developerSpiritFixtureOwner:owner,nativeEmptyGround:this.nativeEmptyGround?.pin,privateDisposableSave:this.#privateDisposableSave,
+  const savedHeader=preflightWorldSave(path,{rejectClimate:!this.allowMvpClimate,allowSeasonalModel:this.seasonalModel,developerSpiritFixtureOwner:owner,nativeEmptyGround:this.nativeEmptyGround?.pin,privateDisposableSave:this.#privateDisposableSave,privateDisposableAgedTransfer:this.#disposableAgedTransfer,
    inspectOptionalAlmanac:this.#privateDisposableSave?(db,w)=>{
     if(hasDisposableNativeAgedTransfer(db)){
      if(!this.#disposableAgedTransfer)throw Error('disposable_native_aged_transfer_pin_required');
@@ -299,13 +299,18 @@ export class WorldStore {
    first:prefix=>(this.receiptPrefix.get(id,prefix,prefix.slice(0,-1)+';') as {receipt:string}|undefined)?.receipt,
   });
  }
+ private decodeWorldBody(body:unknown){
+  return this.#privateDisposableSave&&this.#disposableAgedTransfer?
+   decodeExactDisposableSavedWorld(body,this.db,this.#privateDisposableSave,this.#disposableAgedTransfer):
+   decodeSavedWorld(body,!!this.mvpSpiritEffectFixture);
+ }
  private readWorld(working:boolean,indexedReceipts:boolean):World|null {
   this.developerSpiritFixtureOwner?.assertOwned();
   this.assertDeveloperSpiritSeal();
   if(this.developerSpiritFixtureOwner)rejectSealedAgedBirthOnGenericPath(this.db);
   const row=this.db.prepare('SELECT state FROM worlds ORDER BY rowid DESC LIMIT 1').get() as {state:string|Uint8Array}|undefined;
   if (!row) return null;
-  const saved=decodeSavedWorld(row.state,!!this.mvpSpiritEffectFixture) as unknown as World & {terrainKey?:string;resourceChanges:Array<[number,Resource]>;resourceCount:number;ledgerVersion?:1};
+  const saved=this.decodeWorldBody(row.state) as unknown as World & {terrainKey?:string;resourceChanges:Array<[number,Resource]>;resourceCount:number;ledgerVersion?:1};
   if(!this.allowMvpClimate)rejectMvpClimateForModels(saved);
   if(saved.formalRainProvenance&&!this.allowFormalRainProvenance)throw Error('formal_rain_store_scope');
   if(!this.seasonalModel&&saved.mvpSeasonalModelVersion!==undefined)throw Error('seasonal_model_store_required');
@@ -750,14 +755,16 @@ export class WorldStore {
    return {status:'committed' as const,replay:false,effect:structuredClone(effect)};
   }catch(error){this.db.exec('ROLLBACK');throw error;}
  }
- private assertWritable(world:World):void {
+ private assertWritable(world:World,privateEating?:Eating):void {
   if(this.#privateDisposableSave&&(world.mode!=='validation'||!world.id.startsWith('godot-mvp-')))throw Error('disposable_native_rules_store_scope');
   this.developerSpiritFixtureOwner?.assertOwned();
   if(this.developerSpiritFixtureOwner?.rulesSpeechWorldId&&world.id!==this.developerSpiritFixtureOwner.rulesSpeechWorldId)
    throw Error('mvp_rules_private_speech_world');
   if(this.developerSpiritFixtureOwner?.rulesMealWorldId&&world.id!==this.developerSpiritFixtureOwner.rulesMealWorldId)
    throw Error('mvp_rules_private_meal_world');
-  assertWorldCompatibility(world,!!this.mvpSpiritEffectFixture);
+  if(privateEating&&this.#privateDisposableSave&&this.#disposableAgedTransfer)
+   assertStagedDisposableEatingCompatibility(world,privateEating);
+  else assertWorldCompatibility(world,!!this.mvpSpiritEffectFixture);
   if(this.formalAppointmentChoiceCustody&&world.mode!=='formal')throw Error('formal_appointment_choice_custody_scope');
   if(this.formalAddressedSpeechCustody&&world.mode!=='formal')throw Error('formal_addressed_speech_scope');
   if(this.nativeRulesFruitRenewal&&(world.mode!=='validation'||world.id!==this.nativeRulesFruitRenewal.worldId||
@@ -822,7 +829,7 @@ export class WorldStore {
  }
  private commitTransaction(world:World,previousRevision:number|null,appended?:AppendedHistory,seasonalLedger?:SeasonalLedger,
   proof?:AddressedSpeechObservation,mealWitnesses?:readonly ValleySpiritMvpMealWitness[]):readonly ValleySpiritLifeReceipt[]{
-  this.assertWritable(world);
+  if(!this.#disposableAgedTransfer)this.assertWritable(world);
   const due=this.armedFormalDue,shadow=this.armedFormalShadow;
   const reached=(job:FormalArmedWindow|undefined)=>!!job&&previousRevision!==null&&
    world.id===job.worldId&&world.mode==='formal'&&world.minute>=job.notBefore;
@@ -849,8 +856,9 @@ export class WorldStore {
     if(!entry)throw Error('disposable_native_aged_transfer_missing');
     // A revoked weather provenance grant stops external readback; it
     // cannot make an already committed physical lot invisible to residents.
-    lifecycle=advanceDisposableNativeAgedTransfer(entry,before,world,native.groundObserved,native.groundPickup);
+    lifecycle=advanceDisposableNativeAgedTransfer(entry,before,world,native.groundObserved,native.groundPickup,native.agedEatingScope,native.agedEaten);
    }
+   if(this.#disposableAgedTransfer)this.assertWritable(world,lifecycle?.eating);
    speech=this.writeDraftWithCustody(world,previousRevision,appended,seasonalLedger,proof,
     !!this.developerSpiritFixtureOwner?.rulesSpeechWorldId,mealWitnesses);
    if(lifecycle&&this.#privateDisposableSave&&this.#disposableAgedTransfer){
@@ -1161,6 +1169,9 @@ export class WorldStore {
  }
  readDisposableNativeGroundPickupEvidence(head:GroundDiscoveryHead){
   return this.withCurrentDisposableGround(head,false,e=>projectActiveDisposableGroundForPickup(e,head));
+ }
+ readDisposableHeldForNativeEating(head:GroundDiscoveryHead){
+  return this.withCurrentDisposableGround(head,false,projectDisposableHeldForNativeEating);
  }
  readDisposableResidentGroundDiscovery(head:GroundDiscoveryHead,residentId:string){
   return this.withCurrentDisposableGround(head,true,e=>projectDisposableGroundResidentDiscovery(e,residentId));
@@ -1609,7 +1620,7 @@ export class WorldStore {
    if(ids.length>1||ids.length===1&&ids[0].id!==world.id)throw Error('disposable_native_rules_world_changed');
   }
   const row=this.db.prepare('SELECT revision,state FROM worlds WHERE id=?').get(world.id) as {revision:number;state:string|Uint8Array}|undefined;
-  const stored=row?decodeSavedWorld(row.state,!!this.mvpSpiritEffectFixture):null;
+  const stored=row?this.decodeWorldBody(row.state):null;
   if(stored){if(stored.schemaVersion===3&&world.schemaVersion!==3)throw Error('shelter_schema_downgrade');if(stored.mvpSeasonalModelVersion===1&&(!this.seasonalModel||world.mvpSeasonalModelVersion!==1))throw Error('seasonal_model_dependency_downgrade');assertSeasonalKnowledgeAdvance(stored as unknown as World,world);if(Object.prototype.hasOwnProperty.call(stored,'mvpPreservation')&&!world.mvpPreservation)throw Error('preservation_dependency_downgrade');if(Object.prototype.hasOwnProperty.call(stored,'mvpSoil')&&(!world.mvpSoil||(world.mvpClimate?.schemaVersion??0)<2))throw Error('soil_dependency_downgrade');if(Object.prototype.hasOwnProperty.call(stored,'mvpAgriculture')&&(!world.mvpAgriculture||world.mvpClimate?.schemaVersion!==3))throw Error('agriculture_dependency_downgrade');if(!this.allowMvpClimate)rejectMvpClimateForModels(stored);}
   if((row?.revision??null)!==previousRevision)throw new Error('stale_world_revision');
   if(this.#privateDisposableSave)guardDisposableRulesSaveCommit(this.db,this.#privateDisposableSave,world.id,!row);

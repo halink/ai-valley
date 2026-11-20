@@ -67,7 +67,17 @@ export function createDisposableNativeRulesSave(){
      assertDisposable();return read();
     };
     return Object.freeze({
-     snapshot:()=>live(run.snapshot),advance:()=>live(()=>run.session.advance(1)),
+     snapshot:()=>live(()=>{
+      const s=run.snapshot();
+      // Exact in-flight effect identifiers live only in the protected world
+      // and private evidence, not generic observer snapshots.
+      for(const resident of s.world.residents){
+       if(resident.activity?.action.type==='mvpAgedFruitEat'||resident.plan?.actions.some(a=>a.type==='mvpAgedFruitEat')){
+        resident.activity=null;resident.plan=null;
+       }
+      }
+      return s;
+     }),advance:()=>live(()=>run.session.advance(1)),
      readPrivateSpiritGeographicProposal:()=>live(run.readPrivateSpiritGeographicProposal),
      readPrivateNativeFruitLot:()=>live(run.readPrivateNativeFruitLot),
      readPrivateAgedFruitPreflight:()=>live(run.readPrivateAgedFruitPreflight),
@@ -155,7 +165,7 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
   if(disposable&&!privateDisposableSave)throw Error('disposable_native_rules_owner');
   try{lstatSync(owner.database+'.self-hosted-session');throw Error('mvp_rules_unresolved_session');}catch(error){if(!(error&&typeof error==='object'&&'code' in error&&error.code==='ENOENT'))throw error;}
   let almanacReadable=true,nativeGroundAlreadyBound=false;
-  const probe=preflightWorldSave(owner.database,{requireWorld:true,privateDisposableSave,developerSpiritFixtureOwner:privateOwner,nativeEmptyGround:nativeEmpty?agedGroundPin??undefined:undefined,inspectOptionalAlmanac:(db,w)=>{if(nativeEmpty)nativeGroundAlreadyBound=hasNativeEmptyGroundCheckpoint(db);try{inspectValleySpiritAlmanac(db,(w as unknown as World).id);}catch{almanacReadable=false;}if(lifePin)try{inspectPersistentRulesLifeFixture(db,w,lifePin);lifeReadable=true;}catch{/* isolate optional life */}},validateWorld:value=>{const w=value as unknown as World;assertMvpWorld(w);assertMvpClimateWorld(w);const m=w.metrics;
+  const probe=preflightWorldSave(owner.database,{requireWorld:true,privateDisposableSave,privateDisposableAgedTransfer:disposableAgedTransfer??undefined,developerSpiritFixtureOwner:privateOwner,nativeEmptyGround:nativeEmpty?agedGroundPin??undefined:undefined,inspectOptionalAlmanac:(db,w)=>{if(nativeEmpty)nativeGroundAlreadyBound=hasNativeEmptyGroundCheckpoint(db);try{inspectValleySpiritAlmanac(db,(w as unknown as World).id);}catch{almanacReadable=false;}if(lifePin)try{inspectPersistentRulesLifeFixture(db,w,lifePin);lifeReadable=true;}catch{/* isolate optional life */}},validateWorld:value=>{const w=value as unknown as World;assertMvpWorld(w);assertMvpClimateWorld(w);const m=w.metrics;
    if(!m||!Array.isArray(m.inFlight)||m.inFlight.length||m.configured!==false||[m.requests,m.successes,m.failures,m.inputTokens,m.outputTokens].some(n=>n!==0)||m.lastAttemptModel!==undefined||m.admissionCancellation!==undefined||m.routing!==undefined||Object.keys(m.usageWindow??{}).length||Object.keys(m.selfHostedCooldowns??{}).length||m.unmeteredFailures)throw Error('mvp_rules_model_history_unsupported');}});
   if(agedGroundPin){
    if(probe?.id!==agedGroundPin.worldId)throw Error('ordinary_aged_ground_existing_save_required');
@@ -187,6 +197,7 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
   if(!saved||upgraded||adopted||soilAdopted||agricultureAdopted||rainAdopted)store.commit(world,previous);
   let lastCommittedMinute=world.minute;
   const startSession=(head:World)=>createMvpSession({world:head,persistent:true,
+   privateReadHeldAgedEat:disposableAgedTransfer?head=>store!.readDisposableHeldForNativeEating(head):undefined,
    privateAgedGroundDiscovery:disposableAgedTransfer?{
     readExactActiveLot:head=>store!.readDisposableActiveGroundForNativeObservation(head),
     readExactPickupEvidence:head=>store!.readDisposableNativeGroundPickupEvidence(head),

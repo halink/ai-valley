@@ -1,3 +1,4 @@
+import {emitLedgerEvent} from './events.js';
 import type {Action,Resident,World} from '../shared/types.js';
 import {goods} from '../shared/items.js';
 import {minuteToClimateUs,parseClimateUs} from './mvp-climate.js';
@@ -6,10 +7,11 @@ import {mvpDiningPlace} from './mvp-rooms.js';
 import {MVP_HALL,hasMvpHamlet} from '../shared/mvp-hamlet.js';
 import {findPath,same} from './navigation.js';
 
-export interface NativeAgedEatSelection {readonly residentId:string;readonly effectId:string;readonly expiresUs:string;readonly table?:true}
-interface NativeAgedEatCompletion {
+export interface NativeAgedEatSelection {readonly residentId:string;readonly effectId:string;readonly expiresUs:string;readonly table?:true;readonly disposableEvent?:true}
+export interface NativeAgedEatCompletion {
  readonly residentId:string;readonly planId:string;readonly startedUs:string;readonly settledUs:string;
  readonly dining?: NonNullable<Extract<Action,{type:'mvpAgedFruitEat'}>['dining']>;
+ readonly eventId?:string;
  readonly hungerBefore:number;readonly hungerAfter:number;readonly nutrition:number;readonly workMinutes:5;
 }
 const active=new WeakMap<World,{held:NativeAgedEatSelection;completion:NativeAgedEatCompletion|null}>();
@@ -81,7 +83,9 @@ export function completeMvpNativeAgedEat(w:World,r:Resident,action:EatAction,ela
   return d?AGED_DINING_INVALID:AGED_EAT_INVALID;
  const hungerBefore=r.hunger,nutrition=goods.fruit.food;
  r.hunger=Math.max(0,hungerBefore-nutrition);
- scope.completion=Object.freeze({residentId:r.id,planId:a.planId,startedUs:minuteToClimateUs(startedAt),
+ const event=scope.held.disposableEvent?emitLedgerEvent(w,{kind:'action',actors:[r.id],place:{...r.at},
+  text:r.name+'吃完了一份自己的食物。'}):undefined;
+ scope.completion=Object.freeze({...(event?{eventId:event.id}:{}),residentId:r.id,planId:a.planId,startedUs:minuteToClimateUs(startedAt),
   settledUs:minuteToClimateUs(w.minute),hungerBefore,hungerAfter:r.hunger,nutrition,workMinutes:5,
   ...(d?{dining:Object.freeze({...d,seat:Object.freeze({...d.seat})})}:{})});
  return null; // Held terminal and observer fact belong to the exact sealed transaction.

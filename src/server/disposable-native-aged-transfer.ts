@@ -1,3 +1,6 @@
+import {physiology} from '../world/physiology.js';
+import type {NativeAgedEatCompletion,NativeAgedEatSelection} from '../world/mvp-aged-fruit-native-eat.js';
+import {goods} from '../shared/items.js';
 import type {DisposableNativePickupWitness} from './godot-mvp.js';
 import {same} from '../world/navigation.js';
 import {mvpFallenFruitDiscoveryId} from '../shared/valley-spirit-fairness.js';
@@ -83,11 +86,40 @@ export function makeDisposableNativeAgedBirth(pin:DisposableNativeAgedTransferPi
 type PickupFact=Readonly<DisposableNativePickupWitness&{revision:number;groundDebit:1;heldCredit:1}>;
 type HeldExpiry=Readonly<{atUs:string;revision:number;heldDebit:1}>;
 type Entry=Omit<NonNullable<ReturnType<typeof makeDisposableNativeAgedBirth>>['entry'],'version'>&{
- readonly version:1|2;
+ readonly version:1|2|3;
  readonly discoveries?:readonly CommittedNativeOrdinaryAgedDiscovery[];
  readonly pickup?:PickupFact;
  readonly heldExpiry?:HeldExpiry;
+ readonly eating?:Eating;
+ readonly eaten?:Eaten;
 };
+export type Eating=Readonly<{residentId:string;planId:string;effectId:string;startedAt:number;worked:number}>;
+type Eaten=Readonly<NativeAgedEatCompletion&{eventId:string;eventDigest:string;revision:number;heldDebit:1}>;
+function sameJson(a:unknown,b:unknown){return JSON.stringify(a)===JSON.stringify(b);}
+function agedEatActor(r:World['residents'][number]){
+ return r.activity?.action.type==='mvpAgedFruitEat'||r.plan?.actions.some(a=>a.type==='mvpAgedFruitEat')||
+  r.activity?.mvpAgedEatWorkStartedAt!==undefined;
+}
+export function exactDisposableEating(w:World,expected?:Eating):boolean{
+ if(!expected)return !w.residents.some(agedEatActor);
+ const actors=w.residents.filter(agedEatActor);
+ if(actors.length!==1||actors[0].id!==expected.residentId)return false;
+ const r=actors[0],a=r.activity,p=r.plan;
+ return !!a&&!!p&&r.inside===null&&!r.regionalLocation&&r.status==='alive'&&a.action.type==='mvpAgedFruitEat'&&
+  exact(a.action,['type','effectId'])&&a.action.effectId===expected.effectId&&p.id===expected.planId&&
+  p.actorId===r.id&&p.actions.length===0&&a.planId===p.id&&a.startedAt===expected.startedAt&&
+  p.createdAt===a.startedAt-1&&a.path.length===0&&!a.room&&a.mvpAgedEatWorkStartedAt===undefined&&same(a.target,r.at)&&
+  Number.isSafeInteger(expected.worked)&&expected.worked>=1&&expected.worked<=4&&a.remaining===5-expected.worked&&
+  w.minute===expected.startedAt+expected.worked-1&&w.processed.includes('plan:'+p.id);
+}
+function readEating(w:World,holderId:string,effectId:string):Eating|undefined{
+ if(!w.residents.some(agedEatActor))return undefined;
+ const a=w.residents.find(r=>r.id===holderId)?.activity;
+ if(!a)throw Error('disposable_native_aged_eat_foreign');
+ const work={residentId:holderId,planId:a.planId,effectId,startedAt:a.startedAt,worked:5-a.remaining};
+ if(!exactDisposableEating(w,work))throw Error('disposable_native_aged_eat_activity');
+ return work;
+}
 const MAX_DISCOVERIES=64, MAX_ARCHIVE_BYTES=64*1024;
 const residentId=(id:unknown):id is string=>typeof id==='string'&&/^[A-Za-z0-9:_-]{1,160}$/u.test(id);
 const vec=(v:unknown)=>exact(v,['x','y'])&&[v.x,v.y].every(n=>Number.isSafeInteger(n)&&Number(n)>=0&&Number(n)<=4095);
@@ -133,7 +165,7 @@ export function readDisposableNativeAgedTransfer(db:DatabaseSync,owner:Disposabl
  if(persisted?.revision!==w.revision||!(persisted.state instanceof Uint8Array)||hash(persisted.state)!==e.head)
   throw Error('disposable_native_aged_transfer_durable_head');
  const g1=prepareOrdinaryAgedG1ReviewEncoding(pin.review,e.p.basis,e.p.ground,e.p.g1);
- if(e.version!==(e.pickup?2:1)||e.head!==digestWorld(w)||w.id!==e.p.terms.worldId||w.revision<e.receipt.placementRevision||
+ if((e.pickup?e.version!==2&&e.version!==3:e.version!==1)||(e.eating||e.eaten)&&e.version!==3||e.head!==digestWorld(w)||w.id!==e.p.terms.worldId||w.revision<e.receipt.placementRevision||
   g1.status!=='encoding-only'||e.p.terms.g1Digest!==hash(JSON.stringify(e.p.g1))||e.p.terms.effectKeyId!==pin.keyId||
   !g2Valid(e.p.terms,e.g2,pin)||e.expiry===null&&!e.pickup&&parseClimateUs(minuteToClimateUs(w.minute))>=parseClimateUs(e.lot.expiresUs)||
   e.expiry!==null&&(e.expiry.atUs!==e.lot.expiresUs||e.expiry.revision>w.revision))throw Error('disposable_native_aged_transfer_head');
@@ -150,9 +182,24 @@ export function readDisposableNativeAgedTransfer(db:DatabaseSync,owner:Disposabl
    parseClimateUs(p.settledUs)<=parseClimateUs(first.atUs)||parseClimateUs(p.settledUs)>=parseClimateUs(e.lot.expiresUs)||
    parseClimateUs(p.settledUs)>now||!p.planId.startsWith('mvp-rule-'+w.id+'-')||
    (e.heldExpiry?e.heldExpiry.atUs!==e.lot.expiresUs||e.heldExpiry.revision<=p.revision||e.heldExpiry.revision>w.revision||
-    e.heldExpiry.heldDebit!==1||now<parseClimateUs(e.lot.expiresUs):now>=parseClimateUs(e.lot.expiresUs)||!livingHolder(w,p.residentId)))
+    e.heldExpiry.heldDebit!==1||now<parseClimateUs(e.lot.expiresUs):e.eaten?false:now>=parseClimateUs(e.lot.expiresUs)||!livingHolder(w,p.residentId)))
    throw Error('disposable_native_aged_pickup_archive');
- }else if(e.heldExpiry)throw Error('disposable_native_aged_pickup_archive');
+ }else if(e.heldExpiry||e.eating||e.eaten)throw Error('disposable_native_aged_pickup_archive');
+ if(!exactDisposableEating(w,e.eating)||e.eating&&(e.eaten||e.heldExpiry||e.eating.residentId!==p?.residentId||e.eating.effectId!==e.receipt.effectId))
+  throw Error('disposable_native_aged_eat_archive');
+ if(e.eaten){
+  const f=e.eaten,now=parseClimateUs(minuteToClimateUs(w.minute));
+  const archived=db.prepare('SELECT id,world_id,at,rowid AS seq,body FROM main.events WHERE id=?').get(f.eventId);
+  const actors=db.prepare('SELECT world_id,person_id,event_id,event_seq FROM main.event_people WHERE event_id=? LIMIT 2').all(f.eventId);
+  const animals=db.prepare('SELECT 1 FROM main.event_animals WHERE event_id=? LIMIT 1').get(f.eventId);
+  if(e.heldExpiry||!p||f.residentId!==p.residentId||f.heldDebit!==1||f.workMinutes!==5||f.nutrition!==goods.fruit.food||f.dining||
+   parseClimateUs(f.startedUs)<=parseClimateUs(p.settledUs)||parseClimateUs(f.settledUs)-parseClimateUs(f.startedUs)!==4_000_000n||
+   parseClimateUs(f.settledUs)>=parseClimateUs(e.lot.expiresUs)||parseClimateUs(f.settledUs)>now||f.revision<=p.revision||f.revision>w.revision||
+   archived?.id!==f.eventId||archived.world_id!==w.id||typeof archived.at!=='number'||minuteToClimateUs(archived.at)!==f.settledUs||
+   typeof archived.body!=='string'||hash(archived.body)!==f.eventDigest||actors.length!==1||actors[0].world_id!==w.id||
+   actors[0].event_id!==f.eventId||actors[0].event_seq!==archived.seq||actors[0].person_id!==f.residentId||animals)
+   throw Error('disposable_native_aged_eat_event');
+ }
  return e;
 }
 export function writeDisposableNativeAgedTransfer(db:DatabaseSync,owner:DisposableRulesSaveAuthority,e:Entry,initial:boolean){
@@ -166,18 +213,50 @@ function livingHolder(w:World,id:string){
  const r=w.residents.find(r=>r.id===id);
  return r?.status==='alive'&&r.health>0&&r.residency!=='outside'&&!r.regionalLocation?r:null;
 }
-export function advanceDisposableNativeAgedTransfer(e:Entry,before:World,after:World,observed:readonly NativeOrdinaryAgedDiscovery[]=[],pickup?:DisposableNativePickupWitness){
+export function projectDisposableHeldForNativeEating(e:Entry):NativeAgedEatSelection|null{
+ return e.pickup&&!e.heldExpiry&&!e.eaten?Object.freeze({residentId:e.pickup.residentId,effectId:e.receipt.effectId,
+  expiresUs:e.lot.expiresUs,disposableEvent:true as const}):null;
+}
+export function advanceDisposableNativeAgedTransfer(e:Entry,before:World,after:World,observed:readonly NativeOrdinaryAgedDiscovery[]=[],pickup?:DisposableNativePickupWitness,
+ scope?:NativeAgedEatSelection,completed?:NativeAgedEatCompletion){
  const atUs=minuteToClimateUs(after.minute);
  if(after.id!==before.id||after.minute!==before.minute+1||after.revision<=before.revision||after.clock.paused||before.clock.paused)
   throw Error('disposable_native_aged_transfer_native_minute');
  if(e.pickup){
   if(pickup||observed.length)throw Error('disposable_native_aged_pickup_duplicate');
-  if(e.heldExpiry)return {...e,head:digestWorld(after)};
-  if(!livingHolder(before,e.pickup.residentId)||!livingHolder(after,e.pickup.residentId)||
+  if(e.heldExpiry||e.eaten){
+   if(scope||completed||!exactDisposableEating(after))throw Error('disposable_native_aged_eat_duplicate');
+   return {...e,head:digestWorld(after)};
+  }
+  const expected=projectDisposableHeldForNativeEating(e),holder=e.pickup.residentId;
+  if(!expected||!sameJson(scope,expected)||!exactDisposableEating(before,e.eating)||!livingHolder(before,holder)||!livingHolder(after,holder)||
    before.mvpClimate?.lastUs!==minuteToClimateUs(before.minute)||after.mvpClimate?.lastUs!==atUs||
    parseClimateUs(atUs)>parseClimateUs(e.lot.expiresUs))throw Error('disposable_native_aged_held_scope');
-  return {...e,head:digestWorld(after),...(atUs===e.lot.expiresUs?{heldExpiry:{atUs,revision:after.revision,heldDebit:1 as const}}:{})};
+  const work=readEating(after,holder,e.receipt.effectId);
+  if(atUs===e.lot.expiresUs){
+   if(work||completed)throw Error('disposable_native_aged_eat_expiry_priority');
+   const {eating:_old,...rest}=e;
+   return {...rest,head:digestWorld(after),heldExpiry:{atUs,revision:after.revision,heldDebit:1 as const}};
+  }
+  if(completed){
+   const previous=e.eating,event=after.events.find(x=>x.id===completed.eventId),old=livingHolder(before,holder)!,next=livingHolder(after,holder)!;
+   if(work||!previous||previous.worked!==4||completed.residentId!==holder||completed.dining||completed.workMinutes!==5||
+    completed.planId!==previous.planId||completed.startedUs!==minuteToClimateUs(previous.startedAt)||completed.settledUs!==atUs||
+    completed.nutrition!==goods.fruit.food||completed.hungerAfter!==Math.max(0,completed.hungerBefore-completed.nutrition)||
+    old.hunger!==completed.hungerBefore||next.hunger!==Math.min(100,completed.hungerAfter+physiology(after,next).hungerPerMinute)||
+    !sameJson(old.inventory,next.inventory)||
+    !event||event.kind!=='action'||event.at!==after.minute||event.actors.length!==1||event.actors[0]!==holder||!event.observerOnly||
+    before.events.some(x=>x.id===event.id))throw Error('disposable_native_aged_eat_completion');
+   const {eating:_old,...rest}=e;
+   return {...rest,version:3 as const,head:digestWorld(after),eaten:{...completed,eventId:event.id,eventDigest:hash(JSON.stringify(event)),
+    revision:after.revision,heldDebit:1 as const}};
+  }
+  if(work&&(!e.eating?work.worked!==1:work.planId!==e.eating.planId||work.startedAt!==e.eating.startedAt||work.worked!==e.eating.worked+1))
+   throw Error('disposable_native_aged_eat_work');
+  const {eating:_old,...rest}=e;
+  return {...rest,version:work?3 as const:e.version,...(work?{eating:work}:{}),head:digestWorld(after)};
  }
+ if(scope||completed||!exactDisposableEating(after))throw Error('disposable_native_aged_eat_without_held');
  const shift=e.expiry?null:advanceAgedGroundExpiry(before,after,[e.lot]);
  if(!e.expiry&&!shift)throw Error('disposable_native_aged_transfer_expiry');
  const expiry=shift?.expired[0];
@@ -211,8 +290,14 @@ export function projectDisposableNativeAgedTransfer(e:Entry,w:World,g1?:unknown,
  }
  const base={replay:true as const,receipt:e.receipt,expiry:e.expiry};
  if(e.pickup){
-  return {...base,status:e.heldExpiry?'held-expired' as const:'held' as const,occupied:0 as const,
-   pickup:e.pickup,heldQuantity:e.heldExpiry?0 as const:1 as const,heldExpiry:e.heldExpiry??null};
+  return {...base,status:e.eaten?'eaten' as const:e.heldExpiry?'held-expired' as const:'held' as const,occupied:0 as const,
+   pickup:e.pickup,heldQuantity:e.eaten||e.heldExpiry?0 as const:1 as const,heldExpiry:e.heldExpiry??null,eaten:e.eaten??null};
  }
  return {...base,status:e.expiry?'expired' as const:'placed' as const,occupied:e.expiry?0 as const:1 as const};
+}
+
+export function readExactDisposableActiveEating(db:DatabaseSync,owner:DisposableRulesSaveAuthority,pin:DisposableNativeAgedTransferPin,w:World){
+ if(!Array.isArray(w.residents)||!w.residents.some(agedEatActor))return null;
+ const entry=readDisposableNativeAgedTransfer(db,owner,pin,w);
+ return entry?.eating&&exactDisposableEating(w,entry.eating)?entry.eating:null;
 }
