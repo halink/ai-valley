@@ -187,7 +187,10 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
   if(!saved||upgraded||adopted||soilAdopted||agricultureAdopted||rainAdopted)store.commit(world,previous);
   let lastCommittedMinute=world.minute;
   const startSession=(head:World)=>createMvpSession({world:head,persistent:true,
-   privateAgedGroundDiscovery:disposableAgedTransfer?{readExactActiveLot:head=>store!.readDisposableActiveGroundForNativeObservation(head)}:undefined,captureAddressedSpeechCustody:speechPin?true:undefined,captureSameSaveNativeWeather:privateOwner?.rulesWeatherAccountScope?true:undefined,captureAtomicNativeMeals:mealPin?true:undefined,captureAtomicNativeFruitRenewal:nativeRenewal?true:undefined,captureNativeEmptyGroundMinute:nativeEmpty?true:undefined,captureAtomicNativeFruitLot:nativeRenewal?.lotShelfLifeGameMinutes?true:undefined,commit:(draft,revision,speech,meals)=>{
+   privateAgedGroundDiscovery:disposableAgedTransfer?{
+    readExactActiveLot:head=>store!.readDisposableActiveGroundForNativeObservation(head),
+    readExactPickupEvidence:head=>store!.readDisposableNativeGroundPickupEvidence(head),
+   }:undefined,captureAddressedSpeechCustody:speechPin?true:undefined,captureSameSaveNativeWeather:privateOwner?.rulesWeatherAccountScope?true:undefined,captureAtomicNativeMeals:mealPin?true:undefined,captureAtomicNativeFruitRenewal:nativeRenewal?true:undefined,captureNativeEmptyGroundMinute:nativeEmpty?true:undefined,captureAtomicNativeFruitLot:nativeRenewal?.lotShelfLifeGameMinutes?true:undefined,commit:(draft,revision,speech,meals)=>{
    owner!.assertOwned();assertDisposable?.();
    if(mealPin){
     if(draft.id!==mealPin.worldId)throw Error('mvp_rules_private_meal_world');

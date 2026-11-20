@@ -1,3 +1,6 @@
+import type {NativeAgedPickupSelection} from './mvp-aged-fruit-native-pickup.js';
+import {canPerceiveMvpCommonFruitPoint,mvpFallenFruitOptionalActionPermitted} from './mvp-fallen-fruit-resident.js';
+import {same} from './navigation.js';
 import type {MvpGroundFruit} from '../shared/mvp-ground-fruit.js';
 import type {Vec,World} from '../shared/types.js';
 import {mvpFallenFruitDiscoveryId} from '../shared/valley-spirit-fairness.js';
@@ -73,4 +76,43 @@ export function captureOrdinaryAgedGroundDiscovery<T>(draft:World,authority:Ordi
   }
   return {result,observed:Object.freeze(observed)};
  }catch{return {result,observed:none()};}
+}
+
+export interface CommittedNativeOrdinaryAgedDiscovery extends NativeOrdinaryAgedDiscovery {
+ readonly committedRevision:number;
+}
+export interface OrdinaryAgedGroundNativePickupRead extends OrdinaryAgedGroundDiscoveryRead {
+ readonly readExactPickupEvidence:(head:Readonly<GroundDiscoveryHead>)=>Readonly<{
+  lot:NonNullable<ReturnType<OrdinaryAgedGroundDiscoveryRead['readExactActiveLot']>>;
+  discoveries:readonly CommittedNativeOrdinaryAgedDiscovery[];
+ }>|null;
+}
+/** No chosen resident is passed in. This only prepares eligible actors who
+ * really reached the lot; the engine's ordinary idle fallback arbitrates. */
+export function prepareOrdinaryNativePickupIntents(w:World,port:OrdinaryAgedGroundNativePickupRead){
+ const intents=new Map<string,NativeAgedPickupSelection>();
+ try{
+  let facts:readonly CommittedNativeOrdinaryAgedDiscovery[]|undefined;
+  const selected=readOrdinaryAgedGroundObservationHead(w,{readExactActiveLot(h){
+   const input=port.readExactPickupEvidence(h);facts=input?.discoveries;return input?.lot??null;
+  }});
+  if(!selected||!facts||facts.length>64)return intents;
+  const {h,r,before}=selected;
+  const byActor=new Map<string,CommittedNativeOrdinaryAgedDiscovery>();
+  for(const f of facts){
+   if(byActor.has(f.residentId)||f.schema!=='native-ordinary-aged-ground-observation/v1'||f.worldId!==h.worldId||
+    f.effectId!==r.fruit.effectId||f.receiptDigest!==r.receiptDigest||f.discoveryId!==mvpFallenFruitDiscoveryId(h.worldId,f.residentId,f.effectId)||
+    !same(f.target,r.fruit.at)||!Number.isSafeInteger(f.committedRevision)||f.committedRevision>h.revision||f.committedRevision<=f.fromRevision||
+    parseClimateUs(f.atUs)>before||parseClimateUs(f.atUs)<=parseClimateUs(r.fruit.placedUs))return intents;
+   byActor.set(f.residentId,f);
+  }
+  for(const actor of w.residents){
+   const f=byActor.get(actor.id);
+   if(!f||actor.activity||actor.plan||!same(actor.at,r.fruit.at)||!mvpFallenFruitOptionalActionPermitted(w,actor)||
+    !canPerceiveMvpCommonFruitPoint(w,actor.id,r.fruit.at))continue;
+   intents.set(actor.id,Object.freeze({residentId:actor.id,residentRevision:actor.revision,effectId:f.effectId,discoveryId:f.discoveryId,
+    point:r.fruit.at,fromUs:h.atUs,expiresUs:r.expiresUs}));
+  }
+  return intents;
+ }catch{return new Map<string,NativeAgedPickupSelection>();}
 }

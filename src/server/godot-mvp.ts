@@ -1,4 +1,4 @@
-import {captureOrdinaryAgedGroundDiscovery,type OrdinaryAgedGroundDiscoveryRead,type NativeOrdinaryAgedDiscovery} from '../world/mvp-ordinary-aged-ground-discovery.js';
+import {captureOrdinaryAgedGroundDiscovery,prepareOrdinaryNativePickupIntents,type OrdinaryAgedGroundNativePickupRead,type OrdinaryAgedGroundDiscoveryRead,type NativeOrdinaryAgedDiscovery} from '../world/mvp-ordinary-aged-ground-discovery.js';
 import {AGED_DINING_INVALID,AGED_EAT_INVALID,captureMvpNativeAgedEat,selectMvpNativeAgedEat,type NativeAgedEatSelection} from '../world/mvp-aged-fruit-native-eat.js';
 import {captureMvpNativeAgedPickup,selectMvpNativeAgedPickup,type NativeAgedPickupSelection} from '../world/mvp-aged-fruit-native-pickup.js';
 import {nativeWeatherHourTransition} from './valley-spirit-weather-credit.js';
@@ -447,8 +447,11 @@ export function followsPostCommitMvpFruitFlow(previous:MvpFruitFlowBatch,next:Mv
  const before=postCommitFruitFlows.get(previous),after=postCommitFruitFlows.get(next);
  return !!before&&!!after&&before.sessionToken===after.sessionToken&&after.deliveredSequence===before.deliveredSequence+1;
 }
+export type DisposableNativePickupWitness=Readonly<{
+ residentId:string;effectId:string;discoveryId:string;planId:string;settledUs:string;startedAt:number;
+}>;
 const atomicNativeMealMinutes=new WeakMap<World,Readonly<{before:string;after:string}>>();
-const atomicNativeRenewalMinutes=new WeakMap<World,Readonly<{before:string;after:string;renewal:readonly MvpFruitRenewalWitness[];flow:MvpFruitFlowBatch|null;groundObserved?:readonly NativeOrdinaryAgedDiscovery[]}>>();
+const atomicNativeRenewalMinutes=new WeakMap<World,Readonly<{before:string;after:string;renewal:readonly MvpFruitRenewalWitness[];flow:MvpFruitFlowBatch|null;groundObserved?:readonly NativeOrdinaryAgedDiscovery[];groundPickup?:DisposableNativePickupWitness}>>();
 export function readAtomicNativeRulesRenewal(previous:World,draft:World){
  const recorded=atomicNativeRenewalMinutes.get(draft);
  return recorded&&recorded.before===sameSaveWorldFingerprint(previous)&&recorded.after===sameSaveWorldFingerprint(draft)?recorded:undefined;
@@ -474,7 +477,7 @@ export function isAtomicNativeMealMinute(previous:World,draft:World):boolean{
  const observed=atomicNativeMealMinutes.get(draft);
  return !!observed&&observed.before===sameSaveWorldFingerprint(previous)&&observed.after===sameSaveWorldFingerprint(draft);
 }
-export function createMvpSession(options:{observeSessionWeather?:true;world?:World;commit?:(world:World,previousRevision:number,speech?:AddressedSpeechObservation,atomicMeals?:readonly ValleySpiritMvpMealWitness[])=>void;persistent?:boolean;captureAddressedSpeechCustody?:true;captureSameSaveNativeWeather?:true;captureAtomicNativeMeals?:true;captureAtomicNativeFruitRenewal?:true;captureAtomicNativeFruitLot?:true;captureNativeEmptyGroundMinute?:true;privateAgedGroundDiscovery?:OrdinaryAgedGroundDiscoveryRead;observeCommittedMeals?:(witnesses:readonly ValleySpiritMvpMealWitness[])=>void;observeCommittedFruitRenewal?:(witnesses:readonly MvpFruitRenewalWitness[])=>void;observeCommittedFruitFlow?:(flow:MvpFruitFlowBatch)=>void}={}){
+export function createMvpSession(options:{observeSessionWeather?:true;world?:World;commit?:(world:World,previousRevision:number,speech?:AddressedSpeechObservation,atomicMeals?:readonly ValleySpiritMvpMealWitness[])=>void;persistent?:boolean;captureAddressedSpeechCustody?:true;captureSameSaveNativeWeather?:true;captureAtomicNativeMeals?:true;captureAtomicNativeFruitRenewal?:true;captureAtomicNativeFruitLot?:true;captureNativeEmptyGroundMinute?:true;privateAgedGroundDiscovery?:OrdinaryAgedGroundNativePickupRead;observeCommittedMeals?:(witnesses:readonly ValleySpiritMvpMealWitness[])=>void;observeCommittedFruitRenewal?:(witnesses:readonly MvpFruitRenewalWitness[])=>void;observeCommittedFruitFlow?:(flow:MvpFruitFlowBatch)=>void}={}){
  const fruitFlowSessionToken=Symbol();let deliveredFruitFlowSequence=0;
  let world=structuredClone(options.world??createMvpWorld());
  if(options.world)inheritReceiptHistory(options.world,world);
@@ -525,9 +528,16 @@ export function createMvpSession(options:{observeSessionWeather?:true;world?:Wor
      fruitRenewal:!!(options.persistent&&options.commit&&(options.observeCommittedFruitRenewal||options.captureAtomicNativeFruitRenewal)),
      addressedSpeech:!!(options.persistent&&options.commit&&options.captureAddressedSpeechCustody),
     });
-    const scoped=options.persistent&&options.commit&&options.privateAgedGroundDiscovery?
-     captureOrdinaryAgedGroundDiscovery(world,options.privateAgedGroundDiscovery,advanceNative):undefined;
-    const minute=scoped?scoped.result:advanceNative();
+    const owned=options.persistent&&options.commit?options.privateAgedGroundDiscovery:undefined;
+    const intents=owned?prepareOrdinaryNativePickupIntents(current,owned):undefined;
+    const advanceObserved=()=>owned?captureOrdinaryAgedGroundDiscovery(world,owned,advanceNative):{result:advanceNative(),observed:undefined};
+    const pickup=intents?.size?captureMvpNativeAgedPickup(world,intents,advanceObserved):null;
+    if(intents?.size&&!pickup)throw Error('disposable_native_pickup_scope_conflict');
+    const scoped=pickup?pickup.result:advanceObserved();
+    const chosen=pickup?.completion,selected=chosen?intents?.get(chosen.residentId):undefined;
+    if(chosen&&!selected)throw Error('disposable_native_pickup_missing_selection');
+    const groundPickup=chosen&&selected?Object.freeze({...chosen,effectId:selected.effectId,discoveryId:selected.discoveryId}):undefined;
+    const minute=scoped.result;
     serial=minute.serial;
     const {speech,witnesses,renewal,fruitFlow}=minute;
     if(options.persistent&&options.commit&&options.captureSameSaveNativeWeather)sealNativeWeatherMinute(current,world);
@@ -535,7 +545,7 @@ export function createMvpSession(options:{observeSessionWeather?:true;world?:Wor
     if(atomic&&witnesses.length&&world.minute===current.minute+1)
      atomicNativeMealMinutes.set(world,Object.freeze({before:sameSaveWorldFingerprint(current),after:sameSaveWorldFingerprint(world)}));
     if(options.persistent&&options.commit&&(options.captureNativeEmptyGroundMinute||options.captureAtomicNativeFruitLot||options.captureAtomicNativeFruitRenewal&&renewal.length))
-     atomicNativeRenewalMinutes.set(world,Object.freeze({before:sameSaveWorldFingerprint(current),after:sameSaveWorldFingerprint(world),renewal,flow:fruitFlow,groundObserved:scoped?.observed}));
+     atomicNativeRenewalMinutes.set(world,Object.freeze({before:sameSaveWorldFingerprint(current),after:sameSaveWorldFingerprint(world),renewal,flow:fruitFlow,groundObserved:scoped.observed,groundPickup}));
     try{
      if(atomic)options.commit?.(world,current.revision,speech,witnesses);
      else if(speech?.receipts.length)options.commit?.(world,current.revision,speech);

@@ -1,5 +1,7 @@
+import type {DisposableNativePickupWitness} from './godot-mvp.js';
+import {same} from '../world/navigation.js';
 import {mvpFallenFruitDiscoveryId} from '../shared/valley-spirit-fairness.js';
-import type {GroundDiscoveryHead,NativeOrdinaryAgedDiscovery} from '../world/mvp-ordinary-aged-ground-discovery.js';
+import type {GroundDiscoveryHead,NativeOrdinaryAgedDiscovery,CommittedNativeOrdinaryAgedDiscovery} from '../world/mvp-ordinary-aged-ground-discovery.js';
 import {createHash,createPublicKey,verify} from 'node:crypto';
 import {gzipSync} from 'node:zlib';
 import type {DatabaseSync} from 'node:sqlite';
@@ -78,8 +80,14 @@ export function makeDisposableNativeAgedBirth(pin:DisposableNativeAgedTransferPi
  const entry={version:1 as const,p,g2:{terms:p.terms,signature:g2.signature},lot,receipt,head:digestWorld(draft),expiry:null as null|{revision:number;atUs:string;groundDebit:1}};
  return {draft,entry};
 }
-type CommittedDiscovery=NativeOrdinaryAgedDiscovery&{readonly committedRevision:number};
-type Entry=NonNullable<ReturnType<typeof makeDisposableNativeAgedBirth>>['entry']&{readonly discoveries?:readonly CommittedDiscovery[]};
+type PickupFact=Readonly<DisposableNativePickupWitness&{revision:number;groundDebit:1;heldCredit:1}>;
+type HeldExpiry=Readonly<{atUs:string;revision:number;heldDebit:1}>;
+type Entry=Omit<NonNullable<ReturnType<typeof makeDisposableNativeAgedBirth>>['entry'],'version'>&{
+ readonly version:1|2;
+ readonly discoveries?:readonly CommittedNativeOrdinaryAgedDiscovery[];
+ readonly pickup?:PickupFact;
+ readonly heldExpiry?:HeldExpiry;
+};
 const MAX_DISCOVERIES=64, MAX_ARCHIVE_BYTES=64*1024;
 const residentId=(id:unknown):id is string=>typeof id==='string'&&/^[A-Za-z0-9:_-]{1,160}$/u.test(id);
 const vec=(v:unknown)=>exact(v,['x','y'])&&[v.x,v.y].every(n=>Number.isSafeInteger(n)&&Number(n)>=0&&Number(n)<=4095);
@@ -93,9 +101,13 @@ function validDiscovery(e:Entry,d:NativeOrdinaryAgedDiscovery){
   vec(d.observerAt)&&vec(d.target)&&d.target.x===e.lot.fruit.at.x&&d.target.y===e.lot.fruit.at.y;
 }
 export function projectActiveDisposableGroundForObservation(e:Entry,head:GroundDiscoveryHead){
- if(e.expiry)return null;
+ if(e.expiry||e.pickup)return null;
  return Object.freeze({...head,schema:'ordinary-active-aged-ground-observation/v1' as const,
   receiptDigest:receiptDigest(e),fruit:structuredClone(e.lot.fruit),bornUs:e.lot.bornUs,expiresUs:e.lot.expiresUs});
+}
+export function projectActiveDisposableGroundForPickup(e:Entry,h:GroundDiscoveryHead){
+ const lot=projectActiveDisposableGroundForObservation(e,h);
+ return lot?{lot,discoveries:structuredClone(e.discoveries??[])}:null;
 }
 export function projectDisposableGroundResidentDiscovery(e:Entry,id:string){
  return residentId(id)?structuredClone(e.discoveries?.find(d=>d.residentId===id)??null):null;
@@ -121,15 +133,26 @@ export function readDisposableNativeAgedTransfer(db:DatabaseSync,owner:Disposabl
  if(persisted?.revision!==w.revision||!(persisted.state instanceof Uint8Array)||hash(persisted.state)!==e.head)
   throw Error('disposable_native_aged_transfer_durable_head');
  const g1=prepareOrdinaryAgedG1ReviewEncoding(pin.review,e.p.basis,e.p.ground,e.p.g1);
- if(e.version!==1||e.head!==digestWorld(w)||w.id!==e.p.terms.worldId||w.revision<e.receipt.placementRevision||
+ if(e.version!==(e.pickup?2:1)||e.head!==digestWorld(w)||w.id!==e.p.terms.worldId||w.revision<e.receipt.placementRevision||
   g1.status!=='encoding-only'||e.p.terms.g1Digest!==hash(JSON.stringify(e.p.g1))||e.p.terms.effectKeyId!==pin.keyId||
-  !g2Valid(e.p.terms,e.g2,pin)||e.expiry===null&&parseClimateUs(minuteToClimateUs(w.minute))>=parseClimateUs(e.lot.expiresUs)||
+  !g2Valid(e.p.terms,e.g2,pin)||e.expiry===null&&!e.pickup&&parseClimateUs(minuteToClimateUs(w.minute))>=parseClimateUs(e.lot.expiresUs)||
   e.expiry!==null&&(e.expiry.atUs!==e.lot.expiresUs||e.expiry.revision>w.revision))throw Error('disposable_native_aged_transfer_head');
  const d=e.discoveries;
  if(d!==undefined&&(!Array.isArray(d)||d.length>MAX_DISCOVERIES||new Set(d.map(r=>r.residentId)).size!==d.length||
   d.some(({committedRevision,...r})=>!validDiscovery(e,r)||!Number.isSafeInteger(committedRevision)||committedRevision<=r.fromRevision||
    committedRevision<r.observedRevision||committedRevision>w.revision||parseClimateUs(r.atUs)>parseClimateUs(minuteToClimateUs(w.minute)))))
   throw Error('disposable_native_aged_discovery_archive');
+ const p=e.pickup;
+ if(p){
+  const first=e.discoveries?.find(d=>d.residentId===p.residentId&&d.discoveryId===p.discoveryId),now=parseClimateUs(minuteToClimateUs(w.minute));
+  if(e.expiry||!first||p.effectId!==e.receipt.effectId||p.groundDebit!==1||p.heldCredit!==1||!Number.isSafeInteger(p.revision)||
+   p.revision<=first.committedRevision||p.revision>w.revision||minuteToClimateUs(p.startedAt)!==p.settledUs||
+   parseClimateUs(p.settledUs)<=parseClimateUs(first.atUs)||parseClimateUs(p.settledUs)>=parseClimateUs(e.lot.expiresUs)||
+   parseClimateUs(p.settledUs)>now||!p.planId.startsWith('mvp-rule-'+w.id+'-')||
+   (e.heldExpiry?e.heldExpiry.atUs!==e.lot.expiresUs||e.heldExpiry.revision<=p.revision||e.heldExpiry.revision>w.revision||
+    e.heldExpiry.heldDebit!==1||now<parseClimateUs(e.lot.expiresUs):now>=parseClimateUs(e.lot.expiresUs)||!livingHolder(w,p.residentId)))
+   throw Error('disposable_native_aged_pickup_archive');
+ }else if(e.heldExpiry)throw Error('disposable_native_aged_pickup_archive');
  return e;
 }
 export function writeDisposableNativeAgedTransfer(db:DatabaseSync,owner:DisposableRulesSaveAuthority,e:Entry,initial:boolean){
@@ -139,14 +162,38 @@ export function writeDisposableNativeAgedTransfer(db:DatabaseSync,owner:Disposab
  if(Buffer.byteLength(body)>MAX_ARCHIVE_BYTES||db.prepare(`INSERT INTO main.${table} VALUES(1,?,?) ON CONFLICT(slot) DO UPDATE SET body=excluded.body,seal=excluded.seal`)
   .run(body,authenticateDisposableRulesPayload(owner,lane,body)).changes!==1)throw Error('disposable_native_aged_transfer_write');
 }
-export function advanceDisposableNativeAgedTransfer(e:Entry,before:World,after:World,observed:readonly NativeOrdinaryAgedDiscovery[]=[]){
+function livingHolder(w:World,id:string){
+ const r=w.residents.find(r=>r.id===id);
+ return r?.status==='alive'&&r.health>0&&r.residency!=='outside'&&!r.regionalLocation?r:null;
+}
+export function advanceDisposableNativeAgedTransfer(e:Entry,before:World,after:World,observed:readonly NativeOrdinaryAgedDiscovery[]=[],pickup?:DisposableNativePickupWitness){
  const atUs=minuteToClimateUs(after.minute);
  if(after.id!==before.id||after.minute!==before.minute+1||after.revision<=before.revision||after.clock.paused||before.clock.paused)
   throw Error('disposable_native_aged_transfer_native_minute');
+ if(e.pickup){
+  if(pickup||observed.length)throw Error('disposable_native_aged_pickup_duplicate');
+  if(e.heldExpiry)return {...e,head:digestWorld(after)};
+  if(!livingHolder(before,e.pickup.residentId)||!livingHolder(after,e.pickup.residentId)||
+   before.mvpClimate?.lastUs!==minuteToClimateUs(before.minute)||after.mvpClimate?.lastUs!==atUs||
+   parseClimateUs(atUs)>parseClimateUs(e.lot.expiresUs))throw Error('disposable_native_aged_held_scope');
+  return {...e,head:digestWorld(after),...(atUs===e.lot.expiresUs?{heldExpiry:{atUs,revision:after.revision,heldDebit:1 as const}}:{})};
+ }
  const shift=e.expiry?null:advanceAgedGroundExpiry(before,after,[e.lot]);
  if(!e.expiry&&!shift)throw Error('disposable_native_aged_transfer_expiry');
  const expiry=shift?.expired[0];
  if(expiry&&expiry.settledUs!==e.lot.expiresUs)throw Error('disposable_native_aged_transfer_missed_expiry');
+ if(pickup){
+  const first=e.discoveries?.find(d=>d.residentId===pickup.residentId&&d.discoveryId===pickup.discoveryId);
+  const from=livingHolder(before,pickup.residentId),to=livingHolder(after,pickup.residentId);
+  if(e.expiry||expiry||!first||first.committedRevision>before.revision||pickup.effectId!==e.receipt.effectId||
+   pickup.settledUs!==atUs||pickup.startedAt!==after.minute||!from||!to||from.activity||from.plan||to.activity||to.plan||
+   !same(from.at,e.lot.fruit.at)||!same(to.at,e.lot.fruit.at)||to.inside!==null||
+   !after.processed.includes('plan:'+pickup.planId)||JSON.stringify(from.inventory)!==JSON.stringify(to.inventory))
+   throw Error('disposable_native_aged_pickup_phase');
+  // No new ground discoveries are made durable on the pickup settlement minute:
+  // per-resident observations do not provide ordering against that removal.
+  return {...e,version:2 as const,head:digestWorld(after),pickup:{...pickup,revision:after.revision,groundDebit:1 as const,heldCredit:1 as const}};
+ }
  if(observed.length&&(e.expiry||expiry||observed.length>MAX_DISCOVERIES||observed.some(d=>!validDiscovery(e,d)||
   d.fromRevision!==before.revision||d.observedRevision>after.revision||d.atUs!==atUs)))
   throw Error('disposable_native_aged_discovery_phase');
@@ -162,6 +209,10 @@ export function projectDisposableNativeAgedTransfer(e:Entry,w:World,g1?:unknown,
   if(!pin||!expected||!exact(g1,['terms','signature'])||g1.signature!==e.p.g1.signature||
    !ordinaryAgedG1ReviewSigningBytes(g1.terms)?.equals(expected)||!g2Valid(e.p.terms,g2,pin))return null;
  }
- return {status:e.expiry?'expired' as const:'placed' as const,replay:true as const,receipt:e.receipt,occupied:e.expiry?0 as const:1 as const,
-  expiry:e.expiry};
+ const base={replay:true as const,receipt:e.receipt,expiry:e.expiry};
+ if(e.pickup){
+  return {...base,status:e.heldExpiry?'held-expired' as const:'held' as const,occupied:0 as const,
+   pickup:e.pickup,heldQuantity:e.heldExpiry?0 as const:1 as const,heldExpiry:e.heldExpiry??null};
+ }
+ return {...base,status:e.expiry?'expired' as const:'placed' as const,occupied:e.expiry?0 as const:1 as const};
 }
