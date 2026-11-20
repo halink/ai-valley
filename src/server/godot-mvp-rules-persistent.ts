@@ -1,3 +1,5 @@
+import {DatabaseSync} from 'node:sqlite';
+import {ORDINARY_G1_DECISION_PURPOSE,advanceOrdinaryG1DecisionEpoch,appendOrdinaryG1Decision,ordinaryAgedG1DecisionSigningBytes,ordinaryG1DecisionDigest,ordinaryG1DecisionHash,ordinaryG1DecisionReviewDigest,ordinaryG1DecisionSaveScope,readOrdinaryG1DecisionHead,readOrdinaryG1DecisionRecord,type OrdinaryG1DecisionTerms} from './valley-spirit-ordinary-g1-decision.js';
 import {rehearseOrdinaryAgedG1} from './valley-spirit-ordinary-g1-rehearsal.js';
 import {openDisposableSpeechEditorial,pinDisposableSpeechEditorialReviewer,type DisposableSpeechEditorialWatermark} from './disposable-native-speech-release.js';
 import {bindDisposableSpeechPurpose,disposableSpeechHead,openDisposableNativeSpeechReader,stageDisposableSpeechScenario,type DisposableSpeechCase,type DisposableSpeechHead} from './disposable-native-addressed-speech.js';
@@ -32,7 +34,7 @@ import {WorldStore} from './store.js';
 import {acquireRuntimeOwnership,type RuntimeOwnership} from './runtime-lock.js';
 import {assertGodotWebExport} from './godot-web.js';
 import type {World} from '../shared/types.js';
-type PersistentRulesOptions={database:string;port:number;webRoot?:string;autoStart?:boolean;tickMs?:number;privateSpiritShadow?:PersistentRulesShadowOptions;privateSpiritGeographyQueue?:RulesGeographyQueueOptions;privateNativeFruitRenewal?:RulesNativeFruitRenewalPin;privateAgedFruitPreflight?:true;privateEmptyAgedGround?:OrdinaryAgedGroundPin;privateNativeEmptyAgedGround?:true;privateOrdinaryAgedG1Review?:OrdinaryAgedG1ReviewOptions;privateLifeFixture?:PersistentRulesLifeFixture;privateSpeechCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string;nativeWeatherCredit?:true}>;privateMealCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string}>};
+type PersistentRulesOptions={database:string;port:number;webRoot?:string;autoStart?:boolean;tickMs?:number;privateSpiritShadow?:PersistentRulesShadowOptions;privateSpiritGeographyQueue?:RulesGeographyQueueOptions;privateNativeFruitRenewal?:RulesNativeFruitRenewalPin;privateAgedFruitPreflight?:true;privateEmptyAgedGround?:OrdinaryAgedGroundPin;privateNativeEmptyAgedGround?:true;privateOrdinaryAgedG1Review?:OrdinaryAgedG1ReviewOptions;privateOrdinaryAgedG1Decision?:true;privateLifeFixture?:PersistentRulesLifeFixture;privateSpeechCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string;nativeWeatherCredit?:true}>;privateMealCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string}>};
 export async function startPersistentRulesMvp(options:PersistentRulesOptions){
  if(typeof options.database!=='string'||!options.database.trim())throw Error('mvp_rules_database_required');
  if(isDisposableRulesScratchPath(options.database))throw Error('disposable_native_rules_no_http');
@@ -171,6 +173,10 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
    agedGroundPin.worldId!==queuePin.worldId||agedGroundPin.sourceId!==queuePin.site.sourceId||
    agedGroundPin.target.x!==queuePin.site.target.x||agedGroundPin.target.y!==queuePin.site.target.y))
   throw Error('ordinary_aged_g1_review_scope');
+ const g1DecisionEnabled=options.privateOrdinaryAgedG1Decision===true;
+ if(options.privateOrdinaryAgedG1Decision!==undefined&&
+  (!g1DecisionEnabled||!ordinaryReview||!!disposable||options.autoStart!==false))
+  throw Error('ordinary_aged_g1_decision_stopped_scope');
  const speechPin=options.privateSpeechCustody===undefined?undefined:structuredClone(options.privateSpeechCustody);
  if(options.privateSpeechCustody!==undefined&&(!speechPin||!speechPin.fixture||typeof speechPin.worldId!=='string'||!/^godot-mvp-[A-Za-z0-9_-]{1,160}$/.test(speechPin.worldId)||
     Object.keys(speechPin).some(k=>!['fixture','worldId','nativeWeatherCredit'].includes(k))||
@@ -332,6 +338,79 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
     return Object.freeze({...encoded,status:'g1-review-verified' as const,advisory,rehearsal});
    }catch{return unavailableOrdinaryAgedG1();}
   };
+  // The only decision owner is this stopped ordinary runtime closure. There
+  // is no HTTP, G2, weather publication or automatic scheduler adapter.
+  const g1DecisionUnavailable=()=>({status:g1DecisionEnabled?'unavailable' as const:'disabled' as const,executionAuthorized:false as const});
+  let g1DecisionEpochReady=false;
+  const withG1DecisionDb=<T>(write:boolean,fn:(db:DatabaseSync,database:string)=>T,bootstrap=false):T|ReturnType<typeof g1DecisionUnavailable>=>{
+   if(!g1DecisionEnabled||!ordinaryReview||!owner||!('lockPath' in owner)||!session||!store||closing||
+    !bootstrap&&!g1DecisionEpochReady)return g1DecisionUnavailable();
+   try{
+    owner.assertOwned();
+    const database=owner.database,db=new DatabaseSync(database,{readOnly:!write});
+    try{
+     db.exec('PRAGMA trusted_schema=OFF; PRAGMA busy_timeout=0');
+     db.exec(write?'BEGIN IMMEDIATE':'BEGIN');
+     const result=fn(db,database);
+     owner.assertOwned();
+     db.exec('COMMIT');
+     return result;
+    }finally{if(db.isTransaction)db.exec('ROLLBACK');db.close();}
+   }catch{return g1DecisionUnavailable();}
+  };
+  if(g1DecisionEnabled)g1DecisionEpochReady=withG1DecisionDb(true,(db,database)=>{
+   const saveScope=ordinaryG1DecisionSaveScope(database);
+   return !!saveScope&&advanceOrdinaryG1DecisionEpoch(db,{worldId:session!.world.id,saveScope},ordinaryReview!.epoch,ordinaryReview!.keyId);
+  },true)===true;
+  const currentG1DecisionHead=(db:DatabaseSync,database:string)=>{
+   const w=session!.world,h=readOrdinaryG1DecisionHead(db,database,w.id);
+   return h&&h.revision===w.revision&&h.atUs===minuteToClimateUs(w.minute)?h:null;
+  };
+  const captureG1Decision=(db:DatabaseSync,database:string,review:unknown):OrdinaryG1DecisionTerms|null=>{
+   const initial=currentG1DecisionHead(db,database);
+   const reviewDigest=ordinaryG1DecisionReviewDigest(review);
+   if(!initial||!reviewDigest)return null;
+   const result=readPrivateOrdinaryAgedG1Review(review);
+   if(result.status!=='g1-review-verified'||result.rehearsal.status!=='validated_detached'||
+    result.terms.worldId!==initial.worldId||result.terms.revision!==initial.revision||result.terms.atUs!==initial.atUs||
+    result.advisory.candidate.permissionVersion!==initial.permissionVersion||
+    JSON.stringify(currentG1DecisionHead(db,database))!==JSON.stringify(initial))return null;
+   const c=result.advisory.candidate,terms:OrdinaryG1DecisionTerms=Object.freeze({
+    purpose:ORDINARY_G1_DECISION_PURPOSE,...initial,untilUs:result.terms.untilUs,epoch:result.terms.epoch,
+    reviewerKeyId:result.terms.reviewerKeyId,proposalId:c.proposalId,opportunityId:c.opportunityId,inputSnapshotId:c.inputSnapshotId,
+    sourceLotId:result.sourceLotId,targetId:result.targetId,reviewDigest,rehearsalDigest:ordinaryG1DecisionDigest(result.rehearsal),
+    outcome:'validated_detached',
+   });
+   return ordinaryAgedG1DecisionSigningBytes(terms)?terms:null;
+  };
+  const g1DecisionView=(decisionId:string,terms:OrdinaryG1DecisionTerms)=>({
+   status:'g1-detached-validated' as const,decisionId,terms,
+   executionAuthorized:false as const,placementEligible:false as const,schedulingAuthorized:false as const,
+  });
+  const previewPrivateOrdinaryAgedG1Decision=(signedReview:unknown)=>withG1DecisionDb(false,(db,database)=>{
+   const terms=captureG1Decision(db,database,structuredClone(signedReview));
+   if(!terms)return g1DecisionUnavailable();
+   // A malformed previously used annex is not a fresh review surface.
+   readOrdinaryG1DecisionRecord(db,terms,terms.epoch,terms.reviewerKeyId);
+   return {status:'g1-detached-decision-signing-input' as const,terms,executionAuthorized:false as const};
+  });
+  const commitPrivateOrdinaryAgedG1Decision=(signedReview:unknown,signedDecision:unknown)=>withG1DecisionDb(true,(db,database)=>{
+   const review=structuredClone(signedReview),approval=structuredClone(signedDecision);
+   const terms=captureG1Decision(db,database,review);
+   if(!terms)return g1DecisionUnavailable();
+   const result=appendOrdinaryG1Decision(db,terms,review,approval,ordinaryReview!.key);
+   if(!result)return g1DecisionUnavailable();
+   if(JSON.stringify(captureG1Decision(db,database,review))!==JSON.stringify(terms))throw Error('ordinary_g1_decision_stale_readback');
+   return {...g1DecisionView(result.id,terms),replay:result.replay};
+  });
+  const readPrivateOrdinaryAgedG1Decision=()=>withG1DecisionDb(false,(db,database)=>{
+   const current=currentG1DecisionHead(db,database);
+   if(!current)return g1DecisionUnavailable();
+   const record=readOrdinaryG1DecisionRecord(db,current,ordinaryReview!.epoch,ordinaryReview!.keyId);
+   const terms=record&&captureG1Decision(db,database,record.review);
+   const live=terms&&ordinaryAgedG1DecisionSigningBytes(terms),stored=record&&ordinaryAgedG1DecisionSigningBytes(record.terms);
+   return terms&&live&&stored&&live.equals(stored)?g1DecisionView(ordinaryG1DecisionHash(live),terms):g1DecisionUnavailable();
+  });
   let rebaseRequired=false;
   const transactPrivateDisposableAgedTransfer=(g1?:unknown,g2?:unknown)=>{
    if(!disposableAgedTransfer||!queuePin||!agedGroundPin||!geographicProposalQueue||!owner||!('lockPath' in owner)||!store||!session)return null;
@@ -358,6 +437,6 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
    const w=session.world;
    return store.readDisposableResidentGroundDiscovery({worldId:w.id,revision:w.revision,atUs:minuteToClimateUs(w.minute)},residentId);
   };
-  return {get session(){return session!;},server,snapshot,readPrivateDisposableNativeSpeech:(head:Readonly<DisposableSpeechHead>)=>speechReader?.latest(head)??null,transactPrivateDisposableAgedTransfer,readPrivateDisposableNativeAgedFairness,readPrivateDisposableResidentGroundDiscovery,disposableRebaseRequired:()=>rebaseRequired,readPrivateSpiritCandidate,readPrivateSpiritGeographicProposal,readPrivateNativeFruitRenewal,readPrivateNativeFruitLot,readPrivateAgedFruitPreflight,readPrivateOrdinaryAgedGround,readPrivateOrdinaryAgedG1Review,close};
+  return {get session(){return session!;},server,snapshot,readPrivateDisposableNativeSpeech:(head:Readonly<DisposableSpeechHead>)=>speechReader?.latest(head)??null,transactPrivateDisposableAgedTransfer,readPrivateDisposableNativeAgedFairness,readPrivateDisposableResidentGroundDiscovery,disposableRebaseRequired:()=>rebaseRequired,readPrivateSpiritCandidate,readPrivateSpiritGeographicProposal,readPrivateNativeFruitRenewal,readPrivateNativeFruitLot,readPrivateAgedFruitPreflight,readPrivateOrdinaryAgedGround,readPrivateOrdinaryAgedG1Review,previewPrivateOrdinaryAgedG1Decision,commitPrivateOrdinaryAgedG1Decision,readPrivateOrdinaryAgedG1Decision,close};
  }catch(error){await close();throw error;}
 }
