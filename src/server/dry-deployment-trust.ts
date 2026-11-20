@@ -65,6 +65,10 @@ function bytes(s:unknown,key:KeyObject,len:number){
  if(!Array.isArray(tuple)||tuple.length!==len||JSON.stringify(tuple)!==a.utf8)return fail('canonical_bytes_invalid');
  return {tuple,utf8:a.utf8};
 }
+/** Canonical crypto framing shared by disconnected evidence contracts.
+ * Neither helper pins a deployment role or authorizes a live action. */
+export function canonicalDryEd25519PublicKey(spki:unknown){return ed25519(spki);}
+export function verifyCanonicalDrySignedTuple(input:unknown,key:KeyObject,length:number){return bytes(input,key,length).tuple;}
 const time=(start:unknown,end:unknown,now:number)=>integer(start)&&integer(end)&&
  start<=now&&now<end&&end-start<=MAX_WINDOW;
 function signedScope(a:unknown[],kind:'delegate'|'permit',role:Role,s:Scope){
