@@ -14,11 +14,11 @@ export interface NativeAgedEatCompletion {
  readonly eventId?:string;
  readonly hungerBefore:number;readonly hungerAfter:number;readonly nutrition:number;readonly workMinutes:5;
 }
-const active=new WeakMap<World,{held:NativeAgedEatSelection;completion:NativeAgedEatCompletion|null}>();
+const active=new WeakMap<World,{held:NativeAgedEatSelection;completion:NativeAgedEatCompletion|null;seatDeclinePlan:string|null}>();
 const duration=5;
 export function captureMvpNativeAgedEat<T>(w:World,held:NativeAgedEatSelection,run:()=>T){
  if(active.has(w))return null;
- const scope={held,completion:null as NativeAgedEatCompletion|null};
+ const scope={held,completion:null as NativeAgedEatCompletion|null,seatDeclinePlan:null as string|null};
  active.set(w,scope);
  try{const result=run();return {result,completion:scope.completion};}finally{active.delete(w);}
 }
@@ -57,7 +57,7 @@ export function canRunMvpNativeAgedEat(w:World,id:string,action:EatAction):boole
   parseClimateUs(minuteToClimateUs(w.minute))>=parseClimateUs(held.expiresUs))return false;
  if(!action.dining)return Object.keys(action).length===2&&canEatInPlace(w,r);
  const d=action.dining;
- if(!held.table||Object.keys(action).length!==3||Object.keys(d).length!==3||!d.seat||Object.keys(d.seat).length!==2||r.hunger<35)return false;
+ if(!held.table||held.disposableEvent&&r.energy<70||Object.keys(action).length!==3||Object.keys(d).length!==3||!d.seat||Object.keys(d.seat).length!==2||r.hunger<35)return false;
  const p=actualDining(w,r);
  return !!p&&action.dining.buildingId===p.building.id&&action.dining.key===p.key&&same(action.dining.seat,p.at);
 }
@@ -83,10 +83,25 @@ export function completeMvpNativeAgedEat(w:World,r:Resident,action:EatAction,ela
   return d?AGED_DINING_INVALID:AGED_EAT_INVALID;
  const hungerBefore=r.hunger,nutrition=goods.fruit.food;
  r.hunger=Math.max(0,hungerBefore-nutrition);
- const event=scope.held.disposableEvent?emitLedgerEvent(w,{kind:'action',actors:[r.id],place:{...r.at},
+ const event=scope.held.disposableEvent?emitLedgerEvent(w,{kind:'action',actors:[r.id],place:{...r.at},...(d?{roomId:r.inside,roomAt:{...r.roomAt!}}:{}),
   text:r.name+'吃完了一份自己的食物。'}):undefined;
  scope.completion=Object.freeze({...(event?{eventId:event.id}:{}),residentId:r.id,planId:a.planId,startedUs:minuteToClimateUs(startedAt),
   settledUs:minuteToClimateUs(w.minute),hungerBefore,hungerAfter:r.hunger,nutrition,workMinutes:5,
   ...(d?{dining:Object.freeze({...d,seat:Object.freeze({...d.seat})})}:{})});
  return null; // Held terminal and observer fact belong to the exact sealed transaction.
 }
+
+/** Actual room engine error for the exact disposable dining activity only.
+ * A prior/out-of-scope failure string is never a private cancellation. */
+export function noteDisposableAgedDiningSeatDecline(w:World,r:Resident,action=r.activity?.action,planId=r.activity?.planId):boolean{
+ const s=active.get(w);
+ if(!s?.held.disposableEvent||s.held.residentId!==r.id||action?.type!=='mvpAgedFruitEat'||!action.dining||
+  action.effectId!==s.held.effectId||!planId||planId!==r.plan?.id)return false;
+ s.seatDeclinePlan=planId;return true;
+}
+export function wasDisposableAgedDiningSeatDecline(w:World,r:Resident,planId:string|undefined):boolean{
+ const s=active.get(w);
+ return !!s?.seatDeclinePlan&&s.seatDeclinePlan===planId&&s.held.residentId===r.id&&!r.plan&&!r.activity;
+}
+
+export const hasDisposableAgedDiningCapture=(w:World)=>active.get(w)?.held.disposableEvent===true;

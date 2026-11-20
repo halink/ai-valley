@@ -1,3 +1,5 @@
+import {MVP_HALL} from '../shared/mvp-hamlet.js';
+import {roomLayout,roomPath} from '../shared/rooms.js';
 import {lawfulAgedGroundApproach,type AgedGroundApproachPlan,type AgedGroundApproachWitness} from '../world/mvp-native-aged-ground-approach.js';
 import {physiology} from '../world/physiology.js';
 import type {NativeAgedEatCompletion,NativeAgedEatSelection} from '../world/mvp-aged-fruit-native-eat.js';
@@ -87,7 +89,7 @@ export function makeDisposableNativeAgedBirth(pin:DisposableNativeAgedTransferPi
 type PickupFact=Readonly<DisposableNativePickupWitness&{revision:number;groundDebit:1;heldCredit:1}>;
 type HeldExpiry=Readonly<{atUs:string;revision:number;heldDebit:1}>;
 type Entry=Omit<NonNullable<ReturnType<typeof makeDisposableNativeAgedBirth>>['entry'],'version'>&{
- readonly version:1|2|3|4|5;
+ readonly version:1|2|3|4|5|6;
  readonly discoveries?:readonly CommittedNativeOrdinaryAgedDiscovery[];
  readonly pickup?:PickupFact;
  readonly heldExpiry?:HeldExpiry;
@@ -158,30 +160,64 @@ function stageApproach(e:Entry,before:World,after:World,witness:AgedGroundApproa
  const completed=!!approach.enteredAtUs&&!b.lastFailure&&!witness.stopped&&same(b.at,p.to)&&parseClimateUs(atUs)<parseClimateUs(p.expiresUs);
  return {approach:undefined,lastApproach:{approach,revision:after.revision,finishedAtUs:atUs,result:completed?'completed' as const:'interrupted' as const}};
 }
-export type Eating=Readonly<{residentId:string;planId:string;effectId:string;startedAt:number;worked:number}>;
+type DiningPlace=NonNullable<NativeAgedEatCompletion['dining']>;
+type DiningEating=Readonly<{dining:DiningPlace;phase:'outdoor-route'|'indoor-route'|'seated'|'work';workStartedAt?:number}>;
+export type Eating=Readonly<{residentId:string;planId:string;effectId:string;startedAt:number;worked:number;table?:DiningEating}>;
 type Eaten=Readonly<NativeAgedEatCompletion&{eventId:string;eventDigest:string;revision:number;heldDebit:1}>;
 function sameJson(a:unknown,b:unknown){return JSON.stringify(a)===JSON.stringify(b);}
 function agedEatActor(r:World['residents'][number]){
  return r.activity?.action.type==='mvpAgedFruitEat'||r.plan?.actions.some(a=>a.type==='mvpAgedFruitEat')||
   r.activity?.mvpAgedEatWorkStartedAt!==undefined;
 }
+function diningWorkClaim(w:World,r:World['residents'][number],d:DiningPlace){
+ return r.inside===d.buildingId&&!!r.roomAt&&same(r.roomAt,d.seat)&&w.rooms?.tick===w.minute&&
+  w.rooms.claims.filter(c=>c.buildingId===d.buildingId&&c.key===d.key).length===1&&
+  w.rooms.claims.some(c=>c.buildingId===d.buildingId&&c.key===d.key&&c.group===r.id&&c.people.length===1&&c.people[0]===r.id);
+}
+const diningPhaseOrder=['outdoor-route','indoor-route','seated','work'] as const;
+function exactDiningActivity(w:World,r:World['residents'][number],expected:Eating){
+ const a=r.activity!,d=a.action.type==='mvpAgedFruitEat'?a.action.dining:undefined,t=expected.table;
+ if(!d||!t||!exact(a.action,['type','effectId','dining'])||!exact(d,['buildingId','key','seat'])||
+  d.buildingId!==MVP_HALL||!sameJson(d,t.dining))return false;
+ const b=w.buildings.find(b=>b.id===d.buildingId);
+ if(!b||b.kind!=='lodge'||b.ownerId!=='commons'||!same(a.target,b.door))return false;
+ const layout=roomLayout(w,b),slot=layout.slots.find(s=>s.kind==='seat'&&s.key===d.key);
+ if(!slot||!same(slot.at,d.seat)||a.room?.mode==='exit')return false;
+ if(t.phase==='work'){
+  return Number.isSafeInteger(t.workStartedAt)&&t.workStartedAt!>=a.startedAt&&a.mvpAgedEatWorkStartedAt===t.workStartedAt&&
+   expected.worked>=1&&expected.worked<=4&&w.minute===t.workStartedAt!+expected.worked-1&&
+   !a.room&&!a.path.length&&diningWorkClaim(w,r,d);
+ }
+ if(expected.worked!==0||t.workStartedAt!==undefined||a.mvpAgedEatWorkStartedAt!==undefined)return false;
+ if(t.phase==='outdoor-route')return r.inside===null&&!a.room&&
+  (a.path.length?same(a.path.at(-1)!,b.door):same(r.at,b.door));
+ if(!same(r.at,b.door)||a.path.length||r.inside!==d.buildingId||!r.roomAt)return false;
+ if(t.phase==='seated')return !a.room&&same(r.roomAt,d.seat);
+ const j=a.room;
+ return t.phase==='indoor-route'&&!!j&&j.mode==='work'&&j.buildingId===d.buildingId&&same(j.target,d.seat)&&
+  j.path.length>0&&same(j.path.at(-1)!,d.seat)&&roomPath(layout,r.roomAt,d.seat)!==null;
+}
 export function exactDisposableEating(w:World,expected?:Eating):boolean{
  if(!expected)return !w.residents.some(agedEatActor);
  const actors=w.residents.filter(agedEatActor);
  if(actors.length!==1||actors[0].id!==expected.residentId)return false;
  const r=actors[0],a=r.activity,p=r.plan;
- return !!a&&!!p&&r.inside===null&&!r.regionalLocation&&r.status==='alive'&&a.action.type==='mvpAgedFruitEat'&&
-  exact(a.action,['type','effectId'])&&a.action.effectId===expected.effectId&&p.id===expected.planId&&
-  p.actorId===r.id&&p.actions.length===0&&a.planId===p.id&&a.startedAt===expected.startedAt&&
-  p.createdAt===a.startedAt-1&&a.path.length===0&&!a.room&&a.mvpAgedEatWorkStartedAt===undefined&&same(a.target,r.at)&&
-  Number.isSafeInteger(expected.worked)&&expected.worked>=1&&expected.worked<=4&&a.remaining===5-expected.worked&&
-  w.minute===expected.startedAt+expected.worked-1&&w.processed.includes('plan:'+p.id);
+ if(!a||!p||r.regionalLocation||r.status!=='alive'||a.action.type!=='mvpAgedFruitEat'||
+  a.action.effectId!==expected.effectId||p.id!==expected.planId||p.actorId!==r.id||p.actions.length!==0||
+  a.planId!==p.id||a.startedAt!==expected.startedAt||!Number.isSafeInteger(a.startedAt)||a.startedAt>w.minute||p.createdAt!==a.startedAt-1||
+  !Number.isSafeInteger(expected.worked)||a.remaining!==5-expected.worked||!w.processed.includes('plan:'+p.id))return false;
+ if(expected.table)return exactDiningActivity(w,r,expected);
+ return r.inside===null&&exact(a.action,['type','effectId'])&&a.path.length===0&&!a.room&&a.mvpAgedEatWorkStartedAt===undefined&&
+  same(a.target,r.at)&&expected.worked>=1&&expected.worked<=4&&w.minute===expected.startedAt+expected.worked-1;
 }
 function readEating(w:World,holderId:string,effectId:string):Eating|undefined{
  if(!w.residents.some(agedEatActor))return undefined;
- const a=w.residents.find(r=>r.id===holderId)?.activity;
- if(!a)throw Error('disposable_native_aged_eat_foreign');
- const work={residentId:holderId,planId:a.planId,effectId,startedAt:a.startedAt,worked:5-a.remaining};
+ const r=w.residents.find(r=>r.id===holderId),a=r?.activity;
+ if(!r||!a||a.action.type!=='mvpAgedFruitEat')throw Error('disposable_native_aged_eat_foreign');
+ const d=a.action.dining,workStartedAt=a.mvpAgedEatWorkStartedAt;
+ const table:DiningEating|undefined=d?{dining:structuredClone(d),phase:workStartedAt!==undefined?'work':
+  r.inside===null?'outdoor-route':a.room?'indoor-route':'seated',...(workStartedAt!==undefined?{workStartedAt}:{})}:undefined;
+ const work={residentId:holderId,planId:a.planId,effectId,startedAt:a.startedAt,worked:5-a.remaining,...(table?{table}:{})};
  if(!exactDisposableEating(w,work))throw Error('disposable_native_aged_eat_activity');
  return work;
 }
@@ -230,8 +266,10 @@ export function readDisposableNativeAgedTransfer(db:DatabaseSync,owner:Disposabl
  if(persisted?.revision!==w.revision||!(persisted.state instanceof Uint8Array)||hash(persisted.state)!==e.head)
   throw Error('disposable_native_aged_transfer_durable_head');
  const g1=prepareOrdinaryAgedG1ReviewEncoding(pin.review,e.p.basis,e.p.ground,e.p.g1);
- if((e.lastApproach?.result==='superseded-by-pickup'?e.version!==5:e.approach||e.lastApproach?e.version!==4:e.pickup?e.version!==2&&e.version!==3:e.version!==1)||
-  (e.eating||e.eaten)&&e.version!==3&&e.version!==4&&e.version!==5||e.head!==digestWorld(w)||w.id!==e.p.terms.worldId||w.revision<e.receipt.placementRevision||
+ if((e.version===6?!e.pickup||!!e.approach:e.lastApproach?.result==='superseded-by-pickup'?e.version!==5:
+  e.approach||e.lastApproach?e.version!==4:e.pickup?e.version!==2&&e.version!==3:e.version!==1)||
+  (e.eating?.table||e.eaten?.dining)&&e.version!==6||
+  (e.eating||e.eaten)&&e.version!==3&&e.version!==4&&e.version!==5&&e.version!==6||e.head!==digestWorld(w)||w.id!==e.p.terms.worldId||w.revision<e.receipt.placementRevision||
   g1.status!=='encoding-only'||e.p.terms.g1Digest!==hash(JSON.stringify(e.p.g1))||e.p.terms.effectKeyId!==pin.keyId||
   !g2Valid(e.p.terms,e.g2,pin)||e.expiry===null&&!e.pickup&&parseClimateUs(minuteToClimateUs(w.minute))>=parseClimateUs(e.lot.expiresUs)||
   e.expiry!==null&&(e.expiry.atUs!==e.lot.expiresUs||e.expiry.revision>w.revision))throw Error('disposable_native_aged_transfer_head');
@@ -273,13 +311,18 @@ export function readDisposableNativeAgedTransfer(db:DatabaseSync,owner:Disposabl
   const archived=db.prepare('SELECT id,world_id,at,rowid AS seq,body FROM main.events WHERE id=?').get(f.eventId);
   const actors=db.prepare('SELECT world_id,person_id,event_id,event_seq FROM main.event_people WHERE event_id=? LIMIT 2').all(f.eventId);
   const animals=db.prepare('SELECT 1 FROM main.event_animals WHERE event_id=? LIMIT 1').get(f.eventId);
-  if(e.heldExpiry||!p||f.residentId!==p.residentId||f.heldDebit!==1||f.workMinutes!==5||f.nutrition!==goods.fruit.food||f.dining||
+  if(e.heldExpiry||!p||f.residentId!==p.residentId||f.heldDebit!==1||f.workMinutes!==5||f.nutrition!==goods.fruit.food||
    parseClimateUs(f.startedUs)<=parseClimateUs(p.settledUs)||parseClimateUs(f.settledUs)-parseClimateUs(f.startedUs)!==4_000_000n||
    parseClimateUs(f.settledUs)>=parseClimateUs(e.lot.expiresUs)||parseClimateUs(f.settledUs)>now||f.revision<=p.revision||f.revision>w.revision||
    archived?.id!==f.eventId||archived.world_id!==w.id||typeof archived.at!=='number'||minuteToClimateUs(archived.at)!==f.settledUs||
    typeof archived.body!=='string'||hash(archived.body)!==f.eventDigest||actors.length!==1||actors[0].world_id!==w.id||
    actors[0].event_id!==f.eventId||actors[0].event_seq!==archived.seq||actors[0].person_id!==f.residentId||animals)
    throw Error('disposable_native_aged_eat_event');
+  if(f.dining){
+   const event=JSON.parse(archived.body);
+   if(f.dining.buildingId!==MVP_HALL||event.roomId!==f.dining.buildingId||!event.roomAt||!same(event.roomAt,f.dining.seat))
+    throw Error('disposable_native_aged_eat_room_event');
+  }
  }
  return e;
 }
@@ -296,7 +339,7 @@ function livingHolder(w:World,id:string){
 }
 export function projectDisposableHeldForNativeEating(e:Entry):NativeAgedEatSelection|null{
  return e.pickup&&!e.heldExpiry&&!e.eaten?Object.freeze({residentId:e.pickup.residentId,effectId:e.receipt.effectId,
-  expiresUs:e.lot.expiresUs,disposableEvent:true as const}):null;
+  expiresUs:e.lot.expiresUs,table:true as const,disposableEvent:true as const}):null;
 }
 export function advanceDisposableNativeAgedTransfer(e:Entry,before:World,after:World,observed:readonly NativeOrdinaryAgedDiscovery[]=[],pickup?:DisposableNativePickupWitness,
  scope?:NativeAgedEatSelection,completed?:NativeAgedEatCompletion,route?:AgedGroundApproachWitness){
@@ -321,21 +364,31 @@ export function advanceDisposableNativeAgedTransfer(e:Entry,before:World,after:W
   }
   if(completed){
    const previous=e.eating,event=after.events.find(x=>x.id===completed.eventId),old=livingHolder(before,holder)!,next=livingHolder(after,holder)!;
-   if(work||!previous||previous.worked!==4||completed.residentId!==holder||completed.dining||completed.workMinutes!==5||
-    completed.planId!==previous.planId||completed.startedUs!==minuteToClimateUs(previous.startedAt)||completed.settledUs!==atUs||
+   if(work||!previous||previous.worked!==4||completed.residentId!==holder||completed.workMinutes!==5||
+    !sameJson(completed.dining,previous.table?.dining)||
+    completed.planId!==previous.planId||completed.startedUs!==minuteToClimateUs(previous.table?.workStartedAt??previous.startedAt)||completed.settledUs!==atUs||
+    completed.dining&&(!diningWorkClaim(after,next,completed.dining)||!event?.roomAt||
+     event.roomId!==completed.dining.buildingId||!same(event.roomAt,completed.dining.seat))||
     completed.nutrition!==goods.fruit.food||completed.hungerAfter!==Math.max(0,completed.hungerBefore-completed.nutrition)||
     old.hunger!==completed.hungerBefore||next.hunger!==Math.min(100,completed.hungerAfter+physiology(after,next).hungerPerMinute)||
     !sameJson(old.inventory,next.inventory)||
     !event||event.kind!=='action'||event.at!==after.minute||event.actors.length!==1||event.actors[0]!==holder||!event.observerOnly||
     before.events.some(x=>x.id===event.id))throw Error('disposable_native_aged_eat_completion');
    const {eating:_old,...rest}=e;
-   return {...rest,version:e.lastApproach?e.version:3 as const,head:digestWorld(after),eaten:{...completed,eventId:event.id,eventDigest:hash(JSON.stringify(event)),
+   return {...rest,version:e.version===6||e.lastApproach?e.version:3 as const,head:digestWorld(after),eaten:{...completed,eventId:event.id,eventDigest:hash(JSON.stringify(event)),
     revision:after.revision,heldDebit:1 as const}};
   }
-  if(work&&(!e.eating?work.worked!==1:work.planId!==e.eating.planId||work.startedAt!==e.eating.startedAt||work.worked!==e.eating.worked+1))
-   throw Error('disposable_native_aged_eat_work');
+  if(work){
+   const prior=e.eating,age=work.table;
+   if(prior&&(work.planId!==prior.planId||work.startedAt!==prior.startedAt||!sameJson(age?.dining,prior.table?.dining)||
+    age&&prior.table&&diningPhaseOrder.indexOf(age.phase)<diningPhaseOrder.indexOf(prior.table.phase))||
+    !age&&work.worked!==(prior?.worked??0)+1||age&&(prior?.worked?
+     work.worked!==prior.worked+1||age.workStartedAt!==prior.table?.workStartedAt:work.worked>1)||
+    age&&work.worked>0&&(!age.workStartedAt||!diningWorkClaim(after,livingHolder(after,holder)!,age.dining)))
+    throw Error('disposable_native_aged_eat_work');
+  }
   const {eating:_old,...rest}=e;
-  return {...rest,version:work&&!e.lastApproach?3 as const:e.version,...(work?{eating:work}:{}),head:digestWorld(after)};
+  return {...rest,version:work?.table||e.version===6?6 as const:work&&!e.lastApproach?3 as const:e.version,...(work?{eating:work}:{}),head:digestWorld(after)};
  }
  if(scope||completed||!exactDisposableEating(after))throw Error('disposable_native_aged_eat_without_held');
  const routed=stageApproach(e,before,after,route,atUs,pickup);

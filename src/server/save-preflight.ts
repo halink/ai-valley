@@ -70,7 +70,7 @@ function assertWorldCompatibilityInternal(value:unknown,allowMvpSpiritEffectFixt
   const plan=arrangement&&Array.isArray(arrangement.actions)?arrangement.actions:[];
   const activity=record(r.activity)?r.activity:null;
   if(plan.some(a=>record(a)&&(a.type==='mvpAgedFruitPickup'||a.type==='mvpAgedFruitEat'))||
-   activity&&(owns(activity,'mvpAgedEatWorkStartedAt')||record(activity.action)&&(activity.action.type==='mvpAgedFruitPickup'||
+   activity&&(owns(activity,'mvpAgedEatWorkStartedAt')&&(!privateEating?.table||privateEating.residentId!==r.id)||record(activity.action)&&(activity.action.type==='mvpAgedFruitPickup'||
     activity.action.type==='mvpAgedFruitEat'&&privateEating?.residentId!==r.id)))
    fail('save_sealed_aged_pickup_requires_private_archive');
   const pending=plan.some(a=>record(a)&&a.type==='mvpShelter');

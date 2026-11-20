@@ -1,6 +1,6 @@
 import {captureAgedGroundApproach,hasAgedGroundApproachCapture,isDeclinedAgedGroundRacePickup,selectAgedGroundApproach,stoppedCurrentAgedGroundApproach,type AgedGroundApproachWitness} from '../world/mvp-native-aged-ground-approach.js';
 import {captureOrdinaryAgedGroundDiscovery,prepareOrdinaryNativePickupIntents,prepareOrdinaryNativeGroundApproach,type OrdinaryAgedGroundNativePickupRead,type OrdinaryAgedGroundDiscoveryRead,type NativeOrdinaryAgedDiscovery} from '../world/mvp-ordinary-aged-ground-discovery.js';
-import {AGED_DINING_INVALID,AGED_EAT_INVALID,type NativeAgedEatCompletion,captureMvpNativeAgedEat,selectMvpNativeAgedEat,type NativeAgedEatSelection} from '../world/mvp-aged-fruit-native-eat.js';
+import {AGED_DINING_INVALID,AGED_EAT_INVALID,type NativeAgedEatCompletion,captureMvpNativeAgedEat,hasDisposableAgedDiningCapture,selectMvpNativeAgedEat,wasDisposableAgedDiningSeatDecline,type NativeAgedEatSelection} from '../world/mvp-aged-fruit-native-eat.js';
 import {captureMvpNativeAgedPickup,selectMvpNativeAgedPickup,type NativeAgedPickupSelection} from '../world/mvp-aged-fruit-native-pickup.js';
 import {nativeWeatherHourTransition} from './valley-spirit-weather-credit.js';
 import {captureMvpNativeObservationPhase} from '../world/mvp-native-observation-phase.js';
@@ -308,6 +308,8 @@ function advanceMvpRuleMinuteDraft(world:World,current:World,serial:number,decis
  const gathering=new Map(world.residents.map(r=>[r.id,r.activity?.action]));
  const shelterWorkers=new Set(world.residents.filter(r=>r.activity?.action.type==='mvpShelter'||r.plan?.actions[0]?.type==='mvpShelter').map(r=>r.id));
  const activityPlans=new Map(world.residents.map(r=>[r.id,r.activity?.planId]));
+ const ownedDiningPlans=hasDisposableAgedDiningCapture(world)?new Map(world.residents.filter(r=>r.activity?.action.type==='mvpAgedFruitEat'||
+  r.plan?.actions.some(a=>a.type==='mvpAgedFruitEat'&&a.dining)).map(r=>[r.id,r.activity?.planId??r.plan?.id])):null;
  const approachPlans=hasAgedGroundApproachCapture(world)?new Map(world.residents.map(r=>[r.id,r.activity?.planId??r.plan?.id])):null;
  const actionFailures:import('../world/engine.js').StepActionFailure[]=[];
  const optional:{stageMealWitnesses?:()=>readonly ValleySpiritMvpMealWitness[]}={};
@@ -330,6 +332,7 @@ function advanceMvpRuleMinuteDraft(world:World,current:World,serial:number,decis
   speech=captureAddressedSpeech(world,advanceObservedEngine);
  else advanceObservedEngine();
  for(const failed of world.residents.filter(r=>r.lastFailure)){
+  if(ownedDiningPlans&&wasDisposableAgedDiningSeatDecline(world,failed,ownedDiningPlans.get(failed.id)))continue;
   if(approachPlans&&(stoppedCurrentAgedGroundApproach(world,failed,approachPlans.get(failed.id))||
    isDeclinedAgedGroundRacePickup(world,failed,approachPlans.get(failed.id))))continue;
   const action=gathering.get(failed.id);
