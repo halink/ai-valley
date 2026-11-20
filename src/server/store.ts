@@ -1,4 +1,5 @@
-import {advanceDisposableNativeAgedTransfer,hasDisposableNativeAgedTransfer,makeDisposableNativeAgedBirth,prepareDisposableNativeAgedTransfer,projectDisposableNativeAgedTransfer,readDisposableNativeAgedTransfer,writeDisposableNativeAgedTransfer,type DisposableNativeAgedTransferPin} from './disposable-native-aged-transfer.js';
+import type {GroundDiscoveryHead} from '../world/mvp-ordinary-aged-ground-discovery.js';
+import {advanceDisposableNativeAgedTransfer,hasDisposableNativeAgedTransfer,makeDisposableNativeAgedBirth,prepareDisposableNativeAgedTransfer,projectDisposableNativeAgedTransfer,projectActiveDisposableGroundForObservation,projectDisposableGroundResidentDiscovery,readDisposableNativeAgedTransfer,writeDisposableNativeAgedTransfer,type DisposableNativeAgedTransferPin} from './disposable-native-aged-transfer.js';
 import {assertDisposableRulesSavePath,guardDisposableRulesSaveCommit,readDisposableRulesSaveMarker,type DisposableRulesSaveAuthority} from './disposable-native-rules-save.js';
 import {advanceOrdinaryNativeEmptyGround,pinOrdinaryAgedGround,readOwnedEmptyGround,type OrdinaryAgedGroundPin} from './valley-spirit-ordinary-aged-ground.js';
 import {runtimeOwnershipAnchor,type RuntimeOwnership} from './runtime-lock.js';
@@ -841,11 +842,14 @@ export class WorldStore {
    let lifecycle;
    if(this.#privateDisposableSave&&hasDisposableNativeAgedTransfer(this.db)){
     const before=this.readWorld(false,false),pin=this.#disposableAgedTransfer;
-    if(!before||!pin||before.revision!==previousRevision||!readAtomicNativeRulesRenewal(before,world))
+    const native=before?readAtomicNativeRulesRenewal(before,world):null;
+    if(!before||!pin||before.revision!==previousRevision||!native)
      throw Error('disposable_native_aged_transfer_native_minute');
     const entry=readDisposableNativeAgedTransfer(this.db,this.#privateDisposableSave,pin,before);
     if(!entry)throw Error('disposable_native_aged_transfer_missing');
-    lifecycle=advanceDisposableNativeAgedTransfer(entry,before,world);
+    // A revoked weather provenance grant stops external readback; it
+    // cannot make an already committed physical lot invisible to residents.
+    lifecycle=advanceDisposableNativeAgedTransfer(entry,before,world,native.groundObserved);
    }
    speech=this.writeDraftWithCustody(world,previousRevision,appended,seasonalLedger,proof,
     !!this.developerSpiritFixtureOwner?.rulesSpeechWorldId,mealWitnesses);
@@ -1133,6 +1137,30 @@ export class WorldStore {
     return {status:'placed' as const,replay:false as const,receipt:birth.entry.receipt,occupied:1 as const,expiry:null};
    }finally{if(this.db.isTransaction)this.db.exec('ROLLBACK');}
   }catch{return null;}
+ }
+ private withCurrentDisposableGround<T>(head:GroundDiscoveryHead,requireDisclosureGrant:boolean,project:(e:NonNullable<ReturnType<typeof readDisposableNativeAgedTransfer>>)=>T):T|null{
+  const owner=this.#privateDisposableSave,pin=this.#disposableAgedTransfer;
+  if(!owner||!pin)return null;
+  try{
+   this.db.exec('BEGIN');
+   try{
+    const w=this.readWorld(false,false);
+    if(!w||w.clock.paused||w.id!==head.worldId||w.revision!==head.revision||minuteToClimateUs(w.minute)!==head.atUs)return null;
+    const entry=readDisposableNativeAgedTransfer(this.db,owner,pin,w);
+    if(!entry)return null;
+    if(requireDisclosureGrant){
+     const grant=readValleySpiritWeatherPermission(this.db,w.id);
+     if(!grant?.publicWeather||grant.version!==entry.p.basis.permissionVersion)return null;
+    }
+    return project(entry);
+   }finally{this.db.exec('ROLLBACK');}
+  }catch{return null;}
+ }
+ readDisposableActiveGroundForNativeObservation(head:GroundDiscoveryHead){
+  return this.withCurrentDisposableGround(head,false,e=>projectActiveDisposableGroundForObservation(e,head));
+ }
+ readDisposableResidentGroundDiscovery(head:GroundDiscoveryHead,residentId:string){
+  return this.withCurrentDisposableGround(head,true,e=>projectDisposableGroundResidentDiscovery(e,residentId));
  }
  hasDisposableAgedTransfer(){
   return !!this.#privateDisposableSave&&hasDisposableNativeAgedTransfer(this.db);

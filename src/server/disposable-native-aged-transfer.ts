@@ -1,3 +1,5 @@
+import {mvpFallenFruitDiscoveryId} from '../shared/valley-spirit-fairness.js';
+import type {GroundDiscoveryHead,NativeOrdinaryAgedDiscovery} from '../world/mvp-ordinary-aged-ground-discovery.js';
 import {createHash,createPublicKey,verify} from 'node:crypto';
 import {gzipSync} from 'node:zlib';
 import type {DatabaseSync} from 'node:sqlite';
@@ -76,7 +78,28 @@ export function makeDisposableNativeAgedBirth(pin:DisposableNativeAgedTransferPi
  const entry={version:1 as const,p,g2:{terms:p.terms,signature:g2.signature},lot,receipt,head:digestWorld(draft),expiry:null as null|{revision:number;atUs:string;groundDebit:1}};
  return {draft,entry};
 }
-type Entry=NonNullable<ReturnType<typeof makeDisposableNativeAgedBirth>>['entry'];
+type CommittedDiscovery=NativeOrdinaryAgedDiscovery&{readonly committedRevision:number};
+type Entry=NonNullable<ReturnType<typeof makeDisposableNativeAgedBirth>>['entry']&{readonly discoveries?:readonly CommittedDiscovery[]};
+const MAX_DISCOVERIES=64, MAX_ARCHIVE_BYTES=64*1024;
+const residentId=(id:unknown):id is string=>typeof id==='string'&&/^[A-Za-z0-9:_-]{1,160}$/u.test(id);
+const vec=(v:unknown)=>exact(v,['x','y'])&&[v.x,v.y].every(n=>Number.isSafeInteger(n)&&Number(n)>=0&&Number(n)<=4095);
+const receiptDigest=(e:Entry)=>hash(JSON.stringify([lane,e.receipt]));
+function validDiscovery(e:Entry,d:NativeOrdinaryAgedDiscovery){
+ return exact(d,['schema','worldId','residentId','effectId','receiptDigest','discoveryId','atUs','fromRevision','observedRevision','observerAt','target'])&&
+  d.schema==='native-ordinary-aged-ground-observation/v1'&&d.worldId===e.p.terms.worldId&&residentId(d.residentId)&&
+  d.effectId===e.receipt.effectId&&d.receiptDigest===receiptDigest(e)&&d.discoveryId===mvpFallenFruitDiscoveryId(d.worldId,d.residentId,d.effectId)&&
+  typeof d.atUs==='string'&&parseClimateUs(d.atUs)>parseClimateUs(e.receipt.placedUs)&&parseClimateUs(d.atUs)<parseClimateUs(e.receipt.expiresUs)&&
+  Number.isSafeInteger(d.fromRevision)&&d.fromRevision>=e.receipt.placementRevision&&Number.isSafeInteger(d.observedRevision)&&d.observedRevision>=d.fromRevision&&
+  vec(d.observerAt)&&vec(d.target)&&d.target.x===e.lot.fruit.at.x&&d.target.y===e.lot.fruit.at.y;
+}
+export function projectActiveDisposableGroundForObservation(e:Entry,head:GroundDiscoveryHead){
+ if(e.expiry)return null;
+ return Object.freeze({...head,schema:'ordinary-active-aged-ground-observation/v1' as const,
+  receiptDigest:receiptDigest(e),fruit:structuredClone(e.lot.fruit),bornUs:e.lot.bornUs,expiresUs:e.lot.expiresUs});
+}
+export function projectDisposableGroundResidentDiscovery(e:Entry,id:string){
+ return residentId(id)?structuredClone(e.discoveries?.find(d=>d.residentId===id)??null):null;
+}
 export function hasDisposableNativeAgedTransfer(db:DatabaseSync):boolean{
  const exists=db.prepare('SELECT type,sql FROM main.sqlite_schema WHERE lower(name)=?').get(table);
  const meta=db.prepare("SELECT 1 FROM main.sqlite_schema WHERE type='table' AND name='archive_meta'").get();
@@ -89,7 +112,7 @@ export function hasDisposableNativeAgedTransfer(db:DatabaseSync):boolean{
 }
 export function readDisposableNativeAgedTransfer(db:DatabaseSync,owner:DisposableRulesSaveAuthority,pin:DisposableNativeAgedTransferPin,w:World):Entry|null{
  if(!hasDisposableNativeAgedTransfer(db))return null;
- const rows=db.prepare(`SELECT slot,CASE WHEN length(CAST(body AS BLOB))<=16384 THEN body END AS body,seal FROM main.${table} LIMIT 2`).all();
+ const rows=db.prepare(`SELECT slot,CASE WHEN length(CAST(body AS BLOB))<=${MAX_ARCHIVE_BYTES} THEN body END AS body,seal FROM main.${table} LIMIT 2`).all();
  const r=rows[0];
  if(rows.length!==1||r.slot!==1||typeof r.body!=='string'||authenticateDisposableRulesPayload(owner,lane,r.body)!==r.seal)
   throw Error('disposable_native_aged_transfer_archive');
@@ -102,16 +125,21 @@ export function readDisposableNativeAgedTransfer(db:DatabaseSync,owner:Disposabl
   g1.status!=='encoding-only'||e.p.terms.g1Digest!==hash(JSON.stringify(e.p.g1))||e.p.terms.effectKeyId!==pin.keyId||
   !g2Valid(e.p.terms,e.g2,pin)||e.expiry===null&&parseClimateUs(minuteToClimateUs(w.minute))>=parseClimateUs(e.lot.expiresUs)||
   e.expiry!==null&&(e.expiry.atUs!==e.lot.expiresUs||e.expiry.revision>w.revision))throw Error('disposable_native_aged_transfer_head');
+ const d=e.discoveries;
+ if(d!==undefined&&(!Array.isArray(d)||d.length>MAX_DISCOVERIES||new Set(d.map(r=>r.residentId)).size!==d.length||
+  d.some(({committedRevision,...r})=>!validDiscovery(e,r)||!Number.isSafeInteger(committedRevision)||committedRevision<=r.fromRevision||
+   committedRevision<r.observedRevision||committedRevision>w.revision||parseClimateUs(r.atUs)>parseClimateUs(minuteToClimateUs(w.minute)))))
+  throw Error('disposable_native_aged_discovery_archive');
  return e;
 }
 export function writeDisposableNativeAgedTransfer(db:DatabaseSync,owner:DisposableRulesSaveAuthority,e:Entry,initial:boolean){
  if(!db.isTransaction)throw Error('disposable_native_aged_transfer_transaction');
  if(initial){db.exec(ddl);db.prepare('INSERT INTO main.archive_meta(key,value) VALUES(?,?)').run(lane,lane);}
  const body=JSON.stringify(e);
- if(Buffer.byteLength(body)>16384||db.prepare(`INSERT INTO main.${table} VALUES(1,?,?) ON CONFLICT(slot) DO UPDATE SET body=excluded.body,seal=excluded.seal`)
+ if(Buffer.byteLength(body)>MAX_ARCHIVE_BYTES||db.prepare(`INSERT INTO main.${table} VALUES(1,?,?) ON CONFLICT(slot) DO UPDATE SET body=excluded.body,seal=excluded.seal`)
   .run(body,authenticateDisposableRulesPayload(owner,lane,body)).changes!==1)throw Error('disposable_native_aged_transfer_write');
 }
-export function advanceDisposableNativeAgedTransfer(e:Entry,before:World,after:World){
+export function advanceDisposableNativeAgedTransfer(e:Entry,before:World,after:World,observed:readonly NativeOrdinaryAgedDiscovery[]=[]){
  const atUs=minuteToClimateUs(after.minute);
  if(after.id!==before.id||after.minute!==before.minute+1||after.revision<=before.revision||after.clock.paused||before.clock.paused)
   throw Error('disposable_native_aged_transfer_native_minute');
@@ -119,7 +147,13 @@ export function advanceDisposableNativeAgedTransfer(e:Entry,before:World,after:W
  if(!e.expiry&&!shift)throw Error('disposable_native_aged_transfer_expiry');
  const expiry=shift?.expired[0];
  if(expiry&&expiry.settledUs!==e.lot.expiresUs)throw Error('disposable_native_aged_transfer_missed_expiry');
- return {...e,head:digestWorld(after),expiry:e.expiry??(expiry?{revision:after.revision,atUs,groundDebit:1 as const}:null)};
+ if(observed.length&&(e.expiry||expiry||observed.length>MAX_DISCOVERIES||observed.some(d=>!validDiscovery(e,d)||
+  d.fromRevision!==before.revision||d.observedRevision>after.revision||d.atUs!==atUs)))
+  throw Error('disposable_native_aged_discovery_phase');
+ const discoveries=[...e.discoveries??[]],seen=new Set(discoveries.map(d=>d.residentId));
+ for(const d of observed)if(!seen.has(d.residentId)){seen.add(d.residentId);discoveries.push({...d,committedRevision:after.revision});}
+ if(discoveries.length>MAX_DISCOVERIES)throw Error('disposable_native_aged_discovery_capacity');
+ return {...e,...(discoveries.length?{discoveries}:{}),head:digestWorld(after),expiry:e.expiry??(expiry?{revision:after.revision,atUs,groundDebit:1 as const}:null)};
 }
 export function projectDisposableNativeAgedTransfer(e:Entry,w:World,g1?:unknown,g2?:unknown,pin?:DisposableNativeAgedTransferPin){
  if(w.clock.paused)return null;
