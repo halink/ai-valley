@@ -1,3 +1,4 @@
+import {isValleySpiritGeographyOnly,proposeValleySpiritFruitFall,VALLEY_SPIRIT_GEOGRAPHY_ONLY_MENU} from './valley-spirit-proposal.js';
 import {createHash,createPublicKey,verify,type KeyObject} from 'node:crypto';
 import {parseClimateUs} from '../world/mvp-climate.js';
 import type {inspectRulesAgedFruitBasis} from './valley-spirit-rules-aged-preflight.js';
@@ -63,4 +64,38 @@ export function prepareOrdinaryAgedG1ReviewEncoding(pin:NonNullable<ReturnType<t
  return Object.freeze({status:'encoding-only' as const,terms,blockers,
   proposalId:basis.proposalId,sourceLotId:basis.sourceLot.id,targetId:basis.targetId,
   placementEligible:false as const,executionAuthorized:false as const});
+}
+
+
+/** Detached arithmetic for the one tracked cohort only. The ordinary world
+ * has no nonempty target writer, so this cannot become a placement preview
+ * or a successful ordinary/shadow production preflight. */
+export function inspectOrdinaryAgedG1Advisory(
+ pin:NonNullable<ReturnType<typeof pinOrdinaryAgedG1Review>>,basis:Basis,ground:Ground,signed:unknown,
+){
+ if(signed===undefined||basis.status!=='blocked')return null;
+ const encoded=prepareOrdinaryAgedG1ReviewEncoding(pin,basis,ground,signed);
+ if(encoded.status!=='encoding-only')return null;
+ const candidate=proposeValleySpiritFruitFall(basis.proposalId,[{
+  worldId:basis.worldId,menuVersion:VALLEY_SPIRIT_GEOGRAPHY_ONLY_MENU,inputSnapshotId:basis.proposalInputId,
+  permissionVersion:basis.permissionVersion,sourceRefs:[basis.sourceRef],rainEventId:basis.rainEventId,
+  sourceResourceInstanceId:basis.sourceResourceInstanceId,targetId:basis.targetId,quantity:1,
+  validFromMicroMinute:Number(parseClimateUs(basis.atUs)),validUntilMicroMinute:Number(parseClimateUs(basis.proposalUntilUs)),
+ }],{optionNumber:1,rationale:'仅对已核验的一份原龄公共果进行守恒试算。'});
+ if(candidate.status!=='proposed'||candidate.proposal.opportunityId!==basis.opportunityId||
+  !isValleySpiritGeographyOnly(candidate.proposal))return null;
+ const lot=basis.sourceLot,at=parseClimateUs(basis.atUs);
+ if(!lot.id||lot.quantity!==1||parseClimateUs(lot.bornUs)>at||parseClimateUs(lot.expiresUs)<=at||
+  !integer(lot.birthRevision,0,basis.revision))return null;
+ // Geography admission already proves an unclaimed public bush. Only this
+ // exact tracked unit moves in the imaginary comparison, never total stock.
+ const unit=Object.freeze({...lot,ownerId:'commons' as const});
+ const before=Object.freeze({source:unit,ground:null,totalUnits:lot.quantity});
+ const after=Object.freeze({source:null,ground:unit,totalUnits:lot.quantity});
+ return Object.freeze({
+  status:'blocked_advisory' as const,candidate:candidate.proposal,
+  comparison:Object.freeze({kind:'detached-one-lot-conservation/v1' as const,before,after,
+   debitSource:1 as const,creditGround:1 as const}),
+  blockers:encoded.blockers,placementEligible:false as const,executionAuthorized:false as const,
+ });
 }

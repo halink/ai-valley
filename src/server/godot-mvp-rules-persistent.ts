@@ -3,7 +3,7 @@ import {bindDisposableSpeechPurpose,disposableSpeechHead,openDisposableNativeSpe
 import {minuteToClimateUs} from '../world/mvp-climate.js';
 import {pinDisposableNativeAgedTransfer} from './disposable-native-aged-transfer.js';
 import {createFreshDisposableRulesStorage,isDisposableRulesScratchPath} from './disposable-native-rules-save.js';
-import {prepareOrdinaryAgedG1ReviewEncoding,pinOrdinaryAgedG1Review,unavailableOrdinaryAgedG1,type OrdinaryAgedG1ReviewOptions} from './valley-spirit-ordinary-aged-g1-review.js';
+import {inspectOrdinaryAgedG1Advisory,prepareOrdinaryAgedG1ReviewEncoding,pinOrdinaryAgedG1Review,unavailableOrdinaryAgedG1,type OrdinaryAgedG1ReviewOptions} from './valley-spirit-ordinary-aged-g1-review.js';
 import {canInstallEmptyOrdinaryAgedGround,hasNativeEmptyGroundCheckpoint,openEmptyOrdinaryAgedGround,pinOrdinaryAgedGround,type OrdinaryAgedGroundPin} from './valley-spirit-ordinary-aged-ground.js';
 import {unavailableAgedRulesPreflight} from './valley-spirit-rules-aged-preflight.js';
 import {pinRulesNativeFruitRenewal,type RulesNativeFruitRenewalPin} from './valley-spirit-rules-fruit-renewal.js';
@@ -318,7 +318,11 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
      JSON.stringify(basis)!==JSON.stringify(readPrivateAgedFruitPreflight()))return unavailableOrdinaryAgedG1();
     const encoded=prepareOrdinaryAgedG1ReviewEncoding(ordinaryReview,basis,ground,signed);
     if(encoded.status!=='encoding-only')return encoded;
-    return Object.freeze({...encoded,status:signed===undefined?'g1-review-signing-input' as const:'g1-review-verified' as const});
+    if(signed===undefined)return Object.freeze({...encoded,status:'g1-review-signing-input' as const});
+    const advisory=inspectOrdinaryAgedG1Advisory(ordinaryReview,basis,ground,signed);
+    if(!advisory||JSON.stringify(ground)!==JSON.stringify(readPrivateOrdinaryAgedGround())||
+     JSON.stringify(basis)!==JSON.stringify(readPrivateAgedFruitPreflight()))return unavailableOrdinaryAgedG1();
+    return Object.freeze({...encoded,status:'g1-review-verified' as const,advisory});
    }catch{return unavailableOrdinaryAgedG1();}
   };
   let rebaseRequired=false;
