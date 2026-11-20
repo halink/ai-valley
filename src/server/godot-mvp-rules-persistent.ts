@@ -204,6 +204,7 @@ export function bindOrdinaryG2DevelopmentOriginPreview(storage:ReturnType<typeof
      advanceDevelopmentHallMinute:()=>ifLive(()=>run.advancePrivateOrdinaryDevelopmentV3Minute?.('hall')??null),
      readDevelopmentHeld:(residentId:string)=>ifLive(()=>run.readPrivateOrdinaryDevelopmentV3Held?.(residentId)??null),
      readDevelopmentDiscovery:(residentId:string)=>ifLive(()=>run.readPrivateOrdinaryDevelopmentV3Discovery?.(residentId)??null),
+     readDevelopmentFairness:()=>ifLive(()=>run.readPrivateOrdinaryDevelopmentV3Fairness?.()??null),
      readDevelopmentGround:()=>ifLive(()=>run.readPrivateOrdinaryDevelopmentV3?.()??null),}:{}),
     async close(){if(!closed){closed=true;await run.close();opened=false;}},
    });
@@ -660,6 +661,7 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
   return {get session(){return session!;},server,snapshot,...(ordinaryG2V3?{previewPrivateOrdinaryDevelopmentV3:()=>{
    const proof=!committedV3Head&&selectedReview?.currentPositive();return proof&&store?store.previewOrdinaryDevelopmentV3(proof):null;},
    advancePrivateOrdinaryDevelopmentV3Minute:advanceDevelopmentGroundMinute,
+   readPrivateOrdinaryDevelopmentV3Fairness:()=>store?.readOwnedOrdinaryDevelopmentV3Fairness()??null,
    readPrivateOrdinaryDevelopmentV3Route:(id:string)=>typeof id==='string'&&id.length&&id.length<=300?store?.readOwnedOrdinaryDevelopmentV3Route(id)??null:null,
    readPrivateOrdinaryDevelopmentV3Eating:(id:string)=>typeof id==='string'&&id.length&&id.length<=300?store?.readOwnedOrdinaryDevelopmentV3Eating(id)??null:null,
    readPrivateOrdinaryDevelopmentV3Held:(id:string)=>typeof id==='string'&&id.length&&id.length<=300?store?.readOwnedOrdinaryDevelopmentV3Held(id)??null:null,

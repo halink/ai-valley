@@ -407,12 +407,12 @@ export function prepareSealedMvpAdjacentMinute(current:World){
 
 /** One detached ordinary ecology minute without any supplied resident action.
  * Only the sealed store may commit it with custody. */
-export function prepareSealedMvpEcologyMinute(current:World,captureMeals=false,privateFruitPoint?:Vec,privatePickup?:ReadonlyMap<string,NativeAgedPickupSelection>,privateEat?:NativeAgedEatSelection,sealedReplayFruitFlow?:true){
+export function prepareSealedMvpEcologyMinute(current:World,captureMeals=false,privateFruitPoint?:Vec,privatePickup?:ReadonlyMap<string,NativeAgedPickupSelection>,privateEat?:NativeAgedEatSelection,sealedReplayFruitFlow?:true,ordinaryFruitFlow?:true){
  if(current.mode!=='validation'||current.clock.paused||!current.mvpClimate?.rainProvenance)return null;
  const draft=structuredClone(current);
  inheritReceiptHistory(current,draft);enableCompletedMovement(draft);
  try{
-  const advance=()=>advanceMvpRuleMinuteDraft(draft,current,0,{},{meals:captureMeals,fruitFlow:sealedReplayFruitFlow===true,fruitRenewal:true,addressedSpeech:true,sealedReplayFruitFlow});
+  const advance=()=>advanceMvpRuleMinuteDraft(draft,current,0,{},{meals:captureMeals,fruitFlow:sealedReplayFruitFlow===true||ordinaryFruitFlow===true,fruitRenewal:true,addressedSpeech:true,sealedReplayFruitFlow});
   const observe=()=>privateFruitPoint?captureMvpNativeObservationPhase(draft,privateFruitPoint,advance):{result:advance(),observed:[],arrivals:[]};
   const pickup=()=>privatePickup?captureMvpNativeAgedPickup(draft,privatePickup,observe):{result:observe(),completion:null};
   const eating=privateEat?captureMvpNativeAgedEat(draft,privateEat,pickup):{result:pickup(),completion:null,seatDecline:null};
@@ -428,21 +428,21 @@ export function prepareSealedMvpEcologyMinute(current:World,captureMeals=false,p
 
 /** One normal chooser/engine minute for the stopped ordinary archive only.
  * The provided read port is built from the verified owning snapshot. */
-export function prepareStoppedOrdinaryAgedGroundMinute(current:World,ownedGround:OrdinaryAgedGroundDiscoveryRead){
+export function prepareStoppedOrdinaryAgedGroundMinute(current:World,ownedGround:OrdinaryAgedGroundDiscoveryRead,ordinaryFruitFlow?:true){
  if(current.mode!=='validation'||current.clock.paused||!current.mvpClimate?.rainProvenance||
   Object.hasOwn(current.mvpClimate,'spiritEffects')||Object.hasOwn(current.mvpClimate,'spiritFruitSettlement'))return null;
  const draft=structuredClone(current);
  inheritReceiptHistory(current,draft);enableCompletedMovement(draft);
  try{
   const {result,observed}=captureOrdinaryAgedGroundDiscovery(draft,ownedGround,()=>
-   advanceMvpRuleMinuteDraft(draft,current,0,{},{meals:true,fruitFlow:false,fruitRenewal:false,addressedSpeech:true}));
+   advanceMvpRuleMinuteDraft(draft,current,0,{},{meals:true,fruitFlow:ordinaryFruitFlow===true,fruitRenewal:false,addressedSpeech:true}));
   if(draft.minute!==current.minute+1||result.speech?.receipts.length||result.witnesses.length)return null;
-  return {draft,observed};
+  return {draft,observed,fruitFlow:result.fruitFlow};
  }catch{return null;}
 }
 
 /** Detached exact native route/pickup witness; the original V3 store owns commit. */
-export function prepareStoppedOrdinaryAgedGroundRouteMinute(current:World,owned:OrdinaryAgedGroundNativePickupRead,prior:AgedGroundApproachPlan|null){
+export function prepareStoppedOrdinaryAgedGroundRouteMinute(current:World,owned:OrdinaryAgedGroundNativePickupRead,prior:AgedGroundApproachPlan|null,ordinaryFruitFlow?:true){
  if(current.mode!=='validation'||current.clock.paused||!current.mvpClimate?.rainProvenance||
   Object.hasOwn(current.mvpClimate,'spiritEffects')||Object.hasOwn(current.mvpClimate,'spiritFruitSettlement'))return null;
  const draft=structuredClone(current);
@@ -452,12 +452,12 @@ export function prepareStoppedOrdinaryAgedGroundRouteMinute(current:World,owned:
   const intents=!prior&&!pickups.size?prepareOrdinaryNativeGroundApproach(current,owned):new Map();
   if(!prior&&!intents.size)return null;
   const advance=()=>captureAgedGroundApproach(draft,intents,prior,()=>captureOrdinaryAgedGroundDiscovery(draft,owned,()=>
-   advanceMvpRuleMinuteDraft(draft,current,0,{},{meals:true,fruitFlow:false,fruitRenewal:false,addressedSpeech:true})));
+   advanceMvpRuleMinuteDraft(draft,current,0,{},{meals:true,fruitFlow:ordinaryFruitFlow===true,fruitRenewal:false,addressedSpeech:true})));
   const pickup=pickups.size?captureMvpNativeAgedPickup(draft,pickups,advance):null;
   if(pickups.size&&!pickup)return null;
   const {result:{result,observed},witness}=pickup?pickup.result:advance();
   if(draft.minute!==current.minute+1||result.speech?.receipts.length||result.witnesses.length)return null;
-  return {draft,observed,witness,pickup:pickup?.completion??null};
+  return {draft,observed,witness,pickup:pickup?.completion??null,fruitFlow:result.fruitFlow};
  }catch{return null;}
 }
 

@@ -1,3 +1,4 @@
+import type {MvpFruitFlowBatch} from '../world/mvp-resources.js';
 import {diningWorkClaim,readNativeAgedEatingState,type Eating} from './disposable-native-aged-transfer.js';
 import {agedGroundApproachPath,chooseLawfulAgedGroundPath,equalAgedGroundPath,type AgedGroundApproachPlan,type AgedGroundApproachWitness} from '../world/mvp-native-aged-ground-approach.js';
 import {same} from '../world/navigation.js';
@@ -122,8 +123,9 @@ type Eaten=Readonly<{heldDebit:1;witness:NativeAgedEatCompletion}>;
 type Route=Readonly<{plan:AgedGroundApproachPlan;edgesUs:readonly string[];result:'active'|'completed'|'interrupted'|'superseded';
  closedUs?:string;competitorPlanId?:string}>;
 type HallDecline=Readonly<{schema:'v3-native-hall-declined';holderId:string;planId:string;atUs:string;reason:NativeAgedDiningDeclineReason}>;
+type SourceFlow=Readonly<{observedMinutes:number;grossNaturalRenewal:number;grossOrdinaryGather:number;closingQuantity:number}>;
 type Lifecycle=Readonly<{schema:'ordinary-g2-development-continuation/v3';sequence:number;atUs:string;
- revision:number;digest:string;placement:Ground;discoveries:readonly CommittedNativeOrdinaryAgedDiscovery[];expiry:Expiry|null;held?:Held;heldExpiry?:HeldExpiry;work?:Work;hallWork?:Eating;hallDecline?:HallDecline;eaten?:Eaten;route?:Route}>;
+ revision:number;digest:string;placement:Ground;discoveries:readonly CommittedNativeOrdinaryAgedDiscovery[];expiry:Expiry|null;held?:Held;heldExpiry?:HeldExpiry;work?:Work;hallWork?:Eating;hallDecline?:HallDecline;eaten?:Eaten;route?:Route;sourceFlow?:SourceFlow|null}>;
 const archiveKeys=['schema','approval','sourceBefore','sourceAfter','afterRevision','afterDigest','groundDigest'];
 const lotOf=(g:Ground,c:Approval):AgedGroundLot=>({bornUs:g.bornUs,expiresUs:g.expiresUs,
  fruit:{effectId:g.effectId,kind:'fallen-fruit',amount:1,ownerId:g.ownerId,sourceResourceId:g.sourceId,
@@ -156,7 +158,7 @@ export function readOrdinaryDevelopmentV3(db:DatabaseSync,origin:OrdinaryG2Devel
    w.resources.filter(r=>r.id===g.sourceId&&r.amount===a.sourceAfter&&r.at.x===g.sourceAt.x&&r.at.y===g.sourceAt.y).length!==1||
    !resolveMvpRainEpisode(w,c.terms.rainEventId))throw Error('ordinary_g2_dev_v3_placement_mismatch');
  }else{
-  if(!exact(l,['schema','sequence','atUs','revision','digest','placement','discoveries','expiry',...(Object.hasOwn(l,'held')?['held']:[]),...(Object.hasOwn(l,'heldExpiry')?['heldExpiry']:[]),...(Object.hasOwn(l,'work')?['work']:[]),...(Object.hasOwn(l,'eaten')?['eaten']:[]),...(Object.hasOwn(l,'hallWork')?['hallWork']:[]),...(Object.hasOwn(l,'hallDecline')?['hallDecline']:[]),...(Object.hasOwn(l,'route')?['route']:[])])||l.schema!=='ordinary-g2-development-continuation/v3'||
+  if(!exact(l,['schema','sequence','atUs','revision','digest','placement','discoveries','expiry',...(Object.hasOwn(l,'held')?['held']:[]),...(Object.hasOwn(l,'heldExpiry')?['heldExpiry']:[]),...(Object.hasOwn(l,'work')?['work']:[]),...(Object.hasOwn(l,'eaten')?['eaten']:[]),...(Object.hasOwn(l,'hallWork')?['hallWork']:[]),...(Object.hasOwn(l,'hallDecline')?['hallDecline']:[]),...(Object.hasOwn(l,'route')?['route']:[]),...(Object.hasOwn(l,'sourceFlow')?['sourceFlow']:[])])||l.schema!=='ordinary-g2-development-continuation/v3'||
    !int(l.sequence)||l.sequence<1||l.sequence>1440||BigInt(now)!==before+1_000_000n*BigInt(l.sequence)||
    now!==l.atUs||w.revision!==l.revision||w.revision<=a.afterRevision||l.digest!==digestHead(db,w)||
    !Array.isArray(l.discoveries)||l.discoveries.length>64||
@@ -312,6 +314,48 @@ function eligibleLifecycleEvents(w:World,draft:World){
   hash(draft.events.slice(0,w.events.length))===hash(w.events)&&
   !draft.events.slice(w.events.length).some(e=>e.kind==='conversation'||e.speechText!==undefined||e.mvpMeal||e.socialAppointmentArrival||e.mvpFruitFall);
 }
+const sourcePoint=(row:{sourceAt:{x:number;y:number}}|undefined,g:Ground)=>!!row&&row.sourceAt.x===g.sourceAt.x&&row.sourceAt.y===g.sourceAt.y;
+function verifiedSourceFlow(w:World,g:Ground,a:Archive,l:Pick<Lifecycle,'sequence'|'sourceFlow'>|null):SourceFlow|null{
+ const resource=w.resources.filter(r=>r.id===g.sourceId);
+ const x=l?l.sourceFlow:{observedMinutes:0,grossNaturalRenewal:0,grossOrdinaryGather:0,closingQuantity:a.sourceAfter};
+ if(!x||!exact(x,['observedMinutes','grossNaturalRenewal','grossOrdinaryGather','closingQuantity'])||
+  !Object.values(x).every(int)||x.observedMinutes!==(l?.sequence??0)||
+  BigInt(a.sourceAfter)+BigInt(x.grossNaturalRenewal)-BigInt(x.grossOrdinaryGather)!==BigInt(x.closingQuantity)||
+  resource.length!==1||resource[0].kind!=='bush'||resource[0].foodItem!=='fruit'||
+  !sourcePoint({sourceAt:resource[0].at},g)||resource[0].amount!==x.closingQuantity)return null;
+ return x;
+}
+function advanceSourceFlow(w:World,draft:World,g:Ground,a:Archive,l:Lifecycle|null,flow:MvpFruitFlowBatch|null):SourceFlow|null{
+ const old=verifiedSourceFlow(w,g,a,l);
+ if(!old||!flow||flow.worldId!==w.id||draft.id!==w.id||flow.fromRevision!==w.revision||flow.toRevision!==draft.revision||
+  flow.fromUs!==minuteToClimateUs(w.minute)||flow.toUs!==minuteToClimateUs(draft.minute))return null;
+ const open=flow.opening.find(r=>r.sourceId===g.sourceId),close=flow.closing.find(r=>r.sourceId===g.sourceId);
+ if(!open||!close||!sourcePoint(open,g)||!sourcePoint(close,g)||open.amount!==old.closingQuantity)return null;
+ let grossNaturalRenewal=old.grossNaturalRenewal,grossOrdinaryGather=old.grossOrdinaryGather;
+ for(const op of flow.operations){
+  if(op.kind==='gather'&&op.sourceId===g.sourceId)grossOrdinaryGather+=op.quantity;
+  if(op.kind==='renewal'&&op.witness.sourceId===g.sourceId)grossNaturalRenewal+=op.witness.naturallyRenewed;
+ }
+ const sequence=(l?.sequence??0)+1;
+ const sourceFlow={observedMinutes:sequence,grossNaturalRenewal,grossOrdinaryGather,closingQuantity:close.amount};
+ return verifiedSourceFlow(draft,g,a,{sequence,sourceFlow});
+}
+/** Only project an original transaction-verified archive through its owning reader. */
+export function projectOrdinaryDevelopmentV3Fairness(w:World,owned:NonNullable<ReturnType<typeof readOrdinaryDevelopmentV3>>){
+ const proof=verifiedArchiveReads.get(owned);
+ if(!proof||proof.revision!==w.revision||proof.world!==hash(w)||proof.content!==hash(owned))return null;
+ const l=owned.lifecycle,g=l?.placement??owned.ground;
+ if(!g)return null;
+ const flow=verifiedSourceFlow(w,g,owned.receipt,l);
+ return {status:'ready',coverage:'one-signed-development-opportunity',throughRevision:w.revision,throughUs:minuteToClimateUs(w.minute),
+  proposalDirections:{linkedApprovedCandidate:1,total:'unavailable'},actualEffects:{groundPlacement:1},
+  actualDiscoveries:{personal:(l?.discoveries??[]).length},actualPickups:{settled:l?.held?1:0},
+  supply:{fallTransfer:{sourceDebit:1,groundCredit:1,directNewSupply:0},pickupTransfer:{groundDebit:l?.held?1:0,heldCredit:l?.held?1:0},
+   groundExpiry:l?.expiry?1:0,heldExpiry:l?.heldExpiry?1:0,eaten:l?.eaten?1:0,
+   sourceFlow:flow?{status:'ready',baselineUs:g.placedUs,baselineRevision:owned.receipt.afterRevision,baselineQuantity:owned.receipt.sourceAfter,...flow}:
+    {status:'unavailable',reason:'no-contiguous-native-coverage'},causalGain:'unavailable'},
+  productionEnabled:false,executionAuthorized:false} as const;
+}
 const preparedMinutes=new WeakMap<object,{db:DatabaseSync;priorSeal:string;content:string}>();
 /** Native minute for an actually placed, still owned lot. No user-supplied
  * actor, plan, world, time, target or observations enter this path. */
@@ -331,7 +375,7 @@ export function prepareOrdinaryDevelopmentV3Minute(db:DatabaseSync,w:World,owned
   if(BigInt(now)>=deadline)return null;
   const next=prepareSealedMvpEcologyMinute(w,true,undefined,undefined,{
    residentId:held.holderId,effectId:held.effectId,expiresUs:held.expiresUs,...(hall?{originalHall:true}:{originalOutdoorEvent:true})
-  });
+  },undefined,true);
   if(!next||next.observed.length||next.mealWitnesses.length||next.speech?.receipts.length||!eligibleLifecycleEvents(w,next.draft))return null;
   const holder=next.draft.residents.find(r=>r.id===held.holderId);
   if(!holder||holder.status!=='alive'||holder.residency==='outside'||holder.regionalLocation)return null;
@@ -377,7 +421,7 @@ export function prepareOrdinaryDevelopmentV3Minute(db:DatabaseSync,w:World,owned
     hash(holder.inventory)!==hash(opening.inventory))return null;
    hallDecline={schema:'v3-native-hall-declined',holderId:held.holderId,planId:l.hallWork.planId,atUs:after,reason:declining.reason};
   }
-  const prepared={draft:next.draft,placement:l.placement,sequence:l.sequence+1,discoveries:l.discoveries,expiry:null,held,heldExpiry,work,hallWork,hallDecline,eaten,route:l.route};
+  const prepared={draft:next.draft,placement:l.placement,sequence:l.sequence+1,discoveries:l.discoveries,expiry:null,held,heldExpiry,work,hallWork,hallDecline,eaten,route:l.route,sourceFlow:advanceSourceFlow(w,next.draft,l.placement,owned.receipt,l,next.fruitFlow)};
   preparedMinutes.set(prepared,{db,priorSeal:owned.seal,content:hash(prepared)});
   return prepared;
  }
@@ -392,15 +436,15 @@ export function prepareOrdinaryDevelopmentV3Minute(db:DatabaseSync,w:World,owned
   readExactActiveLot:readLot,
   readExactPickupEvidence(h){const active=readLot(h);return active&&l?.discoveries.length?
    {lot:active,discoveries:l.discoveries,approachAlreadyUsed:!!l.route}:null;}
- },activeRoute?.plan??null):null;
+ },activeRoute?.plan??null,true):null;
  if((mode==='approach'||activeRoute)&&!routed||pickup&&routed&&!routed.pickup)return null;
  const picked=pickup&&!routed?prepareOrdinaryAgedGroundPickup(w,{readExactPickupEvidence(h){
   const active=readLot(h);
   if(!active||!l?.discoveries.length)return null;
   return {lot:active,discoveries:l.discoveries.map(({committedRevision:_,...native})=>native)};
- }}):null;
+ }},true):null;
  if(pickup&&!routed&&(!picked||picked.nativeCustody.mealWitnesses.length||picked.nativeCustody.speech?.receipts.length))return null;
- const next=routed??(picked?{draft:picked.draft,observed:[]}:prepareStoppedOrdinaryAgedGroundMinute(w,{readExactActiveLot:readLot}));
+ const next=routed??(picked?{draft:picked.draft,observed:[],fruitFlow:picked.nativeCustody.fruitFlow}:prepareStoppedOrdinaryAgedGroundMinute(w,{readExactActiveLot:readLot},true));
  if(!next)return null;
  const {draft,observed}=next,expiry=advanceAgedGroundExpiry(w,draft,[lot]),atUs=minuteToClimateUs(draft.minute);
  let completion=picked?.completion;
@@ -423,7 +467,7 @@ export function prepareOrdinaryDevelopmentV3Minute(db:DatabaseSync,w:World,owned
   discoveries.push({...seen,committedRevision:draft.revision});prior.add(seen.residentId);
  }
  if(discoveries.length>64)return null;
- const prepared={draft,placement:g,sequence:(l?.sequence??0)+1,discoveries,expiry:expiry.expired[0]??null,...(held?{held}:{}),heldExpiry:undefined,work:undefined,hallWork:undefined,hallDecline:undefined,eaten:undefined,route};
+ const prepared={draft,placement:g,sequence:(l?.sequence??0)+1,discoveries,expiry:expiry.expired[0]??null,...(held?{held}:{}),heldExpiry:undefined,work:undefined,hallWork:undefined,hallDecline:undefined,eaten:undefined,route,sourceFlow:advanceSourceFlow(w,draft,g,owned.receipt,l,next.fruitFlow)};
  preparedMinutes.set(prepared,{db,priorSeal:owned.seal,content:hash(prepared)});
  return prepared;
 }
@@ -438,7 +482,7 @@ export function writeOrdinaryDevelopmentV3Minute(db:DatabaseSync,origin:Ordinary
  if(!db.isTransaction||!h||!prepared||prepared.db!==db||prepared.priorSeal!==owned.seal||prepared.content!==hash(step)||(!owned.ground&&!owned.lifecycle?.held)||!tables(db)||latch(db,true)!==owned.seal)throw Error('ordinary_g2_dev_v3_continuation_scope');
  assertLifecycleWorldWriter(db);assertStoppedEventAuthority(db);assertStoppedEventArchive(db,step.draft);
  const lifecycle:Lifecycle={schema:'ordinary-g2-development-continuation/v3',sequence:step.sequence,atUs:minuteToClimateUs(step.draft.minute),
-  revision:step.draft.revision,digest:h,placement:step.placement,discoveries:step.discoveries,expiry:step.expiry,...(step.held?{held:step.held}:{}),...(step.heldExpiry?{heldExpiry:step.heldExpiry}:{}),...(step.work?{work:step.work}:{}),...(step.eaten?{eaten:step.eaten}:{}),...(step.hallWork?{hallWork:step.hallWork}:{}),...(step.hallDecline?{hallDecline:step.hallDecline}:{}),...(step.route?{route:step.route}:{})};
+  revision:step.draft.revision,digest:h,placement:step.placement,discoveries:step.discoveries,expiry:step.expiry,sourceFlow:step.sourceFlow,...(step.held?{held:step.held}:{}),...(step.heldExpiry?{heldExpiry:step.heldExpiry}:{}),...(step.work?{work:step.work}:{}),...(step.eaten?{eaten:step.eaten}:{}),...(step.hallWork?{hallWork:step.hallWork}:{}),...(step.hallDecline?{hallDecline:step.hallDecline}:{}),...(step.route?{route:step.route}:{})};
  const raw=JSON.stringify({placementReceipt:owned.receipt,lifecycle}),seal=authenticateOrdinaryG2DevelopmentV3(origin,'v3-receipt',raw);
  if(Buffer.byteLength(raw)>65536||
   db.prepare('UPDATE main.'+RECEIPT+' SET body=?,seal=? WHERE opportunity=? AND seal=?')

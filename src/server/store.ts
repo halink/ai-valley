@@ -1,5 +1,5 @@
 import {rehearseDetachedNativeLot} from './valley-spirit-ordinary-g1-rehearsal.js';
-import {ownsOrdinaryDevelopmentV3Pin,ordinaryDevelopmentV3Terms,verifyOrdinaryDevelopmentV3,encodeOrdinaryDevelopmentV3,readOrdinaryDevelopmentV3,writeOrdinaryDevelopmentV3,prepareOrdinaryDevelopmentV3Minute,writeOrdinaryDevelopmentV3Minute,type OrdinaryDevelopmentV3Pin} from './ordinary-g2-development-v3.js';
+import {projectOrdinaryDevelopmentV3Fairness,ownsOrdinaryDevelopmentV3Pin,ordinaryDevelopmentV3Terms,verifyOrdinaryDevelopmentV3,encodeOrdinaryDevelopmentV3,readOrdinaryDevelopmentV3,writeOrdinaryDevelopmentV3,prepareOrdinaryDevelopmentV3Minute,writeOrdinaryDevelopmentV3Minute,type OrdinaryDevelopmentV3Pin} from './ordinary-g2-development-v3.js';
 import {ownsSelectedPositiveRehearsal,type openSelectedOrdinaryRehearsal} from './valley-spirit-ordinary-selected-rehearsal.js';
 import {assertOrdinaryG2DevelopmentPath,guardOrdinaryG2DevelopmentOriginCommit,inspectOrdinaryG2DevelopmentOrigin,type OrdinaryG2DevelopmentOrigin} from './ordinary-g2-development-origin.js';
 import {currentClosedRain} from './valley-spirit-persistent-rules-shadow.js';
@@ -1404,6 +1404,9 @@ export class WorldStore {
  readOwnedOrdinaryDevelopmentV3(residentId?:string){
   if(residentId===undefined)return this.readOwnedOrdinaryDevelopmentV3Ground();
   return this.readOwnedOrdinaryDevelopmentV3Archive((r)=>({discovery:r.lifecycle?.discoveries.find(d=>d.residentId===residentId)??null}));
+ }
+ readOwnedOrdinaryDevelopmentV3Fairness(){
+  return this.readOwnedOrdinaryDevelopmentV3Archive((r,w)=>projectOrdinaryDevelopmentV3Fairness(w,r));
  }
  private readOwnedOrdinaryDevelopmentV3Ground(){
   return this.readOwnedOrdinaryDevelopmentV3Archive((r,w)=>({status:r.ground?'development-v3-stored' as const:r.lifecycle?.eaten?'development-v3-held-eaten' as const:r.lifecycle?.heldExpiry?'development-v3-held-expired' as const:r.lifecycle?.held?'development-v3-held' as const:'development-v3-expired' as const,ground:r.ground,

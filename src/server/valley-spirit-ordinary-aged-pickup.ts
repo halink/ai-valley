@@ -23,7 +23,7 @@ export interface OrdinaryAgedGroundPickupRead{
 /** Detached one ordinary chooser/engine minute. It is not a commit port.
  * A verified owning read is still required at future settlement; neither
  * this result nor the injected reader permits inserting scalar held food. */
-export function prepareOrdinaryAgedGroundPickup(current:World,owner:OrdinaryAgedGroundPickupRead){
+export function prepareOrdinaryAgedGroundPickup(current:World,owner:OrdinaryAgedGroundPickupRead,ordinaryFruitFlow?:true){
  try{
   let rows:readonly NativeOrdinaryAgedDiscovery[]|undefined;
   const evidence=readOrdinaryAgedGroundObservationHead(current,{readExactActiveLot(head){
@@ -55,7 +55,7 @@ export function prepareOrdinaryAgedGroundPickup(current:World,owner:OrdinaryAged
   if(!intents.size)return null;
   // The native chooser sees all eligible residents and decides in roster
   // order, only at the ordinary idle fallback. No requested actor/action.
-  const next=prepareSealedMvpEcologyMinute(current,true,undefined,intents);
+  const next=prepareSealedMvpEcologyMinute(current,true,undefined,intents,undefined,undefined,ordinaryFruitFlow);
   if(!next?.completion)return null;
   const {draft,completion}=next,s=intents.get(completion.residentId);
   const opening=current.residents.find(a=>a.id===completion.residentId),closing=draft.residents.find(a=>a.id===completion.residentId);
@@ -63,7 +63,7 @@ export function prepareOrdinaryAgedGroundPickup(current:World,owner:OrdinaryAged
    JSON.stringify(opening.inventory)!==JSON.stringify(closing.inventory)||!draft.processed.includes('plan:'+completion.planId)||
    completion.startedAt!==draft.minute||completion.settledUs!==draft.mvpClimate?.lastUs||
    parseClimateUs(completion.settledUs)!==before+1_000_000n||parseClimateUs(completion.settledUs)>=parseClimateUs(r.expiresUs))return null;
-  return {draft,nativeCustody:{mealWitnesses:next.mealWitnesses,speech:next.speech,renewal:next.renewal},completion:Object.freeze({
+  return {draft,nativeCustody:{mealWitnesses:next.mealWitnesses,speech:next.speech,renewal:next.renewal,fruitFlow:next.fruitFlow},completion:Object.freeze({
    schema:'native-ordinary-aged-ground-pickup-completion/v1' as const,worldId:h.worldId,baseRevision:h.revision,
    draftRevision:draft.revision,effectId:r.fruit.effectId,receiptDigest:r.receiptDigest,residentId:completion.residentId,
    discoveryId:s.discoveryId,planId:completion.planId,settledUs:completion.settledUs,bornUs:r.bornUs,expiresUs:r.expiresUs,

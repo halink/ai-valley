@@ -132,3 +132,9 @@ index with the one held debit and original latch in the same transaction.
 The original scoped archive authenticates reopens during travel or work.
 This does not enable a player save, public broadcast, arbitrary room or
 table movement, other eating authority, model, or automatic scheduler.
+
+### 单机会私有公平与果源流量审计
+
+原 V3 无端口所有者可用 `readDevelopmentFairness` 核对已认证的一个机会。已链接签审的候选、真正落地、本人实际发现、真正拾取分别计数；这里既不统计所有候选，也不返回居民身份。进食和过期仍分开记账。落果只从源转移到地面，不凭空增加供应或证明因果增产。
+
+从落地提交后的真实果源数量开始，通过同一次原生分钟运行的采摘事件与自然恢复见证，分别累计该源的普通采摘和自然恢复，即使二者抵消也是两条实际流。流量必须连续、精确匹配原源坐标、起止世界版本和库存；与原始存档同事务签封。凡旧轮次没有记录、原生捕获失败或不连续，累计流量保持不可用，不从后续库存补算；不会为流量统计额外推进世界，也不会因此阻止原本合法的物理过期、拾取或进食。覆盖只到现有 V3 私有生命周期终点，不代表全世界公平性、其他果源或反事实收益。
