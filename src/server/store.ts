@@ -1,3 +1,6 @@
+import {appendOrdinarySelectionIntent,hasOrdinarySelectionIntentState,ordinarySelectionIntentSigningSnapshot,
+ ownsOrdinarySelectionIntentPin,type OrdinarySelectionIntentHead,type OrdinarySelectionIntentPin} from './ordinary-g1-selection-intent.js';
+import {ordinaryG1DecisionSaveScope} from './valley-spirit-ordinary-g1-decision.js';
 import {assertStoppedEventArchive,assertStoppedEventAuthority} from './valley-spirit-ordinary-stopped-continuation.js';
 import {digestOrdinaryDue,encodeOrdinaryDevelopmentDue,hasOrdinaryDevelopmentDue,ordinaryDevelopmentDueHead,ordinaryDevelopmentDueTerms,
  readOrdinaryDevelopmentDue,readOrdinaryDevelopmentDueRecord,ordinaryDueExecutionTerms,verifyOrdinaryDueExecution,verifyOrdinaryDevelopmentDue,writeOrdinaryDevelopmentDue} from './ordinary-g2-development-due.js';
@@ -8,7 +11,7 @@ import {projectOrdinaryDevelopmentV3Fairness,ownsOrdinaryDevelopmentV3Pin,ordina
 import {ownsSelectedPositiveRehearsal,type openSelectedOrdinaryRehearsal} from './valley-spirit-ordinary-selected-rehearsal.js';
 import {assertOrdinaryG2DevelopmentPath,guardOrdinaryG2DevelopmentOriginCommit,inspectOrdinaryG2DevelopmentOrigin,type OrdinaryG2DevelopmentOrigin} from './ordinary-g2-development-origin.js';
 import {currentClosedRain} from './valley-spirit-persistent-rules-shadow.js';
-import {buildOrdinaryMultiCandidatePreview,type CandidateJournal,type OrdinaryMultiCandidatePin} from './valley-spirit-ordinary-multi-candidate.js';
+import {ordinaryCandidateClosedRainKey,buildOrdinaryMultiCandidatePreview,type CandidateJournal,type OrdinaryMultiCandidatePin} from './valley-spirit-ordinary-multi-candidate.js';
 import {openOrdinaryNativeShelterLease,type OrdinaryNativeShelterOptions} from './ordinary-native-shelter-custody.js';
 import {openOrdinaryNativeSpeechLease,type OrdinaryNativeSpeechOptions} from './ordinary-native-speech-custody.js';
 import {appendDisposableNativeSpeech,ownsDisposableSpeechPurpose,type DisposableSpeechPurpose} from './disposable-native-addressed-speech.js';
@@ -134,6 +137,8 @@ export function workingEvents(world:World):WorldEvent[]{
 }
 
 /** One durable commit contains the entire fact-state and its event ledger. */
+type OrdinaryMenu=NonNullable<ReturnType<typeof buildOrdinaryMultiCandidatePreview>>;
+const selectionHeads=new WeakMap<OrdinaryMenu,Readonly<{owner:WorldStore;head:OrdinarySelectionIntentHead}>>();
 export class WorldStore {
  private db:DatabaseSync;
  private dailySnapshots?:AtomicDailySnapshots;
@@ -153,6 +158,7 @@ export class WorldStore {
  readonly #ordinaryG2V3?:OrdinaryDevelopmentV3Pin;
  readonly #ordinaryG2DevelopmentOrigin?:OrdinaryG2DevelopmentOrigin;
  private readonly nativeMultiFruit?:ReturnType<typeof openRulesNativeMultiFruitLease>;
+ readonly #nativeMultiOwner?:RuntimeOwnership;
  private readonly nativeRulesFruitRenewal:RulesNativeFruitRenewalPin|null;
  private readonly allowFormalRainProvenance:boolean;
  private readonly formalAppointmentChoiceCustody:boolean;
@@ -221,6 +227,7 @@ export class WorldStore {
       options.privateDisposableSave||options.disposableAgedTransfer||options.dailySnapshots||options.nativeWeatherCredit||
       options.ordinaryNativeMeal||options.ordinaryNativeSpeech||options.ordinaryNativeShelter||options.sealedAgedBirthExecution)
     throw Error('ordinary_multi_fruit_scope');
+   this.#nativeMultiOwner=options.nativeMultiFruit.owner;
    this.nativeMultiFruit=openRulesNativeMultiFruitLease(options.nativeMultiFruit.owner,path,options.nativeMultiFruit.pin);
   }
   this.sealedAgedBirthExecution=options.sealedAgedBirthExecution===true;
@@ -1366,27 +1373,66 @@ export class WorldStore {
  hasDisposableAgedTransfer(){
   return !!this.#privateDisposableSave&&hasDisposableNativeAgedTransfer(this.db);
  }
- readCurrentOrdinaryMultiCandidate(head:Readonly<{id:string;revision:number;minute:number}>,pin:OrdinaryMultiCandidatePin,journal:CandidateJournal){
+ private currentOrdinaryMultiCandidateInTransaction(head:Readonly<{id:string;revision:number;minute:number}>,
+  pin:OrdinaryMultiCandidatePin,journal:CandidateJournal,captureIntentHead=false){
+  if(!this.db.isTransaction||!this.nativeMultiFruit||this.nativeMultiFruit.worldId!==head.id||pin.worldId!==head.id)return null;
+  const w=this.readWorld(false,false);
+  if(!w||w.id!==head.id||w.revision!==head.revision||w.minute!==head.minute)return null;
+  assertOrdinaryAgedGroundStartup(this.db,w as unknown as Record<string,unknown>,true);
+  const grant=readValleySpiritWeatherPermission(this.db,w.id);
+  if(!grant?.publicWeather)return null;
+  const first=this.nativeMultiFruit.inspect(this.db,w);
+  if(!first)return null;
+  const m=buildOrdinaryMultiCandidatePreview(w,pin,first,journal);
+  if(!m||m.permissionVersion!==grant.version)return null;
+  const second=this.nativeMultiFruit.inspect(this.db,w);
+  const after=second&&buildOrdinaryMultiCandidatePreview(w,pin,second,journal);
+  assertOrdinaryAgedGroundStartup(this.db,w as unknown as Record<string,unknown>,true);
+  const finalGrant=readValleySpiritWeatherPermission(this.db,w.id);
+  if(!after||after.snapshot!==m.snapshot||!finalGrant?.publicWeather||finalGrant.version!==grant.version)return null;
+  if(captureIntentHead){
+   const rows=this.db.prepare('SELECT id,revision,state FROM main.worlds LIMIT 2').all();
+   const row=rows[0],episode=ordinaryCandidateClosedRainKey(m);
+   if(rows.length!==1||row.id!==w.id||row.revision!==w.revision||!(row.state instanceof Uint8Array)||!episode||
+      w.mode!=='validation'||Object.hasOwn(w,'simulationOnly')||Object.hasOwn(w,'mvpSeasonalModelVersion'))return null;
+   selectionHeads.set(m,Object.freeze({owner:this,head:Object.freeze({worldId:w.id,revision:w.revision,atUs:minuteToClimateUs(w.minute),
+    permissionVersion:m.permissionVersion,headDigest:createHash('sha256').update(row.state).digest('hex'),snapshot:m.snapshot,episode})}));
+  }
+  return m;
+ }
+ readCurrentOrdinaryMultiCandidate(head:Readonly<{id:string;revision:number;minute:number}>,pin:OrdinaryMultiCandidatePin,journal:CandidateJournal,captureIntentHead=false){
   if(!this.nativeMultiFruit||this.nativeMultiFruit.worldId!==head.id||pin.worldId!==head.id)return null;
   try{
    this.db.exec('BEGIN');
-   try{
-    const w=this.readWorld(false,false);
-    if(!w||w.id!==head.id||w.revision!==head.revision||w.minute!==head.minute)return null;
-    assertOrdinaryAgedGroundStartup(this.db,w as unknown as Record<string,unknown>,true);
-    const grant=readValleySpiritWeatherPermission(this.db,w.id);
-    if(!grant?.publicWeather)return null;
-    const first=this.nativeMultiFruit.inspect(this.db,w);
-    if(!first)return null;
-    const m=buildOrdinaryMultiCandidatePreview(w,pin,first,journal);
-    if(!m||m.permissionVersion!==grant.version)return null;
-    const second=this.nativeMultiFruit.inspect(this.db,w);
-    const after=second&&buildOrdinaryMultiCandidatePreview(w,pin,second,journal);
-    assertOrdinaryAgedGroundStartup(this.db,w as unknown as Record<string,unknown>,true);
-    const finalGrant=readValleySpiritWeatherPermission(this.db,w.id);
-    return after&&after.snapshot===m.snapshot&&finalGrant?.publicWeather&&finalGrant.version===grant.version?m:null;
-   }finally{this.db.exec('ROLLBACK');}
+   try{return this.currentOrdinaryMultiCandidateInTransaction(head,pin,journal,captureIntentHead);}
+   finally{this.db.exec('ROLLBACK');}
   }catch{return null;}
+ }
+ ordinarySelectionIntentSigningSnapshot(menu:OrdinaryMenu){
+  const witness=selectionHeads.get(menu);
+  return witness?.owner===this?ordinarySelectionIntentSigningSnapshot(witness.head):null;
+ }
+ hasOrdinarySelectionIntentState(){return hasOrdinarySelectionIntentState(this.db);}
+ reserveOrdinarySelectionIntent(owner:RuntimeOwnership,guard:OrdinarySelectionIntentPin,
+  head:Readonly<{id:string;revision:number;minute:number}>,pin:OrdinaryMultiCandidatePin,journal:CandidateJournal,
+  menu:OrdinaryMenu,approvalDigest:string){
+  if(!ownsOrdinarySelectionIntentPin(guard)||owner!==this.#nativeMultiOwner||this.#ordinaryG2DevelopmentOrigin||this.#privateDisposableSave||this.developerSpiritFixtureOwner)return false;
+  const witness=selectionHeads.get(menu),original=runtimeOwnershipAnchor(owner);
+  if(!witness||witness.owner!==this||!original)return false;
+  try{
+   original.assertOwned();
+   if(ordinaryG1DecisionSaveScope(original.database)!==guard.originalScope)return false;
+   this.db.exec('BEGIN IMMEDIATE');
+   try{
+    const current=this.currentOrdinaryMultiCandidateInTransaction(head,pin,journal,true),expected=ordinarySelectionIntentSigningSnapshot(witness.head);
+    if(!current||this.ordinarySelectionIntentSigningSnapshot(current)!==expected||
+      !appendOrdinarySelectionIntent(this.db,guard,witness.head,approvalDigest))return false;
+    original.assertOwned();
+    const after=this.currentOrdinaryMultiCandidateInTransaction(head,pin,journal,true);
+    if(!after||this.ordinarySelectionIntentSigningSnapshot(after)!==expected||ordinaryG1DecisionSaveScope(original.database)!==guard.originalScope)return false;
+    this.db.exec('COMMIT');return true;
+   }finally{if(this.db.isTransaction)this.db.exec('ROLLBACK');}
+  }catch{return false;}
  }
  previewOrdinaryDevelopmentV3(proof:NonNullable<ReturnType<ReturnType<typeof openSelectedOrdinaryRehearsal>['currentPositive']>>){
   const origin=this.#ordinaryG2DevelopmentOrigin,pin=this.#ordinaryG2V3;

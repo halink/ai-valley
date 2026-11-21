@@ -13,6 +13,8 @@ const hash=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('h
 export type OrdinaryMultiCandidatePin=Readonly<{scope:'ordinary-native-multi-candidate-preview/v1';worldId:string;maxAgeGameMinutes:number;
  sites:readonly Readonly<{sourceId:string;target:Readonly<Vec>}>[]}>;
 type LotBasis=NonNullable<ReturnType<ReturnType<typeof openRulesNativeMultiFruitLease>['inspect']>>;
+const ordinaryEpisodes=new WeakMap<object,string>();
+export const ordinaryCandidateClosedRainKey=(menu:object)=>ordinaryEpisodes.get(menu)??null;
 export type CandidateJournal=Pick<ValleySpiritJournal,'currentObservedRainPacket'|'isCurrentPublicInput'>;
 export function pinOrdinaryMultiCandidate(v:unknown):OrdinaryMultiCandidatePin|null{
  try{
@@ -60,8 +62,10 @@ export function buildOrdinaryMultiCandidatePreview(w:World,p:OrdinaryMultiCandid
   const snapshot=hash([p,w.id,w.revision,atUs,rain,archived,offers,lots]);
   const numbered=Object.freeze({schema:'ordinary-native-candidate-numbered-preview/v1' as const,
    options:Object.freeze(offers.map(o=>Object.freeze({number:o.number,kind:'ripe-fruit-after-rain' as const})))});
-  return Object.freeze({status:'candidate-menu-preview-only' as const,snapshot,headRevision:w.revision,
+  const result=Object.freeze({status:'candidate-menu-preview-only' as const,snapshot,headRevision:w.revision,
    permissionVersion:archived.permissionVersion,offers,numbered,selectionTraits,selectionAuthorized:false as const,executionAuthorized:false as const,
    groundCapability:false as const});
+  ordinaryEpisodes.set(result,hash(['ordinary-native-g1-selection-closed-rain/v1',w.id,rain.rainEventId]));
+  return result;
  }catch{return null;}
 }

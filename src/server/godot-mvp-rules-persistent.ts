@@ -1,3 +1,4 @@
+import {pinOrdinarySelectionIntent,type OrdinarySelectionIntentPin} from './ordinary-g1-selection-intent.js';
 import {openOrdinaryG2GroundObserver,pinOrdinaryG2GroundObserver} from './ordinary-g2-ground-observer.js';
 import {pinOrdinaryDevelopmentV3,type OrdinaryDevelopmentV3Options} from './ordinary-g2-development-v3.js';
 import {createFreshOrdinaryG2DevelopmentOriginStorage,isOrdinaryG2DevelopmentOriginScratch,ownsOrdinaryG2DevelopmentStorage} from './ordinary-g2-development-origin.js';
@@ -47,7 +48,7 @@ import {WorldStore} from './store.js';
 import {acquireRuntimeOwnership,type RuntimeOwnership} from './runtime-lock.js';
 import {assertGodotWebExport} from './godot-web.js';
 import type {World} from '../shared/types.js';
-type PersistentRulesOptions={database:string;port:number;webRoot?:string;autoStart?:boolean;tickMs?:number;privateSpiritShadow?:PersistentRulesShadowOptions;privateSpiritGeographyQueue?:RulesGeographyQueueOptions;privateNativeFruitRenewal?:RulesNativeFruitRenewalPin;privateOrdinaryMultiFruit?:RulesNativeMultiFruitPin;privateOrdinaryMultiCandidate?:OrdinaryMultiCandidatePin;privateOrdinaryMultiSelection?:OrdinaryCandidateSelectionOptions;privateOrdinarySelectedRehearsal?:SelectedOrdinaryRehearsalOptions;privateOrdinaryDevelopmentV3?:OrdinaryDevelopmentV3Options;privateAgedFruitPreflight?:true;privateEmptyAgedGround?:OrdinaryAgedGroundPin;privateNativeEmptyAgedGround?:true;privateOrdinaryAgedG1Review?:OrdinaryAgedG1ReviewOptions;privateOrdinaryAgedG1Decision?:true;privateOrdinaryG2BlockedHandoff?:OrdinaryG2BlockedHandoffOptions;privateLifeFixture?:PersistentRulesLifeFixture;privateSpeechCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string;nativeWeatherCredit?:true}>;privateOrdinaryNativeMeal?:OrdinaryNativeMealOptions;privateOrdinaryNativeSpeech?:OrdinaryNativeSpeechOptions;privateOrdinaryNativeShelter?:OrdinaryNativeShelterOptions;privateOrdinaryNativeMealView?:OrdinaryMealEditorialPin;privateOrdinaryNativeHearingView?:OrdinaryHearingEditorialPin;privateOrdinaryNativeShelterView?:OrdinaryShelterEditorialPin;privateMealCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string}>};
+type PersistentRulesOptions={database:string;port:number;webRoot?:string;autoStart?:boolean;tickMs?:number;privateSpiritShadow?:PersistentRulesShadowOptions;privateSpiritGeographyQueue?:RulesGeographyQueueOptions;privateNativeFruitRenewal?:RulesNativeFruitRenewalPin;privateOrdinaryMultiFruit?:RulesNativeMultiFruitPin;privateOrdinaryMultiCandidate?:OrdinaryMultiCandidatePin;privateOrdinaryMultiSelection?:OrdinaryCandidateSelectionOptions;privateOrdinaryMultiSelectionIntent?:OrdinarySelectionIntentPin;privateOrdinarySelectedRehearsal?:SelectedOrdinaryRehearsalOptions;privateOrdinaryDevelopmentV3?:OrdinaryDevelopmentV3Options;privateAgedFruitPreflight?:true;privateEmptyAgedGround?:OrdinaryAgedGroundPin;privateNativeEmptyAgedGround?:true;privateOrdinaryAgedG1Review?:OrdinaryAgedG1ReviewOptions;privateOrdinaryAgedG1Decision?:true;privateOrdinaryG2BlockedHandoff?:OrdinaryG2BlockedHandoffOptions;privateLifeFixture?:PersistentRulesLifeFixture;privateSpeechCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string;nativeWeatherCredit?:true}>;privateOrdinaryNativeMeal?:OrdinaryNativeMealOptions;privateOrdinaryNativeSpeech?:OrdinaryNativeSpeechOptions;privateOrdinaryNativeShelter?:OrdinaryNativeShelterOptions;privateOrdinaryNativeMealView?:OrdinaryMealEditorialPin;privateOrdinaryNativeHearingView?:OrdinaryHearingEditorialPin;privateOrdinaryNativeShelterView?:OrdinaryShelterEditorialPin;privateMealCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string}>};
 export async function startPersistentRulesMvp(options:PersistentRulesOptions){
  if(typeof options.database!=='string'||!options.database.trim())throw Error('mvp_rules_database_required');
  if(isDisposableRulesScratchPath(options.database))throw Error('disposable_native_rules_no_http');
@@ -322,7 +323,7 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
   throw Error('ordinary_native_life_view_independent_scope');
  const ordinaryMultiFruit=pinRulesNativeMultiFruit(options.privateOrdinaryMultiFruit);
  if(options.privateOrdinaryMultiFruit!==undefined&&(!ordinaryMultiFruit||disposable||options.autoStart!==false||
-  Object.keys(options).some(k=>k.startsWith('private')&&k!=='privateOrdinaryMultiFruit'&&k!=='privateOrdinaryMultiCandidate'&&k!=='privateOrdinaryMultiSelection'&&k!=='privateOrdinarySelectedRehearsal'&&k!=='privateOrdinaryDevelopmentV3')))
+  Object.keys(options).some(k=>k.startsWith('private')&&k!=='privateOrdinaryMultiFruit'&&k!=='privateOrdinaryMultiCandidate'&&k!=='privateOrdinaryMultiSelection'&&k!=='privateOrdinaryMultiSelectionIntent'&&k!=='privateOrdinarySelectedRehearsal'&&k!=='privateOrdinaryDevelopmentV3')))
   throw Error('ordinary_multi_fruit_explicit_scope');
  const ordinaryMultiCandidate=pinOrdinaryMultiCandidate(options.privateOrdinaryMultiCandidate);
  if(options.privateOrdinaryMultiCandidate!==undefined&&(!ordinaryMultiCandidate||!ordinaryMultiFruit||
@@ -332,6 +333,10 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
  const ordinarySelection=options.privateOrdinaryMultiSelection===undefined?null:pinOrdinaryCandidateSelection(options.privateOrdinaryMultiSelection);
  if(options.privateOrdinaryMultiSelection!==undefined&&(!ordinarySelection||!ordinaryMultiCandidate||!ordinaryMultiFruit||options.autoStart!==false||disposable))
   throw Error('ordinary_candidate_selection_explicit_scope');
+ const selectionIntent=options.privateOrdinaryMultiSelectionIntent===undefined?null:pinOrdinarySelectionIntent(options.privateOrdinaryMultiSelectionIntent);
+ if(options.privateOrdinaryMultiSelectionIntent!==undefined&&(!selectionIntent||!ordinarySelection||!ordinaryMultiCandidate||
+  options.autoStart!==false||disposable||ordinaryG2Storage||options.privateOrdinaryDevelopmentV3!==undefined))
+  throw Error('ordinary_g1_selection_intent_explicit_scope');
  const selectedRehearsal=options.privateOrdinarySelectedRehearsal===undefined?null:pinSelectedOrdinaryRehearsal(options.privateOrdinarySelectedRehearsal);
  if(options.privateOrdinarySelectedRehearsal!==undefined&&(!selectedRehearsal||!ordinarySelection||
   selectedRehearsal.fingerprint===ordinarySelection.fingerprint))throw Error('ordinary_selected_review_explicit_independent_scope');
@@ -379,6 +384,8 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
    if((privateOwner.rulesWeatherHourCredit===true)!==weatherCredit)throw Error('mvp_rules_private_weather_scope');
   }else owner=acquireRuntimeOwnership(options.database,agedGroundPin||ordinaryMeal||nativeLifePins.length||ordinarySpeech||ordinaryShelter||ordinaryMultiFruit?{existingOnly:true}:undefined);
   owner.assertOwned();assertDisposable?.();ordinaryG2Storage?.assertOriginal();
+  if(selectionIntent&&ordinaryG1DecisionSaveScope(owner.database)!==selectionIntent.originalScope)
+   throw Error('ordinary_g1_selection_intent_original_scope');
   const privateDisposableSave=disposable&&'lockPath' in owner?disposable.bind(owner):undefined;
   if(disposable&&!privateDisposableSave)throw Error('disposable_native_rules_owner');
   const ordinaryG2DevelopmentOrigin=ordinaryG2Storage&&'lockPath' in owner?ordinaryG2Storage.bind(owner):undefined;
@@ -469,8 +476,15 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
    viewers=createValleySpiritPublicReaders(valleySpirit,almanacReader);
   }
   if(ordinarySelection&&ordinaryMultiCandidate&&'lockPath' in owner){
-   selection=openOrdinaryCandidateSelection(owner,ordinarySelection,
-    ()=>session&&store&&valleySpirit?store.readCurrentOrdinaryMultiCandidate(session.world,ordinaryMultiCandidate,valleySpirit):null);
+   const selectionOwner=owner;
+   selection=openOrdinaryCandidateSelection(selectionOwner,ordinarySelection,
+    ()=>session&&store&&valleySpirit&&(selectionIntent||!store.hasOrdinarySelectionIntentState())?
+     store.readCurrentOrdinaryMultiCandidate(session.world,ordinaryMultiCandidate,valleySpirit,!!selectionIntent):null,
+    selectionIntent?{
+     signedSnapshot:menu=>store?.ordinarySelectionIntentSigningSnapshot(menu)??null,
+     reserve:(menu,approval)=>!!(session&&store&&valleySpirit&&store.reserveOrdinarySelectionIntent(
+      selectionOwner,selectionIntent,session.world,ordinaryMultiCandidate,valleySpirit,menu,approval)),
+    }:undefined);
   }
   if(selectedRehearsal&&ordinaryMultiCandidate&&selection&&'lockPath' in owner)
    selectedReview=openSelectedOrdinaryRehearsal(owner,selectedRehearsal,()=>selection?.reviewProof()??null,

@@ -48,9 +48,10 @@ export function encodeOrdinaryCandidateSelection(t:unknown){
 const nativeReviewProofs=new WeakSet<object>();
 export function ownsOrdinaryCandidateReviewProof(v:unknown){return typeof v==='object'&&v!==null&&nativeReviewProofs.has(v);}
 type Result=Readonly<{status:'selected-detached-preview';number:number;snapshot:string;selectionOperative:false;executionAuthorized:false}>;
-/** This is ephemeral operator preview only: no durable ledger, queue, quota,
- * network, or authority. One claimed memory request per owned handle. */
-export function openOrdinaryCandidateSelection(owner:RuntimeOwnership,pin:Pinned,current:()=>Menu|null){
+type IntentGuard=Readonly<{signedSnapshot:(menu:Menu)=>string|null;reserve:(menu:Menu,approvalDigest:string)=>boolean}>;
+/** Transport and selected result always ephemeral. Only an explicit ordinary
+ * store guard may durably reserve the opportunity before the memory call. */
+export function openOrdinaryCandidateSelection(owner:RuntimeOwnership,pin:Pinned,current:()=>Menu|null,intent?:IntentGuard){
  const o=runtimeOwnershipAnchor(owner);
  if(!o||!pinned.delete(pin))throw Error('ordinary_candidate_untrusted_owner');
  o.assertOwned();
@@ -58,7 +59,7 @@ export function openOrdinaryCandidateSelection(owner:RuntimeOwnership,pin:Pinned
  if(!f.isFile()||f.nlink!==1n)throw Error('ordinary_candidate_original_save');
  const scope=digest(JSON.stringify([MODE,String(f.dev),String(f.ino),pin.fingerprint]));
  const token=randomBytes(32).toString('hex'),abort=new AbortController();
- let used=false,closed=false,selected:Result|null=null;
+ let used=false,closed=false,selected:Result|null=null,selectedSigningSnapshot:string|null=null;
  let proof:Readonly<{approvalDigest:string;wireDigest:string;token:string;selection:Result}>|null=null;
  const get=()=>{
   try{
@@ -69,7 +70,9 @@ export function openOrdinaryCandidateSelection(owner:RuntimeOwnership,pin:Pinned
    const m=current();
    if(!m||new Set(m.selectionTraits.map(v=>v.stockBand+':'+v.remainingBand)).size<2)return null;
    const wire=JSON.stringify({schema:SCHEMA,token,options:m.selectionTraits});
-   const t:Terms=Object.freeze({schema:SIGN,scope,reviewer:pin.fingerprint,snapshot:m.snapshot,wireDigest:digest(wire),token});
+   const signingSnapshot=intent?intent.signedSnapshot(m):m.snapshot;
+   if(!signingSnapshot)return null;
+   const t:Terms=Object.freeze({schema:SIGN,scope,reviewer:pin.fingerprint,snapshot:signingSnapshot,wireDigest:digest(wire),token});
    return {m,wire,t};
   }catch{return null;}
  };
@@ -96,13 +99,15 @@ export function openOrdinaryCandidateSelection(owner:RuntimeOwnership,pin:Pinned
     if(!bytes||sig.toString('base64url')!==a.signature||!bytes.equals(encodeOrdinaryCandidateSelection(s.t)!)||
      !verify(null,bytes,pin.reviewer,sig))return null;
     const again=get();
-    if(!again||again.m.snapshot!==s.m.snapshot||again.wire!==s.wire)return null;
+    if(!again||again.t.snapshot!==s.t.snapshot||again.m.snapshot!==s.m.snapshot||again.wire!==s.wire)return null;
+    const approvalDigest=digest(JSON.stringify([bytes.toString('base64url'),a.signature]));
+    if(intent&&!intent.reserve(again.m,approvalDigest))return null;
     used=true;
     const response=await pin.invoke(s.wire,abort.signal),number=valid(response,s.m.selectionTraits),after=get();
-    if(number===null||!after||after.m.snapshot!==s.m.snapshot||after.wire!==s.wire)return null;
+    if(number===null||!after||after.t.snapshot!==s.t.snapshot||after.m.snapshot!==s.m.snapshot||after.wire!==s.wire)return null;
     selected=Object.freeze({status:'selected-detached-preview',number,snapshot:s.m.snapshot,selectionOperative:false,executionAuthorized:false});
-    proof=Object.freeze({approvalDigest:digest(JSON.stringify([bytes.toString('base64url'),a.signature])),
-     wireDigest:s.t.wireDigest,token,selection:selected});
+    selectedSigningSnapshot=s.t.snapshot;
+    proof=Object.freeze({approvalDigest,wireDigest:s.t.wireDigest,token,selection:selected});
     nativeReviewProofs.add(proof);
     return selected;
    }catch{return null;}
@@ -110,13 +115,13 @@ export function openOrdinaryCandidateSelection(owner:RuntimeOwnership,pin:Pinned
   latest(){
    if(!selected)return null;
    const now=get();
-   return now?.m.snapshot===selected.snapshot?selected:null;
+   return now?.m.snapshot===selected.snapshot&&now.t.snapshot===selectedSigningSnapshot?selected:null;
   },
   reviewProof(){
    if(!proof)return null;
    const now=get();
-   return now?.m.snapshot===proof.selection.snapshot&&now.t.wireDigest===proof.wireDigest?proof:null;
+   return now?.m.snapshot===proof.selection.snapshot&&now.t.snapshot===selectedSigningSnapshot&&now.t.wireDigest===proof.wireDigest?proof:null;
   },
-  close(){closed=true;selected=null;proof=null;abort.abort();},
+  close(){closed=true;selected=null;selectedSigningSnapshot=null;proof=null;abort.abort();},
  });
 }
