@@ -240,3 +240,23 @@ remain an ordinary action without claiming any delivery.
 The existing world event, both normal person indexes, and the actual memory
 commit together with expiry or all roll back. No new V3 speech record,
 reader, view, reply, publication or evidence from event prose is created.
+
+### Original holder dies in a native minute
+
+The closed, original development save can record one narrow case: an outdoor,
+stationary current holder who begins alive with positive health and dies from
+the native hunger or exhaustion drain. The actual death event, person index
+and ordinary protected estate commit with the V3 custody change, or all roll
+back. The ordinary estate contains only the resident’s original property, not
+the commons fruit. The original lot remains sealed with no living holder,
+unchanged owner, birth and expiry, and never returns to the ground. It cannot
+be read as a resident’s live hold, inherited, transferred, picked up or eaten.
+Only the original expiry can debit it, once.
+
+This path does not support a same-minute death/expiry collision, active or
+historical V3 route, dining or work, travel/departure, other deaths, or
+ambiguous concurrent specialized actions. Unsupported cases keep the previous
+verified head. The short death fixture uses an already-supported versioned
+physiology rule and low positive starting health so ordinary native loss
+reaches zero within the test window; no rule defaults or runtime death
+controls changed. This scope does not enable ordinary player saves.

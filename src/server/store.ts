@@ -1405,7 +1405,7 @@ export class WorldStore {
    r.lifecycle.eaten??r.lifecycle.work??r.lifecycle.hallWork??r.lifecycle.hallDecline??null:null);
  }
  readOwnedOrdinaryDevelopmentV3Held(residentId:string){
-  return this.readOwnedOrdinaryDevelopmentV3Archive(r=>r.lifecycle?.held?.holderId===residentId&&!r.lifecycle.heldExpiry&&!r.lifecycle.eaten?r.lifecycle.held:null);
+  return this.readOwnedOrdinaryDevelopmentV3Archive(r=>r.lifecycle?.held?.holderId===residentId&&!r.lifecycle.heldExpiry&&!r.lifecycle.eaten&&!r.lifecycle.holderDeath?r.lifecycle.held:null);
  }
  readOwnedOrdinaryDevelopmentV3():ReturnType<WorldStore['readOwnedOrdinaryDevelopmentV3Ground']>;
  readOwnedOrdinaryDevelopmentV3(residentId:string):{readonly discovery:import('../world/mvp-ordinary-aged-ground-discovery.js').CommittedNativeOrdinaryAgedDiscovery|null}|null;
@@ -1430,7 +1430,7 @@ export class WorldStore {
   return this.readOwnedOrdinaryDevelopmentV3Archive((r,w)=>projectOrdinaryDevelopmentV3Fairness(w,r));
  }
  private readOwnedOrdinaryDevelopmentV3Ground(){
-  return this.readOwnedOrdinaryDevelopmentV3Archive((r,w)=>({status:r.ground?'development-v3-stored' as const:r.lifecycle?.eaten?'development-v3-held-eaten' as const:r.lifecycle?.heldExpiry?'development-v3-held-expired' as const:r.lifecycle?.held?'development-v3-held' as const:'development-v3-expired' as const,ground:r.ground,
+  return this.readOwnedOrdinaryDevelopmentV3Archive((r,w)=>({status:r.ground?'development-v3-stored' as const:r.lifecycle?.eaten?'development-v3-held-eaten' as const:r.lifecycle?.heldExpiry?'development-v3-held-expired' as const:r.lifecycle?.holderDeath?'development-v3-custody-suspended' as const:r.lifecycle?.held?'development-v3-held' as const:'development-v3-expired' as const,ground:r.ground,
       worldId:w.id,revision:w.revision,minute:w.minute,expiry:r.lifecycle?.expiry??null,
       sourceBefore:r.receipt.sourceBefore,sourceAfter:r.receipt.sourceAfter,approvalPresent:true as const,
       productionApproved:false as const,executionAuthorized:false as const}));
@@ -1460,7 +1460,7 @@ export class WorldStore {
     this.writeCommit(step.draft,w.revision,undefined,undefined,undefined,undefined,true);
     const stored=writeOrdinaryDevelopmentV3Minute(this.db,origin,pin,r,step);
     this.db.exec('COMMIT');
-    return {status:stored.ground?'development-v3-native-minute' as const:stored.lifecycle?.eaten?'development-v3-held-eaten' as const:stored.lifecycle?.heldExpiry?'development-v3-held-expired' as const:stored.lifecycle?.held?'development-v3-held' as const:'development-v3-expired' as const,
+    return {status:stored.ground?'development-v3-native-minute' as const:stored.lifecycle?.eaten?'development-v3-held-eaten' as const:stored.lifecycle?.heldExpiry?'development-v3-held-expired' as const:stored.lifecycle?.holderDeath?'development-v3-custody-suspended' as const:stored.lifecycle?.held?'development-v3-held' as const:'development-v3-expired' as const,
      worldId:step.draft.id,revision:step.draft.revision,minute:step.draft.minute,expiry:stored.lifecycle?.expiry??null,heldExpiry:stored.lifecycle?.heldExpiry??null};
    }catch(e){this.db.exec('ROLLBACK');throw e;}
   }catch{return null;}

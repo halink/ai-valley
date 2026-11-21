@@ -128,6 +128,8 @@ type Expiry=NonNullable<ReturnType<typeof advanceAgedGroundExpiry>>['expired'][n
 type Pickup=NonNullable<ReturnType<typeof prepareOrdinaryAgedGroundPickup>>['completion'];
 type Held=Readonly<{schema:'ordinary-g2-development-held/v3';holderId:string;ownerId:'commons';effectId:string;lotId:string;
  bornUs:string;expiresUs:string;groundDebit:1;heldCredit:1;pickup:Pickup}>;
+/** Historical pickup remains a receipt; no resident owns suspended custody. */
+type HolderDeath=Readonly<{schema:'v3-native-holder-death/v1';atUs:string;eventId:string;estateDigest:string}>;
 type HeldExpiry=Readonly<{settledUs:string;heldDebit:1}>;
 type Work=Readonly<{planId:string;startedUs:string;count:number;at:{x:number;y:number}}>;
 type Eaten=Readonly<{heldDebit:1;witness:NativeAgedEatCompletion}>;
@@ -136,7 +138,7 @@ type Route=Readonly<{plan:AgedGroundApproachPlan;edgesUs:readonly string[];resul
 type HallDecline=Readonly<{schema:'v3-native-hall-declined';holderId:string;planId:string;atUs:string;reason:NativeAgedDiningDeclineReason}>;
 type SourceFlow=NativeAgedFruitSourceFlow;
 type Lifecycle=Readonly<{schema:'ordinary-g2-development-continuation/v3';sequence:number;atUs:string;
- revision:number;digest:string;placement:Ground;discoveries:readonly CommittedNativeOrdinaryAgedDiscovery[];expiry:Expiry|null;held?:Held;heldExpiry?:HeldExpiry;work?:Work;hallWork?:Eating;hallDecline?:HallDecline;eaten?:Eaten;route?:Route;sourceFlow?:SourceFlow|null}>;
+ revision:number;digest:string;placement:Ground;discoveries:readonly CommittedNativeOrdinaryAgedDiscovery[];expiry:Expiry|null;held?:Held;holderDeath?:HolderDeath;heldExpiry?:HeldExpiry;work?:Work;hallWork?:Eating;hallDecline?:HallDecline;eaten?:Eaten;route?:Route;sourceFlow?:SourceFlow|null}>;
 const archiveKeys=['schema','approval','sourceBefore','sourceAfter','afterRevision','afterDigest','groundDigest'];
 const lotOf=(g:Ground,c:Approval):AgedGroundLot=>({bornUs:g.bornUs,expiresUs:g.expiresUs,
  fruit:{effectId:g.effectId,kind:'fallen-fruit',amount:1,ownerId:g.ownerId,sourceResourceId:g.sourceId,
@@ -169,7 +171,7 @@ export function readOrdinaryDevelopmentV3(db:DatabaseSync,origin:OrdinaryG2Devel
    w.resources.filter(r=>r.id===g.sourceId&&r.amount===a.sourceAfter&&r.at.x===g.sourceAt.x&&r.at.y===g.sourceAt.y).length!==1||
    !resolveMvpRainEpisode(w,c.terms.rainEventId))throw Error('ordinary_g2_dev_v3_placement_mismatch');
  }else{
-  if(!exact(l,['schema','sequence','atUs','revision','digest','placement','discoveries','expiry',...(Object.hasOwn(l,'held')?['held']:[]),...(Object.hasOwn(l,'heldExpiry')?['heldExpiry']:[]),...(Object.hasOwn(l,'work')?['work']:[]),...(Object.hasOwn(l,'eaten')?['eaten']:[]),...(Object.hasOwn(l,'hallWork')?['hallWork']:[]),...(Object.hasOwn(l,'hallDecline')?['hallDecline']:[]),...(Object.hasOwn(l,'route')?['route']:[]),...(Object.hasOwn(l,'sourceFlow')?['sourceFlow']:[])])||l.schema!=='ordinary-g2-development-continuation/v3'||
+  if(!exact(l,['schema','sequence','atUs','revision','digest','placement','discoveries','expiry',...(Object.hasOwn(l,'held')?['held']:[]),...(Object.hasOwn(l,'holderDeath')?['holderDeath']:[]),...(Object.hasOwn(l,'heldExpiry')?['heldExpiry']:[]),...(Object.hasOwn(l,'work')?['work']:[]),...(Object.hasOwn(l,'eaten')?['eaten']:[]),...(Object.hasOwn(l,'hallWork')?['hallWork']:[]),...(Object.hasOwn(l,'hallDecline')?['hallDecline']:[]),...(Object.hasOwn(l,'route')?['route']:[]),...(Object.hasOwn(l,'sourceFlow')?['sourceFlow']:[])])||l.schema!=='ordinary-g2-development-continuation/v3'||
    !int(l.sequence)||l.sequence<1||l.sequence>1440||BigInt(now)!==before+1_000_000n*BigInt(l.sequence)||
    now!==l.atUs||w.revision!==l.revision||w.revision<=a.afterRevision||l.digest!==digestHead(db,w)||
    !Array.isArray(l.discoveries)||l.discoveries.length>64||
@@ -192,10 +194,17 @@ export function readOrdinaryDevelopmentV3(db:DatabaseSync,origin:OrdinaryG2Devel
     !int(p.baseRevision)||p.baseRevision<d.committedRevision||p.effectId!==g.effectId||p.receiptDigest!==hash(a)||p.residentId!==held.holderId||
     p.discoveryId!==d.discoveryId||!clock(p.settledUs)||BigInt(p.settledUs)>BigInt(now)||BigInt(p.settledUs)>=expires||p.bornUs!==g.bornUs||p.expiresUs!==g.expiresUs||BigInt(d.atUs)>=BigInt(p.settledUs)||
     !string(p.planId)||!w.processed.includes('plan:'+p.planId)||
-    resident.status!=='alive'||resident.residency==='outside'||resident.regionalLocation||
+    (!l.holderDeath&&resident.status!=='alive')||resident.residency==='outside'||resident.regionalLocation||
     (p.settledUs===now)!==(p.draftRevision===w.revision)||
     p.settledUs===now&&(resident.at.x!==g.at.x||resident.at.y!==g.at.y||resident.inside!==null||resident.plan||resident.activity))
     throw Error('ordinary_g2_dev_v3_held');
+  }
+  if(Object.hasOwn(l,'holderDeath')){
+   const h=l.held,d=l.holderDeath;
+   if(!h||!d||!exact(d,['schema','atUs','eventId','estateDigest'])||d.schema!=='v3-native-holder-death/v1'||!clock(d.atUs)||
+    BigInt(d.atUs)<=BigInt(h.pickup.settledUs)||BigInt(d.atUs)>=expires||BigInt(d.atUs)>BigInt(now)||
+    l.route||l.work||l.hallWork||l.hallDecline||l.eaten||!readNativeHolderDeath(w,h,d))
+    throw Error('ordinary_g2_dev_v3_holder_death');
   }
   if(Object.hasOwn(l,'heldExpiry')){
    const x=l.heldExpiry;
@@ -320,6 +329,38 @@ function matchesEatingEvent(w:World,n:NativeAgedEatCompletion){
   e.text===r.name+'吃完了一份自己的食物。'&&e.observerOnly&&e.place?.x===r.at.x&&e.place?.y===r.at.y&&
   (n.dining?!!e.roomAt&&e.roomId===n.dining.buildingId&&same(e.roomAt,n.dining.seat)&&diningWorkClaim(w,r,n.dining):!e.roomId&&!e.roomAt);
 }
+function readNativeHolderDeath(w:World,h:Held,d:HolderDeath){
+ const resident=w.residents.filter(r=>r.id===h.holderId),events=w.events.filter(e=>e.id===d.eventId),estates=w.estates.filter(e=>e.personId===h.holderId);
+ if(resident.length!==1||events.length!==1||estates.length!==1)return null;
+ const r=resident[0],e=events[0],estate=estates[0],body=e.bodyLocation;
+ if(r.status!=='dead'||r.deathCause!=='illHealth'||r.deathAt!==e.at||r.health!==0||r.plan||r.activity||r.regionalLocation||
+  r.residency==='outside'||r.inside!==null||r.roomAt||Object.keys(r.inventory).length||r.coins!==0||
+  !e.id.startsWith(w.id+':event:')||!int(Number(e.id.slice((w.id+':event:').length)))||
+  e.kind!=='death'||e.populationChange!=='death'||e.observerOnly||e.actors.length!==1||e.actors[0]!==r.id||
+  !body||body.personId!==r.id||body.roomId!==null||body.roomAt!==null||e.roomId!==null||e.roomAt!==null||
+  !same(r.at,body.at)||!same(r.at,e.place)||minuteToClimateUs(e.at)!==d.atUs||
+  estate.status!=='protected'||!estate.location||!same(estate.location.at,r.at)||estate.location.inside!==null||estate.location.roomAt!==null||
+  hash(estate)!==d.estateDigest)return null;
+ return estate;
+}
+function exactNativeHolderDeath(w:World,draft:World,h:Held){
+ const a=w.residents.find(r=>r.id===h.holderId),b=draft.residents.find(r=>r.id===h.holderId);
+ // The native tick alone produces zero health, local death and ordinary estate.
+ // Prove only outdoor stationary illness from needs, not travel, treatment,
+ // exercising the fruit, another resident's death or any special custody.
+ if(!a||!b||a.status!=='alive'||a.health<=0||a.inside!==null||a.roomAt||a.regionalLocation||a.residency==='outside'||
+  (a.activity&&a.activity.action.type!=='wait')||a.plan?.actions.some(x=>x.type!=='wait')||w.estates.some(e=>e.personId===a.id)||!same(a.at,b.at))return null;
+ const appended=draft.events.slice(w.events.length),events=appended.filter(e=>e.kind==='death');
+ if(events.length!==1||events[0].at!==draft.minute||appended.some(e=>e!==events[0]&&e.actors.includes(a.id)))return null;
+ const estate=draft.estates.find(e=>e.personId===a.id);
+ if(!estate||estate.coins!==a.coins||hash(estate.inventory)!==hash(a.inventory)||estate.parcels?.length!==0)return null;
+ const death:HolderDeath={schema:'v3-native-holder-death/v1',atUs:minuteToClimateUs(draft.minute),eventId:events[0].id,estateDigest:hash(estate)};
+ const rules=physiology(draft,b);
+ const hunger=Math.min(100,a.hunger+rules.hungerPerMinute),energy=Math.max(0,a.energy-rules.energyPerMinute);
+ if(b.hunger!==hunger||b.energy!==energy||
+   (hunger>rules.hungerDanger?rules.hungerHealthDrain:0)+(energy<rules.energyDanger?rules.energyHealthDrain:0)<a.health)return null;
+ return readNativeHolderDeath(draft,h,death)?death:null;
+}
 function exactUnrelatedExpiryMeal(w:World,draft:World,r:ValleySpiritMvpMealWitness,prior:readonly CommittedNativeOrdinaryAgedDiscovery[]){
  const native=readStagedMvpMealConsumption(draft,r);
  if(!native||!Number.isFinite(native.nutrition)||native.nutrition<=0||prior.some(d=>d.residentId===r.actorId))return false;
@@ -399,18 +440,28 @@ export function prepareOrdinaryDevelopmentV3Minute(db:DatabaseSync,w:World,owned
   if(!l?.held||l.heldExpiry||l.eaten)return null;
   const held=l.held;
   const opening=w.residents.find(r=>r.id===held.holderId);
-  if(!opening||hall&&l.work||!hall&&l.hallWork||l.work&&!matchesOutdoorWork(opening,l.work,held.effectId,l.atUs))return null;
+  if(!opening||hall&&l.holderDeath||hall&&l.work||!hall&&l.hallWork||l.work&&!matchesOutdoorWork(opening,l.work,held.effectId,l.atUs))return null;
   const now=minuteToClimateUs(w.minute),deadline=BigInt(held.expiresUs);
   if(BigInt(now)>=deadline)return null;
-  const next=prepareSealedMvpEcologyMinute(w,true,undefined,undefined,{
+  const next=prepareSealedMvpEcologyMinute(w,true,undefined,undefined,l.holderDeath?undefined:{
    residentId:held.holderId,effectId:held.effectId,expiresUs:held.expiresUs,...(hall?{originalHall:true}:{originalOutdoorEvent:true})
   },undefined,true);
   if(!next||next.observed.length||next.mealWitnesses.length||next.speech?.receipts.length||!eligibleLifecycleEvents(w,next.draft))return null;
   const holder=next.draft.residents.find(r=>r.id===held.holderId);
-  if(!holder||holder.status!=='alive'||holder.residency==='outside'||holder.regionalLocation)return null;
+  if(!holder||holder.residency==='outside'||holder.regionalLocation)return null;
   const after=minuteToClimateUs(next.draft.minute);
   if(BigInt(after)!==BigInt(now)+1_000_000n)return null;
   const heldExpiry:HeldExpiry|undefined=BigInt(after)>=deadline?{settledUs:after,heldDebit:1}:undefined;
+  if(holder.status!=='alive'||l.holderDeath){
+   if(hall||l.route||l.work||l.hallWork||l.hallDecline||next.eaten||next.agedDiningDecline)return null;
+   const death=l.holderDeath??(!heldExpiry?exactNativeHolderDeath(w,next.draft,held):null);
+   if(!death||!readNativeHolderDeath(next.draft,held,death)||
+     l.holderDeath&&next.draft.events.slice(w.events.length).some(e=>e.kind==='death'))return null;
+   const prepared={draft:next.draft,placement:l.placement,sequence:l.sequence+1,discoveries:l.discoveries,expiry:null,held,holderDeath:death,heldExpiry,
+    work:undefined,hallWork:undefined,hallDecline:undefined,eaten:undefined,route:undefined,sourceFlow:deriveNativeAgedFruitSourceMinute(w,next.draft,nativeSourceBasis(l.placement,owned.receipt),l,next.fruitFlow)};
+   preparedMinutes.set(prepared,{db,priorSeal:owned.seal,content:hash(prepared)});
+   return prepared;
+  }
   let work:Work|undefined,hallWork:Eating|undefined,eaten:Eaten|undefined;
   if(next.eaten){
    const n=next.eaten;
@@ -450,7 +501,7 @@ export function prepareOrdinaryDevelopmentV3Minute(db:DatabaseSync,w:World,owned
     hash(holder.inventory)!==hash(opening.inventory))return null;
    hallDecline={schema:'v3-native-hall-declined',holderId:held.holderId,planId:l.hallWork.planId,atUs:after,reason:declining.reason};
   }
-  const prepared={draft:next.draft,placement:l.placement,sequence:l.sequence+1,discoveries:l.discoveries,expiry:null,held,heldExpiry,work,hallWork,hallDecline,eaten,route:l.route,sourceFlow:deriveNativeAgedFruitSourceMinute(w,next.draft,nativeSourceBasis(l.placement,owned.receipt),l,next.fruitFlow)};
+  const prepared={draft:next.draft,placement:l.placement,sequence:l.sequence+1,discoveries:l.discoveries,expiry:null,held,holderDeath:undefined,heldExpiry,work,hallWork,hallDecline,eaten,route:l.route,sourceFlow:deriveNativeAgedFruitSourceMinute(w,next.draft,nativeSourceBasis(l.placement,owned.receipt),l,next.fruitFlow)};
   preparedMinutes.set(prepared,{db,priorSeal:owned.seal,content:hash(prepared)});
   return prepared;
  }
@@ -504,7 +555,7 @@ export function prepareOrdinaryDevelopmentV3Minute(db:DatabaseSync,w:World,owned
   discoveries.push({...seen,committedRevision:draft.revision});prior.add(seen.residentId);
  }
  if(discoveries.length>64)return null;
- const prepared={draft,placement:g,sequence:(l?.sequence??0)+1,discoveries,expiry:expiry.expired[0]??null,...(held?{held}:{}),heldExpiry:undefined,work:undefined,hallWork:undefined,hallDecline:undefined,eaten:undefined,route,sourceFlow:deriveNativeAgedFruitSourceMinute(w,draft,nativeSourceBasis(g,owned.receipt),l,next.fruitFlow)};
+ const prepared={draft,placement:g,sequence:(l?.sequence??0)+1,discoveries,expiry:expiry.expired[0]??null,...(held?{held}:{}),holderDeath:undefined,heldExpiry:undefined,work:undefined,hallWork:undefined,hallDecline:undefined,eaten:undefined,route,sourceFlow:deriveNativeAgedFruitSourceMinute(w,draft,nativeSourceBasis(g,owned.receipt),l,next.fruitFlow)};
  preparedMinutes.set(prepared,{db,priorSeal:owned.seal,content:hash(prepared)});
  return prepared;
 }
@@ -519,7 +570,7 @@ export function writeOrdinaryDevelopmentV3Minute(db:DatabaseSync,origin:Ordinary
  if(!db.isTransaction||!h||!prepared||prepared.db!==db||prepared.priorSeal!==owned.seal||prepared.content!==hash(step)||(!owned.ground&&!owned.lifecycle?.held)||!tables(db)||latch(db,true)!==owned.seal)throw Error('ordinary_g2_dev_v3_continuation_scope');
  assertLifecycleWorldWriter(db);assertStoppedEventAuthority(db);assertStoppedEventArchive(db,step.draft);
  const lifecycle:Lifecycle={schema:'ordinary-g2-development-continuation/v3',sequence:step.sequence,atUs:minuteToClimateUs(step.draft.minute),
-  revision:step.draft.revision,digest:h,placement:step.placement,discoveries:step.discoveries,expiry:step.expiry,sourceFlow:step.sourceFlow,...(step.held?{held:step.held}:{}),...(step.heldExpiry?{heldExpiry:step.heldExpiry}:{}),...(step.work?{work:step.work}:{}),...(step.eaten?{eaten:step.eaten}:{}),...(step.hallWork?{hallWork:step.hallWork}:{}),...(step.hallDecline?{hallDecline:step.hallDecline}:{}),...(step.route?{route:step.route}:{})};
+  revision:step.draft.revision,digest:h,placement:step.placement,discoveries:step.discoveries,expiry:step.expiry,sourceFlow:step.sourceFlow,...(step.held?{held:step.held}:{}),...(step.holderDeath?{holderDeath:step.holderDeath}:{}),...(step.heldExpiry?{heldExpiry:step.heldExpiry}:{}),...(step.work?{work:step.work}:{}),...(step.eaten?{eaten:step.eaten}:{}),...(step.hallWork?{hallWork:step.hallWork}:{}),...(step.hallDecline?{hallDecline:step.hallDecline}:{}),...(step.route?{route:step.route}:{})};
  const raw=JSON.stringify({placementReceipt:owned.receipt,lifecycle}),seal=authenticateOrdinaryG2DevelopmentV3(origin,'v3-receipt',raw);
  if(Buffer.byteLength(raw)>65536||
   db.prepare('UPDATE main.'+RECEIPT+' SET body=?,seal=? WHERE opportunity=? AND seal=?')
