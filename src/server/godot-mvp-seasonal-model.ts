@@ -1,3 +1,4 @@
+import {SEASONAL_LOCAL_WEATHER_DESKTOP_MODE,startSeasonalLocalWeatherDesktop} from './seasonal-local-weather-desktop.js';
 import {claimSeasonalHeldWeatherMemory,prepareSeasonalHeldWeatherBody,parseSeasonalHeldWeatherCompletion,SEASONAL_HELD_WEATHER_OUTPUT_TOKENS,type SeasonalHeldWeatherTransport} from './valley-spirit-seasonal-weather-http-held.js';
 import {claimSeasonalAlmanacFixture,openSeasonalAlmanacFixture,type SeasonalAlmanacFixture} from './seasonal-almanac-runtime.js';
 import {createHash,createPublicKey,verify,type KeyObject} from 'node:crypto';
@@ -748,7 +749,7 @@ function openSeasonalLocalWeatherEditorial(owner:RuntimeOwnership,quota:Producti
 return {open:openSeasonalLocalWeatherEditorial,encode:encodeSeasonalLocalWeatherEditorialTerms};
 })();
 
-export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal';database:string;port?:number;transport?:MemoryTransport;sharedAccount?:OfflineResidentAccountAdmission;almanacFixture?:SeasonalAlmanacFixture;canonicalResidentQuota?:Readonly<CanonicalSeasonalQuota>;privateWeatherUse?:SeasonalPrivateWeatherPin;privateWeatherDraft?:true;privateWeatherWire?:SeasonalWeatherMemoryTransport;privateWeatherTopics?:typeof TOPIC_MODE;privateWeatherTopicChoice?:SeasonalWeatherMemoryTransport;publicWeatherSource?:SeasonalPublicWeatherSourcePin;publicWeatherResponse?:Readonly<{reviewerPublicKeyPem:string;transport:SeasonalWeatherMemoryTransport|SeasonalHeldWeatherTransport}>;localWeatherEditorial?:Readonly<{mode:'explicit-local-offline-weather-edition';reviewerPublicKeyPem:string}>}){
+export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal';database:string;port?:number;transport?:MemoryTransport;sharedAccount?:OfflineResidentAccountAdmission;almanacFixture?:SeasonalAlmanacFixture;canonicalResidentQuota?:Readonly<CanonicalSeasonalQuota>;privateWeatherUse?:SeasonalPrivateWeatherPin;privateWeatherDraft?:true;privateWeatherWire?:SeasonalWeatherMemoryTransport;privateWeatherTopics?:typeof TOPIC_MODE;privateWeatherTopicChoice?:SeasonalWeatherMemoryTransport;publicWeatherSource?:SeasonalPublicWeatherSourcePin;publicWeatherResponse?:Readonly<{reviewerPublicKeyPem:string;transport:SeasonalWeatherMemoryTransport|SeasonalHeldWeatherTransport}>;localWeatherEditorial?:Readonly<{mode:'explicit-local-offline-weather-edition';reviewerPublicKeyPem:string}>;localWeatherDesktopPreview?:Readonly<{mode:typeof SEASONAL_LOCAL_WEATHER_DESKTOP_MODE}>}){
  if(options.mode!=='offline-seasonal')throw Error('seasonal_model_explicit_mode_required');
  if(options.port!==undefined&&(!Number.isInteger(options.port)||options.port<0||options.port>65535))throw Error('seasonal_model_port');
  const transport=options.transport===undefined?undefined:transports.get(options.transport);
@@ -800,6 +801,9 @@ export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal'
    throw Error('seasonal_local_weather_editor_reviewer');
   return pin;
  })();
+ const desktopWeather=options.localWeatherDesktopPreview;
+ if(desktopWeather!==undefined&&(!exact(desktopWeather,['mode'])||desktopWeather.mode!==SEASONAL_LOCAL_WEATHER_DESKTOP_MODE||
+  !localWeatherEditorPin||!canonical||httpHeld||options.port!==undefined))throw Error('seasonal_local_weather_desktop_scope');
  const publicResponseTransport=publicResponsePin&&!httpHeld?claimSeasonalWeatherMemoryTransport(publicResponseOption!.transport as SeasonalWeatherMemoryTransport):undefined;
  const publicHeldTransport=publicResponsePin&&httpHeld?claimSeasonalHeldWeatherMemory(publicResponseOption!.transport as SeasonalHeldWeatherTransport):undefined;
  const shared=canonical?.admission??legacy;
@@ -823,6 +827,7 @@ export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal'
  let publicWeatherSource:ReturnType<typeof openSeasonalWeatherCustody>|undefined;
  let weatherDraft:ReturnType<typeof openNativeWeatherDraft>|undefined;
  let localWeatherEditorial:ReturnType<typeof seasonalLocalWeatherEditorial.open>|undefined;
+ let localWeatherDesktop:Awaited<ReturnType<typeof startSeasonalLocalWeatherDesktop>>|undefined;
  const worldBinding=()=>{
   owner.assertOwned();
   const f=lstatSync(owner.database,{bigint:true});
@@ -960,6 +965,10 @@ export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal'
     guard:assertCanonicalWorld,revision:()=>w.revision,basis:localWeatherEditorialBasis,
    });
   }catch{/* Optional signed editorial custody does not affect world and quota. */}
+  if(desktopWeather!==undefined){
+   if(!localWeatherEditorial)throw Error('seasonal_local_weather_desktop_editor_unavailable');
+   localWeatherDesktop=await startSeasonalLocalWeatherDesktop(()=>closed?null:localWeatherEditorial?.latest()??null);
+  }
   if(claimedAlmanac){
    // Unknown optional data isolates the almanac without altering resident
    // accounting, clock behavior, or the previous world commit.
@@ -1064,7 +1073,7 @@ export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal'
   let closing:Promise<void>|undefined;
   const close=()=>closing??=(async()=>{
    const dispatchWasLive=!!dispatch;
-   closed=true;controller?.abort();try{localWeatherEditorial?.close();}catch{/* optional editor */}try{weatherDraft?.close();}catch{/* private draft */}try{publicWeatherSource?.close();}catch{/* optional public-source custody */}try{privateWeatherSecond?.close();}catch{/* optional topic annex */}try{privateWeather?.close();}catch{/* optional annex */}try{almanac?.close();}catch{/* isolate optional state */}
+   closed=true;controller?.abort();try{await localWeatherDesktop?.close();}catch{/* separate local listener */}try{localWeatherEditorial?.close();}catch{/* optional editor */}try{weatherDraft?.close();}catch{/* private draft */}try{publicWeatherSource?.close();}catch{/* optional public-source custody */}try{privateWeatherSecond?.close();}catch{/* optional topic annex */}try{privateWeather?.close();}catch{/* optional annex */}try{almanac?.close();}catch{/* isolate optional state */}
    try{
     if(server){server.closeAllConnections();await new Promise<void>(resolve=>server!.close(()=>resolve()));}
     let clearCanonicalDemand=false;
@@ -1140,6 +1149,7 @@ export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal'
     packet:p.packet,field:r.fact.field,value:r.fact.value};
   }
   return {status:read,pump,close,server,
+   ...(localWeatherDesktop?{localWeatherDesktopPreview:localWeatherDesktop.descriptor}:{}),
    async pumpAlmanac(){
     if(closed||!almanac)return {status:'disabled' as const};
     if(fault||dispatch||ledger?.requests.at(-1)?.state==='intent')return {status:'resident-unresolved' as const};
@@ -1192,5 +1202,5 @@ export async function startOfflineSeasonalModel(options:{mode:'offline-seasonal'
    }:{}),
    setAlmanacPublicWeatherAllowed:(allowed:boolean)=>!closed&&(almanac?.setPublicWeatherAllowed(allowed)??false),
   };
- }catch(error){try{localWeatherEditorial?.close();}catch{/* optional editor */}try{weatherDraft?.close();}catch{/* private draft */}try{publicWeatherSource?.close();}catch{/* optional public-source custody */}try{privateWeatherSecond?.close();}catch{/* optional topic annex */}try{privateWeather?.close();}catch{/* optional annex */}try{almanac?.close();}catch{/* optional state */}try{if(server?.listening){server.closeAllConnections();await new Promise<void>(resolve=>server!.close(()=>resolve()));}store?.close();}finally{try{owner.release();}finally{releaseQuota?.();}}throw error;}
+ }catch(error){try{await localWeatherDesktop?.close();}catch{/* separate local listener */}try{localWeatherEditorial?.close();}catch{/* optional editor */}try{weatherDraft?.close();}catch{/* private draft */}try{publicWeatherSource?.close();}catch{/* optional public-source custody */}try{privateWeatherSecond?.close();}catch{/* optional topic annex */}try{privateWeather?.close();}catch{/* optional annex */}try{almanac?.close();}catch{/* optional state */}try{if(server?.listening){server.closeAllConnections();await new Promise<void>(resolve=>server!.close(()=>resolve()));}store?.close();}finally{try{owner.release();}finally{releaseQuota?.();}}throw error;}
 }

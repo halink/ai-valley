@@ -5,6 +5,8 @@ const Art = preload("res://valley_interface_style.gd")
 var body: Label
 var http: HTTPRequest
 var endpoint := ""
+var seasonal_preview := false
+var preview_headers := PackedStringArray()
 var expected_world := ""
 var expected_entry := ""
 var pending := false
@@ -48,6 +50,29 @@ static func presentation(value: Variant, world: String, entry: String) -> String
 		lines.append(Weather._time(float(fact.minute)) + " · " + text)
 	return "\n".join(lines)
 
+static func approved_seasonal_token(value: String) -> bool:
+	if value.length() != 43: return false
+	for ch in value:
+		if not ch in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_": return false
+	return true
+
+static func seasonal_presentation(value: Variant) -> String:
+	if not Weather._exact(value, ["schemaVersion", "mode", "origin", "rendererVersion", "fact"]): return ""
+	if not Weather._eq_number(value.schemaVersion, 1) or not Weather._eq_number(value.rendererVersion, 1): return ""
+	if not Weather._eq_string(value.mode, "local-seasonal-offline-weather-preview") or not Weather._eq_string(value.origin, "offline-synthetic"): return ""
+	var fact: Variant = value.fact
+	if not Weather._exact(fact, ["minute", "field", "value"]) or not Weather._integer(fact.minute, 0, 100000000) or not fact.field is String: return ""
+	var text := ""
+	match fact.field:
+		"condition":
+			if fact.value is String and Weather.WEATHER.has(fact.value): text = "天气：" + Weather.WEATHER[fact.value]
+		"temperatureDeciC":
+			if Weather._integer(fact.value, -300, 450): text = "气温：%.1f℃" % (fact.value / 10.0)
+		"relativeHumidityPermille":
+			if Weather._integer(fact.value, 0, 1000): text = "湿度：%.1f%%" % (fact.value / 10.0)
+	if text.is_empty(): return ""
+	return Weather._time(float(fact.minute)) + " · " + text + "\n离线合成 · 本机阅览"
+
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var center := CenterContainer.new()
@@ -78,19 +103,29 @@ func _ready() -> void:
 	if OS.has_feature("web"):
 		body.text = "此阅览窗口暂不可用。"
 		return
+	var inherited_seasonal_token := OS.get_environment("VALLEY_SEASONAL_WEATHER_PREVIEW_TOKEN")
+	OS.unset_environment("VALLEY_SEASONAL_WEATHER_PREVIEW_TOKEN")
 	var args := {}
 	for arg in OS.get_cmdline_user_args():
 		var parts := arg.split("=", true, 1)
-		if parts.size() != 2 or args.has(parts[0]) or parts[0] not in ["--weather-review-port", "--weather-review-world", "--weather-review-entry"]:
+		if parts.size() != 2 or args.has(parts[0]) or parts[0] not in ["--weather-review-port", "--weather-review-world", "--weather-review-entry", "--weather-seasonal-preview-port"]:
 			body.text = "此阅览窗口暂不可用。"
 			return
 		args[parts[0]] = parts[1]
-	if args.size() != 3: return
-	var port: String = args["--weather-review-port"]
-	expected_world = args["--weather-review-world"]
-	expected_entry = args["--weather-review-entry"]
-	if not port.is_valid_int() or str(int(port)) != port or int(port) < 1024 or int(port) > 65535 or not valid_id(expected_world) or not valid_id(expected_entry): return
-	endpoint = "http://127.0.0.1:%s/developer/weather-review" % port
+	if args.size() == 1 and args.has("--weather-seasonal-preview-port"):
+		var native_port: String = args["--weather-seasonal-preview-port"]
+		var token: String = inherited_seasonal_token
+		if not native_port.is_valid_int() or str(int(native_port)) != native_port or int(native_port) < 1024 or int(native_port) > 65535 or not approved_seasonal_token(token): return
+		seasonal_preview = true
+		preview_headers = PackedStringArray(["X-Valley-Local-Preview: " + token])
+		endpoint = "http://127.0.0.1:%s/desktop/local-seasonal-weather" % native_port
+	elif args.size() == 3 and args.has("--weather-review-port") and args.has("--weather-review-world") and args.has("--weather-review-entry"):
+		var port: String = args["--weather-review-port"]
+		expected_world = args["--weather-review-world"]
+		expected_entry = args["--weather-review-entry"]
+		if not port.is_valid_int() or str(int(port)) != port or int(port) < 1024 or int(port) > 65535 or not valid_id(expected_world) or not valid_id(expected_entry): return
+		endpoint = "http://127.0.0.1:%s/developer/weather-review" % port
+	else: return
 	http = HTTPRequest.new()
 	http.timeout = 2.0
 	http.max_redirects = 0
@@ -110,7 +145,7 @@ func _process(_delta: float) -> void:
 	pending = true
 	requested_at = now
 	next_poll = now + 2000
-	if http.request(endpoint) != OK:
+	if http.request(endpoint, preview_headers) != OK:
 		pending = false
 		_clear()
 
@@ -125,11 +160,19 @@ func _completed(result: int, code: int, _headers: PackedStringArray, bytes: Pack
 		_clear()
 		return
 	var value: Variant = JSON.parse_string(bytes.get_string_from_utf8())
-	var rendered := presentation(value, expected_world, expected_entry)
+	var rendered := seasonal_presentation(value) if seasonal_preview else presentation(value, expected_world, expected_entry)
 	if rendered.is_empty():
 		_clear()
 		return
 	var canonical := JSON.stringify(value, "", true)
+	if seasonal_preview:
+		if not last_payload.is_empty() and canonical != last_payload:
+			_clear()
+			return
+		last_payload = canonical
+		accepted_at = Time.get_ticks_msec()
+		body.text = rendered
+		return
 	if value.textVersion < last_text_version or value.permissionVersion < last_permission_version or (value.textVersion == last_text_version and value.permissionVersion == last_permission_version and canonical != last_payload):
 		_clear()
 		return
