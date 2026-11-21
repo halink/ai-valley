@@ -220,6 +220,7 @@ function bindOriginalDevelopmentPreview(storage:ReturnType<typeof createFreshOrd
      transferDevelopmentFruit:(input:unknown)=>advanceObserved(()=>run.transferPrivateOrdinaryDevelopmentV3?.(input)??null),
      advanceDevelopmentGroundMinute:()=>advanceObserved(()=>run.advancePrivateOrdinaryDevelopmentV3Minute?.()??null),
      tryDevelopmentGroundPickupMinute:()=>advanceObserved(()=>run.advancePrivateOrdinaryDevelopmentV3Minute?.('pickup')??null),
+     advanceDevelopmentTerminalMinute:()=>advanceObserved(()=>run.advancePrivateOrdinaryDevelopmentV3TerminalMinute?.()??null),
      advanceDevelopmentHeldMinute:()=>advanceObserved(()=>run.advancePrivateOrdinaryDevelopmentV3Minute?.('held')??null),
      tryDevelopmentGroundApproachMinute:()=>advanceObserved(()=>run.advancePrivateOrdinaryDevelopmentV3Minute?.('approach')??null),
      readDevelopmentGroundApproach:(residentId:string)=>ifLive(()=>run.readPrivateOrdinaryDevelopmentV3Route?.(residentId)??null),
@@ -726,6 +727,14 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
    committedV3Head=Object.freeze({worldId:settled.worldId,revision:settled.revision,minute:settled.minute});
    return settled;
   };
+  const advanceDevelopmentTerminalMinute=()=>{
+   owner!.assertOwned();ordinaryG2Storage?.assertOriginal();
+   if(dueOwned?.status!=='consumed'||!committedV3Head||!store)return null;
+   const settled=store.advanceOwnedOrdinaryDevelopmentV3TerminalMinute();
+   if(!settled)return null;
+   committedV3Head=Object.freeze({worldId:settled.worldId,revision:settled.revision,minute:settled.minute});
+   return settled;
+  };
   const transferDevelopmentFruit=(input:unknown)=>{
    if(dueOwned||committedV3Head||!store||!selectedReview||!valleySpirit||!ordinaryMultiCandidate)return null;
    const placed=store.transactOwnedOrdinaryDevelopmentV3(selectedReview.currentPositive(),ordinaryMultiCandidate,valleySpirit,input);
@@ -741,6 +750,7 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
    previewPrivateOrdinaryDevelopmentDue:previewDevelopmentDue,acceptPrivateOrdinaryDevelopmentDue:acceptDevelopmentDue,
    readPrivateOrdinaryDevelopmentDue:()=>store?.readOwnedDevelopmentDue()??null,advancePrivateOrdinaryDevelopmentDue:advanceDevelopmentDue,
    advancePrivateOrdinaryDevelopmentV3Minute:advanceDevelopmentGroundMinute,
+   advancePrivateOrdinaryDevelopmentV3TerminalMinute:advanceDevelopmentTerminalMinute,
    readPrivateOrdinaryDevelopmentV3Fairness:()=>store?.readOwnedOrdinaryDevelopmentV3Fairness()??null,
    readPrivateOrdinaryDevelopmentV3GroundMarker:()=>store?.readOwnedOrdinaryDevelopmentV3GroundMarker(),
    readPrivateOrdinaryDevelopmentV3Route:(id:string)=>typeof id==='string'&&id.length&&id.length<=300?store?.readOwnedOrdinaryDevelopmentV3Route(id)??null:null,

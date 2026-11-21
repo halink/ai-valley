@@ -139,6 +139,16 @@ type HallDecline=Readonly<{schema:'v3-native-hall-declined';holderId:string;plan
 type SourceFlow=NativeAgedFruitSourceFlow;
 type Lifecycle=Readonly<{schema:'ordinary-g2-development-continuation/v3';sequence:number;atUs:string;
  revision:number;digest:string;placement:Ground;discoveries:readonly CommittedNativeOrdinaryAgedDiscovery[];expiry:Expiry|null;held?:Held;holderDeath?:HolderDeath;heldExpiry?:HeldExpiry;work?:Work;hallWork?:Eating;hallDecline?:HallDecline;eaten?:Eaten;route?:Route;sourceFlow?:SourceFlow|null}>;
+type TerminalHead=Readonly<{schema:'ordinary-g2-development-terminal-head/v1';steps:number;atUs:string;revision:number;digest:string;
+ priorRevision:number;priorDigest:string;terminalDigest:string;consumedDigest:string}>;
+const terminalKind=(l:Lifecycle|null)=>!l||l.work||l.hallWork||l.route?.result==='active'?null:
+ l.expiry&&!l.held&&!l.heldExpiry&&!l.eaten?'ground-expired':
+ l.expiry===null&&l.held&&l.heldExpiry&&!l.eaten?'held-expired':null;
+function terminalDue(db:DatabaseSync,origin:OrdinaryG2DevelopmentOrigin,pin:Pin,a:Archive){
+ // A historical direct V3 transfer does not grant this capability.
+ const d=readOrdinaryDevelopmentDueRecord(db,origin,pin);
+ return d?.record.consumed&&verifyDueExecutionPlacement(db,origin,pin,a.approval,hash(a))?d:null;
+}
 const archiveKeys=['schema','approval','sourceBefore','sourceAfter','afterRevision','afterDigest','groundDigest'];
 const lotOf=(g:Ground,c:Approval):AgedGroundLot=>({bornUs:g.bornUs,expiresUs:g.expiresUs,
  fruit:{effectId:g.effectId,kind:'fallen-fruit',amount:1,ownerId:g.ownerId,sourceResourceId:g.sourceId,
@@ -151,7 +161,9 @@ export function readOrdinaryDevelopmentV3(db:DatabaseSync,origin:OrdinaryG2Devel
  const rg=gr[0],ar=rr[0];
  if(gr.length>1||rr.length!==1||typeof ar.body!=='string'||
   ar.seal!==authenticateOrdinaryG2DevelopmentV3(origin,'v3-receipt',ar.body)||latch(db,true)!==ar.seal)throw Error('ordinary_g2_dev_v3_receipt');
- const envelope=JSON.parse(ar.body),stepped=exact(envelope,['placementReceipt','lifecycle']);
+ const envelope=JSON.parse(ar.body),resumed=exact(envelope,['placementReceipt','lifecycle','terminalHead']),
+  stepped=resumed||exact(envelope,['placementReceipt','lifecycle']);
+ const terminalHead=resumed?envelope.terminalHead as TerminalHead:null;
  const a=(stepped?envelope.placementReceipt:envelope) as Archive,l=stepped?envelope.lifecycle as Lifecycle:null;
  const g=l?l.placement:typeof rg?.body==='string'?JSON.parse(rg.body) as Ground:null;
  const c=verifyOrdinaryDevelopmentV3(a.approval,origin,pin)??verifyDueExecutionPlacement(db,origin,pin,a.approval,hash(a));
@@ -166,7 +178,22 @@ export function readOrdinaryDevelopmentV3(db:DatabaseSync,origin:OrdinaryG2Devel
   valleySpiritFruitFallOpportunityId(w.id,c.terms.rainEventId,g.sourceInstanceId)!==c.terms.opportunityId)
   throw Error('ordinary_g2_dev_v3_mismatch');
  const now=minuteToClimateUs(w.minute),before=BigInt(g.placedUs),expires=BigInt(g.expiresUs);
- if(!l){
+ if(resumed){
+  // Only the native terminal writer can authenticate this envelope. On its
+  // first write it verifies the old lifecycle at the exact terminal world,
+  // then leaves those historical facts byte-for-byte frozen. Never compare
+  // its historical live predicates with later resident or lot state.
+  const h=terminalHead,d=terminalDue(db,origin,pin,a);
+  if(!h||!l||!terminalKind(l)||gr.length||!d||!int(l.revision)||!hex(l.digest)||
+   !exact(h,['schema','steps','atUs','revision','digest','priorRevision','priorDigest','terminalDigest','consumedDigest'])||
+   h.schema!=='ordinary-g2-development-terminal-head/v1'||!int(h.steps)||h.steps<1||h.steps>1440||
+   !clock(l.atUs)||BigInt(now)!==BigInt(l.atUs)+1_000_000n*BigInt(h.steps)||
+   h.atUs!==now||h.revision!==w.revision||!int(h.priorRevision)||h.priorRevision<l.revision+h.steps-1||h.priorRevision>=h.revision||
+   !hex(h.priorDigest)||h.steps===1&&(h.priorRevision!==l.revision||h.priorDigest!==l.digest)||
+   h.digest!==digestHead(db,w)||h.terminalDigest!==hash(l)||h.consumedDigest!==d.seal)
+   throw Error('ordinary_g2_dev_v3_terminal_head');
+  assertLifecycleWorldWriter(db);
+ }else if(!l){
   if(stepped||w.revision!==a.afterRevision||now!==c.terms.atUs||a.afterDigest!==digestHead(db,w)||
    w.resources.filter(r=>r.id===g.sourceId&&r.amount===a.sourceAfter&&r.at.x===g.sourceAt.x&&r.at.y===g.sourceAt.y).length!==1||
    !resolveMvpRainEpisode(w,c.terms.rainEventId))throw Error('ordinary_g2_dev_v3_placement_mismatch');
@@ -249,7 +276,7 @@ export function readOrdinaryDevelopmentV3(db:DatabaseSync,origin:OrdinaryG2Devel
  }
  if(l){assertStoppedEventAuthority(db);assertStoppedEventArchive(db,w);}
  if(l?.expiry||l?.held?gr.length!==0:rg?.slot!==1||rg.body!==JSON.stringify(g))throw Error('ordinary_g2_dev_v3_ground_row');
- const own={ground:l?.expiry||l?.held?null:g,receipt:a,approval:c,lifecycle:l,seal:ar.seal as string};
+ const own={ground:l?.expiry||l?.held?null:g,receipt:a,approval:c,lifecycle:l,terminalHead,seal:ar.seal as string};
  verifiedArchiveReads.set(own,{db,revision:w.revision,world:hash(w),content:hash(own)});
  return own;
 }
@@ -416,7 +443,7 @@ export function projectOrdinaryDevelopmentV3Fairness(w:World,owned:NonNullable<R
  if(!proof||proof.revision!==w.revision||proof.world!==hash(w)||proof.content!==hash(owned))return null;
  const l=owned.lifecycle,g=l?.placement??owned.ground;
  if(!g)return null;
- const flow=verifyNativeAgedFruitSourceFlow(w,nativeSourceBasis(g,owned.receipt),l);
+ const flow=owned.terminalHead?null:verifyNativeAgedFruitSourceFlow(w,nativeSourceBasis(g,owned.receipt),l);
  return {status:'ready',coverage:'one-signed-development-opportunity',throughRevision:w.revision,throughUs:minuteToClimateUs(w.minute),
   proposalDirections:{linkedApprovedCandidate:1,total:'unavailable'},actualEffects:{groundPlacement:1},
   actualDiscoveries:{personal:(l?.discoveries??[]).length},actualPickups:{settled:l?.held?1:0},
@@ -580,6 +607,54 @@ export function writeOrdinaryDevelopmentV3Minute(db:DatabaseSync,origin:Ordinary
    throw Error('ordinary_g2_dev_v3_continuation_write');
  const persisted=readOrdinaryDevelopmentV3(db,origin,pin,step.draft);
  if(!persisted||persisted.seal!==seal||persisted.lifecycle?.digest!==h)throw Error('ordinary_g2_dev_v3_continuation_readback');
+ return persisted;
+}
+const preparedTerminalMinutes=new WeakMap<object,{db:DatabaseSync;priorSeal:string;priorDigest:string;priorRevision:number;dueSeal:string;content:string}>();
+function agedActionOpen(w:World){
+ return w.residents.some(r=>r.activity?.action.type==='mvpAgedFruitEat'||r.activity?.action.type==='mvpAgedFruitPickup'||
+  r.plan?.actions.some(a=>a.type==='mvpAgedFruitEat'||a.type==='mvpAgedFruitPickup'));
+}
+/** Socketless owner continuation/rules only; no quote, permission, provider,
+ * current rain eligibility, private capture authority or actionable lot. */
+export function prepareOrdinaryDevelopmentV3TerminalMinute(db:DatabaseSync,origin:OrdinaryG2DevelopmentOrigin,pin:Pin,w:World,
+ owned:NonNullable<ReturnType<typeof readOrdinaryDevelopmentV3>>){
+ const p=verifiedArchiveReads.get(owned),from=owned.terminalHead??owned.lifecycle;
+ if(!db.isTransaction||!p||p.db!==db||p.revision!==w.revision||p.world!==hash(w)||p.content!==hash(owned)||
+  !from||!terminalKind(owned.lifecycle)||owned.ground||latch(db,true)!==owned.seal||
+  (owned.terminalHead?.steps??0)>=1440||agedActionOpen(w))return null;
+ const due=terminalDue(db,origin,pin,owned.receipt);
+ if(!due||from.digest!==digestHead(db,w))return null;
+ assertLifecycleWorldWriter(db);assertStoppedEventAuthority(db);assertStoppedEventArchive(db,w);
+ const next=prepareSealedMvpEcologyMinute(w);
+ if(!next||next.eaten||next.completion||next.observed.length||next.agedDiningDecline||agedActionOpen(next.draft))return null;
+ const draft=next.draft,appended=draft.events.slice(w.events.length);
+ if(draft.mvpClimate?.lastUs!==minuteToClimateUs(draft.minute)||draft.revision<=w.revision||draft.events.length<w.events.length||draft.events.length>4096||appended.length>128||
+  hash(draft.events.slice(0,w.events.length))!==hash(w.events)||
+  appended.some(e=>e.at!==draft.minute||!e.id.startsWith(w.id+':event:')||e.mvpFruitFall||e.socialAppointmentArrival))return null;
+ const prepared={draft,steps:(owned.terminalHead?.steps??0)+1};
+ preparedTerminalMinutes.set(prepared,{db,priorSeal:owned.seal,priorDigest:from.digest,priorRevision:w.revision,dueSeal:due.seal,content:hash(prepared)});
+ return prepared;
+}
+export function writeOrdinaryDevelopmentV3TerminalMinute(db:DatabaseSync,origin:OrdinaryG2DevelopmentOrigin,pin:Pin,
+ owned:NonNullable<ReturnType<typeof readOrdinaryDevelopmentV3>>,step:NonNullable<ReturnType<typeof prepareOrdinaryDevelopmentV3TerminalMinute>>){
+ const prepared=preparedTerminalMinutes.get(step),digest=digestHead(db,step.draft),due=terminalDue(db,origin,pin,owned.receipt);
+ preparedTerminalMinutes.delete(step);
+ if(!db.isTransaction||!prepared||prepared.db!==db||prepared.content!==hash(step)||prepared.priorSeal!==owned.seal||
+  !digest||!due||due.seal!==prepared.dueSeal||!tables(db)||latch(db,true)!==owned.seal||!owned.lifecycle||
+  db.prepare('SELECT 1 FROM main.'+GROUND+' LIMIT 1').get())throw Error('ordinary_g2_dev_v3_terminal_scope');
+ assertLifecycleWorldWriter(db);assertStoppedEventAuthority(db);assertStoppedEventArchive(db,step.draft);
+ const terminalHead:TerminalHead={schema:'ordinary-g2-development-terminal-head/v1',steps:step.steps,
+  atUs:minuteToClimateUs(step.draft.minute),revision:step.draft.revision,digest,priorRevision:prepared.priorRevision,
+  priorDigest:prepared.priorDigest,terminalDigest:hash(owned.lifecycle),consumedDigest:due.seal};
+ const raw=JSON.stringify({placementReceipt:owned.receipt,lifecycle:owned.lifecycle,terminalHead}),
+  seal=authenticateOrdinaryG2DevelopmentV3(origin,'v3-receipt',raw);
+ if(Buffer.byteLength(raw)>65536||
+  db.prepare('UPDATE main.'+RECEIPT+' SET body=?,seal=? WHERE opportunity=? AND seal=?')
+   .run(raw,seal,owned.approval.terms.opportunityId,owned.seal).changes!==1||
+  db.prepare('UPDATE main.archive_meta SET value=? WHERE key=? AND value=?').run(seal,LATCH,owned.seal).changes!==1)
+  throw Error('ordinary_g2_dev_v3_terminal_write');
+ const persisted=readOrdinaryDevelopmentV3(db,origin,pin,step.draft);
+ if(!persisted||persisted.seal!==seal||persisted.terminalHead?.digest!==digest)throw Error('ordinary_g2_dev_v3_terminal_readback');
  return persisted;
 }
 /** Invoke only from the original scoped WorldStore transaction after the actual debit. */

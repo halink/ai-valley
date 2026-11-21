@@ -7,7 +7,7 @@ import {digestOrdinaryDue,encodeOrdinaryDevelopmentDue,hasOrdinaryDevelopmentDue
 import {prepareOrdinaryDevelopmentDueNativeMinute} from './godot-mvp.js';
 import {inspectMvpGroundFruitGeography} from '../world/mvp-ground-fruit.js';
 import {rehearseDetachedNativeLot} from './valley-spirit-ordinary-g1-rehearsal.js';
-import {projectOrdinaryDevelopmentV3Fairness,ownsOrdinaryDevelopmentV3Pin,ordinaryDevelopmentV3Terms,verifyOrdinaryDevelopmentV3,encodeOrdinaryDevelopmentV3,readOrdinaryDevelopmentV3,writeOrdinaryDevelopmentV3,prepareOrdinaryDevelopmentV3Minute,writeOrdinaryDevelopmentV3Minute,type OrdinaryDevelopmentV3Pin} from './ordinary-g2-development-v3.js';
+import {projectOrdinaryDevelopmentV3Fairness,ownsOrdinaryDevelopmentV3Pin,ordinaryDevelopmentV3Terms,verifyOrdinaryDevelopmentV3,encodeOrdinaryDevelopmentV3,readOrdinaryDevelopmentV3,writeOrdinaryDevelopmentV3,prepareOrdinaryDevelopmentV3Minute,writeOrdinaryDevelopmentV3Minute,prepareOrdinaryDevelopmentV3TerminalMinute,writeOrdinaryDevelopmentV3TerminalMinute,type OrdinaryDevelopmentV3Pin} from './ordinary-g2-development-v3.js';
 import {ownsSelectedPositiveRehearsal,type openSelectedOrdinaryRehearsal} from './valley-spirit-ordinary-selected-rehearsal.js';
 import {assertOrdinaryG2DevelopmentPath,guardOrdinaryG2DevelopmentOriginCommit,inspectOrdinaryG2DevelopmentOrigin,type OrdinaryG2DevelopmentOrigin} from './ordinary-g2-development-origin.js';
 import {currentClosedRain} from './valley-spirit-persistent-rules-shadow.js';
@@ -1508,6 +1508,25 @@ export class WorldStore {
     this.db.exec('COMMIT');
     return {status:stored.ground?'development-v3-native-minute' as const:stored.lifecycle?.eaten?'development-v3-held-eaten' as const:stored.lifecycle?.heldExpiry?'development-v3-held-expired' as const:stored.lifecycle?.holderDeath?'development-v3-custody-suspended' as const:stored.lifecycle?.held?'development-v3-held' as const:'development-v3-expired' as const,
      worldId:step.draft.id,revision:step.draft.revision,minute:step.draft.minute,expiry:stored.lifecycle?.expiry??null,heldExpiry:stored.lifecycle?.heldExpiry??null};
+   }catch(e){this.db.exec('ROLLBACK');throw e;}
+  }catch{return null;}
+ }
+ advanceOwnedOrdinaryDevelopmentV3TerminalMinute(){
+  const origin=this.#ordinaryG2DevelopmentOrigin,pin=this.#ordinaryG2V3;
+  if(!origin||!pin)return null;
+  try{
+   this.db.exec('BEGIN IMMEDIATE');
+   try{
+    const w=this.readWorld(false,false),r=w&&readOrdinaryDevelopmentV3(this.db,origin,pin,w);
+    const step=w&&r&&prepareOrdinaryDevelopmentV3TerminalMinute(this.db,origin,pin,w,r);
+    if(!w||!r||!step){this.db.exec('ROLLBACK');return null;}
+    this.assertWritable(step.draft);
+    this.writeCommit(step.draft,w.revision,undefined,undefined,undefined,undefined,true);
+    if(!writeOrdinaryDevelopmentV3TerminalMinute(this.db,origin,pin,r,step).terminalHead)
+     throw Error('ordinary_g2_dev_v3_missing_terminal_head');
+    this.db.exec('COMMIT');
+    return {status:'development-v3-terminal-native-minute' as const,worldId:step.draft.id,revision:step.draft.revision,minute:step.draft.minute,
+     productionApproved:false as const,executionAuthorized:false as const};
    }catch(e){this.db.exec('ROLLBACK');throw e;}
   }catch{return null;}
  }

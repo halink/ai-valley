@@ -260,3 +260,30 @@ verified head. The short death fixture uses an already-supported versioned
 physiology rule and low positive starting health so ordinary native loss
 reaches zero within the test window; no rule defaults or runtime death
 controls changed. This scope does not enable ordinary player saves.
+
+### One native minute after paired V3 custody ends
+
+Only the existing stopped, socketless original owner with both a verified
+consumed due record and its exact V3 placement can request a terminal minute.
+A ground expiry or held expiry must already have committed; a held eating
+disposition is not included in this verified path.
+No active lot, holder work, or approach may remain. Direct historical V3
+placements, unconsumed due records, partial archives, and copied saves do not
+qualify. Revoking public weather still bars new dispatch and does not make
+this historical continuation depend on weather approval.
+
+The ordinary native chooser and engine take one minute with no injected lot,
+pickup, eating, route or caller-provided inputs. Normal completed actions may
+remain in the ordinary private world and event index. No fruit-placement or
+appointment-arrival effect, separate editorial evidence, model/provider call,
+publication, automatic ticking or generic advance is enabled. The bounded
+event suffix and all index rows are checked against the packed world; a failed
+check or write leaves the previous head intact.
+
+The receipt freezes the original placement and terminal lifecycle facts,
+then authenticates the new packed head, its predecessor, and the unchanged
+consumed due seal in the same transaction. Later source-flow metrics are unavailable
+in this lane; the historical placement, transfers and terminal debit remain
+unchanged. The private path stops at its existing 4,096-event validation
+limit or 1,440 post-terminal minutes; old code does not adopt this new
+receipt shape. This is not production execution approval.
