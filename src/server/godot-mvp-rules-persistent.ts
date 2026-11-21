@@ -1,3 +1,4 @@
+import {openOrdinaryG2GroundObserver,pinOrdinaryG2GroundObserver} from './ordinary-g2-ground-observer.js';
 import {pinOrdinaryDevelopmentV3,type OrdinaryDevelopmentV3Options} from './ordinary-g2-development-v3.js';
 import {createFreshOrdinaryG2DevelopmentOriginStorage,isOrdinaryG2DevelopmentOriginScratch,ownsOrdinaryG2DevelopmentStorage} from './ordinary-g2-development-origin.js';
 import {openSelectedOrdinaryRehearsal,pinSelectedOrdinaryRehearsal,type SelectedOrdinaryRehearsalOptions} from './valley-spirit-ordinary-selected-rehearsal.js';
@@ -160,12 +161,24 @@ type OwnedG2PreviewOptions=Pick<PersistentRulesOptions,'privateOrdinaryMultiFrui
  'privateOrdinaryMultiSelection'|'privateOrdinarySelectedRehearsal'|'privateOrdinaryDevelopmentV3'>;
 const ownedG2PreviewKeys=['privateOrdinaryMultiFruit','privateOrdinaryMultiCandidate','privateOrdinaryMultiSelection',
  'privateOrdinarySelectedRehearsal','privateOrdinaryDevelopmentV3'] as const;
-export function createOrdinaryG2DevelopmentOrigin(){
- return bindOrdinaryG2DevelopmentOriginPreview(createFreshOrdinaryG2DevelopmentOriginStorage());
+type OrdinaryG2ObserverBootOptions=Readonly<{trustedGodotExecutable:string}>;
+function pinGroundObserverBoot(observerBoot?:OrdinaryG2ObserverBootOptions){
+ if(observerBoot===undefined)return null;
+ const pin=observerBoot&&Object.getPrototypeOf(observerBoot)===Object.prototype&&Reflect.ownKeys(observerBoot).length===1&&
+  pinOrdinaryG2GroundObserver(Object.getOwnPropertyDescriptor(observerBoot,'trustedGodotExecutable')?.value);
+ if(!pin)throw Error('ordinary_g2_development_observer_boot');
+ return pin;
+}
+export function createOrdinaryG2DevelopmentOrigin(observerBoot?:OrdinaryG2ObserverBootOptions){
+ const pin=pinGroundObserverBoot(observerBoot);
+ return bindOriginalDevelopmentPreview(createFreshOrdinaryG2DevelopmentOriginStorage(),pin);
 }
 /** Only an already freshly minted process capability, never a path, can
  * bind this host-side closure. No raw session or gameplay writer escapes. */
-export function bindOrdinaryG2DevelopmentOriginPreview(storage:ReturnType<typeof createFreshOrdinaryG2DevelopmentOriginStorage>){
+export function bindOrdinaryG2DevelopmentOriginPreview(storage:ReturnType<typeof createFreshOrdinaryG2DevelopmentOriginStorage>,observerBoot?:OrdinaryG2ObserverBootOptions){
+ return bindOriginalDevelopmentPreview(storage,pinGroundObserverBoot(observerBoot));
+}
+function bindOriginalDevelopmentPreview(storage:ReturnType<typeof createFreshOrdinaryG2DevelopmentOriginStorage>,observerPin:ReturnType<typeof pinOrdinaryG2GroundObserver>){
  if(!ownsOrdinaryG2DevelopmentStorage(storage))throw Error('ordinary_g2_development_storage_untrusted');
  storage.assertOriginal();
  let opened=false;
@@ -178,6 +191,9 @@ export function bindOrdinaryG2DevelopmentOriginPreview(storage:ReturnType<typeof
    const run=await openPersistentRulesCore({...options,database:storage.database,port:0,autoStart:false},undefined,undefined,undefined,storage);
    let closed=false;
    const ifLive=<T>(f:()=>T)=>closed?null:f();
+   let groundObserver:ReturnType<typeof openOrdinaryG2GroundObserver>;
+   const groundMarker=()=>ifLive(()=>run.readPrivateOrdinaryDevelopmentV3GroundMarker?.())??Object.freeze({status:'unavailable' as const});
+   const advanceObserved=<T>(f:()=>T)=>ifLive(()=>{try{return f();}finally{groundObserver?.refresh();}});
    return Object.freeze({
     head:()=>ifLive(()=>run.readPrivateOrdinaryDevelopmentV3Head?run.readPrivateOrdinaryDevelopmentV3Head():
      Object.freeze({worldId:run.session.world.id,revision:run.session.world.revision,minute:run.session.world.minute})),
@@ -196,24 +212,29 @@ export function bindOrdinaryG2DevelopmentOriginPreview(storage:ReturnType<typeof
      previewDevelopmentDue:()=>ifLive(()=>run.previewPrivateOrdinaryDevelopmentDue?.()??null),
      acceptDevelopmentDue:(input:unknown)=>ifLive(()=>run.acceptPrivateOrdinaryDevelopmentDue?.(input)??null),
      previewDevelopmentDueTransfer:()=>ifLive(()=>run.previewPrivateOrdinaryDueTransfer?.()??null),
-     transferDevelopmentDueFruit:(input:unknown)=>ifLive(()=>run.transferPrivateOrdinaryDueFruit?.(input)??null),
+     transferDevelopmentDueFruit:(input:unknown)=>advanceObserved(()=>run.transferPrivateOrdinaryDueFruit?.(input)??null),
      readDevelopmentDue:()=>ifLive(()=>run.readPrivateOrdinaryDevelopmentDue?.()??null),
      advanceDevelopmentDueMinute:()=>ifLive(()=>run.advancePrivateOrdinaryDevelopmentDue?.()??null),
      previewDevelopmentTransfer:()=>ifLive(()=>run.previewPrivateOrdinaryDevelopmentV3?.()??null),
-     transferDevelopmentFruit:(input:unknown)=>ifLive(()=>run.transferPrivateOrdinaryDevelopmentV3?.(input)??null),
-     advanceDevelopmentGroundMinute:()=>ifLive(()=>run.advancePrivateOrdinaryDevelopmentV3Minute?.()??null),
-     tryDevelopmentGroundPickupMinute:()=>ifLive(()=>run.advancePrivateOrdinaryDevelopmentV3Minute?.('pickup')??null),
-     advanceDevelopmentHeldMinute:()=>ifLive(()=>run.advancePrivateOrdinaryDevelopmentV3Minute?.('held')??null),
-     tryDevelopmentGroundApproachMinute:()=>ifLive(()=>run.advancePrivateOrdinaryDevelopmentV3Minute?.('approach')??null),
+     transferDevelopmentFruit:(input:unknown)=>advanceObserved(()=>run.transferPrivateOrdinaryDevelopmentV3?.(input)??null),
+     advanceDevelopmentGroundMinute:()=>advanceObserved(()=>run.advancePrivateOrdinaryDevelopmentV3Minute?.()??null),
+     tryDevelopmentGroundPickupMinute:()=>advanceObserved(()=>run.advancePrivateOrdinaryDevelopmentV3Minute?.('pickup')??null),
+     advanceDevelopmentHeldMinute:()=>advanceObserved(()=>run.advancePrivateOrdinaryDevelopmentV3Minute?.('held')??null),
+     tryDevelopmentGroundApproachMinute:()=>advanceObserved(()=>run.advancePrivateOrdinaryDevelopmentV3Minute?.('approach')??null),
      readDevelopmentGroundApproach:(residentId:string)=>ifLive(()=>run.readPrivateOrdinaryDevelopmentV3Route?.(residentId)??null),
      readDevelopmentEating:(residentId:string)=>ifLive(()=>run.readPrivateOrdinaryDevelopmentV3Eating?.(residentId)??null),
-     advanceDevelopmentHallMinute:()=>ifLive(()=>run.advancePrivateOrdinaryDevelopmentV3Minute?.('hall')??null),
+     advanceDevelopmentHallMinute:()=>advanceObserved(()=>run.advancePrivateOrdinaryDevelopmentV3Minute?.('hall')??null),
      readDevelopmentHeld:(residentId:string)=>ifLive(()=>run.readPrivateOrdinaryDevelopmentV3Held?.(residentId)??null),
      readDevelopmentDiscovery:(residentId:string)=>ifLive(()=>run.readPrivateOrdinaryDevelopmentV3Discovery?.(residentId)??null),
      readDevelopmentFairness:()=>ifLive(()=>run.readPrivateOrdinaryDevelopmentV3Fairness?.()??null),
      readDevelopmentGround:()=>ifLive(()=>run.readPrivateOrdinaryDevelopmentV3?.()??null),
-     readDevelopmentGroundMarker:()=>ifLive(()=>run.readPrivateOrdinaryDevelopmentV3GroundMarker?.())??Object.freeze({status:'unavailable' as const}),}:{}),
-    async close(){if(!closed){closed=true;await run.close();opened=false;}},
+     readDevelopmentGroundMarker:groundMarker,
+     ...(observerPin?{openDevelopmentGroundObserver:(...args:[])=>{
+      if(args.length||closed||groundObserver?.isOpen())return false;
+      groundObserver=openOrdinaryG2GroundObserver(observerPin,groundMarker);
+      return groundObserver?.isOpen()??false;
+     }}:{}),}:{}),
+    async close(){if(!closed){closed=true;groundObserver?.close();await run.close();opened=false;}},
    });
   }catch(e){opened=false;throw e;}
  }});
