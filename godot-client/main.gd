@@ -33,6 +33,13 @@ var meal_observation: Variant
 var valley_spirit_snapshot: Dictionary = {}
 var spirit_archive_context: Dictionary = {}
 var spirit_archive_request: HTTPRequest
+# One ephemeral query, only while the player has opened the almanac.
+const ALMANAC_POLL_MS := 2000
+const ALMANAC_FRESH_MS := 4000
+var spirit_almanac_open := false
+var spirit_almanac_request: HTTPRequest
+var spirit_almanac_next := 0
+var spirit_almanac_fresh_until := 0
 var spirit_life_context: Dictionary = {}
 var spirit_life_request: HTTPRequest
 var relationship_history: Variant
@@ -507,7 +514,7 @@ func _set_archive_authority(next: Dictionary) -> void:
 		spirit_archive_request.queue_free()
 		spirit_archive_request = null
 	hud.show_spirit_archive(not next.is_empty(), false, "")
-	hud.show_spirit_almanac(not next.is_empty(), false, "")
+	_close_spirit_almanac()
 
 func _request_spirit_archive() -> void:
 	if not connected or spirit_archive_context.is_empty() or spirit_archive_request != null: return
@@ -540,31 +547,61 @@ func _spirit_archive_received(result: int, code: int, _headers: PackedStringArra
 	if text.is_empty(): text = "天气档案暂不可读。"
 	hud.show_spirit_archive(true, false, text)
 
+func _close_spirit_almanac() -> void:
+	spirit_almanac_open = false
+	spirit_almanac_fresh_until = 0
+	spirit_almanac_next = 0
+	if spirit_almanac_request != null:
+		var old := spirit_almanac_request
+		spirit_almanac_request = null
+		old.cancel_request()
+		old.queue_free()
+	hud.spirit_almanac_button.text = "查看年鉴"
+	hud.show_spirit_almanac(not spirit_archive_context.is_empty(), false, "")
+
 func _request_spirit_almanac() -> void:
-	if not connected or spirit_archive_context.is_empty() or spirit_archive_request != null: return
+	if not connected or spirit_archive_context.is_empty() or not hud.spirit_almanac_button.is_visible_in_tree(): return
+	if spirit_almanac_open:
+		_close_spirit_almanac()
+		return
+	spirit_almanac_open = true
+	hud.spirit_almanac_button.text = "收起年鉴"
+	hud.show_spirit_almanac(true, false, "正在读取年鉴…")
+	_poll_spirit_almanac(Time.get_ticks_msec())
+
+func _poll_spirit_almanac(now: int) -> void:
+	if not spirit_almanac_open: return
+	if not connected or spirit_archive_context.is_empty() or not hud.spirit_almanac_button.is_visible_in_tree():
+		_close_spirit_almanac()
+		return
+	if spirit_almanac_fresh_until > 0 and now >= spirit_almanac_fresh_until:
+		spirit_almanac_fresh_until = 0
+		hud.show_spirit_almanac(true, false, "年鉴暂不可读。")
+	if spirit_almanac_request != null or now < spirit_almanac_next: return
 	var request := HTTPRequest.new()
-	request.timeout = 6.0
+	request.timeout = 2.0
 	request.body_size_limit = 65536
 	request.max_redirects = 0
 	add_child(request)
-	spirit_archive_request = request
-	request.request_completed.connect(_spirit_almanac_received.bind(request, spirit_archive_context.duplicate()))
-	hud.show_spirit_almanac(true, true, "正在读取年鉴…")
+	spirit_almanac_request = request
+	spirit_almanac_next = now + ALMANAC_POLL_MS
+	var expected := spirit_archive_context.duplicate()
+	request.request_completed.connect(_spirit_almanac_received.bind(request, expected, active_endpoint, now))
 	if request.request(active_endpoint + "/ai-town/api/valley-spirit/almanac/latest") != OK:
-		_spirit_almanac_received(HTTPRequest.RESULT_CANT_CONNECT, 0, PackedStringArray(), PackedByteArray(), request, spirit_archive_context)
+		_spirit_almanac_received(HTTPRequest.RESULT_CANT_CONNECT, 0, PackedStringArray(), PackedByteArray(), request, expected, active_endpoint, now)
 
-func _spirit_almanac_received(result: int, code: int, _headers: PackedStringArray, body: PackedByteArray, request: HTTPRequest, grant: Dictionary) -> void:
-	if request != spirit_archive_request: return
-	spirit_archive_request = null
+func _spirit_almanac_received(result: int, code: int, _headers: PackedStringArray, body: PackedByteArray, request: HTTPRequest, grant: Dictionary, endpoint: String, sent_at: int) -> void:
+	if request != spirit_almanac_request: return
+	spirit_almanac_request = null
 	request.queue_free()
-	if not connected or not ValleySpiritArchive.same_authority(grant, spirit_archive_context):
-		hud.show_spirit_almanac(false, false, "")
+	if not spirit_almanac_open or not connected or endpoint != active_endpoint or not ValleySpiritArchive.same_authority(grant, spirit_archive_context) or not hud.spirit_almanac_button.is_visible_in_tree():
+		_close_spirit_almanac()
 		return
 	var display := ""
-	if result == HTTPRequest.RESULT_SUCCESS and code == 200:
+	if result == HTTPRequest.RESULT_SUCCESS and code == 200 and Time.get_ticks_msec() - sent_at <= ALMANAC_POLL_MS:
 		display = ValleySpiritArchive.almanac_presentation(JSON.parse_string(body.get_string_from_utf8()), spirit_archive_context)
-	if display.is_empty(): display = "年鉴暂不可读。"
-	hud.show_spirit_almanac(true, false, display)
+	spirit_almanac_fresh_until = 0 if display.is_empty() else Time.get_ticks_msec() + ALMANAC_FRESH_MS
+	hud.show_spirit_almanac(true, false, display if not display.is_empty() else "年鉴暂不可读。")
 
 func _quarantine_pending_spirit_life(parsed: Dictionary) -> void:
 	if not ValleySpiritLife.same_authority(spirit_life_context, ValleySpiritLife.context(parsed)):
@@ -719,6 +756,7 @@ func _notice(message: String) -> void:
 	hud.show_feedback(message)
 
 func _process(_delta: float) -> void:
+	_poll_spirit_almanac(Time.get_ticks_msec())
 	if following and not valley.focus_resident(selected_resident) and not doorway_active:
 		_set_follow(false)
 	if not selected_resource.is_empty() and valley.room_id.is_empty() and connected:
