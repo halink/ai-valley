@@ -1,3 +1,4 @@
+import {assertOrdinaryFreshGenesisPath,hasOrdinaryFreshGenesisRecord,isOrdinaryFreshPendingPath,type OrdinaryFreshGenesisLease} from './ordinary-fresh-genesis.js';
 import {digestOrdinaryDue,readOrdinaryDevelopmentDue} from './ordinary-g2-development-due.js';
 import {stagedOrdinaryDevelopmentV3WorkActor,type prepareOrdinaryDevelopmentV3Minute} from './ordinary-g2-development-v3.js';
 import {ownsOrdinaryDevelopmentV3Pin,readOrdinaryDevelopmentV3,type OrdinaryDevelopmentV3Pin} from './ordinary-g2-development-v3.js';
@@ -183,6 +184,7 @@ export function assertDeveloperMvpEffectArchive(db:DatabaseSync,world:World):voi
 }
 
 function inspectDatabase(db:DatabaseSync,rejectClimate:boolean,validateWorld?: (world:Record<string,unknown>)=>void,allowSeasonalModel=false,inspectSeasonalModel?:(s:SeasonalLedger|null)=>void,fixtureSeal?:string,formalOwner?:DeveloperMvpSpiritFixtureOwner,formalWeatherOwner?:DeveloperMvpSpiritFixtureOwner,nativeEmptyGround?:OrdinaryAgedGroundPin,privateDisposableSave?:DisposableRulesSaveAuthority,privateDisposableAgedTransfer?:DisposableNativeAgedTransferPin,ordinaryG2DevelopmentOrigin?:OrdinaryG2DevelopmentOrigin,ordinaryG2V3?:OrdinaryDevelopmentV3Pin):Record<string,unknown>|null {
+ if(hasOrdinaryFreshGenesisRecord(db))fail('save_ordinary_fresh_genesis_pending');
  let g2World:string|null=null;
  try{g2World=inspectOrdinaryG2DevelopmentOrigin(db,ordinaryG2DevelopmentOrigin,ownsOrdinaryDevelopmentV3Pin(ordinaryG2V3));}
  catch{fail('save_ordinary_g2_development_origin');}
@@ -317,7 +319,12 @@ function unchanged(path:string,files:ReadonlyArray<SourceFile|null>,suffixes:rea
  * checkpoint. WAL is copied alongside the DB and SQLite reads its latest state.
  * This is not a substitute for caller-held ownership against concurrent writers.
  */
-export function preflightWorldSave(path:string,options:{requireWorld?:boolean;rejectClimate?:boolean;allowSeasonalModel?:boolean;inspectSeasonalModel?:(s:SeasonalLedger|null)=>void;inspectOptionalAlmanac?:(snapshot:DatabaseSync,world:Record<string,unknown>)=>void;validateWorld?:(world:Record<string,unknown>)=>void;developerSpiritFixtureOwner?:DeveloperMvpSpiritFixtureOwner;nativeEmptyGround?:OrdinaryAgedGroundPin;privateDisposableSave?:DisposableRulesSaveAuthority;privateDisposableAgedTransfer?:DisposableNativeAgedTransferPin;ordinaryG2DevelopmentOrigin?:OrdinaryG2DevelopmentOrigin;ordinaryG2V3?:OrdinaryDevelopmentV3Pin}={}):Record<string,unknown>|null {
+export function preflightWorldSave(path:string,options:{ordinaryFreshGenesis?:OrdinaryFreshGenesisLease;requireWorld?:boolean;rejectClimate?:boolean;allowSeasonalModel?:boolean;inspectSeasonalModel?:(s:SeasonalLedger|null)=>void;inspectOptionalAlmanac?:(snapshot:DatabaseSync,world:Record<string,unknown>)=>void;validateWorld?:(world:Record<string,unknown>)=>void;developerSpiritFixtureOwner?:DeveloperMvpSpiritFixtureOwner;nativeEmptyGround?:OrdinaryAgedGroundPin;privateDisposableSave?:DisposableRulesSaveAuthority;privateDisposableAgedTransfer?:DisposableNativeAgedTransferPin;ordinaryG2DevelopmentOrigin?:OrdinaryG2DevelopmentOrigin;ordinaryG2V3?:OrdinaryDevelopmentV3Pin}={}):Record<string,unknown>|null {
+ const fresh=options.ordinaryFreshGenesis;
+ if(fresh!==undefined){
+  if(!isOrdinaryFreshPendingPath(path)||options.rejectClimate||options.allowSeasonalModel)fail('save_ordinary_fresh_genesis_pending');
+  try{assertOrdinaryFreshGenesisPath(fresh,path);}catch{fail('save_ordinary_fresh_genesis_pending');}
+ }else if(isOrdinaryFreshPendingPath(path))fail('save_ordinary_fresh_genesis_pending');
  const fixture=options.developerSpiritFixtureOwner,disposable=options.privateDisposableSave;
  const g2=options.ordinaryG2DevelopmentOrigin;
  if(options.ordinaryG2V3!==undefined&&(!g2||!ownsOrdinaryDevelopmentV3Pin(options.ordinaryG2V3)))fail('save_ordinary_g2_development_v3');
@@ -349,6 +356,7 @@ export function preflightWorldSave(path:string,options:{requireWorld?:boolean;re
    if(files.slice(1).some(file=>file&&file.stat.size>0n))fail('save_orphaned_journal');
    return null;
   }
+  if(fresh!==undefined)fail('save_ordinary_fresh_genesis_existing_bytes');
   directory=mkdtempSync(join(tmpdir(),'ai-valley-preflight-'));
   const copy=join(directory,'world.sqlite'),buffer=Buffer.allocUnsafe(64*1024);
   for(const file of files)if(file)copySource(file,copy+file.suffix,buffer);

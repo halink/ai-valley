@@ -1,3 +1,4 @@
+import {isOrdinaryFreshPendingPath,prepareOrdinaryRulesWorldStorage,prepareOwnedOrdinaryFreshGenesis,type OrdinaryFreshGenesisBoot} from './ordinary-fresh-genesis.js';
 import {pinOrdinarySelectionIntent,type OrdinarySelectionIntentPin} from './ordinary-g1-selection-intent.js';
 import {openOrdinaryG2GroundObserver,pinOrdinaryG2GroundObserver} from './ordinary-g2-ground-observer.js';
 import {pinOrdinaryDevelopmentV3,type OrdinaryDevelopmentV3Options} from './ordinary-g2-development-v3.js';
@@ -35,14 +36,11 @@ import {inspectValleySpiritAlmanac,SqliteValleySpiritAlmanacReader} from './vall
 import {createValleySpiritPublicReaders,type ValleySpiritPublicReaders} from './valley-spirit-reader.js';
 import {SqliteValleySpiritPermissions} from './valley-spirit-permissions.js';
 import {ValleySpiritJournal,publicWeatherProjection,valleySpiritUnavailable} from './valley-spirit.js';
-import {adoptMvpAgriculture} from '../world/mvp-agriculture.js';
-import {adoptMvpSoil} from '../world/mvp-soil.js';
 import {lstatSync} from 'node:fs';
 /** Explicit opt-in durable RULE demonstration. Never reads model configuration or dispatches a model. */
 import {createMvpSession,createMvpServer,createMvpWorld} from './godot-mvp.js';
-import {assertMvpWorld,upgradeMvpWorld} from './godot-mvp-persistent.js';
-import {adoptMvpClimate,validateMvpClimate,assertMvpClimateWorld} from '../world/mvp-climate-state.js';
-import {adoptMvpRainProvenance} from '../world/mvp-rain-provenance.js';
+import {assertMvpWorld} from './godot-mvp-persistent.js';
+import {validateMvpClimate,assertMvpClimateWorld} from '../world/mvp-climate-state.js';
 import {preflightWorldSave} from './save-preflight.js';
 import {WorldStore} from './store.js';
 import {acquireRuntimeOwnership,type RuntimeOwnership} from './runtime-lock.js';
@@ -51,6 +49,7 @@ import type {World} from '../shared/types.js';
 type PersistentRulesOptions={database:string;port:number;webRoot?:string;autoStart?:boolean;tickMs?:number;privateSpiritShadow?:PersistentRulesShadowOptions;privateSpiritGeographyQueue?:RulesGeographyQueueOptions;privateNativeFruitRenewal?:RulesNativeFruitRenewalPin;privateOrdinaryMultiFruit?:RulesNativeMultiFruitPin;privateOrdinaryMultiCandidate?:OrdinaryMultiCandidatePin;privateOrdinaryMultiSelection?:OrdinaryCandidateSelectionOptions;privateOrdinaryMultiSelectionIntent?:OrdinarySelectionIntentPin;privateOrdinarySelectedRehearsal?:SelectedOrdinaryRehearsalOptions;privateOrdinaryDevelopmentV3?:OrdinaryDevelopmentV3Options;privateAgedFruitPreflight?:true;privateEmptyAgedGround?:OrdinaryAgedGroundPin;privateNativeEmptyAgedGround?:true;privateOrdinaryAgedG1Review?:OrdinaryAgedG1ReviewOptions;privateOrdinaryAgedG1Decision?:true;privateOrdinaryG2BlockedHandoff?:OrdinaryG2BlockedHandoffOptions;privateLifeFixture?:PersistentRulesLifeFixture;privateSpeechCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string;nativeWeatherCredit?:true}>;privateOrdinaryNativeMeal?:OrdinaryNativeMealOptions;privateOrdinaryNativeSpeech?:OrdinaryNativeSpeechOptions;privateOrdinaryNativeShelter?:OrdinaryNativeShelterOptions;privateOrdinaryNativeMealView?:OrdinaryMealEditorialPin;privateOrdinaryNativeHearingView?:OrdinaryHearingEditorialPin;privateOrdinaryNativeShelterView?:OrdinaryShelterEditorialPin;privateMealCustody?:Readonly<{fixture:DeveloperMvpSpiritFixtureKey;worldId:string}>};
 export async function startPersistentRulesMvp(options:PersistentRulesOptions){
  if(typeof options.database!=='string'||!options.database.trim())throw Error('mvp_rules_database_required');
+ if(isOrdinaryFreshPendingPath(options.database))throw Error('save_ordinary_fresh_genesis_pending');
  if(isDisposableRulesScratchPath(options.database))throw Error('disposable_native_rules_no_http');
  if(isOrdinaryG2DevelopmentOriginScratch(options.database))throw Error('ordinary_g2_development_no_http');
  const running=await openPersistentRulesCore(options);
@@ -239,6 +238,21 @@ function bindOriginalDevelopmentPreview(storage:ReturnType<typeof createFreshOrd
     async close(){if(!closed){closed=true;groundObserver?.close();await run.close();opened=false;}},
    });
   }catch(e){opened=false;throw e;}
+ }});
+}
+/** Explicit trusted-host pending creation. It uses the exact ordinary native
+ * seed and first commit but starts no runtime, route, provider or G2 writer. */
+export function prepareOrdinaryRulesFreshGenesis(boot:OrdinaryFreshGenesisBoot){
+ const prepared=prepareOwnedOrdinaryFreshGenesis(boot);
+ return Object.freeze({reservationInput:prepared.request,create(reservation:Parameters<typeof prepared.create>[0]){
+  return prepared.create(reservation,(pin,database,world)=>{
+   const store=new WorldStore(database,{allowMvpClimate:true,ordinaryFreshGenesis:pin});
+   try{
+    store.commit(world,null);
+    return Object.freeze({status:'pending-genesis-checkpoint' as const,checkpoint:store.readOrdinaryFreshGenesisCheckpoint(pin),
+     enrollmentActive:false as const,liveAuthorized:false as const,executionAuthorized:false as const});
+   }finally{store.close();}
+  });
  }});
 }
 async function openPersistentRulesCore(options:PersistentRulesOptions,disposable?:ReturnType<typeof createFreshDisposableRulesStorage>,disposableEffectKey?:string,disposableSpeech?:DisposableSpeechCase,ordinaryG2Storage?:ReturnType<typeof createFreshOrdinaryG2DevelopmentOriginStorage>){
@@ -431,10 +445,8 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
    if(!('lockPath' in owner))throw Error('ordinary_aged_ground_runtime_owner_required');
    agedGround=openEmptyOrdinaryAgedGround(owner,agedGroundPin,()=>store!.load(),nativeEmpty);
   }
-  const upgraded=upgradeMvpWorld(world),adopted=adoptMvpClimate(world),soilAdopted=adoptMvpSoil(world),agricultureAdopted=adoptMvpAgriculture(world);
-  const rainAdopted=adoptMvpRainProvenance(world);
-  if(adopted||soilAdopted||agricultureAdopted||rainAdopted)world.revision++;
-  if(!saved||upgraded||adopted||soilAdopted||agricultureAdopted||rainAdopted)store.commit(world,previous);
+  const changed=prepareOrdinaryRulesWorldStorage(world);
+  if(!saved||changed)store.commit(world,previous);
   let lastCommittedMinute=world.minute;
   const startSession=(head:World)=>createMvpSession({world:head,persistent:true,
    privateReadHeldAgedEat:disposableAgedTransfer?head=>store!.readDisposableHeldForNativeEating(head):undefined,
