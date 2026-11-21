@@ -1,11 +1,13 @@
 import {createHash,createPublicKey,verify} from 'node:crypto';
 import {lstatSync} from 'node:fs';
 import type {DatabaseSync} from 'node:sqlite';
-import type {ValleySpiritAlmanacEntry} from './valley-spirit-almanac.js';
+import {isOrdinaryReviewedWeatherField,type OrdinaryReviewedWeatherField,type ValleySpiritAlmanacEntry} from './valley-spirit-almanac.js';
 export const ORDINARY_OFFLINE_REVIEW_SCHEMA='ordinary-offline-weather-review/v1' as const;
 const SCHEMA=ORDINARY_OFFLINE_REVIEW_SCHEMA;
 export const ORDINARY_OFFLINE_CORRECTION_SCHEMA='ordinary-offline-weather-correction/v1' as const;
 const CORRECTION_SCHEMA=ORDINARY_OFFLINE_CORRECTION_SCHEMA;
+export const ORDINARY_OFFLINE_SELECTED_SCHEMA='ordinary-offline-weather-selected-field/v1' as const;
+
 export const ORDINARY_REVIEW_WORLD=/^godot-mvp-[A-Za-z0-9_-]{1,160}$/;
 const ENTRY=/^valley-almanac-[a-f0-9]{64}$/;
 const HEX=/^[a-f0-9]{64}$/;
@@ -24,6 +26,9 @@ export interface OrdinaryOfflineWeatherReview extends OrdinaryOfflineWeatherTerm
 export interface OrdinaryOfflineWeatherCorrection extends OrdinaryOfflineWeatherTerms {
  schema:typeof CORRECTION_SCHEMA;
  supersedes:string; predecessorDigest:string; predecessorReceiptDigest:string; predecessorWithdrawalDigest:string;
+}
+export interface OrdinaryOfflineWeatherSelection extends OrdinaryOfflineWeatherTerms {
+ schema:typeof ORDINARY_OFFLINE_SELECTED_SCHEMA; rawHeadDigest:string; rendererVersion:1; sourceRef:string; field:OrdinaryReviewedWeatherField;
 }
 const baseline=['worldId','saveScope','reviewerFingerprint','headRevision','permissionVersion','priorAlmanacDigest','entryId','editionDigest','selectedSourcesDigest'] as const;
 /** The reviewer signs the exact supported edition and authority version, not
@@ -47,6 +52,22 @@ export function encodeOrdinaryOfflineWeatherCorrection(t:unknown):Buffer|null {
   t.supersedes,t.predecessorDigest,t.predecessorReceiptDigest,t.predecessorWithdrawalDigest]),'utf8'):null;
 }
 
+export function encodeOrdinaryOfflineWeatherSelection(t:unknown):Buffer|null {
+ if(!exact(t,['schema',...baseline,'rawHeadDigest','rendererVersion','sourceRef','field'])||
+  t.schema!==ORDINARY_OFFLINE_SELECTED_SCHEMA||typeof t.rawHeadDigest!=='string'||!HEX.test(t.rawHeadDigest)||t.rendererVersion!==1||
+  !isOrdinaryReviewedWeatherField(t.field)||typeof t.sourceRef!=='string'||!/^godot-mvp-[A-Za-z0-9_-]{1,160}\/weather-[1-9][0-9]{0,15}-[0-9]{1,16}$/.test(t.sourceRef)||
+  !t.sourceRef.startsWith(t.worldId+'/'+ 'weather-'+t.permissionVersion+'-'))return null;
+ const inherited=Object.fromEntries(baseline.map(k=>[k,t[k]]));
+ const bytes=encodeOrdinaryOfflineWeatherReview({schema:SCHEMA,...inherited});
+ return bytes?Buffer.from(JSON.stringify([ORDINARY_OFFLINE_SELECTED_SCHEMA,bytes.toString('base64url'),t.rawHeadDigest,t.rendererVersion,t.sourceRef,t.field]),'utf8'):null;
+}
+/** Bind original compressed SQL bytes, not an in-memory reconstruction. */
+export function ordinaryWeatherRawHeadDigest(db:DatabaseSync,worldId:string,revision:number){
+ const rows=db.prepare('SELECT id,revision,state FROM main.worlds LIMIT 2').all(),row=rows[0];
+ return rows.length===1&&row.id===worldId&&row.revision===revision&&row.state instanceof Uint8Array?
+  createHash('sha256').update(row.state).digest('hex'):null;
+}
+
 const TABLE='valley_spirit_ordinary_weather_review';
 const DDL='CREATE TABLE valley_spirit_ordinary_weather_review(entry_id TEXT PRIMARY KEY NOT NULL,world_id TEXT NOT NULL,receipt_json TEXT NOT NULL)';
 // The ordinary editorial developer lane needs only a bounded release
@@ -54,7 +75,7 @@ const DDL='CREATE TABLE valley_spirit_ordinary_weather_review(entry_id TEXT PRIM
 // synchronous operation grow to thousands of verifier calls.
 const MAX_ROWS=256, MAX_BYTES=4096;
 export interface OrdinaryWeatherReviewReceipt {
- terms:OrdinaryOfflineWeatherReview|OrdinaryOfflineWeatherCorrection;
+ terms:OrdinaryOfflineWeatherReview|OrdinaryOfflineWeatherCorrection|OrdinaryOfflineWeatherSelection;
  reviewerDer:string;
  signature:string;
 }
@@ -76,7 +97,12 @@ export function verifiedOrdinaryWeatherReceipt(value:unknown,entry:ValleySpiritA
   if(!exact(value,['terms','reviewerDer','signature'])||typeof value.reviewerDer!=='string'||!(/^[A-Za-z0-9_-]{59}$/.test(value.reviewerDer))||
    typeof value.signature!=='string'||!ORDINARY_REVIEW_SIGNATURE.test(value.signature))return null;
   const t=value.terms as OrdinaryWeatherReviewReceipt['terms'], corrected=entry.textVersion===2;
-  const bytes=corrected?encodeOrdinaryOfflineWeatherCorrection(t):entry.textVersion===1?encodeOrdinaryOfflineWeatherReview(t):null;
+  const selected=t.schema===ORDINARY_OFFLINE_SELECTED_SCHEMA;
+  const bytes=corrected?encodeOrdinaryOfflineWeatherCorrection(t):entry.textVersion===1?
+   selected?encodeOrdinaryOfflineWeatherSelection(t):encodeOrdinaryOfflineWeatherReview(t):null;
+  if(selected&&(entry.packet.points.length!==1||entry.packet.points[0].sourceRef!==t.sourceRef||
+   entry.draft?.claims.length!==1||entry.draft.claims[0].sourceRef!==t.sourceRef||entry.draft.claims[0].field!==t.field||
+   entry.rendered?.rendererVersion!==t.rendererVersion||entry.rendered.facts.length!==1||entry.rendered.facts[0].field!==t.field))return null;
   if(corrected&&(t.schema!==CORRECTION_SCHEMA||t.supersedes!==entry.supersedes))return null;
   if(!bytes||t.worldId!==entry.packet.worldId||t.entryId!==entry.entryId||t.permissionVersion!==entry.packet.permissionVersion||
    t.editionDigest!==ordinaryReviewDigest(entry)||!int(worldRevision,t.headRevision)||(scope!==undefined&&t.saveScope!==scope))return null;
@@ -87,6 +113,12 @@ export function verifiedOrdinaryWeatherReceipt(value:unknown,entry:ValleySpiritA
   return reviewer.asymmetricKeyType==='ed25519'&&reviewer.export({format:'der',type:'spki'}).equals(publicDer)&&verify(null,bytes,reviewer,signature)
    ? value as unknown as OrdinaryWeatherReviewReceipt:null;
  }catch{return null;}
+}
+function verifyReceiptAtDbHead(db:DatabaseSync,worldId:string,entry:ValleySpiritAlmanacEntry,value:unknown,revision:unknown,scope?:string){
+ const r=verifiedOrdinaryWeatherReceipt(value,entry,revision,scope);
+ if(r?.terms.schema===ORDINARY_OFFLINE_SELECTED_SCHEMA&&revision===r.terms.headRevision&&
+    ordinaryWeatherRawHeadDigest(db,worldId,r.terms.headRevision)!==r.terms.rawHeadDigest)return null;
+ return r;
 }
 export function readOrdinaryWeatherReceipts(db:DatabaseSync,worldId:string,reviewed:readonly ValleySpiritAlmanacEntry[],scope?:string){
  const result=new Map<string,OrdinaryWeatherReviewReceipt>();
@@ -100,7 +132,7 @@ export function readOrdinaryWeatherReceipts(db:DatabaseSync,worldId:string,revie
  for(const row of rows){
   const e=typeof row.entry_id==='string'?byId.get(row.entry_id):undefined;
   const receipt=e&&row.world_id===worldId&&typeof row.receipt_json==='string'
-   ?verifiedOrdinaryWeatherReceipt(JSON.parse(row.receipt_json),e,revision,scope):null;
+   ?verifyReceiptAtDbHead(db,worldId,e,JSON.parse(row.receipt_json),revision,scope):null;
   if(!e||!receipt||result.has(e.entryId))throw Error('ordinary_weather_review_receipt_invalid');
   result.set(e.entryId,receipt);
  }
@@ -114,7 +146,7 @@ export function readExactOrdinaryWeatherReceipt(db:DatabaseSync,worldId:string,e
  const row=db.prepare(`SELECT world_id,CASE WHEN length(CAST(receipt_json AS BLOB))<=? THEN receipt_json ELSE NULL END AS receipt_json
   FROM ${TABLE} WHERE entry_id=?`).get(MAX_BYTES,e.entryId);
  return row?.world_id===worldId&&typeof row.receipt_json==='string'
-  ?verifiedOrdinaryWeatherReceipt(JSON.parse(row.receipt_json),e,committedRevision(db,worldId),scope):null;
+  ?verifyReceiptAtDbHead(db,worldId,e,JSON.parse(row.receipt_json),committedRevision(db,worldId),scope):null;
 }
 /** Must run inside the edition CAS transaction. Historical prior-table terms
  * are enforced at write, not recomputed against future changed legacy rows. */
@@ -122,7 +154,8 @@ export function appendOrdinaryWeatherReceipt(db:DatabaseSync,worldId:string,scop
  entry:ValleySpiritAlmanacEntry,proof:OrdinaryWeatherReviewReceipt){
  const revision=committedRevision(db,worldId);
  const valid=verifiedOrdinaryWeatherReceipt(proof,entry,revision,scope);
- if(!valid||valid.terms.headRevision!==revision||valid.terms.priorAlmanacDigest!==ordinaryReviewDigest(prior))return false;
+ if(!valid||valid.terms.headRevision!==revision||valid.terms.priorAlmanacDigest!==ordinaryReviewDigest(prior)||
+  valid.terms.schema===ORDINARY_OFFLINE_SELECTED_SCHEMA&&ordinaryWeatherRawHeadDigest(db,worldId,valid.terms.headRevision)!==valid.terms.rawHeadDigest)return false;
  const payload=JSON.stringify(valid);
  if(Buffer.byteLength(payload)>MAX_BYTES)return false;
  if(!table(db))db.exec(DDL);

@@ -17,7 +17,9 @@ const WORDINGS = ['time-first','field-first'] as const;
 const FIELDS = ['condition','temperatureDeciC','relativeHumidityPermille'] as const;
 type Condition = typeof CONDITIONS[number];
 type Mood = typeof MOODS[number];
-type Field = typeof FIELDS[number];
+export type OrdinaryReviewedWeatherField = typeof FIELDS[number];
+type Field = OrdinaryReviewedWeatherField;
+export const isOrdinaryReviewedWeatherField = (field:unknown):field is Field => option(FIELDS,field);
 
 export interface ValleySpiritAlmanacWeatherSource {sourceRef:string;permissionVersion:number;fact:PublicWeatherFact;}
 export interface ValleySpiritAlmanacAuthority {
@@ -232,9 +234,17 @@ function publicView(e:ValleySpiritAlmanacEntry) {
 /** Pure builder for independently reviewed offline weather. An explicit
  * predecessor only builds a candidate for signing; no authority or write. */
 export function composeOfflineWeatherEdition(range:ValleySpiritAlmanacRange,authority:ValleySpiritAlmanacAuthority,supersedes:string|null=null){
+ return composeReviewedOfflineWeatherEdition(range,authority,supersedes,'condition',false);
+}
+/** Single-field candidate only: value always comes from the authorized packet. */
+export function composeSelectedOfflineWeatherEdition(range:ValleySpiritAlmanacRange,authority:ValleySpiritAlmanacAuthority,field:OrdinaryReviewedWeatherField){
+ return isOrdinaryReviewedWeatherField(field)?composeReviewedOfflineWeatherEdition(range,authority,null,field,true):null;
+}
+function composeReviewedOfflineWeatherEdition(range:ValleySpiritAlmanacRange,authority:ValleySpiritAlmanacAuthority,
+ supersedes:string|null,field:OrdinaryReviewedWeatherField,single:boolean){
  const packet=createValleySpiritAlmanacPacket(range,authority);
- if(!packet)return null;
- const draft=groundValleySpiritAlmanacDraft(packet,{claims:packet.points.map(p=>({sourceRef:p.sourceRef,field:'condition',value:p.condition})),
+ if(!packet||single&&packet.points.length!==1)return null;
+ const draft=groundValleySpiritAlmanacDraft(packet,{claims:packet.points.map(p=>({sourceRef:p.sourceRef,field,value:p[field]})),
   atmosphere:'plain',wording:'time-first'});
  if(!draft)return null;
  const origin:ValleySpiritAlmanacOrigin={schemaVersion:ORIGIN_SCHEMA,kind:REVIEWED_OFFLINE_ORIGIN};
