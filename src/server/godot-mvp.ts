@@ -7,7 +7,7 @@ import {nativeWeatherHourTransition} from './valley-spirit-weather-credit.js';
 import {captureMvpNativeObservationPhase} from '../world/mvp-native-observation-phase.js';
 import {planMvpFallenFruitAdjacentApproach,unsafeMvpApproachEndpoint} from './valley-spirit-mvp-fallen-fruit-approach.js';
 import {observeMvpFallenFruit} from '../world/mvp-fallen-fruit-resident.js';
-import {captureAddressedSpeech,type AddressedSpeechObservation} from '../world/addressed-speech.js';
+import {captureAddressedSpeech,ORDINARY_NATIVE_GREETING_LINE,type AddressedSpeechObservation} from '../world/addressed-speech.js';
 import type {ValleySpiritPublishedLifeView} from './valley-spirit-life-publisher.js';
 import {ORDINARY_NATIVE_HEARING_VIEW,ORDINARY_NATIVE_MEAL_VIEW,ORDINARY_NATIVE_SHELTER_VIEW,type OrdinaryNativeHearingLifeView,type OrdinaryNativeMealLifeView,type OrdinaryNativeShelterLifeView} from './valley-spirit-ordinary-meal-editorial.js';
 import {captureValleySpiritMvpMealStep,type ValleySpiritMvpMealWitness} from './valley-spirit-meal-custody.js';
@@ -236,7 +236,7 @@ export function chooseMvpAction(w:World,r:Resident):{action:Action;reason:string
  if(r.canExpress&&!recentlySpoke&&r.hunger<35&&(mvpThirst(w,r)??0)<50-1e-9&&r.energy>=70&&(r.inventory.berry??0)>=3&&(r.inventory.water??0)>=1){
   const target=w.residents.find(p=>p.id!==r.id&&p.canExpress&&(!p.activity||p.activity.action.type==='wait')&&(!p.plan||p.plan.actions.every(a=>a.type==='wait'))&&canContactSocialTarget(w,r,p));
   if(target){
-   const action:Action={type:'talk',targetId:target.id,text:'〔规则示例问候〕你好，愿你今天在山谷过得顺利。',tone:'friendly'};
+   const action:Action={type:'talk',targetId:target.id,text:ORDINARY_NATIVE_GREETING_LINE,tone:'friendly'};
    const error=planStartError(w,{id:'mvp-greeting-preview',actorId:r.id,actorRevision:r.revision,createdAt:w.minute,definition:w.activeDefinitions['action/routine'],intention:'本地规则：向眼前空闲熟人问候',actions:[action]});
    if(error===null)return {action,reason:'基本需求已处理，向眼前空闲熟人问候；固定规则示例，不是模型对话'};
   }
@@ -439,15 +439,15 @@ export function prepareOrdinaryDevelopmentDueNativeMinute(current:World){
  * The provided read port is built from the verified owning snapshot. */
 export function prepareStoppedOrdinaryAgedGroundMinute(current:World,ownedGround:OrdinaryAgedGroundDiscoveryRead,ordinaryFruitFlow?:true){
  const next=prepareStoppedOrdinaryGroundDraft(current,ownedGround,ordinaryFruitFlow);
- return next&&!next.meals.length?{draft:next.draft,observed:next.observed,fruitFlow:next.fruitFlow}:null;
+ return next&&!next.meals.length&&!next.speech?.receipts.length?{draft:next.draft,observed:next.observed,fruitFlow:next.fruitFlow}:null;
 }
 
 /** Detached V3 candidate shape only. The authenticated V3 owner still
- * checks the actual lot expiry and authentic unrelated meal before commit. */
+ * checks the actual lot expiry and authentic unrelated native work before commit. */
 export function prepareStoppedV3GroundExpiryMinute(current:World,owned:OrdinaryAgedGroundDiscoveryRead,expiresUs:string){
  if((BigInt(minuteToClimateUs(current.minute))+1_000_000n).toString()!==expiresUs)return null;
  const next=prepareStoppedOrdinaryGroundDraft(current,owned,true);
- return next&&!next.observed.length&&next.meals.length<=1?next:null;
+ return next&&!next.observed.length&&next.meals.length+(next.speech?.receipts.length??0)<=1?next:null;
 }
 function prepareStoppedOrdinaryGroundDraft(current:World,ownedGround:OrdinaryAgedGroundDiscoveryRead,ordinaryFruitFlow?:true){
  if(current.mode!=='validation'||current.clock.paused||!current.mvpClimate?.rainProvenance||
@@ -457,8 +457,8 @@ function prepareStoppedOrdinaryGroundDraft(current:World,ownedGround:OrdinaryAge
  try{
   const {result,observed}=captureOrdinaryAgedGroundDiscovery(draft,ownedGround,()=>
    advanceMvpRuleMinuteDraft(draft,current,0,{},{meals:true,fruitFlow:ordinaryFruitFlow===true,fruitRenewal:false,addressedSpeech:true}));
-  if(draft.minute!==current.minute+1||result.speech?.receipts.length)return null;
-  return {draft,observed,fruitFlow:result.fruitFlow,meals:result.witnesses};
+  if(draft.minute!==current.minute+1)return null;
+  return {draft,observed,fruitFlow:result.fruitFlow,meals:result.witnesses,speech:result.speech};
  }catch{return null;}
 }
 

@@ -1,3 +1,4 @@
+import {isCurrentAddressedSpeechObservation,ORDINARY_NATIVE_GREETING_LINE,type AddressedSpeechObservation} from '../world/addressed-speech.js';
 import {readMvpMealFact} from '../shared/mvp-meals.js';
 import {readStagedMvpMealConsumption,type ValleySpiritMvpMealWitness} from './valley-spirit-meal-custody.js';
 import {verifyDueExecutionPlacement,verifyOrdinaryDueExecution,readOrdinaryDevelopmentDueRecord,consumeOrdinaryDevelopmentDue} from './ordinary-g2-development-due.js';
@@ -337,10 +338,35 @@ function exactUnrelatedExpiryMeal(w:World,draft:World,r:ValleySpiritMvpMealWitne
  return events.length===1&&events[0].kind==='action'&&!events[0].observerOnly&&events[0].at===draft.minute&&
   !w.events.some(e=>e.id===r.eventId)&&events[0].actors.length===1&&events[0].actors[0]===r.actorId&&readMvpMealFact(events[0].mvpMeal)?.kind==='ate';
 }
-function eligibleLifecycleEvents(w:World,draft:World,exactMealEvent?:string){
+function exactUnrelatedExpiryGreeting(w:World,draft:World,o:AddressedSpeechObservation,prior:readonly CommittedNativeOrdinaryAgedDiscovery[]){
+ if(!isCurrentAddressedSpeechObservation(draft,o)||o.fromMinute!==w.minute||o.toMinute!==draft.minute||o.previousRevision<w.revision||o.receipts.length!==1)return null;
+ const r=o.receipts[0],speaker=r.speakerId,recipient=r.actualRecipientId;
+ if(r.kind!=='addressed-speech-delivered'||r.schemaVersion!==1||r.worldId!==w.id||r.actionType!=='talk'||
+  speaker===recipient||recipient!==r.intendedRecipientId||r.line!==ORDINARY_NATIVE_GREETING_LINE||r.tone!=='friendly'||
+  r.actionIndexFromEnd!==0||r.deliveredAt!==draft.minute||r.eventRevision<=o.previousRevision||r.eventRevision>=draft.revision||
+  r.eventId!==w.id+':event:'+r.eventRevision||prior.some(d=>d.residentId===speaker||d.residentId===recipient))return null;
+ const a=w.residents.find(x=>x.id===speaker),b=draft.residents.find(x=>x.id===speaker),
+  c=w.residents.find(x=>x.id===recipient),d=draft.residents.find(x=>x.id===recipient);
+ const act=a?.activity,plan=a?.plan;
+ if(!a||!b||!c||!d||[a,b,c,d].some(x=>x.status!=='alive'||x.regionalLocation||x.residency==='outside')||
+   !act||!plan||act.action.type!=='talk'||act.action.targetId!==recipient||act.action.text!==r.line||act.action.tone!==r.tone||
+   act.planId!==r.planId||plan.id!==r.planId||plan.actorId!==speaker||plan.actions.length!==0||plan.createdAt!==act.startedAt-1||
+   act.remaining!==1||act.path.length||act.room||act.startedAt!==r.startedAt||b.plan||b.activity||!draft.processed.includes('plan:'+r.planId)||
+   w.residents.some(x=>x.memories.some(m=>m.eventId===r.eventId)))return null;
+ const e=draft.events.slice(w.events.length).filter(x=>x.id===r.eventId);
+ if(e.length!==1||w.events.some(x=>x.id===r.eventId)||e[0].kind!=='conversation'||e[0].observerOnly||e[0].at!==draft.minute||
+   e[0].conversationId!==`conversation-${w.id}-${r.eventRevision}`||e[0].actors.length!==2||e[0].actors[0]!==speaker||e[0].actors[1]!==recipient||
+   e[0].witnesses.length!==1||e[0].witnesses[0]!==speaker||e[0].speechText!==r.line||e[0].speechTone!==r.tone)return null;
+ const reached=draft.residents.flatMap(x=>x.memories.filter(m=>m.eventId===r.eventId).map(m=>({who:x.id,m})));
+ if(reached.length!==2||
+   reached.filter(({who,m})=>who===speaker&&m.source==='self'&&m.receivedAt===draft.minute&&m.speechText===r.line&&m.speechTone===r.tone).length!==1||
+   reached.filter(({who,m})=>who===recipient&&m.source==='heard'&&m.receivedAt===draft.minute&&m.speechText===r.line&&m.speechTone===r.tone).length!==1)return null;
+ return r.eventId;
+}
+function eligibleLifecycleEvents(w:World,draft:World,exactMealEvent?:string,exactGreetingEvent?:string){
  return draft.events.length<=4096&&draft.events.length-w.events.length<=128&&
   hash(draft.events.slice(0,w.events.length))===hash(w.events)&&
-  !draft.events.slice(w.events.length).some(e=>e.kind==='conversation'||e.speechText!==undefined||e.mvpMeal&&e.id!==exactMealEvent||e.socialAppointmentArrival||e.mvpFruitFall);
+  !draft.events.slice(w.events.length).some(e=>((e.kind==='conversation'||e.speechText!==undefined)&&e.id!==exactGreetingEvent)||e.mvpMeal&&e.id!==exactMealEvent||e.socialAppointmentArrival||e.mvpFruitFall);
 }
 const nativeSourceBasis=(g:Ground,a:Archive)=>({sourceId:g.sourceId,sourceAt:g.sourceAt,placementClosingQuantity:a.sourceAfter});
 /** Only project an original transaction-verified archive through its owning reader. */
@@ -469,7 +495,10 @@ export function prepareOrdinaryDevelopmentV3Minute(db:DatabaseSync,w:World,owned
  const meal=expiryDraft?.meals[0];
  if(meal&&(!exactExpiry||expiry?.expired.length!==1||observed.length||held||route||
    !exactUnrelatedExpiryMeal(w,draft,meal,l?.discoveries??[])))return null;
- if(!expiry||expiry.expired.length&&(observed.length||held)||!eligibleLifecycleEvents(w,draft,meal?.eventId))return null;
+ const speech=expiryDraft?.speech;
+ const greeting=speech?.receipts.length&&exactExpiry&&expiry?.expired.length===1&&!observed.length&&!held&&!route&&!meal?
+  exactUnrelatedExpiryGreeting(w,draft,speech,l?.discoveries??[]):null;
+ if(speech?.receipts.length&&!greeting||!expiry||expiry.expired.length&&(observed.length||held)||!eligibleLifecycleEvents(w,draft,meal?.eventId,greeting??undefined))return null;
  const discoveries=[...l?.discoveries??[]],prior=new Set(discoveries.map(d=>d.residentId));
  for(const seen of observed)if(!prior.has(seen.residentId)){
   discoveries.push({...seen,committedRevision:draft.revision});prior.add(seen.residentId);

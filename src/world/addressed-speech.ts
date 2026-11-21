@@ -6,6 +6,7 @@ import {hasReceipt} from './receipts.js';
 import {distance} from './navigation.js';
 import {canContactSocialTarget,canSeeSocialTarget} from './social-observation.js';
 
+export const ORDINARY_NATIVE_GREETING_LINE='〔规则示例问候〕你好，愿你今天在山谷过得顺利。' as const;
 type TalkAction=Extract<Action,{type:'talk'}>;
 /** In-process staging only. No World, public event, memory, or save field holds this receipt. */
 export interface AddressedSpeechReceipt {

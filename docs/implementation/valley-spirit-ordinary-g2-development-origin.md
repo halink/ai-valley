@@ -34,7 +34,7 @@ discovery, or custody. Current personal evidence may be reread on exact original
 reopen; copies, wrong keys, damaged seams, and generic/player opens do not
 acquire the scope. There is no V3 eating or scheduler here. Other native
 changes to stock do not rebind candidate custody or reenable ordinary writing.
-Unless it fits the exact unrelated meal expiry case below, a native minute
+Unless it fits one exact unrelated expiry case below, a native minute
 that would also settle a meal or addressed speech, exceeds the
 bounded event/discovery archive, or sees an unknown writer is rejected before
 commit. No partial discovery, expiry, or ordinary event settlement is emitted.
@@ -225,3 +225,18 @@ the V3 expiry and ground debit. No separate meal custody or public disclosure
 is created. If the transaction fails, neither action progresses. Non-expiry
 minutes, active or historical V3 routes for the lot, intersecting residents,
 other specialized events, and coincident speech remain guarded as before.
+
+### One unrelated ordinary greeting on exact ground expiry
+
+Instead of the independent meal, the same original ground-expiry-only minute
+may carry one completed native fixed greeting. The actual terminal talk plan,
+fresh delivery witness, matching new ordinary conversation, and the single
+intended recipient’s real `heard` memory must all come from the same engine
+draft. Neither party may be a prior discoverer; no chained plan or existing
+conversation, arbitrary line, ordinary meal, movement of the ground lot, or
+other specialized outcome may accompany it. A normal unheard attempt can
+remain an ordinary action without claiming any delivery.
+
+The existing world event, both normal person indexes, and the actual memory
+commit together with expiry or all roll back. No new V3 speech record,
+reader, view, reply, publication or evidence from event prose is created.
