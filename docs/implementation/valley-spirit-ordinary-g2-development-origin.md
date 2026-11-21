@@ -265,8 +265,8 @@ controls changed. This scope does not enable ordinary player saves.
 
 Only the existing stopped, socketless original owner with both a verified
 consumed due record and its exact V3 placement can request a terminal minute.
-A ground expiry, held expiry, or actual outdoor held-fruit eating must already
-have committed. Hall eating is outside this continuation scope.
+A ground expiry, held expiry, or actual outdoor or shared-hall held-fruit
+eating must already have committed.
 No active lot, holder work, or approach may remain. Direct historical V3
 placements, unconsumed due records, partial archives, and copied saves do not
 qualify. Revoking public weather still bars new dispatch and does not make
@@ -282,9 +282,11 @@ check or write leaves the previous head intact.
 
 The receipt freezes the original placement and terminal lifecycle facts,
 then authenticates the new packed head, its predecessor, and the unchanged
-consumed due seal in the same transaction. For outdoor eating, the immutable
-native event, original resident, plan receipt and settlement minute must still
-match. Later hunger is ordinary physiology, not a recheck or second grant of
+consumed due seal in the same transaction. For eating, the immutable native
+event, original resident, plan receipt and settlement minute must still match.
+Hall eating additionally binds the original shared hall and exact seat to the
+committed event. Its original live sole-resident seat claim is checked once
+at settlement, not substituted with or required of a later seat claim. Later hunger is ordinary physiology, not a recheck or second grant of
 nutrition. Later source-flow metrics are unavailable in this lane; the historical placement, transfers and terminal debit remain
 unchanged. The private path stops at its existing 4,096-event validation
 limit or 1,440 post-terminal minutes; old code does not adopt this new

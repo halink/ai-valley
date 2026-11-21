@@ -1,3 +1,4 @@
+import {MVP_HALL} from '../shared/mvp-hamlet.js';
 import {isCurrentAddressedSpeechObservation,ORDINARY_NATIVE_GREETING_LINE,type AddressedSpeechObservation} from '../world/addressed-speech.js';
 import {readMvpMealFact} from '../shared/mvp-meals.js';
 import {readStagedMvpMealConsumption,type ValleySpiritMvpMealWitness} from './valley-spirit-meal-custody.js';
@@ -144,17 +145,19 @@ type TerminalHead=Readonly<{schema:'ordinary-g2-development-terminal-head/v1';st
 const terminalKind=(l:Lifecycle|null)=>!l||l.work||l.hallWork||l.route?.result==='active'?null:
  l.expiry&&!l.held&&!l.heldExpiry&&!l.eaten?'ground-expired':
  l.expiry===null&&l.held&&l.heldExpiry&&!l.eaten?'held-expired':
- l.expiry===null&&l.held&&!l.heldExpiry&&!l.holderDeath&&l.eaten&&!l.eaten.witness.dining?'held-eaten-outdoors':null;
-function matchesArchivedOutdoorEating(w:World,l:Lifecycle){
+ l.expiry===null&&l.held&&!l.heldExpiry&&!l.holderDeath&&l.eaten?'held-eaten':null;
+function matchesArchivedEating(w:World,l:Lifecycle){
  const n=l.eaten?.witness,h=l.held;
- if(!n||!h||n.dining||l.eaten?.heldDebit!==1||n.settledUs!==l.atUs||n.residentId!==h.holderId||
+ if(!n||!h||l.eaten?.heldDebit!==1||n.settledUs!==l.atUs||n.residentId!==h.holderId||
   !clock(n.startedUs)||!clock(n.settledUs)||BigInt(n.startedUs)<=BigInt(h.pickup.settledUs)||
   BigInt(n.settledUs)-BigInt(n.startedUs)!==4_000_000n||BigInt(n.settledUs)>=BigInt(h.expiresUs)||
   n.workMinutes!==5||!matchesEatingNutrition(n)||!w.processed.includes('plan:'+n.planId))return false;
  const [event,other]=w.events.filter(e=>e.id===n.eventId);
  return !!event&&!other&&event.id.startsWith(w.id+':event:')&&minuteToClimateUs(event.at)===n.settledUs&&
-  event.kind==='action'&&event.observerOnly===true&&!event.roomId&&!event.roomAt&&
-  event.actors.length===1&&event.actors[0]===n.residentId;
+  event.kind==='action'&&event.observerOnly===true&&event.actors.length===1&&event.actors[0]===n.residentId&&
+  (n.dining?exact(n.dining,['buildingId','key','seat'])&&n.dining.buildingId===MVP_HALL&&
+   /^mvp-dining:[0-3]$/.test(n.dining.key)&&point(n.dining.seat)&&event.roomId===n.dining.buildingId&&
+   !!event.roomAt&&same(event.roomAt,n.dining.seat):!event.roomId&&!event.roomAt);
 }
 function terminalDue(db:DatabaseSync,origin:OrdinaryG2DevelopmentOrigin,pin:Pin,a:Archive){
  // A historical direct V3 transfer does not grant this capability.
@@ -196,7 +199,7 @@ export function readOrdinaryDevelopmentV3(db:DatabaseSync,origin:OrdinaryG2Devel
   // then leaves those historical facts byte-for-byte frozen. Never compare
   // its historical live predicates with later resident or lot state.
   const h=terminalHead,d=terminalDue(db,origin,pin,a),kind=terminalKind(l);
-  if(!h||!l||!kind||kind==='held-eaten-outdoors'&&!matchesArchivedOutdoorEating(w,l)||gr.length||!d||!int(l.revision)||!hex(l.digest)||
+  if(!h||!l||!kind||kind==='held-eaten'&&!matchesArchivedEating(w,l)||gr.length||!d||!int(l.revision)||!hex(l.digest)||
    !exact(h,['schema','steps','atUs','revision','digest','priorRevision','priorDigest','terminalDigest','consumedDigest'])||
    h.schema!=='ordinary-g2-development-terminal-head/v1'||!int(h.steps)||h.steps<1||h.steps>1440||
    !clock(l.atUs)||BigInt(now)!==BigInt(l.atUs)+1_000_000n*BigInt(h.steps)||
