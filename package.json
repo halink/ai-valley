@@ -11,7 +11,7 @@
     "build": "tsc --noEmit && node scripts/clean-build.mjs && tsc -p tsconfig.server.json",
     "start": "node build/server/godot-web-main.js",
     "check": "tsc --noEmit",
-    "build:godot:web": "node scripts/export-godot-web.mjs",
+    "build:godot:web": "node --import tsx scripts/export-godot-web.mjs",
     "demo:godot:web": "node --import tsx src/server/godot-web-main.ts",
     "dev:web:persistent": "node --import tsx src/server/godot-mvp-persistent-main.ts",
     "start:web:persistent": "node build/server/godot-mvp-persistent-main.js",

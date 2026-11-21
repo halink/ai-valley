@@ -28,7 +28,7 @@ import {minuteToClimateUs} from '../world/mvp-climate.js';
 import {adoptMvpClimate,validateMvpClimate} from '../world/mvp-climate-state.js';
 import {inheritReceiptHistory} from '../world/receipts.js';
 import {adoptMvpSeeds,isMvpSeedAction} from '../world/mvp-seeds.js';
-import {serveGodotWeb} from './godot-web.js';
+import {assertGodotWebExport,ownsGodotWebExport,serveGodotWeb,type GodotWebExport} from './godot-web.js';
 import {roomObservation} from './room-observation.js';
 import {relationshipObservation} from './relationship-observation.js';
 import {expandMvpHamlet} from '../world/mvp-hamlet.js';
@@ -672,7 +672,9 @@ function currentLifeView(viewer:LifeReadViewer|undefined,world:World|undefined,r
    BigInt(view.range.throughUs)<=BigInt(minuteToClimateUs(world.minute))?view:null;
  }catch{return null;}
 }
-export function createMvpServer(session:Pick<ReturnType<typeof createMvpSession>,'snapshot'>&Partial<Pick<ReturnType<typeof createMvpSession>,'world'>>,options:{webRoot?:string;valleySpiritSource?:(sourceRef:string)=>unknown;valleySpiritArchive?:ValleySpiritJournal['archive'];valleySpiritReaders?:ValleySpiritPublicReaders;valleySpiritLifeViewer?:LifeReadViewer;privateSpeechWeatherOnly?:true}={}):Server {
+export function createMvpServer(session:Pick<ReturnType<typeof createMvpSession>,'snapshot'>&Partial<Pick<ReturnType<typeof createMvpSession>,'world'>>,options:{webRoot?:string;webExport?:GodotWebExport;valleySpiritSource?:(sourceRef:string)=>unknown;valleySpiritArchive?:ValleySpiritJournal['archive'];valleySpiritReaders?:ValleySpiritPublicReaders;valleySpiritLifeViewer?:LifeReadViewer;privateSpeechWeatherOnly?:true}={}):Server {
+ if(options.webExport!==undefined&&(!ownsGodotWebExport(options.webExport)||options.webRoot!==undefined))throw Error('godot_web_export_unverified');
+ const web=options.webExport??(options.webRoot===undefined?undefined:assertGodotWebExport(options.webRoot));
  return createServer((req,res)=>{
   res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');
   if(options.privateSpeechWeatherOnly){
@@ -682,7 +684,7 @@ export function createMvpServer(session:Pick<ReturnType<typeof createMvpSession>
     res.writeHead(404,{'Content-Type':'application/json; charset=utf-8'});res.end('{"status":"unavailable"}');return;
    }
   }
-  if(options.webRoot&&serveGodotWeb(req,res,options.webRoot))return;
+  if(web&&serveGodotWeb(req,res,web))return;
   if(req.method!=='GET'){res.writeHead(405,{'Allow':'GET'});res.end('Read-only MVP');return;}
   const lifeAlmanacPath='/ai-town/api/valley-spirit/almanac/life/latest';
   if(req.url===lifeAlmanacPath||req.url?.startsWith(lifeAlmanacPath+'?')){

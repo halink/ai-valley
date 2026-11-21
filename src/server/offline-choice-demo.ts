@@ -151,11 +151,11 @@ export async function runOfflineChoiceDemo(){
 }
 export async function startOfflineChoiceDemoServer(options:{port:number;webRoot?:string}){
  if(!Number.isInteger(options.port)||options.port<0||options.port>65535)throw Error('offline_choice_demo_invalid_port');
- if(options.webRoot!==undefined)assertGodotWebExport(options.webRoot);
+ const web=options.webRoot===undefined?undefined:assertGodotWebExport(options.webRoot);
  // Runs once, prior to binding. Requests only read a bounded serialized value.
  const result=await runOfflineChoiceDemo(),body=JSON.stringify(result);
  const server=createServer((request,response)=>{
-  if(options.webRoot&&serveGodotWeb(request,response,options.webRoot))return;
+  if(web&&serveGodotWeb(request,response,web))return;
   response.setHeader('Cache-Control','no-store');response.setHeader('X-Content-Type-Options','nosniff');
   response.setHeader('Content-Type','application/json; charset=utf-8');
   if(request.method==='GET'&&request.url===OFFLINE_CHOICE_DEMO_PATH){response.end(body);return;}

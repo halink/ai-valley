@@ -29,7 +29,7 @@ npm run demo:godot:web
 
 `npm run dev`、`npm run dev:web` 与 `npm run demo:godot:web` 是同一规则 Web 入口，只需运行一个。`npm run build` 仅检查 TypeScript 并编译后台，`npm start` 启动编译后的同一服务；Web 导出仍须独立执行。
 
-`build:godot:web` 执行资源导入和 Web release 导出到 `output/godot-web/`；该目录被 Git 忽略。Web preset 使用 Compatibility、关闭多线程和 PWA，不依赖 SharedArrayBuffer/跨域隔离响应头。WebGL 2、WebAssembly 支持仍需浏览器验证。
+`build:godot:web` 执行资源导入和 Web release 导出到 `output/godot-web/`；该目录被 Git 忽略。导出先写临时目录，检查项目源码在导出前后相同、HTML/JS/WASM/PCK 和实际生成的白名单伴随文件非空，最后才发布版本化 `.ready` 清单。清单记录引擎、Web 预设、Godot 项目源码摘要以及对应产物的大小和 SHA-256。本机源码存在时，程序启动前比较当前源码（不含 Godot 缓存和安装模板）与清单；文件、纯文本旧标记、错误引擎、损坏或其他源码版本都不能冒充可用导出。失败不续用旧标记；源码比对只在启动前执行；运行中编辑或切换源码须停服、重建并重启。该进程不会自动切换到新清单。通过校验不证明浏览器画面或模板供应商身份。Web preset 使用 Compatibility、关闭多线程和 PWA，不依赖 SharedArrayBuffer/跨域隔离响应头。WebGL 2、WebAssembly 支持仍需浏览器验证。
 
 演示服务只监听 loopback，只提供导出文件白名单和只读快照，不能把仓库根目录作为静态目录。没有通配 CORS，也没有动作控制 API。不要把模型密钥、`.env`、SQLite、运行日志加入 Web 导出目录或包。
 
@@ -80,7 +80,7 @@ VALLEY_SELF_HOSTED=disabled npm run dev:web:persistent
 
 编译部署时先运行 `npm run build`，再用 `VALLEY_SELF_HOSTED=disabled npm run start:web:persistent`。默认演示命令不变。持久入口使用专用 SQLite，并在重启后恢复世界；模型未启用时停表，没有规则回退。不自动读取 `.env`。模型启用必须由运行者显式配置，详见[配置说明](configuration.md)。不要用真实存档做开发测试。
 
-启动先核验导出标记和 HTML/JS/WASM/PCK 文件，再取得存档锁、恢复数据库或启动模型。页面与只读 API 共用 loopback 端口。已启用模型的世界在重试期间继续推进，HTTP 429 的冷却随存档恢复。若运行时导出标记丢失，静态页面返回 404，后台继续保存和模拟。重建前应先干净停服。
+启动先核验清单和实际 HTML/JS/WASM/PCK，再取得存档锁、恢复数据库或启动模型。页面与只读 API 共用 loopback 端口。已启用模型的世界在重试期间继续推进，HTTP 429 的冷却随存档恢复。若运行时导出标记丢失，静态页面返回 404，后台继续保存和模拟。重建前应先干净停服。
 
 线上远程访问由同源 HTTPS 代理提供，持久后台保持监听 loopback。发布、回滚和状态检查见[线上预览运维手册](deployment.md)。
 

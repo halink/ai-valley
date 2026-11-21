@@ -343,7 +343,7 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
  const custodyPin=speechPin??mealPin;
  const weatherCredit=speechPin?.nativeWeatherCredit===true;
  if(!Number.isFinite(tickMs)||tickMs<100)throw Error('mvp_rules_invalid_tick');
- if(options.webRoot!==undefined)assertGodotWebExport(options.webRoot);
+ const webExport=options.webRoot===undefined?undefined:assertGodotWebExport(options.webRoot);
  let owner:RuntimeOwnership|DeveloperMvpSpiritFixtureOwner|undefined,privateOwner:DeveloperMvpSpiritFixtureOwner|undefined,store:WorldStore|undefined,timer:ReturnType<typeof setInterval>|undefined;
  let server:ReturnType<typeof createMvpServer>|undefined;
  let speechReader:ReturnType<typeof openDisposableNativeSpeechReader>|undefined;
@@ -407,7 +407,7 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
   let session:ReturnType<typeof createMvpSession>|undefined;
   const snapshot=()=>({...session!.snapshot(),valleySpirit:valleySpirit?.view()??valleySpiritUnavailable()});
   if(!assertDisposable&&!ordinaryG2Storage){
-   server=createMvpServer({snapshot,get world(){return session?.world;}},{webRoot:options.webRoot,privateSpeechWeatherOnly:custodyPin?true:undefined,valleySpiritLifeViewer:lifePin||nativeLifePins.length?{latest:id=>nativeLifePins.length?latestOrdinary(id):life?.latest(id)??null}:undefined,valleySpiritSource:ref=>valleySpirit?.resolveSource(ref)??null,valleySpiritArchive:query=>valleySpirit?.archive(query)??{status:'unavailable'},valleySpiritReaders:{almanac:id=>viewers?.almanac(id)??null,latestAlmanac:()=>viewers?.latestAlmanac()??{status:'unavailable'},topics:range=>viewers?.topics(range)??{status:'unavailable'}}});
+   server=createMvpServer({snapshot,get world(){return session?.world;}},{webExport,privateSpeechWeatherOnly:custodyPin?true:undefined,valleySpiritLifeViewer:lifePin||nativeLifePins.length?{latest:id=>nativeLifePins.length?latestOrdinary(id):life?.latest(id)??null}:undefined,valleySpiritSource:ref=>valleySpirit?.resolveSource(ref)??null,valleySpiritArchive:query=>valleySpirit?.archive(query)??{status:'unavailable'},valleySpiritReaders:{almanac:id=>viewers?.almanac(id)??null,latestAlmanac:()=>viewers?.latestAlmanac()??{status:'unavailable'},topics:range=>viewers?.topics(range)??{status:'unavailable'}}});
    await new Promise<void>((resolve,reject)=>{server!.once('error',reject);server!.listen(options.port,'127.0.0.1',resolve);});
   }
   const nativeGround=nativeEmpty&&agedGroundPin&&'lockPath' in owner?{owner,pin:agedGroundPin}:undefined;

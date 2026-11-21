@@ -1,7 +1,7 @@
 import {rejectMvpClimateForModels} from '../world/mvp-climate-state.js';
 import {adoptMvpResources,validateMvpResources} from '../world/mvp-resources.js';
 import {adoptMvpSeeds,validateMvpSeeds} from '../world/mvp-seeds.js';
-import {assertGodotWebExport,serveGodotWeb} from './godot-web.js';
+import {assertGodotWebExport,serveGodotWeb,type GodotWebExport} from './godot-web.js';
 import {roomObservation} from './room-observation.js';
 import {relationshipObservation} from './relationship-observation.js';
 import {assertMvpPopulation,expandMvpHamlet} from '../world/mvp-hamlet.js';
@@ -40,7 +40,7 @@ function validateSavedMvp(database:string):void {
 
 function checkListener(options:MvpListenerOptions){
  if(!Number.isInteger(options.port)||options.port<0||options.port>65535)throw Error('godot_mvp_invalid_port');
- if(options.webRoot!==undefined)assertGodotWebExport(options.webRoot);
+ return options.webRoot===undefined?undefined:assertGodotWebExport(options.webRoot);
 }
 
 function listenMvp(server:Server,port:number){
@@ -51,10 +51,10 @@ function listenMvp(server:Server,port:number){
  });
 }
 
-function serveMvpSnapshot(server:Server,webRoot:string|undefined,snapshot:()=>unknown){
+function serveMvpSnapshot(server:Server,web:GodotWebExport|undefined,snapshot:()=>unknown){
  server.on('request',(req,res)=>{
   res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');
-  if(webRoot!==undefined&&serveGodotWeb(req,res,webRoot))return;
+  if(web!==undefined&&serveGodotWeb(req,res,web))return;
   if(req.method!=='GET'){res.writeHead(405,{'Allow':'GET'});res.end('Read-only MVP');return;}
   if(req.url!=='/ai-town/api/world'){res.writeHead(404);res.end('Not found');return;}
   res.writeHead(200,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(snapshot()));
@@ -76,7 +76,7 @@ export function upgradeMvpWorld(world:World):boolean {
 }
 
 export async function startPersistentMvp(options:MvpListenerOptions&{dayMinutes?:number;env:Readonly<Record<string,string|undefined>>;model?:ConstructorParameters<typeof ValleyRuntime>[2]}){
- checkListener(options);
+ const web=checkListener(options);
  const dayMinutes=options.dayMinutes??20;
  if(!Number.isFinite(dayMinutes)||dayMinutes<20||dayMinutes>1440)throw Error('godot_mvp_invalid_clock');
  const providers=readSelfHostedConfig(options.env);
@@ -117,7 +117,7 @@ export async function startPersistentMvp(options:MvpListenerOptions&{dayMinutes?
   const driver=providers.length?'model':'disabled';
   const snapshot=()=>({...runtime!.snapshot(),roomViews:roomObservation(runtime!.world),observation:runtime!.mvpObservation(),relationshipHistory:relationshipObservation(runtime!.world),movement:completedMovementSnapshot(runtime!.world),residentMovement:residentMovementSnapshot(runtime!.world),capabilities:{active:['小地图只读观察','真实动作引擎','保存与恢复',providers.length?'模型已配置':'模型禁用，世界停表'],pending:['真实模型生活闭环验收','浏览器画面验收','绘本视觉样板']},mvp:{driver,ephemeral:false,notice:providers.length?'持久小山谷：模型决策已启用；调用成本及长期表现未经本客户端验证':'持久小山谷：模型未启用，世界停表；无规则回退',fault:runtime!.selfHostedUnresolved()?'unresolved_model_request':null,
    primary:providers[0]?.model??null,backup:providers[1]?.model??null,phases:Object.fromEntries(runtime!.world.residents.map(r=>[r.id,mvpPhase(r)]))}});
-  serveMvpSnapshot(server,options.webRoot,snapshot);
+  serveMvpSnapshot(server,web,snapshot);
   if(providers.length)runtime.start();
   return {runtime,server,snapshot,close};
  }catch(error){try{await close();}catch(cleanup){throw new AggregateError([error,cleanup],'godot_mvp_startup_cleanup_failed');}throw error;}

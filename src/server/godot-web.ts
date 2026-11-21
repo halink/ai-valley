@@ -1,16 +1,15 @@
 /** Serve only the explicit Godot export artifacts, never the repository or .env. */
-import {createReadStream,openSync,closeSync,fstatSync,constants,lstatSync,realpathSync,existsSync} from 'node:fs';
+import {createReadStream,openSync,closeSync,fstatSync,constants,lstatSync,realpathSync} from 'node:fs';
 import {pipeline} from 'node:stream';
 import {join,dirname} from 'node:path';
 import type {IncomingMessage,ServerResponse} from 'node:http';
-const types:Record<string,string>={
- 'index.html':'text/html; charset=utf-8','index.js':'text/javascript; charset=utf-8',
- 'index.wasm':'application/wasm','index.pck':'application/octet-stream',
- 'index.png':'image/png','index.icon.png':'image/png','index.apple-touch-icon.png':'image/png',
- 'index.audio.worklet.js':'text/javascript; charset=utf-8',
- 'index.audio.position.worklet.js':'text/javascript; charset=utf-8',
-};
-export function serveGodotWeb(req:IncomingMessage,res:ServerResponse,root:string):boolean {
+import {fileURLToPath} from 'node:url';
+import {WEB_TYPES as types,pinGodotWebManifest} from './godot-web-provenance.js';
+const repoProject=fileURLToPath(new URL('../../godot-client',import.meta.url));
+export type GodotWebExport=ReturnType<typeof pinGodotWebManifest>;
+const verified=new WeakSet<GodotWebExport>();
+export function ownsGodotWebExport(pin:GodotWebExport){return verified.has(pin);}
+export function serveGodotWeb(req:IncomingMessage,res:ServerResponse,pinned:GodotWebExport):boolean {
  if(req.method!=='GET'&&req.method!=='HEAD')return false;
  const path=(req.url??'').split('?')[0];
  const file=path==='/'?'index.html':path.slice(1);
@@ -18,14 +17,14 @@ export function serveGodotWeb(req:IncomingMessage,res:ServerResponse,root:string
  res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');
  let fd:number|undefined;
  try{
-  const base=realpathSync(root);
-  if(!existsSync(join(base,'.ready')))throw Error('export not ready');
-  const target=join(base,file),stat=lstatSync(target);
+  if(!ownsGodotWebExport(pinned))throw Error('godot_web_export_unverified');
+  const base=pinned.base;
+  const target=join(base,file),stat=lstatSync(target,{bigint:true});
   if(!stat.isFile()||stat.isSymbolicLink()||dirname(realpathSync(target))!==base)throw Error('invalid export');
   fd=openSync(target,constants.O_RDONLY|constants.O_NOFOLLOW);
-  const opened=fstatSync(fd);
-  if(!opened.isFile()||opened.dev!==stat.dev||opened.ino!==stat.ino)throw Error('export changed');
-  res.writeHead(200,{'Content-Type':types[file],'Content-Length':opened.size});
+  const opened=fstatSync(fd,{bigint:true});
+  if(!opened.isFile()||opened.dev!==stat.dev||opened.ino!==stat.ino||!pinned.unchanged(file,opened))throw Error('export changed');
+  res.writeHead(200,{'Content-Type':types[file],'Content-Length':String(opened.size)});
   if(req.method==='HEAD'){
    closeSync(fd);fd=undefined;res.end();
   }else{
@@ -43,10 +42,14 @@ export function serveGodotWeb(req:IncomingMessage,res:ServerResponse,root:string
 }
 
 /** Fail before opening a save or starting model dispatch when a browser build is absent. */
-export function assertGodotWebExport(root:string):void {
- const base=realpathSync(root);
- for(const file of ['.ready','index.html','index.js','index.wasm','index.pck']){
-  const target=join(base,file),stat=lstatSync(target);
-  if(!stat.isFile()||stat.isSymbolicLink()||stat.size===0||dirname(realpathSync(target))!==base)throw Error('godot_web_export_invalid');
+export function assertGodotWebExport(root:string):GodotWebExport {
+ let project:string|undefined;
+ try{
+  if(!lstatSync(repoProject).isDirectory())throw Error('godot_web_source_scope');
+  project=repoProject;
+ }catch(error){
+  // Published release tarballs intentionally carry build/package/output, not Godot sources.
+  if((error as NodeJS.ErrnoException).code!=='ENOENT'||import.meta.url.endsWith('.ts'))throw error;
  }
+ const pin=pinGodotWebManifest(root,project);verified.add(pin);return pin;
 }
