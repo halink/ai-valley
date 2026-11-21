@@ -17,6 +17,7 @@ const ID=/^[A-Za-z0-9][A-Za-z0-9:._-]{0,319}$/;
 const positive=(n:unknown):n is number=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=1;
 const minute=(n:unknown):n is number=>typeof n==='number'&&Number.isFinite(n)&&n>=0&&n<=1e9;
 const known=new WeakMap<ValleySpiritMvpMealWitness,World>();
+const consumed=new WeakMap<ValleySpiritMvpMealWitness,Readonly<{nutrition:number;hungerRelief:number}>>();
 /** Private engine evidence, never a projection, disclosure grant or public path. */
 export interface ValleySpiritMvpMealWitness {
  readonly worldId:string;
@@ -49,7 +50,7 @@ function stageValleySpiritMvpMealWitnesses(w:World,o:DirectEatingObservation,fro
     e.actors[0]!==r.residentId||readMvpMealFact(e.mvpMeal)?.kind!=='ate')return [];
   const witness=Object.freeze({worldId:w.id,revision:w.revision,eventId:r.eventId,exactPlanId:r.planId,actorId:r.residentId,
      atUs:minuteToClimateUs(r.at)});
-  known.set(witness,w);seen.add(r.eventId);out.push(witness);
+  known.set(witness,w);consumed.set(witness,Object.freeze({nutrition:r.nutrition,hungerRelief:r.hungerRelief}));seen.add(r.eventId);out.push(witness);
  }
  return Object.freeze(out);
 }
@@ -63,6 +64,11 @@ export function captureValleySpiritMvpMealStep(w:World,options:Parameters<typeof
  const fromEventIndex=w.events.length;
  const actual=stepWorldWithFoodEvidence(w,1,options);
  return ()=>stageValleySpiritMvpMealWitnesses(w,actual,fromEventIndex);
+}
+/** From this exact detached native draft only. Not a custody row or publication. */
+export function readStagedMvpMealConsumption(w:World,r:ValleySpiritMvpMealWitness){
+ if(known.get(r)!==w||r.worldId!==w.id||r.revision!==w.revision||r.atUs!==minuteToClimateUs(w.minute))return null;
+ return consumed.get(r)??null;
 }
 type CustodyRow={world_id:string;schema_version:number;event_id:string;plan_id:string;actor_id:string;at_us:string;committed_revision:number;receipt_id:string};
 const expected=[

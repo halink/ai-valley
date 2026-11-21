@@ -1,3 +1,5 @@
+import {readMvpMealFact} from '../shared/mvp-meals.js';
+import {readStagedMvpMealConsumption,type ValleySpiritMvpMealWitness} from './valley-spirit-meal-custody.js';
 import {verifyDueExecutionPlacement,verifyOrdinaryDueExecution,readOrdinaryDevelopmentDueRecord,consumeOrdinaryDevelopmentDue} from './ordinary-g2-development-due.js';
 import {deriveNativeAgedFruitSourceMinute,verifyNativeAgedFruitSourceFlow,type NativeAgedFruitSourceFlow} from './ordinary-native-aged-fruit-conservation.js';
 import {diningWorkClaim,readNativeAgedEatingState,type Eating} from './disposable-native-aged-transfer.js';
@@ -9,7 +11,7 @@ import {goods} from '../shared/items.js';
 import {prepareOrdinaryAgedGroundPickup} from './valley-spirit-ordinary-aged-pickup.js';
 import {createHash,createPublicKey,verify,type KeyObject} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
-import {prepareSealedMvpEcologyMinute,prepareStoppedOrdinaryAgedGroundMinute,prepareStoppedOrdinaryAgedGroundRouteMinute} from './godot-mvp.js';
+import {prepareSealedMvpEcologyMinute,prepareStoppedOrdinaryAgedGroundMinute,prepareStoppedOrdinaryAgedGroundRouteMinute,prepareStoppedV3GroundExpiryMinute} from './godot-mvp.js';
 import {advanceAgedGroundExpiry,type AgedGroundLot} from './valley-spirit-ordinary-aged-ground.js';
 import {assertStoppedEventAuthority,assertStoppedEventArchive} from './valley-spirit-ordinary-stopped-continuation.js';
 import type {CommittedNativeOrdinaryAgedDiscovery} from '../world/mvp-ordinary-aged-ground-discovery.js';
@@ -317,10 +319,28 @@ function matchesEatingEvent(w:World,n:NativeAgedEatCompletion){
   e.text===r.name+'吃完了一份自己的食物。'&&e.observerOnly&&e.place?.x===r.at.x&&e.place?.y===r.at.y&&
   (n.dining?!!e.roomAt&&e.roomId===n.dining.buildingId&&same(e.roomAt,n.dining.seat)&&diningWorkClaim(w,r,n.dining):!e.roomId&&!e.roomAt);
 }
-function eligibleLifecycleEvents(w:World,draft:World){
+function exactUnrelatedExpiryMeal(w:World,draft:World,r:ValleySpiritMvpMealWitness,prior:readonly CommittedNativeOrdinaryAgedDiscovery[]){
+ const native=readStagedMvpMealConsumption(draft,r);
+ if(!native||!Number.isFinite(native.nutrition)||native.nutrition<=0||prior.some(d=>d.residentId===r.actorId))return false;
+ const before=w.residents.filter(x=>x.id===r.actorId),after=draft.residents.filter(x=>x.id===r.actorId);
+ if(before.length!==1||after.length!==1)return false;
+ const x=before[0],y=after[0],activity=x.activity;
+ if(x.status!=='alive'||y.status!=='alive'||x.residency==='outside'||y.residency==='outside'||x.regionalLocation||y.regionalLocation||
+  !activity||activity.action.type!=='eat'||activity.action.item!=='meal'||activity.planId!==r.exactPlanId||x.plan?.id!==r.exactPlanId||
+  activity.remaining!==1||activity.path.length||activity.room||y.plan||y.activity||!draft.processed.includes('plan:'+r.exactPlanId)||
+  !Number.isSafeInteger(x.inventory.meal)||x.inventory.meal!<1||(y.inventory.meal??0)!==x.inventory.meal!-1||
+  !Number.isFinite(x.hunger)||native.hungerRelief!==x.hunger-Math.max(0,x.hunger-native.nutrition)||
+  y.hunger!==Math.min(100,Math.max(0,x.hunger-native.nutrition)+physiology(draft,y).hungerPerMinute))return false;
+ const inventory=(z:World['residents'][number])=>JSON.stringify(Object.entries(z.inventory).filter(([k])=>k!=='meal').sort(([a],[b])=>a.localeCompare(b)));
+ if(inventory(x)!==inventory(y))return false;
+ const events=draft.events.slice(w.events.length).filter(e=>e.id===r.eventId);
+ return events.length===1&&events[0].kind==='action'&&!events[0].observerOnly&&events[0].at===draft.minute&&
+  !w.events.some(e=>e.id===r.eventId)&&events[0].actors.length===1&&events[0].actors[0]===r.actorId&&readMvpMealFact(events[0].mvpMeal)?.kind==='ate';
+}
+function eligibleLifecycleEvents(w:World,draft:World,exactMealEvent?:string){
  return draft.events.length<=4096&&draft.events.length-w.events.length<=128&&
   hash(draft.events.slice(0,w.events.length))===hash(w.events)&&
-  !draft.events.slice(w.events.length).some(e=>e.kind==='conversation'||e.speechText!==undefined||e.mvpMeal||e.socialAppointmentArrival||e.mvpFruitFall);
+  !draft.events.slice(w.events.length).some(e=>e.kind==='conversation'||e.speechText!==undefined||e.mvpMeal&&e.id!==exactMealEvent||e.socialAppointmentArrival||e.mvpFruitFall);
 }
 const nativeSourceBasis=(g:Ground,a:Archive)=>({sourceId:g.sourceId,sourceAt:g.sourceAt,placementClosingQuantity:a.sourceAfter});
 /** Only project an original transaction-verified archive through its owning reader. */
@@ -427,7 +447,9 @@ export function prepareOrdinaryDevelopmentV3Minute(db:DatabaseSync,w:World,owned
   return {lot:active,discoveries:l.discoveries.map(({committedRevision:_,...native})=>native)};
  }},true):null;
  if(pickup&&!routed&&(!picked||picked.nativeCustody.mealWitnesses.length||picked.nativeCustody.speech?.receipts.length))return null;
- const next=routed??(picked?{draft:picked.draft,observed:[],fruitFlow:picked.nativeCustody.fruitFlow}:prepareStoppedOrdinaryAgedGroundMinute(w,{readExactActiveLot:readLot},true));
+ const exactExpiry=mode==='observe'&&!l?.route&&(BigInt(minuteToClimateUs(w.minute))+1_000_000n).toString()===g.expiresUs;
+ const expiryDraft=exactExpiry?prepareStoppedV3GroundExpiryMinute(w,{readExactActiveLot:readLot},g.expiresUs):null;
+ const next=exactExpiry?expiryDraft:routed??(picked?{draft:picked.draft,observed:[],fruitFlow:picked.nativeCustody.fruitFlow}:prepareStoppedOrdinaryAgedGroundMinute(w,{readExactActiveLot:readLot},true));
  if(!next)return null;
  const {draft,observed}=next,expiry=advanceAgedGroundExpiry(w,draft,[lot]),atUs=minuteToClimateUs(draft.minute);
  let completion=picked?.completion;
@@ -444,7 +466,10 @@ export function prepareOrdinaryDevelopmentV3Minute(db:DatabaseSync,w:World,owned
   ownerId:g.ownerId,effectId:g.effectId,lotId:g.lotId,bornUs:g.bornUs,expiresUs:g.expiresUs,groundDebit:1,heldCredit:1,pickup:completion}:undefined;
  const route=routed?stageRoute(w,draft,activeRoute,routed.witness,held,atUs):l?.route;
  if(routed&&!route)return null;
- if(!expiry||expiry.expired.length&&(observed.length||held)||!eligibleLifecycleEvents(w,draft))return null;
+ const meal=expiryDraft?.meals[0];
+ if(meal&&(!exactExpiry||expiry?.expired.length!==1||observed.length||held||route||
+   !exactUnrelatedExpiryMeal(w,draft,meal,l?.discoveries??[])))return null;
+ if(!expiry||expiry.expired.length&&(observed.length||held)||!eligibleLifecycleEvents(w,draft,meal?.eventId))return null;
  const discoveries=[...l?.discoveries??[]],prior=new Set(discoveries.map(d=>d.residentId));
  for(const seen of observed)if(!prior.has(seen.residentId)){
   discoveries.push({...seen,committedRevision:draft.revision});prior.add(seen.residentId);

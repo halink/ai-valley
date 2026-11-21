@@ -438,6 +438,18 @@ export function prepareOrdinaryDevelopmentDueNativeMinute(current:World){
 /** One normal chooser/engine minute for the stopped ordinary archive only.
  * The provided read port is built from the verified owning snapshot. */
 export function prepareStoppedOrdinaryAgedGroundMinute(current:World,ownedGround:OrdinaryAgedGroundDiscoveryRead,ordinaryFruitFlow?:true){
+ const next=prepareStoppedOrdinaryGroundDraft(current,ownedGround,ordinaryFruitFlow);
+ return next&&!next.meals.length?{draft:next.draft,observed:next.observed,fruitFlow:next.fruitFlow}:null;
+}
+
+/** Detached V3 candidate shape only. The authenticated V3 owner still
+ * checks the actual lot expiry and authentic unrelated meal before commit. */
+export function prepareStoppedV3GroundExpiryMinute(current:World,owned:OrdinaryAgedGroundDiscoveryRead,expiresUs:string){
+ if((BigInt(minuteToClimateUs(current.minute))+1_000_000n).toString()!==expiresUs)return null;
+ const next=prepareStoppedOrdinaryGroundDraft(current,owned,true);
+ return next&&!next.observed.length&&next.meals.length<=1?next:null;
+}
+function prepareStoppedOrdinaryGroundDraft(current:World,ownedGround:OrdinaryAgedGroundDiscoveryRead,ordinaryFruitFlow?:true){
  if(current.mode!=='validation'||current.clock.paused||!current.mvpClimate?.rainProvenance||
   Object.hasOwn(current.mvpClimate,'spiritEffects')||Object.hasOwn(current.mvpClimate,'spiritFruitSettlement'))return null;
  const draft=structuredClone(current);
@@ -445,8 +457,8 @@ export function prepareStoppedOrdinaryAgedGroundMinute(current:World,ownedGround
  try{
   const {result,observed}=captureOrdinaryAgedGroundDiscovery(draft,ownedGround,()=>
    advanceMvpRuleMinuteDraft(draft,current,0,{},{meals:true,fruitFlow:ordinaryFruitFlow===true,fruitRenewal:false,addressedSpeech:true}));
-  if(draft.minute!==current.minute+1||result.speech?.receipts.length||result.witnesses.length)return null;
-  return {draft,observed,fruitFlow:result.fruitFlow};
+  if(draft.minute!==current.minute+1||result.speech?.receipts.length)return null;
+  return {draft,observed,fruitFlow:result.fruitFlow,meals:result.witnesses};
  }catch{return null;}
 }
 

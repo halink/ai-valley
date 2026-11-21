@@ -34,7 +34,8 @@ discovery, or custody. Current personal evidence may be reread on exact original
 reopen; copies, wrong keys, damaged seams, and generic/player opens do not
 acquire the scope. There is no V3 eating or scheduler here. Other native
 changes to stock do not rebind candidate custody or reenable ordinary writing.
-A native minute that would also settle a meal or addressed speech, exceeds the
+Unless it fits the exact unrelated meal expiry case below, a native minute
+that would also settle a meal or addressed speech, exceeds the
 bounded event/discovery archive, or sees an unknown writer is rejected before
 commit. No partial discovery, expiry, or ordinary event settlement is emitted.
 
@@ -209,3 +210,18 @@ produce, settle, or expose an effect for any ordinary or production save.
 由原档信任引导预先提供 `{trustedGodotExecutable: ...}` 可选配置，固定可信的 Godot 本机程序（绝对路径，以 `godot` 开头），与原档所有者使用同一受信 OS 用户。未预配置时闭包不提供入口；预配置后，同一原档闭包可显式调用无参的 `openDevelopmentGroundObserver()`。实际启动前重验固定真实路径、文件身份与文件状态；请求不能换程序。该措施不替代对 OS 用户和所安装二进制的信任。窗口只读取当前标记，不加载主场景、存档、天气、人物或游戏端口；在有图形显示的客户端直接显示「一枚落果在地面」及整数格坐标。没有标记时区分确证空地和观察不可用。
 
 原档所有者通过子进程继承的匿名 stdin 管道单向发送三种短记录，不传凭据、路径、对象标识或世界头，不写观察文件、不开放端口；进程 stdout / stderr 不转发。创建／推动原档仍由已有显式拥有者操作；观察不会自动推进。真实转移、拾取、到期操作结束时重新发送，此外每 125 毫秒重新验证原档；窗口在停收超过 375 毫秒、损坏数据、结束或关闭时清除标记，不把旧帧当作现在的状态。进程与画面的调度时间并非原子提交，机器阻塞时可能在该短显示时限内才清除。这里没有面向其他 OS 用户的发布、普通游戏 G2、远程观察或写权限。
+
+
+### One unrelated ordinary meal on exact ground expiry
+
+An original V3 ground-expiry-only native minute can now carry one concurrent
+normal meal completion by a different resident who has not discovered the lot.
+The exact native draft must have a complete meal witness, its existing own
+meal action in the last work minute, exactly one unit leaving that resident’s
+meal inventory, the actual nutrition and ordinary hunger decay, and the new
+matching typed meal event. Copied or caller-authored evidence does not qualify.
+The one ordinary event and resident index share the same world transaction as
+the V3 expiry and ground debit. No separate meal custody or public disclosure
+is created. If the transaction fails, neither action progresses. Non-expiry
+minutes, active or historical V3 routes for the lot, intersecting residents,
+other specialized events, and coincident speech remain guarded as before.
