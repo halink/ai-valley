@@ -1413,6 +1413,19 @@ export class WorldStore {
   if(residentId===undefined)return this.readOwnedOrdinaryDevelopmentV3Ground();
   return this.readOwnedOrdinaryDevelopmentV3Archive((r)=>({discovery:r.lifecycle?.discoveries.find(d=>d.residentId===residentId)??null}));
  }
+ /** A live marker only; hold and expiry are both verified absence. */
+ readOwnedOrdinaryDevelopmentV3GroundMarker(){
+  return this.readOwnedOrdinaryDevelopmentV3Archive((r,w)=>{
+   const g=r.ground;
+   if(!g)return r.lifecycle?.expiry||r.lifecycle?.held?Object.freeze({status:'empty' as const}):null;
+   const {x,y}=g.at,{width,height}=w.map;
+   if(g.quantity!==1||BigInt(minuteToClimateUs(w.minute))>=BigInt(g.expiresUs)||
+    !Number.isSafeInteger(width)||!Number.isSafeInteger(height)||
+    !Number.isSafeInteger(x)||!Number.isSafeInteger(y)||x<0||y<0||x>=width||y>=height||
+    !Number.isSafeInteger(y*width+x)||!Object.hasOwn(w.map.tiles,y*width+x))return null;
+   return Object.freeze({status:'active' as const,x,y});
+  })??Object.freeze({status:'unavailable' as const});
+ }
  readOwnedOrdinaryDevelopmentV3Fairness(){
   return this.readOwnedOrdinaryDevelopmentV3Archive((r,w)=>projectOrdinaryDevelopmentV3Fairness(w,r));
  }

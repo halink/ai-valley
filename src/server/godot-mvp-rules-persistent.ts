@@ -54,7 +54,7 @@ export async function startPersistentRulesMvp(options:PersistentRulesOptions){
  const running=await openPersistentRulesCore(options);
  const server=running.server;
  if(!server){await running.close();throw Error('mvp_rules_missing_server');}
- const {transactPrivateDisposableAgedTransfer:_developerOnly,disposableRebaseRequired:_rebase,readPrivateDisposableResidentGroundDiscovery:_discovery,readPrivateDisposableNativeAgedFairness:_fairness,readPrivateDisposableNativeSpeech:_speech,...normal}=running;
+ const {transactPrivateDisposableAgedTransfer:_developerOnly,disposableRebaseRequired:_rebase,readPrivateDisposableResidentGroundDiscovery:_discovery,readPrivateDisposableNativeAgedFairness:_fairness,readPrivateDisposableNativeSpeech:_speech,readPrivateOrdinaryDevelopmentV3GroundMarker:_marker,...normal}=running;
  return {...normal,server};
 }
 type DisposableRulesOptions=Pick<PersistentRulesOptions,'privateSpiritGeographyQueue'|'privateNativeFruitRenewal'|
@@ -211,7 +211,8 @@ export function bindOrdinaryG2DevelopmentOriginPreview(storage:ReturnType<typeof
      readDevelopmentHeld:(residentId:string)=>ifLive(()=>run.readPrivateOrdinaryDevelopmentV3Held?.(residentId)??null),
      readDevelopmentDiscovery:(residentId:string)=>ifLive(()=>run.readPrivateOrdinaryDevelopmentV3Discovery?.(residentId)??null),
      readDevelopmentFairness:()=>ifLive(()=>run.readPrivateOrdinaryDevelopmentV3Fairness?.()??null),
-     readDevelopmentGround:()=>ifLive(()=>run.readPrivateOrdinaryDevelopmentV3?.()??null),}:{}),
+     readDevelopmentGround:()=>ifLive(()=>run.readPrivateOrdinaryDevelopmentV3?.()??null),
+     readDevelopmentGroundMarker:()=>ifLive(()=>run.readPrivateOrdinaryDevelopmentV3GroundMarker?.())??Object.freeze({status:'unavailable' as const}),}:{}),
     async close(){if(!closed){closed=true;await run.close();opened=false;}},
    });
   }catch(e){opened=false;throw e;}
@@ -706,6 +707,7 @@ async function openPersistentRulesCore(options:PersistentRulesOptions,disposable
    readPrivateOrdinaryDevelopmentDue:()=>store?.readOwnedDevelopmentDue()??null,advancePrivateOrdinaryDevelopmentDue:advanceDevelopmentDue,
    advancePrivateOrdinaryDevelopmentV3Minute:advanceDevelopmentGroundMinute,
    readPrivateOrdinaryDevelopmentV3Fairness:()=>store?.readOwnedOrdinaryDevelopmentV3Fairness()??null,
+   readPrivateOrdinaryDevelopmentV3GroundMarker:()=>store?.readOwnedOrdinaryDevelopmentV3GroundMarker(),
    readPrivateOrdinaryDevelopmentV3Route:(id:string)=>typeof id==='string'&&id.length&&id.length<=300?store?.readOwnedOrdinaryDevelopmentV3Route(id)??null:null,
    readPrivateOrdinaryDevelopmentV3Eating:(id:string)=>typeof id==='string'&&id.length&&id.length<=300?store?.readOwnedOrdinaryDevelopmentV3Eating(id)??null:null,
    readPrivateOrdinaryDevelopmentV3Held:(id:string)=>typeof id==='string'&&id.length&&id.length<=300?store?.readOwnedOrdinaryDevelopmentV3Held(id)??null:null,

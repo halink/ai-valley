@@ -196,3 +196,10 @@ This function tracks same-minute natural renewal and ordinary gathering
 separately, rejects missing or discontinuous evidence, and cannot infer
 unobserved gross activity from net stock. It does not admit, authorize,
 produce, settle, or expose an effect for any ordinary or production save.
+
+
+### 原档只读落果标记
+
+原所有者闭包的 `readDevelopmentGroundMarker()` 仅在显式启用开发 V3 的原档可用。每次在同一只读事务核验真实存档头、原签审、落果保管账及当前实际地图；原龄仍未到期且一份果实仍在地面时返回 `{status:"active", x, y}`（整数格）。已确认拾取或地面到期仅返回 `{status:"empty"}`；尚无认证落地记录、闭包关闭或证据异常则返回 `{status:"unavailable"}`。观察时不推进世界，也不返回人物、来源、时钟、对象编号、果龄、签章、历史或原世界内容。
+
+这是原档闭包的瞬时最小事实，不是居民知识、可执行资格或可复制的存档凭证。`empty` 和 `unavailable` 都不保留之前的标记，没有接入 Godot、普通世界数据、Web／HTTP、存档导出或游戏写入。
